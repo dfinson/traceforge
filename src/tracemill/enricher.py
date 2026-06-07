@@ -81,7 +81,7 @@ class Enricher:
 
         if event.kind == EventKind.TOOL_COMPLETE:
             tool_call_id = event.payload.get("tool_call_id")
-            start_event = self._pending.pop(tool_call_id, None) if tool_call_id else None
+            start_event = self._pending.get(tool_call_id) if tool_call_id else None
 
             if start_event is not None:
                 duration_ms = _compute_duration_ms(start_event.timestamp, event.timestamp)
@@ -92,6 +92,8 @@ class Enricher:
                 event = event.model_copy(
                     update={"payload": merged_payload, "metadata": merged_metadata}
                 )
+                # Only remove from pending after successful pairing
+                del self._pending[tool_call_id]
             else:
                 # Unmatched complete — classify independently
                 event = self._classify_tool(event)
@@ -109,11 +111,11 @@ class Enricher:
         """Emit any buffered events (unpaired tool_starts) with duration_ms=None.
         Call at session end."""
         buffered = list(self._pending.values())
-        self._pending.clear()
         result: list[SessionEvent] = []
         for event in buffered:
             new_metadata = event.metadata.model_copy(update={"duration_ms": None})
             result.append(event.model_copy(update={"metadata": new_metadata}))
+        self._pending.clear()
         return result
 
     # --- Private helpers ---

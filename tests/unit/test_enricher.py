@@ -543,3 +543,95 @@ class TestEdgeCases:
         # Event still reached the sink (raw, un-enriched)
         assert len(recorder.events) == 1
         assert recorder.events[0] == event
+
+
+# =============================================================================
+# ID Stability and Robustness Tests
+# =============================================================================
+
+
+class TestIDStabilityAndRobustness:
+    def test_paired_event_preserves_complete_id(self):
+        """Paired TOOL_COMPLETE preserves the complete event's original ID."""
+        enricher = Enricher()
+        start = _make_tool_start(tool_call_id="tc-id")
+        complete = _make_tool_complete(tool_call_id="tc-id")
+        original_complete_id = complete.id
+
+        enricher.process(start)
+        result = enricher.process(complete)
+        assert result.id == original_complete_id
+
+    def test_displaced_orphan_preserves_original_id(self):
+        """Displaced orphan start preserves its original event ID."""
+        enricher = Enricher()
+        start1 = _make_tool_start(tool_call_id="dup")
+        original_id = start1.id
+
+        enricher.process(start1)
+        result = enricher.process(_make_tool_start(tool_call_id="dup", tool_name="edit"))
+
+        assert isinstance(result, list)
+        assert result[0].id == original_id
+
+    def test_flushed_orphan_preserves_original_id(self):
+        """Flushed orphan start preserves its original event ID."""
+        enricher = Enricher()
+        start = _make_tool_start()
+        original_id = start.id
+
+        enricher.process(start)
+        flushed = enricher.flush()
+        assert flushed[0].id == original_id
+
+    def test_pending_start_survives_failed_duration_computation(self):
+        """If complete processing fails mid-way, the start remains in pending for flush."""
+        enricher = Enricher()
+        start = _make_tool_start(
+            tool_call_id="tc-fail",
+            ts=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+        )
+        # Create a complete with naive timestamp that will cause TypeError in subtraction
+        complete = SessionEvent(
+            kind=EventKind.TOOL_COMPLETE,
+            session_id="sess-1",
+            timestamp=datetime(2024, 1, 1, 12, 0, 1),  # naive — will fail on subtract
+            payload={"tool_call_id": "tc-fail", "tool_name": "edit"},
+        )
+
+        enricher.process(start)
+
+        # process() should raise due to naive/aware mismatch
+        with_error = False
+        try:
+            enricher.process(complete)
+        except TypeError:
+            with_error = True
+
+        assert with_error
+        # The start should still be recoverable via flush
+        flushed = enricher.flush()
+        assert len(flushed) == 1
+        assert flushed[0].payload["tool_call_id"] == "tc-fail"
+
+    def test_complete_overwriting_arguments_still_detects_phase(self):
+        """Paired event with merged payload still detects phase from start arguments."""
+        enricher = Enricher()
+        start = _make_tool_start(
+            tool_name="bash",
+            tool_call_id="tc-phase",
+            arguments={"command": "pytest tests/"},
+            ts=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+        )
+        # Complete has no arguments — merged payload should still contain start's
+        complete = SessionEvent(
+            kind=EventKind.TOOL_COMPLETE,
+            session_id="sess-1",
+            timestamp=datetime(2024, 1, 1, 12, 0, 2, tzinfo=timezone.utc),
+            payload={"tool_call_id": "tc-phase", "result": "0 failures"},
+        )
+
+        enricher.process(start)
+        result = enricher.process(complete)
+        assert result.payload["arguments"] == {"command": "pytest tests/"}
+        assert result.payload["_enrichment"]["phase"] == "verification"

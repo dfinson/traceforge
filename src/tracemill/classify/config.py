@@ -382,6 +382,7 @@ class ClassificationEngine:
         "verb_inference",
         "effect_overrides",
         "shell_rules",
+        "rules_by_binary",
         "binary_info",
         "mcp_profiles",
         "mcp_alias_index",
@@ -443,6 +444,15 @@ class ClassificationEngine:
             )
             for r in config.shell_rules
         )
+
+        # Pre-index rules by binary name for O(1) lookup in match_rule
+        _rules_by_binary: dict[str, list[Rule]] = {}
+        for rule in self.shell_rules:
+            for binary_name in rule.binaries:
+                _rules_by_binary.setdefault(binary_name, []).append(rule)
+        self.rules_by_binary: dict[str, tuple[Rule, ...]] = {
+            k: tuple(v) for k, v in _rules_by_binary.items()
+        }
 
         # Binary info
         from tracemill.classify.core import Effect as EffectEnum

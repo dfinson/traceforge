@@ -216,10 +216,7 @@ class Enricher:
             visibility = Visibility.SYSTEM
         elif event.metadata.classification is not None:
             cls: Classification = event.metadata.classification
-            # System/internal communication mechanisms → system visibility
-            if cls.mechanism.startswith("communication.system") or cls.mechanism.startswith(
-                "communication.internal"
-            ):
+            if cls.mechanism.startswith(("communication.system", "communication.internal")):
                 visibility = Visibility.SYSTEM
 
         if visibility != event.metadata.visibility:
@@ -256,33 +253,39 @@ def _phases_from_classification(cls: Classification) -> frozenset[str]:
     If the classification has a phase_map (built per-command), use it directly.
     Otherwise, derive phases from the aggregate action/role dimensions.
     """
-    # Prefer phase_map when available (compound commands already grouped)
     if cls.phase_map:
         return frozenset(seg.phase for seg in cls.phase_map)
 
-    # Fallback: derive from aggregate dimensions (single-command tools)
+    # Rule table: (predicate, phase) — evaluated in order, all matching rules fire
     phases: set[str] = set()
 
-    if cls.has_action("validate"):
-        phases.add(Phase.VERIFICATION)
+    _PHASE_RULES: list[tuple[str, str]] = [
+        # (action_or_check, phase)
+        ("validate", Phase.VERIFICATION),
+        ("deliver", Phase.REVIEW),
+        ("retrieve", Phase.EXPLORATION),
+        ("analyze", Phase.EXPLORATION),
+        ("configure", Phase.IMPLEMENTATION),
+        ("execute", Phase.IMPLEMENTATION),
+    ]
+    for action, phase in _PHASE_RULES:
+        if cls.has_action(action):
+            phases.add(phase)
+
+    # VCS persist → review (not implementation)
     if cls.has_role("persistence.version_control") and (
         cls.has_action("persist") or cls.has_action("deliver")
     ):
         phases.add(Phase.REVIEW)
-    elif cls.has_action("deliver"):
-        phases.add(Phase.REVIEW)
-    if cls.has_action("retrieve") or cls.has_action("analyze"):
-        phases.add(Phase.EXPLORATION)
-    if cls.has_action("modify") or cls.has_action("persist"):
-        if not (cls.has_role("persistence.version_control") and cls.has_action("persist")):
-            phases.add(Phase.IMPLEMENTATION)
-    if cls.has_action("configure") or cls.has_action("execute"):
+    elif cls.has_action("modify") or cls.has_action("persist"):
         phases.add(Phase.IMPLEMENTATION)
+
+    # Mechanism-based rules
     if cls.mechanism.startswith("communication"):
         phases.add(Phase.PLANNING)
-    if cls.mechanism.startswith("delegation"):
+    elif cls.mechanism.startswith("delegation"):
         phases.add(Phase.IMPLEMENTATION)
-    if cls.mechanism == "filesystem" and cls.effect == "read_only":
+    elif cls.mechanism == "filesystem" and cls.effect == "read_only":
         phases.add(Phase.EXPLORATION)
 
     return frozenset(phases) if phases else frozenset({Phase.IMPLEMENTATION})
@@ -299,63 +302,73 @@ _CI_FILES = frozenset({
     "bitbucket-pipelines.yml", "cloudbuild.yaml",
 })
 
+_DEP_FILES = frozenset({
+    "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+    "requirements.txt", "setup.py", "setup.cfg", "pyproject.toml", "poetry.lock",
+    "cargo.toml", "cargo.lock", "go.mod", "go.sum", "gemfile", "gemfile.lock",
+    "composer.json", "composer.lock", "pom.xml", "build.gradle",
+})
+_ENV_FILES = frozenset({".env", ".envrc", ".env.local", ".env.development", ".env.production"})
+_INFRA_EXTENSIONS = (".tf", ".tfvars", ".hcl")
+_INFRA_DIRS = frozenset({"helm", "charts", "k8s", "kubernetes", "terraform", "infra"})
+_CONTAINER_FILES = frozenset({"docker-compose.yml", "docker-compose.yaml", ".dockerignore"})
+_DOC_FILES = frozenset({"readme.md", "contributing.md", "changelog.md", "license.md"})
+_PAYLOAD_PATH_KEYS = ("path", "file_path", "file", "filename")
+
 def _infer_scope_from_path(path: str) -> str | None:
     """Infer a CodingScope from a file path. Returns None if no pattern matches."""
     if not path:
         return None
 
-    # Normalize separators
     normalized = path.replace("\\", "/").lower()
     segments = normalized.split("/")
     basename = segments[-1] if segments else ""
 
-    # Test code: directory segments or filename patterns
     if _TEST_SEGMENTS.intersection(segments):
         return CodingScope.TEST_CODE
     if any(p in basename for p in _TEST_FILE_PATTERNS):
         return CodingScope.TEST_CODE
 
-    # CI/CD config
     if ".github" in segments and ("workflows" in segments or basename in ("dependabot.yml",)):
         return CodingScope.CI_CD_CONFIG
     if basename in _CI_FILES:
         return CodingScope.CI_CD_CONFIG
 
-    # Container images
-    if basename.startswith("dockerfile") or basename == "docker-compose.yml" or basename == "docker-compose.yaml":
-        return CodingScope.CONTAINER_IMAGE
-    if basename == ".dockerignore":
+    if basename.startswith("dockerfile") or basename in _CONTAINER_FILES:
         return CodingScope.CONTAINER_IMAGE
 
-    # Documentation
     if _DOC_SEGMENTS.intersection(segments):
         return CodingScope.DOCUMENTATION
-    if basename.endswith(".md") and basename in ("readme.md", "contributing.md", "changelog.md", "license.md"):
+    if basename in _DOC_FILES:
         return CodingScope.DOCUMENTATION
 
-    # Dependency/config files
-    _dep_files = {
-        "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
-        "requirements.txt", "setup.py", "setup.cfg", "pyproject.toml", "poetry.lock",
-        "cargo.toml", "cargo.lock", "go.mod", "go.sum", "gemfile", "gemfile.lock",
-        "composer.json", "composer.lock", "pom.xml", "build.gradle",
-    }
-    if basename in _dep_files:
+    if basename in _DEP_FILES:
         return CodingScope.DEPENDENCY
 
-    # Environment config
-    _env_files = {".env", ".envrc", ".env.local", ".env.development", ".env.production"}
-    if basename in _env_files:
+    if basename in _ENV_FILES:
         return CodingScope.ENVIRONMENT
 
-    # Infrastructure
-    _infra_extensions = (".tf", ".tfvars", ".hcl")
-    if any(basename.endswith(ext) for ext in _infra_extensions):
+    if any(basename.endswith(ext) for ext in _INFRA_EXTENSIONS):
         return CodingScope.INFRASTRUCTURE
-    if basename in ("helm", "charts", "k8s", "kubernetes", "terraform", "infra"):
+    if basename in _INFRA_DIRS:
         return CodingScope.INFRASTRUCTURE
 
     return None
+
+
+def _extract_path_from_payload(payload: dict) -> str:
+    """Extract the first file path string from common payload keys."""
+    for key in _PAYLOAD_PATH_KEYS:
+        val = payload.get(key, "")
+        if isinstance(val, str) and val:
+            return val
+    args = payload.get("arguments", {})
+    if isinstance(args, dict):
+        for key in _PAYLOAD_PATH_KEYS:
+            val = args.get(key, "")
+            if isinstance(val, str) and val:
+                return val
+    return ""
 
 
 def _refine_scope_from_payload(cls: Classification, payload: dict) -> Classification:
@@ -364,26 +377,10 @@ def _refine_scope_from_payload(cls: Classification, payload: dict) -> Classifica
     Only applies to filesystem-mechanism tools. Updates both top-level scope
     and phase_map segment scopes for consistency.
     """
-    # Only refine filesystem tools
     if not cls.mechanism.startswith("filesystem"):
         return cls
 
-    # Extract file path from common payload keys
-    file_path = ""
-    for key in ("path", "file_path", "file", "filename"):
-        val = payload.get(key, "")
-        if isinstance(val, str) and val:
-            file_path = val
-            break
-    if not file_path:
-        args = payload.get("arguments", {})
-        if isinstance(args, dict):
-            for key in ("path", "file_path", "file", "filename"):
-                val = args.get(key, "")
-                if isinstance(val, str) and val:
-                    file_path = val
-                    break
-
+    file_path = _extract_path_from_payload(payload)
     if not file_path:
         return cls
 
@@ -448,13 +445,13 @@ def _extract_tool_call_id(event: SessionEvent) -> str | None:
 def _extract_targets_from_payload(payload: dict) -> list[str]:
     """Extract file path targets from event payload for risk scoring."""
     targets: list[str] = []
-    for key in ("path", "file_path", "file", "filename"):
-        val = payload.get(key, "")
-        if isinstance(val, str) and val:
-            targets.append(val)
+    primary = _extract_path_from_payload(payload)
+    if primary:
+        targets.append(primary)
+    # Also pick up pattern/glob from arguments
     args = payload.get("arguments", {})
     if isinstance(args, dict):
-        for key in ("path", "file_path", "file", "filename", "pattern", "glob"):
+        for key in ("pattern", "glob"):
             val = args.get(key, "")
             if isinstance(val, str) and val and val not in targets:
                 targets.append(val)

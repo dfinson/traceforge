@@ -22,6 +22,21 @@ if TYPE_CHECKING:
     from tracemill.classify.core import Classification
 
 
+# ── Module-level constants for O(1) lookups ──
+
+_DEFAULT_SENSITIVITY_BONUSES: dict[str, int] = {"secrets": 20, "system": 14}
+
+_EXECUTION_SINKS = frozenset({
+    "bash", "sh", "zsh", "python", "python3", "perl", "ruby", "node", "eval",
+})
+_NETWORK_SINKS = frozenset({"curl", "wget", "nc", "ncat", "socat", "telnet"})
+_EXECUTION_EFFECTS = frozenset({"destructive", "mutating"})
+_NETWORK_SOURCES = frozenset({"curl", "wget", "fetch"})
+_SENSITIVE_CATEGORIES = frozenset({"secrets", "system"})
+_RELEVANT_CAPABILITIES = frozenset({"network_outbound", "elevated_privilege"})
+_BUILD_DIRS = frozenset(("build/", "dist/", "target/", "node_modules/", "__pycache__/", ".git/"))
+
+
 class Confidence:
     """Risk assessment confidence levels."""
 
@@ -85,24 +100,7 @@ def assess_risk(
     effect_str = classification.effect or "unknown"
     intent_weights: dict[str, int] = risk_cfg.get("intent_weights", {})
     base_score = intent_weights.get(effect_str, intent_weights.get("unknown", 50))
-
-    # Scope modifier: check classification scope against scope_modifiers
-    scope_modifiers: dict[str, int] = risk_cfg.get("scope_modifiers", {})
-    scope_bonus = 0
-    for s in classification.scope:
-        mod = scope_modifiers.get(s, 0)
-        if mod > scope_bonus:
-            scope_bonus = mod
-    # Also check if targets hit sensitive paths
-    sensitive_paths = risk_cfg.get("sensitive_paths", {})
-    path_sensitivity = _check_sensitive_paths(targets, sensitive_paths)
-    sensitive_path_bonuses: dict[str, int] = risk_cfg.get("sensitive_path_bonuses", {})
-    if path_sensitivity and path_sensitivity in sensitive_path_bonuses:
-        scope_bonus = max(scope_bonus, sensitive_path_bonuses[path_sensitivity])
-    elif path_sensitivity == "secrets":
-        scope_bonus = max(scope_bonus, 20)
-    elif path_sensitivity == "system":
-        scope_bonus = max(scope_bonus, 14)
+    scope_bonus = _compute_scope_bonus(classification, targets, risk_cfg)
 
     structural = base_score + scope_bonus
 
@@ -130,6 +128,7 @@ def assess_risk(
     if pipe_segments and len(pipe_segments) >= 2:
         taint_rules: list[dict] = risk_cfg.get("taint_rules", [])
         encoding_commands: list[str] = risk_cfg.get("encoding_commands", [])
+        sensitive_paths: dict[str, list[str]] = risk_cfg.get("sensitive_paths", {})
         taint_bonus = _compute_taint_bonus(
             pipe_segments, taint_rules, encoding_commands, sensitive_paths, factors, mitre_ids
         )
@@ -206,25 +205,7 @@ def assess_tool_risk(
     effect_str = classification.effect or "unknown"
     intent_weights: dict[str, int] = risk_cfg.get("intent_weights", {})
     base_score = intent_weights.get(effect_str, intent_weights.get("unknown", 24))
-
-    # ── Scope modifier ──
-    scope_modifiers: dict[str, int] = risk_cfg.get("scope_modifiers", {})
-    scope_bonus = 0
-    for s in classification.scope:
-        mod = scope_modifiers.get(s, 0)
-        if mod > scope_bonus:
-            scope_bonus = mod
-
-    # Target sensitivity
-    sensitive_paths = risk_cfg.get("sensitive_paths", {})
-    path_sensitivity = _check_sensitive_paths(targets, sensitive_paths)
-    sensitive_path_bonuses: dict[str, int] = risk_cfg.get("sensitive_path_bonuses", {})
-    if path_sensitivity and path_sensitivity in sensitive_path_bonuses:
-        scope_bonus = max(scope_bonus, sensitive_path_bonuses[path_sensitivity])
-    elif path_sensitivity == "secrets":
-        scope_bonus = max(scope_bonus, 20)
-    elif path_sensitivity == "system":
-        scope_bonus = max(scope_bonus, 14)
+    scope_bonus = _compute_scope_bonus(classification, targets, risk_cfg)
 
     structural = base_score + scope_bonus
 
@@ -380,15 +361,45 @@ def _compute_pattern_bonus(
     return min(total, max_bonus)
 
 
+def _compute_scope_bonus(
+    classification: Classification,
+    targets: list[str],
+    risk_cfg: dict[str, Any],
+) -> int:
+    """Compute scope modifier from classification scope and target sensitivity."""
+    scope_modifiers: dict[str, int] = risk_cfg.get("scope_modifiers", {})
+    scope_bonus = max(
+        (scope_modifiers.get(s, 0) for s in classification.scope),
+        default=0,
+    )
+    sensitive_paths = risk_cfg.get("sensitive_paths", {})
+    path_sensitivity = _check_sensitive_paths(targets, sensitive_paths)
+    if path_sensitivity:
+        bonuses = risk_cfg.get("sensitive_path_bonuses", _DEFAULT_SENSITIVITY_BONUSES)
+        scope_bonus = max(scope_bonus, bonuses.get(path_sensitivity, 0))
+    return scope_bonus
+
+
 def _check_sensitive_paths(
     targets: list[str], sensitive_paths: dict[str, list[str]]
 ) -> str | None:
-    """Check if any target matches a sensitive path pattern. Returns category or None."""
+    """Check if any target matches a sensitive path pattern. Returns category or None.
+
+    Builds a flat (pattern, category) index on first call per invocation to
+    avoid O(n³) nested iteration.
+    """
+    if not targets or not sensitive_paths:
+        return None
+    # Flatten to list of (pattern, suffix, category) for single-pass matching
+    flat_rules: list[tuple[str, str, str]] = [
+        (pat, pat.lstrip("*"), category)
+        for category, patterns in sensitive_paths.items()
+        for pat in patterns
+    ]
     for target in targets:
-        for category, patterns in sensitive_paths.items():
-            for pattern in patterns:
-                if fnmatch(target, pattern) or target.endswith(pattern.lstrip("*")):
-                    return category
+        for pattern, suffix, category in flat_rules:
+            if fnmatch(target, pattern) or target.endswith(suffix):
+                return category
     return None
 
 
@@ -440,11 +451,10 @@ def _classify_taint_source(
     targets = segment.get("targets", [])
     if targets:
         sensitivity = _check_sensitive_paths(targets, sensitive_paths)
-        if sensitivity == "secrets" or sensitivity == "system":
+        if sensitivity in _SENSITIVE_CATEGORIES:
             return "sensitive_read"
 
-    binary = segment.get("binary", "")
-    if binary in ("curl", "wget", "fetch"):
+    if segment.get("binary", "") in _NETWORK_SOURCES:
         return "network"
 
     return "any_read"
@@ -452,16 +462,13 @@ def _classify_taint_source(
 
 def _classify_taint_sink(segment: dict[str, Any]) -> str:
     """Classify a pipe sink segment."""
-    effect = segment.get("effect", "")
     binary = segment.get("binary", "")
-
-    if binary in ("bash", "sh", "zsh", "python", "python3", "perl", "ruby", "node", "eval"):
+    if binary in _EXECUTION_SINKS:
         return "execution"
-    if effect == "destructive" or effect == "mutating":
+    if segment.get("effect", "") in _EXECUTION_EFFECTS:
         return "execution"
-    if binary in ("curl", "wget", "nc", "ncat", "socat", "telnet"):
+    if binary in _NETWORK_SINKS:
         return "network"
-
     return "other"
 
 
@@ -473,14 +480,11 @@ def _is_gtfobins_relevant(
     """Check if binary has GTFOBins capability relevant to the classification."""
     if not binary:
         return False
-    # Check if binary is in any GTFOBins category
-    for _category, binaries in gtfobins.items():
-        if binary in binaries:
-            # Only flag if the command has network or execute capabilities
-            caps = classification.capability
-            if "network_outbound" in caps or "elevated_privilege" in caps:
-                return True
-    return False
+    # Build flat set from all categories for O(1) lookup
+    all_bins = {b for bins in gtfobins.values() for b in bins}
+    if binary not in all_bins:
+        return False
+    return bool(classification.capability & _RELEVANT_CAPABILITIES)
 
 
 def _compute_context_adjustment(
@@ -492,19 +496,14 @@ def _compute_context_adjustment(
     if not targets:
         return 0
 
-    build_dirs = ("build/", "dist/", "target/", "node_modules/", "__pycache__/", ".git/")
     adj = 0
-
     for target in targets:
         if target.startswith(project_root) or target.startswith("./") or not target.startswith("/"):
-            # Inside project
             adj = min(adj, adjustments.get("inside_project", -10))
-            if any(d in target for d in build_dirs):
+            if any(d in target for d in _BUILD_DIRS):
                 adj = min(adj, adjustments.get("inside_build_dir", -5) + adjustments.get("inside_project", -10))
         elif target.startswith("/"):
-            # Escapes project
-            adj = max(adj, adjustments.get("escapes_project", 20))
-            break  # Worst case wins for upward adjustments
+            return max(adj, adjustments.get("escapes_project", 20))
 
     return adj
 
@@ -514,6 +513,4 @@ def _score_to_level(score: int, levels: dict[str, list[int]]) -> str:
     for level_name, (low, high) in levels.items():
         if low <= score <= high:
             return level_name
-    if score > 80:
-        return "critical"
-    return "safe"
+    return "critical" if score > 80 else "safe"

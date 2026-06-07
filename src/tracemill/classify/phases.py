@@ -8,27 +8,37 @@ from __future__ import annotations
 from tracemill.classify.core import Classification, PhaseSegment
 from tracemill.classify.workflow import Phase
 
+# Rule table: (predicate, phase) — evaluated in order, first match wins for single-phase
+_DERIVE_RULES: list[tuple[str, str, str]] = [
+    # (kind, value, phase)
+    ("action", "validate", Phase.VERIFICATION),
+    ("action", "deliver", Phase.REVIEW),
+    ("action", "retrieve", Phase.EXPLORATION),
+    ("action", "analyze", Phase.EXPLORATION),
+    ("action", "configure", Phase.IMPLEMENTATION),
+    ("action", "execute", Phase.IMPLEMENTATION),
+    ("action", "modify", Phase.IMPLEMENTATION),
+    ("action", "persist", Phase.IMPLEMENTATION),
+]
+
 
 def derive_phase(cls: Classification) -> str:
     """Derive a single phase for a tool classification.
 
-    Same logic as _phases_from_classification fallback but returns one phase
-    for building the phase_map of single-action tools.
+    Uses a rule table consistent with _phases_from_classification in the enricher.
+    Returns the first matching phase; VCS persist/deliver is special-cased to REVIEW.
     """
-    if cls.has_action("validate"):
-        return Phase.VERIFICATION
+    # Special case: VCS persist/deliver → review
     if cls.has_role("persistence.version_control") and (
         cls.has_action("persist") or cls.has_action("deliver")
     ):
         return Phase.REVIEW
-    if cls.has_action("deliver"):
-        return Phase.REVIEW
-    if cls.has_action("retrieve") or cls.has_action("analyze"):
-        return Phase.EXPLORATION
-    if cls.has_action("modify") or cls.has_action("persist"):
-        return Phase.IMPLEMENTATION
-    if cls.has_action("configure") or cls.has_action("execute"):
-        return Phase.IMPLEMENTATION
+
+    for kind, value, phase in _DERIVE_RULES:
+        if kind == "action" and cls.has_action(value):
+            return phase
+
+    # Mechanism-based fallbacks
     if cls.mechanism.startswith("communication"):
         return Phase.PLANNING
     if cls.mechanism.startswith("delegation"):

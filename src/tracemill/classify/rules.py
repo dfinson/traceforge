@@ -87,10 +87,12 @@ def match_rule(
     *,
     engine: ClassificationEngine,
 ) -> Rule | None:
-    """Find the first matching rule for a (binary, subcmd, flags) tuple."""
-    for rule in engine.shell_rules:
-        if binary not in rule.binaries:
-            continue
+    """Find the first matching rule for a (binary, subcmd, flags) tuple.
+
+    Uses the engine's pre-built binary→rules index for O(1) lookup instead
+    of scanning all rules.
+    """
+    for rule in engine.rules_by_binary.get(binary, ()):
         if rule.subcmds is not None and subcmd not in rule.subcmds:
             continue
         if rule.flags_require is not None and not rule.flags_require.issubset(flags):

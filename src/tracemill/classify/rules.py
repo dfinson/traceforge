@@ -630,54 +630,65 @@ def effect_for_binary(
     flags: list[str],
     engine: ClassificationEngine | None = None,
 ) -> Effect | None:
-    """Determine effect from binary + context, using rule table and binary info."""
-    # Flag-dependent overrides
-    if binary in ("ruff", "eslint", "rubocop", "clippy"):
-        return Effect.MUTATING if "--fix" in flags else Effect.READ_ONLY
-    if binary in ("black", "prettier"):
-        return Effect.READ_ONLY if "--check" in flags else Effect.MUTATING
+    """Determine effect from binary + context, using effect overrides and binary info."""
+    # Use engine's YAML-driven effect overrides if available
+    if engine is not None and binary in engine.effect_overrides:
+        from tracemill.classify.config import EffectOverrideConfig
 
-    # sed/perl with -i → in-place edit
-    if binary in ("sed", "perl") and "-i" in flags:
-        return Effect.MUTATING
+        override: EffectOverrideConfig = engine.effect_overrides[binary]
 
-    # curl: explicit write flags → mutating, otherwise read_only
-    if binary == "curl":
-        _curl_write_flags = {"-X", "-d", "--data", "--data-raw", "--data-binary",
-                             "--data-urlencode", "-F", "--form", "-T", "--upload-file"}
-        if _curl_write_flags.intersection(flags):
+        # Check flag-based effects first
+        for fe in override.flag_effects:
+            if fe.mode == "any_present" and set(fe.flags).intersection(flags):
+                return Effect(fe.effect)
+
+        # Check subcmd-based effects
+        if subcmd and subcmd in override.subcmd_effects:
+            return Effect(override.subcmd_effects[subcmd])
+
+        # Binary-level default effect
+        if override.default_effect is not None:
+            return Effect(override.default_effect)
+
+        # Fall through to binary_info lookup below
+    elif engine is None:
+        # Inline fallback (backward compat when no engine loaded)
+        if binary in ("ruff", "eslint", "rubocop", "clippy"):
+            return Effect.MUTATING if "--fix" in flags else Effect.READ_ONLY
+        if binary in ("black", "prettier"):
+            return Effect.READ_ONLY if "--check" in flags else Effect.MUTATING
+        if binary in ("sed", "perl") and "-i" in flags:
             return Effect.MUTATING
-        return Effect.READ_ONLY
-
-    # Git subcmd determines effect
-    if binary == "git":
-        git_write = {"commit", "push", "merge", "rebase", "cherry-pick", "tag", "reset", "stash"}
-        return Effect.MUTATING if subcmd in git_write else Effect.READ_ONLY
-
-    # Docker/kubectl subcmd effects
-    if binary in ("docker", "podman"):
-        if subcmd in ("rm", "rmi", "prune"):
-            return Effect.DESTRUCTIVE
-        if subcmd in ("build", "push", "run", "exec", "start", "restart", "stop", "pull"):
-            return Effect.MUTATING
-        if subcmd in ("ps", "images", "logs", "inspect", "stats"):
+        if binary == "curl":
+            _curl_write_flags = {"-X", "-d", "--data", "--data-raw", "--data-binary",
+                                 "--data-urlencode", "-F", "--form", "-T", "--upload-file"}
+            if _curl_write_flags.intersection(flags):
+                return Effect.MUTATING
             return Effect.READ_ONLY
-    if binary == "kubectl":
-        if subcmd == "delete":
-            return Effect.DESTRUCTIVE
-        if subcmd in ("apply", "create", "patch", "replace", "exec", "run"):
-            return Effect.MUTATING
-        if subcmd in ("get", "describe", "logs", "top", "events"):
-            return Effect.READ_ONLY
-
-    # Terraform
-    if binary in ("terraform", "tofu"):
-        if subcmd == "destroy":
-            return Effect.DESTRUCTIVE
-        if subcmd in ("apply", "init"):
-            return Effect.MUTATING
-        if subcmd in ("plan", "validate", "show", "state", "output"):
-            return Effect.READ_ONLY
+        if binary == "git":
+            git_write = {"commit", "push", "merge", "rebase", "cherry-pick", "tag", "reset", "stash"}
+            return Effect.MUTATING if subcmd in git_write else Effect.READ_ONLY
+        if binary in ("docker", "podman"):
+            if subcmd in ("rm", "rmi", "prune"):
+                return Effect.DESTRUCTIVE
+            if subcmd in ("build", "push", "run", "exec", "start", "restart", "stop", "pull"):
+                return Effect.MUTATING
+            if subcmd in ("ps", "images", "logs", "inspect", "stats"):
+                return Effect.READ_ONLY
+        if binary == "kubectl":
+            if subcmd == "delete":
+                return Effect.DESTRUCTIVE
+            if subcmd in ("apply", "create", "patch", "replace", "exec", "run"):
+                return Effect.MUTATING
+            if subcmd in ("get", "describe", "logs", "top", "events"):
+                return Effect.READ_ONLY
+        if binary in ("terraform", "tofu"):
+            if subcmd == "destroy":
+                return Effect.DESTRUCTIVE
+            if subcmd in ("apply", "init"):
+                return Effect.MUTATING
+            if subcmd in ("plan", "validate", "show", "state", "output"):
+                return Effect.READ_ONLY
 
     # Look up in binary info
     bi = engine.binary_info if engine is not None else BINARY_INFO

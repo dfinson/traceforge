@@ -1,0 +1,175 @@
+# Effect overrides for specific binary+subcmd or binary+flag combinations.
+# Used by effect_for_binary() when no shell_rule matched with an explicit effect.
+#
+# Format:
+#   binary_name:
+#     flag_effects:            # flag-based overrides (checked first)
+#       - flags: ["-X", "--data", ...]
+#         effect: mutating
+#         mode: any_present     # "any_present" = any flag matches
+#       - flags: ["--check"]
+#         effect: read_only
+#         mode: any_present
+#     subcmd_effects:           # subcommand-based effects
+#       subcmd_name: effect
+#     default_effect: read_only # when no subcmd rule matches
+
+effect_overrides:
+  # Linters: --fix flag makes them mutating
+  ruff:
+    flag_effects:
+      - flags: ["--fix"]
+        effect: mutating
+        mode: any_present
+    default_effect: read_only
+
+  eslint:
+    flag_effects:
+      - flags: ["--fix"]
+        effect: mutating
+        mode: any_present
+    default_effect: read_only
+
+  rubocop:
+    flag_effects:
+      - flags: ["--fix", "-a", "-A", "--auto-correct"]
+        effect: mutating
+        mode: any_present
+    default_effect: read_only
+
+  clippy:
+    flag_effects:
+      - flags: ["--fix"]
+        effect: mutating
+        mode: any_present
+    default_effect: read_only
+
+  # Formatters: --check flag makes them read-only
+  black:
+    flag_effects:
+      - flags: ["--check"]
+        effect: read_only
+        mode: any_present
+    default_effect: mutating
+
+  prettier:
+    flag_effects:
+      - flags: ["--check"]
+        effect: read_only
+        mode: any_present
+    default_effect: mutating
+
+  # sed/perl: -i flag means in-place edit
+  sed:
+    flag_effects:
+      - flags: ["-i"]
+        effect: mutating
+        mode: any_present
+    default_effect: read_only
+
+  perl:
+    flag_effects:
+      - flags: ["-i"]
+        effect: mutating
+        mode: any_present
+
+  # curl: write flags make it mutating
+  curl:
+    flag_effects:
+      - flags: ["-X", "-d", "--data", "--data-raw", "--data-binary",
+                "--data-urlencode", "-F", "--form", "-T", "--upload-file"]
+        effect: mutating
+        mode: any_present
+    default_effect: read_only
+
+  # Git: subcmd determines effect
+  git:
+    subcmd_effects:
+      commit: mutating
+      push: mutating
+      merge: mutating
+      rebase: mutating
+      cherry-pick: mutating
+      tag: mutating
+      reset: mutating
+      stash: mutating
+      add: mutating
+    default_effect: read_only
+
+  # Docker/Podman
+  docker:
+    subcmd_effects:
+      rm: destructive
+      rmi: destructive
+      prune: destructive
+      build: mutating
+      push: mutating
+      run: mutating
+      exec: mutating
+      start: mutating
+      restart: mutating
+      stop: mutating
+      pull: mutating
+      ps: read_only
+      images: read_only
+      logs: read_only
+      inspect: read_only
+      stats: read_only
+
+  podman:
+    subcmd_effects:
+      rm: destructive
+      rmi: destructive
+      prune: destructive
+      build: mutating
+      push: mutating
+      run: mutating
+      exec: mutating
+      start: mutating
+      restart: mutating
+      stop: mutating
+      pull: mutating
+      ps: read_only
+      images: read_only
+      logs: read_only
+      inspect: read_only
+      stats: read_only
+
+  # Kubernetes
+  kubectl:
+    subcmd_effects:
+      delete: destructive
+      apply: mutating
+      create: mutating
+      patch: mutating
+      replace: mutating
+      exec: mutating
+      run: mutating
+      get: read_only
+      describe: read_only
+      logs: read_only
+      top: read_only
+      events: read_only
+
+  # Terraform / OpenTofu
+  terraform:
+    subcmd_effects:
+      destroy: destructive
+      apply: mutating
+      init: mutating
+      plan: read_only
+      validate: read_only
+      show: read_only
+      state: read_only
+      output: read_only
+
+  tofu:
+    subcmd_effects:
+      destroy: destructive
+      apply: mutating
+      init: mutating
+      plan: read_only
+      validate: read_only
+      show: read_only
+      state: read_only
+      output: read_only

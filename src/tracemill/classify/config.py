@@ -103,6 +103,22 @@ class VerbInferenceEntry(BaseModel):
     action: str
 
 
+class FlagEffectConfig(BaseModel):
+    """Flag-based effect override."""
+
+    flags: list[str]
+    effect: str
+    mode: str = "any_present"
+
+
+class EffectOverrideConfig(BaseModel):
+    """Effect override rules for a specific binary."""
+
+    flag_effects: list[FlagEffectConfig] = Field(default_factory=list)
+    subcmd_effects: dict[str, str] = Field(default_factory=dict)
+    default_effect: str | None = None
+
+
 class ClassifyConfig(BaseModel):
     """Top-level config for all externalized classification data.
 
@@ -116,6 +132,7 @@ class ClassifyConfig(BaseModel):
     binary_info: dict[str, BinaryInfoConfig] = Field(default_factory=dict)
     tool_classifications: dict[str, ToolClassificationConfig] = Field(default_factory=dict)
     verb_inference: dict[str, VerbInferenceEntry] = Field(default_factory=dict)
+    effect_overrides: dict[str, EffectOverrideConfig] = Field(default_factory=dict)
     npm_verify_scripts: list[str] = Field(default_factory=list)
     interpreter_verify_modules: list[str] = Field(default_factory=list)
     git_subcmd_actions: dict[str, str] = Field(default_factory=dict)
@@ -200,6 +217,9 @@ def _load_builtin_defaults() -> dict[str, Any]:
     for filename in (
         "canonical_tools.yaml",
         "verb_inference.yaml",
+        "binary_info.yaml",
+        "shell_defaults.yaml",
+        "effect_overrides.yaml",
         "mcp_profiles.yaml",
         "shell_rules.yaml",
         "tool_classifications.yaml",
@@ -348,6 +368,7 @@ class ClassificationEngine:
         "canonical_tools",
         "tool_classifications",
         "verb_inference",
+        "effect_overrides",
         "shell_rules",
         "binary_info",
         "mcp_profiles",
@@ -389,6 +410,9 @@ class ClassificationEngine:
             verb: (entry.effect, entry.action)
             for verb, entry in config.verb_inference.items()
         }
+
+        # Effect overrides (flag/subcmd-based effect determination)
+        self.effect_overrides: dict[str, EffectOverrideConfig] = dict(config.effect_overrides)
 
         # Shell rules
         self.shell_rules: tuple[Rule, ...] = tuple(

@@ -1,0 +1,370 @@
+# Binary metadata — role and default effect for known CLI binaries.
+# Used by shell classification to determine effect and role when
+# no specific rule matches.
+
+binary_info:
+  # ─── Test runners ───────────────────────────────────────────────────────────
+  pytest:
+    role: validator.test_runner
+    default_effect: read_only
+  jest:
+    role: validator.test_runner
+    default_effect: read_only
+  vitest:
+    role: validator.test_runner
+    default_effect: read_only
+  mocha:
+    role: validator.test_runner
+    default_effect: read_only
+  rspec:
+    role: validator.test_runner
+    default_effect: read_only
+  phpunit:
+    role: validator.test_runner
+    default_effect: read_only
+  bats:
+    role: validator.test_runner
+    default_effect: read_only
+  pest:
+    role: validator.test_runner
+    default_effect: read_only
+  tox:
+    role: validator.test_runner
+    default_effect: read_only
+  nox:
+    role: validator.test_runner
+    default_effect: read_only
+  playwright:
+    role: validator.test_runner
+    default_effect: read_only
+
+  # ─── Type checkers ─────────────────────────────────────────────────────────
+  mypy:
+    role: validator.type_checker
+    default_effect: read_only
+  pyright:
+    role: validator.type_checker
+    default_effect: read_only
+  tsc:
+    role: validator.type_checker
+    default_effect: read_only
+
+  # ─── Linters ───────────────────────────────────────────────────────────────
+  flake8:
+    role: validator.linter
+    default_effect: read_only
+  pylint:
+    role: validator.linter
+    default_effect: read_only
+  eslint:
+    role: validator.linter
+    default_effect: read_only
+  rubocop:
+    role: validator.linter
+    default_effect: read_only
+  golangci-lint:
+    role: validator.linter
+    default_effect: read_only
+  clippy:
+    role: validator.linter
+    default_effect: read_only
+  ruff:
+    role: validator.linter
+    default_effect: read_only
+
+  # ─── Formatters ────────────────────────────────────────────────────────────
+  black:
+    role: transformer.formatter
+    default_effect: mutating
+  prettier:
+    role: transformer.formatter
+    default_effect: mutating
+
+  # ─── Package managers ──────────────────────────────────────────────────────
+  pip:
+    role: dependency.package_manager
+    default_effect: mutating
+    network: true
+  pip3:
+    role: dependency.package_manager
+    default_effect: mutating
+    network: true
+  uv:
+    role: dependency.package_manager
+    default_effect: mutating
+    network: true
+  poetry:
+    role: dependency.package_manager
+    default_effect: mutating
+    network: true
+  brew:
+    role: dependency.package_manager
+    default_effect: mutating
+    network: true
+  apt:
+    role: dependency.package_manager
+    default_effect: mutating
+    network: true
+  apt-get:
+    role: dependency.package_manager
+    default_effect: mutating
+    network: true
+  choco:
+    role: dependency.package_manager
+    default_effect: mutating
+    network: true
+  winget:
+    role: dependency.package_manager
+    default_effect: mutating
+    network: true
+  scoop:
+    role: dependency.package_manager
+    default_effect: mutating
+    network: true
+  helm:
+    role: dependency.package_manager
+    default_effect: null
+    network: true
+
+  # ─── Environment managers ──────────────────────────────────────────────────
+  conda:
+    role: dependency.package_manager
+    default_effect: null
+    network: true
+  virtualenv:
+    role: dependency.package_manager
+    default_effect: mutating
+  nvm:
+    role: dependency.package_manager
+    default_effect: mutating
+  rbenv:
+    role: dependency.package_manager
+    default_effect: mutating
+  pyenv:
+    role: dependency.package_manager
+    default_effect: mutating
+
+  # ─── Task runners (npm/cargo/etc.) ─────────────────────────────────────────
+  npm:
+    role: orchestrator.task_runner
+    default_effect: null
+    network: true
+  pnpm:
+    role: orchestrator.task_runner
+    default_effect: null
+    network: true
+  yarn:
+    role: orchestrator.task_runner
+    default_effect: null
+    network: true
+  cargo:
+    role: orchestrator.task_runner
+    default_effect: null
+  make:
+    role: orchestrator.task_runner
+    default_effect: null
+  gradle:
+    role: orchestrator.task_runner
+    default_effect: null
+  mvn:
+    role: orchestrator.task_runner
+    default_effect: null
+  dotnet:
+    role: orchestrator.task_runner
+    default_effect: null
+  go:
+    role: orchestrator.task_runner
+    default_effect: null
+
+  # ─── Build systems ─────────────────────────────────────────────────────────
+  cmake:
+    role: validator.build_checker
+    default_effect: mutating
+  ninja:
+    role: validator.build_checker
+    default_effect: mutating
+  bazel:
+    role: validator.build_checker
+    default_effect: null
+  webpack:
+    role: transformer.bundler
+    default_effect: mutating
+  vite:
+    role: transformer.bundler
+    default_effect: null
+
+  # ─── Container runtimes ────────────────────────────────────────────────────
+  docker:
+    role: orchestrator.container_runtime
+    default_effect: null
+    network: true
+  podman:
+    role: orchestrator.container_runtime
+    default_effect: null
+    network: true
+  docker-compose:
+    role: orchestrator.container_runtime
+    default_effect: null
+    network: true
+  kubectl:
+    role: orchestrator.container_runtime
+    default_effect: null
+    network: true
+
+  # ─── IaC / cloud ──────────────────────────────────────────────────────────
+  terraform:
+    role: orchestrator.task_runner
+    default_effect: null
+    network: true
+  tofu:
+    role: orchestrator.task_runner
+    default_effect: null
+    network: true
+  pulumi:
+    role: orchestrator.task_runner
+    default_effect: null
+    network: true
+
+  # ─── Version control ───────────────────────────────────────────────────────
+  git:
+    role: vcs.version_control
+    default_effect: null
+  gh:
+    role: network.api_client
+    default_effect: null
+    network: true
+
+  # ─── Script runners ────────────────────────────────────────────────────────
+  python:
+    role: orchestrator.script_runner
+    default_effect: null
+  python3:
+    role: orchestrator.script_runner
+    default_effect: null
+  node:
+    role: orchestrator.script_runner
+    default_effect: null
+  perl:
+    role: orchestrator.script_runner
+    default_effect: null
+
+  # ─── Network clients ──────────────────────────────────────────────────────
+  curl:
+    role: network.api_client
+    default_effect: read_only
+    network: true
+  wget:
+    role: network.api_client
+    default_effect: mutating
+    network: true
+
+  # ─── File operations ───────────────────────────────────────────────────────
+  rm:
+    role: orchestrator.script_runner
+    default_effect: destructive
+    destructive: true
+  rmdir:
+    role: orchestrator.script_runner
+    default_effect: destructive
+    destructive: true
+  cp:
+    role: filesystem.file_editor
+    default_effect: mutating
+  mv:
+    role: filesystem.file_editor
+    default_effect: mutating
+  mkdir:
+    role: filesystem.file_editor
+    default_effect: mutating
+  chmod:
+    role: orchestrator.script_runner
+    default_effect: mutating
+  chown:
+    role: orchestrator.script_runner
+    default_effect: mutating
+  touch:
+    role: filesystem.file_editor
+    default_effect: mutating
+  ln:
+    role: filesystem.file_editor
+    default_effect: mutating
+  sudo:
+    role: orchestrator.script_runner
+    default_effect: null
+
+  # ─── Text processors / search ──────────────────────────────────────────────
+  sed:
+    role: filesystem.search_index
+    default_effect: read_only
+  awk:
+    role: filesystem.search_index
+    default_effect: read_only
+  gawk:
+    role: filesystem.search_index
+    default_effect: read_only
+  jq:
+    role: filesystem.search_index
+    default_effect: read_only
+  yq:
+    role: filesystem.search_index
+    default_effect: read_only
+  cat:
+    role: filesystem.file_browser
+    default_effect: read_only
+  head:
+    role: filesystem.file_browser
+    default_effect: read_only
+  tail:
+    role: filesystem.file_browser
+    default_effect: read_only
+  less:
+    role: filesystem.file_browser
+    default_effect: read_only
+  grep:
+    role: filesystem.search_index
+    default_effect: read_only
+  rg:
+    role: filesystem.search_index
+    default_effect: read_only
+  ag:
+    role: filesystem.search_index
+    default_effect: read_only
+  fd:
+    role: filesystem.file_browser
+    default_effect: read_only
+  fdfind:
+    role: filesystem.file_browser
+    default_effect: read_only
+
+  # ─── Security scanners ────────────────────────────────────────────────────
+  bandit:
+    role: validator.security_scanner
+    default_effect: read_only
+  semgrep:
+    role: validator.security_scanner
+    default_effect: read_only
+  trivy:
+    role: validator.security_scanner
+    default_effect: read_only
+  snyk:
+    role: validator.security_scanner
+    default_effect: read_only
+    network: true
+  safety:
+    role: validator.security_scanner
+    default_effect: read_only
+    network: true
+
+  # ─── Cloud CLIs ───────────────────────────────────────────────────────────
+  az:
+    role: network.api_client
+    default_effect: null
+    network: true
+  aws:
+    role: network.api_client
+    default_effect: null
+    network: true
+  gcloud:
+    role: network.api_client
+    default_effect: null
+    network: true

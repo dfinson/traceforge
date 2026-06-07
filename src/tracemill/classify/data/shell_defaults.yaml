@@ -1,0 +1,95 @@
+# Shell classification defaults — small lookup tables that support
+# the shell classifier (transparent wrappers, activity mappings,
+# git subcommand actions, verification role actions, npm scripts, etc.)
+
+# ─── Transparent wrappers ────────────────────────────────────────────────────
+# Binaries that wrap another command without changing its classification.
+# The shell classifier strips these to find the real binary underneath.
+transparent_wrappers:
+  - env
+  - nice
+  - timeout
+  - stdbuf
+  - nohup
+  - command
+  - sudo
+  - exec
+
+# ─── Activity → dimension defaults ──────────────────────────────────────────
+# Maps ShellActivity values to their default action, scope, and phase.
+# Used when a rule matches an activity but doesn't specify these dimensions.
+activity_defaults:
+  verification:
+    action: validate.test
+    scope: artifact.test_code
+    phase: verification
+  setup:
+    action: configure.install
+    scope: configuration.dependency
+    phase: implementation
+  git_ops:
+    action: persist.commit
+    scope: state.repository
+    phase: review
+  investigation:
+    action: retrieve.read
+    scope: artifact.source_code
+    phase: exploration
+  implementation:
+    action: execute.script
+    scope: artifact.source_code
+    phase: implementation
+
+# ─── Git subcommand → action mapping ────────────────────────────────────────
+# When a git command is classified, the subcommand determines the specific action.
+git_subcmd_actions:
+  commit: persist.commit
+  push: deliver.push
+  merge: modify.merge
+  rebase: modify.rebase
+  cherry-pick: modify.merge
+  tag: persist.stage
+  reset: modify.edit
+  stash: persist.stage
+  diff: analyze.diff
+  log: retrieve.browse
+  status: retrieve.browse
+  show: retrieve.read
+  blame: retrieve.read
+  branch: retrieve.browse
+  checkout: execute.script
+  switch: execute.script
+  fetch: retrieve.read
+  pull: retrieve.read
+  clone: retrieve.read
+  add: persist.stage
+
+# ─── Verification role → action mapping ─────────────────────────────────────
+# When a binary has a verification role, this maps to a more specific action.
+verification_role_actions:
+  validator.linter: validate.lint
+  validator.test_runner: validate.test
+  validator.type_checker: validate.typecheck
+  validator.security_scanner: validate.security_scan
+  validator.build_checker: validate.build_check
+  transformer.formatter: validate.lint
+  transformer.bundler: validate.build_check
+
+# ─── NPM verify scripts ─────────────────────────────────────────────────────
+# npm/yarn/pnpm script names that indicate verification (not implementation).
+npm_verify_scripts:
+  - test
+  - tests
+  - lint
+  - check
+  - typecheck
+  - build
+
+# ─── Interpreter verify modules ─────────────────────────────────────────────
+# Python modules that indicate verification when run via `python -m <module>`.
+interpreter_verify_modules:
+  - pytest
+  - unittest
+  - mypy
+  - pyright
+  - ruff

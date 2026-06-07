@@ -42,6 +42,22 @@ class FlushTrackingSink(StorageSink):
         self.closed = True
 
 
+class OrderTrackingSink(StorageSink):
+    """A sink that records the order of flush/close calls."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def on_event(self, event: SessionEvent) -> None:
+        pass
+
+    async def flush(self) -> None:
+        self.calls.append("flush")
+
+    async def close(self) -> None:
+        self.calls.append("close")
+
+
 class TestPipelinePush:
     async def test_single_sink_receives_event(self, recording_sink: RecordingSink):
         pipeline = EventPipeline(sinks=[recording_sink.sink])
@@ -126,6 +142,12 @@ class TestPipelineFlushClose:
         pipeline = EventPipeline(sinks=[FailingSink(), tracker])
         await pipeline.flush()
         assert tracker.flushed
+
+    async def test_close_flushes_before_closing(self):
+        tracker = OrderTrackingSink()
+        pipeline = EventPipeline(sinks=[tracker])
+        await pipeline.close()
+        assert tracker.calls == ["flush", "close"]
 
     async def test_close_error_isolation(self):
         tracker = FlushTrackingSink()

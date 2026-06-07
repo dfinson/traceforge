@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
+
+import pytest
 
 from tracemill import EventKind, EventMetadata, SessionEvent, TelemetrySpan, UsageRecord
 from tests.conftest import make_event, make_span, make_usage
@@ -54,7 +57,8 @@ class TestSessionEvent:
     def test_auto_generated_id(self):
         event = make_event()
         assert event.id is not None
-        assert len(event.id) == 36  # UUID4 format
+        parsed = uuid.UUID(event.id)
+        assert parsed.version == 4
 
     def test_unique_ids(self):
         e1 = make_event()
@@ -135,3 +139,50 @@ class TestUsageRecord:
         assert usage.model == "claude-3"
         assert usage.input_tokens == 200
         assert usage.output_tokens == 100
+
+    def test_negative_tokens_rejected(self):
+        with pytest.raises(ValueError):
+            make_usage(input_tokens=-1)
+        with pytest.raises(ValueError):
+            make_usage(output_tokens=-1)
+
+    def test_negative_cost_rejected(self):
+        with pytest.raises(ValueError):
+            make_usage(cost_usd=-0.01)
+
+
+class TestEventMetadataValidation:
+    def test_invalid_visibility_rejected(self):
+        with pytest.raises(ValueError):
+            EventMetadata(visibility="hidden")
+
+    def test_valid_visibility_values(self):
+        for v in ("visible", "internal", "collapsed"):
+            meta = EventMetadata(visibility=v)
+            assert meta.visibility == v
+
+    def test_negative_duration_rejected(self):
+        with pytest.raises(ValueError):
+            EventMetadata(duration_ms=-1.0)
+
+
+class TestFrozenModels:
+    def test_session_event_immutable(self):
+        event = make_event()
+        with pytest.raises(Exception):
+            event.session_id = "mutated"
+
+    def test_metadata_immutable(self):
+        meta = EventMetadata()
+        with pytest.raises(Exception):
+            meta.visibility = "internal"
+
+    def test_usage_record_immutable(self):
+        usage = make_usage()
+        with pytest.raises(Exception):
+            usage.input_tokens = 999
+
+    def test_telemetry_span_immutable(self):
+        span = make_span()
+        with pytest.raises(Exception):
+            span.name = "mutated"

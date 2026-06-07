@@ -30,7 +30,11 @@ class EventPipeline:
         )
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
-                logger.error("Sink %d failed on event %s: %s", i, event.id, result)
+                logger.error(
+                    "Sink %d failed on event %s: %s",
+                    i, event.id, result,
+                    exc_info=(type(result), result, result.__traceback__),
+                )
 
     async def push_span(self, span: TelemetrySpan) -> None:
         """Fan-out span to all registered sinks."""
@@ -40,7 +44,11 @@ class EventPipeline:
         )
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
-                logger.error("Sink %d failed on span %s: %s", i, span.name, result)
+                logger.error(
+                    "Sink %d failed on span %s: %s",
+                    i, span.name, result,
+                    exc_info=(type(result), result, result.__traceback__),
+                )
 
     async def push_usage(self, usage: UsageRecord) -> None:
         """Fan-out usage record to all registered sinks."""
@@ -50,7 +58,11 @@ class EventPipeline:
         )
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
-                logger.error("Sink %d failed on usage record: %s", i, result)
+                logger.error(
+                    "Sink %d failed on usage record: %s",
+                    i, result,
+                    exc_info=(type(result), result, result.__traceback__),
+                )
 
     async def flush(self) -> None:
         """Flush all sinks. Error-isolated."""
@@ -60,7 +72,11 @@ class EventPipeline:
         )
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
-                logger.error("Sink %d failed on flush: %s", i, result)
+                logger.error(
+                    "Sink %d failed on flush: %s",
+                    i, result,
+                    exc_info=(type(result), result, result.__traceback__),
+                )
 
     async def close(self) -> None:
         """Flush then close all sinks. Error-isolated."""
@@ -71,4 +87,8 @@ class EventPipeline:
         )
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
-                logger.error("Sink %d failed on close: %s", i, result)
+                logger.error(
+                    "Sink %d failed on close: %s",
+                    i, result,
+                    exc_info=(type(result), result, result.__traceback__),
+                )

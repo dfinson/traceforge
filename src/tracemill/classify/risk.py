@@ -165,6 +165,104 @@ def assess_risk(
     )
 
 
+def assess_tool_risk(
+    classification: Classification,
+    *,
+    engine: ClassificationEngine,
+    targets: list[str] | None = None,
+    project_root: str | None = None,
+) -> RiskAssessment:
+    """Score a native/MCP tool's risk from its classification and targets.
+
+    Simpler model than shell scoring — no flag parsing, pipe taint, or
+    injection patterns. Scores from:
+      - Intent base (effect)
+      - Scope modifier (classification scope)
+      - Capability escalation (network, elevated privilege, subprocess)
+      - Target sensitivity (file path sensitivity)
+      - Context adjustment (project-relative targeting)
+
+    Args:
+        classification: The Classification for this tool invocation.
+        engine: ClassificationEngine with risk config loaded.
+        targets: File path arguments extracted from the event payload.
+        project_root: Optional project root path for context adjustments.
+
+    Returns:
+        RiskAssessment with score, level, confidence, factors, and version.
+    """
+    risk_cfg = engine.risk_config
+    if risk_cfg is None:
+        return RiskAssessment(
+            score=0, level="safe", confidence=Confidence.LOW,
+            factors=(), mitre=(), version="risk-v2",
+        )
+
+    factors: list[str] = []
+    mitre_ids: list[str] = []
+    targets = targets or []
+
+    # ── Intent base ──
+    effect_str = classification.effect or "unknown"
+    intent_weights: dict[str, int] = risk_cfg.get("intent_weights", {})
+    base_score = intent_weights.get(effect_str, intent_weights.get("unknown", 24))
+
+    # ── Scope modifier ──
+    scope_modifiers: dict[str, int] = risk_cfg.get("scope_modifiers", {})
+    scope_bonus = 0
+    for s in classification.scope:
+        mod = scope_modifiers.get(s, 0)
+        if mod > scope_bonus:
+            scope_bonus = mod
+
+    # Target sensitivity
+    sensitive_paths = risk_cfg.get("sensitive_paths", {})
+    path_sensitivity = _check_sensitive_paths(targets, sensitive_paths)
+    sensitive_path_bonuses: dict[str, int] = risk_cfg.get("sensitive_path_bonuses", {})
+    if path_sensitivity and path_sensitivity in sensitive_path_bonuses:
+        scope_bonus = max(scope_bonus, sensitive_path_bonuses[path_sensitivity])
+    elif path_sensitivity == "secrets":
+        scope_bonus = max(scope_bonus, 20)
+    elif path_sensitivity == "system":
+        scope_bonus = max(scope_bonus, 14)
+
+    structural = base_score + scope_bonus
+
+    # ── Capability escalation ──
+    cap_weights: dict[str, int] = risk_cfg.get("capability_weights", {})
+    for cap in classification.capability:
+        cap_mod = cap_weights.get(cap, 0)
+        if cap_mod > 0:
+            structural += cap_mod
+            factors.append(f"capability_{cap}")
+
+    # ── Context adjustment ──
+    context_adj = 0
+    context_adjustments: dict[str, int] = risk_cfg.get("context_adjustments", {})
+    if project_root and targets:
+        context_adj = _compute_context_adjustment(targets, project_root, context_adjustments)
+    elif not project_root:
+        context_adj = context_adjustments.get("no_context", 4)
+
+    # ── Final score ──
+    raw_score = structural + context_adj
+    final_score = max(0, min(100, raw_score))
+
+    levels: dict[str, list[int]] = risk_cfg.get("levels", {})
+    level = _score_to_level(final_score, levels)
+    confidence = _compute_confidence(classification, "", [])
+    version: str = risk_cfg.get("version", "risk-v2")
+
+    return RiskAssessment(
+        score=final_score,
+        level=level,
+        confidence=confidence,
+        factors=tuple(dict.fromkeys(factors)),
+        mitre=tuple(dict.fromkeys(mitre_ids)),
+        version=version,
+    )
+
+
 # ── Private helpers ──
 
 

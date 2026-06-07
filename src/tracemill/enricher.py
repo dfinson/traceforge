@@ -10,7 +10,7 @@ from tracemill.classify import classify_shell, classify_tool, get_default_engine
 from tracemill.classify.config import ClassificationEngine, ClassifyConfig, load_config
 from tracemill.classify.core import Classification, PhaseSegment
 from tracemill.classify.coding import CodingMechanism, CodingScope
-from tracemill.classify.risk import RiskAssessment, assess_risk
+from tracemill.classify.risk import RiskAssessment, assess_risk, assess_tool_risk
 from tracemill.classify.tools import normalize_tool_name
 from tracemill.classify.workflow import Phase, Visibility
 from tracemill.types import EventKind, EventMetadata, SessionEvent
@@ -131,9 +131,12 @@ class Enricher:
         new_metadata = event.metadata.model_copy(update={"classification": cls})
         event = event.model_copy(update={"metadata": new_metadata})
 
-        # Risk scoring for shell commands
-        if is_shell and self._engine.risk_config is not None:
-            event = self._assess_risk(event, cls)
+        # Risk scoring
+        if self._engine.risk_config is not None:
+            if is_shell:
+                event = self._assess_risk(event, cls)
+            else:
+                event = self._assess_tool_risk(event, cls)
 
         return event
 
@@ -170,6 +173,29 @@ class Enricher:
         )
 
         # Store risk assessment in payload under _enrichment
+        enrichment = dict(event.payload.get("_enrichment", {}))
+        enrichment["risk"] = {
+            "score": risk.score,
+            "level": risk.level,
+            "confidence": risk.confidence,
+            "factors": list(risk.factors),
+            "mitre": list(risk.mitre),
+            "version": risk.version,
+        }
+        new_payload = {**event.payload, "_enrichment": enrichment}
+        return event.model_copy(update={"payload": new_payload})
+
+    def _assess_tool_risk(self, event: SessionEvent, cls: Classification) -> SessionEvent:
+        """Compute risk score for a native/MCP tool and store in payload._enrichment."""
+        # Extract file targets from payload
+        targets = _extract_targets_from_payload(event.payload)
+
+        risk = assess_tool_risk(
+            classification=cls,
+            engine=self._engine,
+            targets=targets or None,
+        )
+
         enrichment = dict(event.payload.get("_enrichment", {}))
         enrichment["risk"] = {
             "score": risk.score,
@@ -417,6 +443,22 @@ def _extract_tool_call_id(event: SessionEvent) -> str | None:
     if value is not None and not isinstance(value, str):
         logger.debug("Ignoring non-string tool_call_id: %r", value)
     return None
+
+
+def _extract_targets_from_payload(payload: dict) -> list[str]:
+    """Extract file path targets from event payload for risk scoring."""
+    targets: list[str] = []
+    for key in ("path", "file_path", "file", "filename"):
+        val = payload.get(key, "")
+        if isinstance(val, str) and val:
+            targets.append(val)
+    args = payload.get("arguments", {})
+    if isinstance(args, dict):
+        for key in ("path", "file_path", "file", "filename", "pattern", "glob"):
+            val = args.get(key, "")
+            if isinstance(val, str) and val and val not in targets:
+                targets.append(val)
+    return targets
 
 
 def _merge_metadata(

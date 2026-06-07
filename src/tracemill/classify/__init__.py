@@ -37,7 +37,7 @@ from tracemill.classify.mcp import (
 )
 from tracemill.classify.powershell import classify_powershell_command
 from tracemill.classify.registry import DimensionRegistry, get_default_registry
-from tracemill.classify.risk import Confidence, RiskAssessment, assess_risk
+from tracemill.classify.risk import Confidence, RiskAssessment, assess_risk, assess_tool_risk
 from tracemill.classify.shell import (
     _extract_commands_from_ast,
     classify_shell,
@@ -91,4 +91,5 @@ __all__ = [
     "Confidence",
     "RiskAssessment",
     "assess_risk",
+    "assess_tool_risk",
 ]

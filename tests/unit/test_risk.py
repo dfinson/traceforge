@@ -5,9 +5,9 @@ from __future__ import annotations
 import pytest
 
 from tracemill.classify.config import ClassificationEngine, get_default_engine
-from tracemill.classify.core import Classification, Effect
+from tracemill.classify.core import Classification, Capability, Effect, Mechanism
 from tracemill.classify.coding import CodingMechanism, CodingScope
-from tracemill.classify.risk import Confidence, RiskAssessment, assess_risk, _expand_short_flags
+from tracemill.classify.risk import Confidence, RiskAssessment, assess_risk, assess_tool_risk, _expand_short_flags
 
 
 @pytest.fixture
@@ -345,7 +345,7 @@ class TestEnricherIntegration:
         assert "version" in risk_data
         assert risk_data["score"] >= 0
 
-    def test_non_shell_event_no_risk(self) -> None:
+    def test_non_shell_event_gets_tool_risk(self) -> None:
         from tracemill.enricher import Enricher
         from tracemill.types import EventKind, EventMetadata, SessionEvent
         from datetime import datetime, timezone
@@ -366,8 +366,12 @@ class TestEnricherIntegration:
         assert result is None  # buffered
         flushed = enricher.flush()
         assert len(flushed) == 1
-        # Non-shell tool should NOT have risk enrichment
-        assert "_enrichment" not in flushed[0].payload or "risk" not in flushed[0].payload.get("_enrichment", {})
+        # Non-shell tool should now ALSO have risk enrichment
+        assert "_enrichment" in flushed[0].payload
+        assert "risk" in flushed[0].payload["_enrichment"]
+        risk_data = flushed[0].payload["_enrichment"]["risk"]
+        assert "score" in risk_data
+        assert "confidence" in risk_data
 
 
 # ── Confidence levels ──
@@ -470,3 +474,176 @@ class TestExtendedPatterns:
         risk = assess_risk(cls, "iptables -F", engine=engine, binary="iptables", flags=["-F"])
         assert "firewall_mutation" in risk.factors
         assert "T1562.004" in risk.mitre
+
+
+# ── Native/MCP tool risk scoring ──
+
+
+class TestToolRisk:
+    def test_read_only_filesystem_tool_low_score(self, engine: ClassificationEngine) -> None:
+        cls = Classification(
+            mechanism=Mechanism.FILESYSTEM,
+            effect=Effect.READ_ONLY,
+            scope=frozenset({"artifact.source_code"}),
+            capability=frozenset({Capability.FILESYSTEM_READ}),
+        )
+        risk = assess_tool_risk(cls, engine=engine)
+        assert risk.score <= 20
+        assert risk.level == "safe"
+
+    def test_mutating_filesystem_tool_medium_score(self, engine: ClassificationEngine) -> None:
+        cls = Classification(
+            mechanism=Mechanism.FILESYSTEM,
+            effect=Effect.MUTATING,
+            scope=frozenset({"artifact.source_code"}),
+            capability=frozenset({Capability.FILESYSTEM_WRITE}),
+        )
+        risk = assess_tool_risk(cls, engine=engine)
+        assert 20 < risk.score < 60
+
+    def test_destructive_tool_high_score(self, engine: ClassificationEngine) -> None:
+        cls = Classification(
+            mechanism=Mechanism.FILESYSTEM,
+            effect=Effect.DESTRUCTIVE,
+            scope=frozenset({"artifact.source_code"}),
+            capability=frozenset({Capability.FILESYSTEM_WRITE}),
+        )
+        risk = assess_tool_risk(cls, engine=engine)
+        assert risk.score >= 40
+
+    def test_network_capability_escalation(self, engine: ClassificationEngine) -> None:
+        cls_no_net = Classification(
+            mechanism=Mechanism.FILESYSTEM,
+            effect=Effect.MUTATING,
+            scope=frozenset({"artifact.source_code"}),
+        )
+        cls_with_net = Classification(
+            mechanism=Mechanism.NETWORK,
+            effect=Effect.MUTATING,
+            scope=frozenset({"artifact.source_code"}),
+            capability=frozenset({Capability.NETWORK_OUTBOUND}),
+        )
+        risk_no_net = assess_tool_risk(cls_no_net, engine=engine)
+        risk_with_net = assess_tool_risk(cls_with_net, engine=engine)
+        assert risk_with_net.score > risk_no_net.score
+        assert "capability_network_outbound" in risk_with_net.factors
+
+    def test_elevated_privilege_escalation(self, engine: ClassificationEngine) -> None:
+        cls = Classification(
+            mechanism=Mechanism.PROCESS,
+            effect=Effect.MUTATING,
+            capability=frozenset({Capability.ELEVATED_PRIVILEGE}),
+        )
+        risk = assess_tool_risk(cls, engine=engine)
+        assert "capability_elevated_privilege" in risk.factors
+        assert risk.score >= 40
+
+    def test_credential_access_escalation(self, engine: ClassificationEngine) -> None:
+        cls = Classification(
+            mechanism=Mechanism.NETWORK,
+            effect=Effect.READ_ONLY,
+            capability=frozenset({Capability.USES_CREDENTIALS}),
+        )
+        risk = assess_tool_risk(cls, engine=engine)
+        assert "capability_uses_credentials" in risk.factors
+
+    def test_sensitive_target_increases_score(self, engine: ClassificationEngine) -> None:
+        cls = Classification(
+            mechanism=Mechanism.FILESYSTEM,
+            effect=Effect.READ_ONLY,
+        )
+        risk_normal = assess_tool_risk(cls, engine=engine, targets=["readme.md"])
+        risk_secret = assess_tool_risk(cls, engine=engine, targets=[".env"])
+        assert risk_secret.score > risk_normal.score
+
+    def test_system_scope_increases_score(self, engine: ClassificationEngine) -> None:
+        cls_code = Classification(
+            mechanism=Mechanism.FILESYSTEM,
+            effect=Effect.MUTATING,
+            scope=frozenset({"artifact.source_code"}),
+        )
+        cls_system = Classification(
+            mechanism=Mechanism.FILESYSTEM,
+            effect=Effect.MUTATING,
+            scope=frozenset({"system.os"}),
+        )
+        risk_code = assess_tool_risk(cls_code, engine=engine)
+        risk_system = assess_tool_risk(cls_system, engine=engine)
+        assert risk_system.score > risk_code.score
+
+    def test_project_context_reduces_score(self, engine: ClassificationEngine) -> None:
+        cls = Classification(
+            mechanism=Mechanism.FILESYSTEM,
+            effect=Effect.MUTATING,
+        )
+        risk_no_ctx = assess_tool_risk(cls, engine=engine)
+        risk_in_proj = assess_tool_risk(
+            cls, engine=engine,
+            targets=["./src/file.py"], project_root="/home/user/project",
+        )
+        assert risk_in_proj.score < risk_no_ctx.score
+
+    def test_unknown_tool_moderate_score(self, engine: ClassificationEngine) -> None:
+        cls = Classification(mechanism=Mechanism.UNKNOWN, effect=None)
+        risk = assess_tool_risk(cls, engine=engine)
+        assert risk.level in ("safe", "caution")
+        assert risk.confidence == Confidence.LOW
+
+    def test_mcp_tool_with_subprocess(self, engine: ClassificationEngine) -> None:
+        cls = Classification(
+            mechanism=Mechanism.PROCESS,
+            effect=Effect.MUTATING,
+            capability=frozenset({Capability.SUBPROCESS}),
+        )
+        risk = assess_tool_risk(cls, engine=engine)
+        assert "capability_subprocess" in risk.factors
+
+    def test_enricher_edit_to_secrets(self) -> None:
+        """Edit tool targeting .env should get risk with sensitive path bonus."""
+        from tracemill.enricher import Enricher
+        from tracemill.types import EventKind, EventMetadata, SessionEvent
+        from datetime import datetime, timezone
+
+        enricher = Enricher()
+        event = SessionEvent(
+            session_id="test",
+            kind=EventKind.TOOL_START,
+            timestamp=datetime.now(tz=timezone.utc),
+            payload={
+                "tool_name": "edit",
+                "tool_call_id": "tc_edit_env",
+                "arguments": {"path": ".env"},
+            },
+            metadata=EventMetadata(),
+        )
+        enricher.process(event)
+        flushed = enricher.flush()
+        assert len(flushed) == 1
+        risk_data = flushed[0].payload["_enrichment"]["risk"]
+        # Editing .env is mutating + secrets sensitivity → should be caution+
+        assert risk_data["score"] >= 21
+
+    def test_enricher_view_normal_file(self) -> None:
+        """View tool on a normal file should be safe."""
+        from tracemill.enricher import Enricher
+        from tracemill.types import EventKind, EventMetadata, SessionEvent
+        from datetime import datetime, timezone
+
+        enricher = Enricher()
+        event = SessionEvent(
+            session_id="test",
+            kind=EventKind.TOOL_START,
+            timestamp=datetime.now(tz=timezone.utc),
+            payload={
+                "tool_name": "view",
+                "tool_call_id": "tc_view",
+                "arguments": {"path": "src/main.py"},
+            },
+            metadata=EventMetadata(),
+        )
+        enricher.process(event)
+        flushed = enricher.flush()
+        assert len(flushed) == 1
+        risk_data = flushed[0].payload["_enrichment"]["risk"]
+        assert risk_data["score"] <= 20
+        assert risk_data["level"] == "safe"

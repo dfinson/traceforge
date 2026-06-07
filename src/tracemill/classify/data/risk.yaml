@@ -73,6 +73,26 @@ sensitive_path_bonuses:
   system: 14
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Capability escalation weights (used for native/MCP tool risk scoring)
+# ═══════════════════════════════════════════════════════════════════════════
+# Grounded in CVSS v3.1 Attack Vector (AV) and Privileges Required (PR):
+#   AV: Network=0.85, Adjacent=0.62, Local=0.55, Physical=0.20
+#   PR: None=0.85, Low=0.62, High=0.27
+# Applied as additive bonus when a tool's Classification includes these
+# capabilities. Only relevant for native/MCP tools (shell tools use
+# flag/pattern analysis instead).
+capability_weights:
+  # Network access increases blast radius — CVSS AV:Network (0.85)
+  network_outbound: 10
+  network_inbound: 8
+  # Subprocess spawning — potential for uncontrolled execution
+  subprocess: 12
+  # Credential access — CVSS C:High (0.56) for confidentiality impact
+  uses_credentials: 15
+  # Privilege escalation — CVSS PR:None (0.85) vs PR:High (0.27)
+  elevated_privilege: 18
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Layer 2: Per-binary flag risk modifiers
 # ═══════════════════════════════════════════════════════════════════════════
 # Grounded in CVSS v3.1 Privileges Required (PR) ratio and ToolEmu

@@ -604,7 +604,121 @@ Include `malformed.jsonl` with:
 
 ---
 
-## §13 — Implementation Plan
+## §13 — CI / CD
+
+### Overview
+
+Three GitHub Actions workflows: **lint**, **test**, and **publish**. Lint and test run on every PR and push to `main`. Publish runs on version tags.
+
+### 13.1 Lint (`ci-lint.yml`)
+
+Single job, runs on `ubuntu-latest`, Python 3.13 (latest stable).
+
+```yaml
+steps:
+  - uses: actions/checkout@v4
+  - uses: actions/setup-python@v5
+    with: { python-version: "3.13" }
+  - run: pip install ruff
+  - run: ruff check .
+  - run: ruff format --check .
+```
+
+Triggers: `pull_request` (all branches), `push` to `main`.
+
+Fast feedback — fails in <30s on style/lint issues before tests even start.
+
+### 13.2 Test (`ci-test.yml`)
+
+Matrix job across Python versions and dependency configurations:
+
+| Axis | Values |
+| --- | --- |
+| `python-version` | `3.11`, `3.12`, `3.13` |
+| `install-extras` | `dev` (core-only), `all,dev` (full surface) |
+
+This 3×2 matrix (6 jobs) catches:
+- **Core-only jobs** ensure optional imports never leak into core paths
+- **Full jobs** exercise SQLite + OTEL sink code
+- **Version spread** ensures compatibility across the supported range
+
+```yaml
+steps:
+  - uses: actions/checkout@v4
+  - uses: actions/setup-python@v5
+    with: { python-version: "${{ matrix.python-version }}" }
+  - run: pip install -e ".[${{ matrix.install-extras }}]"
+  - run: pytest --tb=short -q
+```
+
+Triggers: `pull_request` (all branches), `push` to `main`.
+
+Tests that require optional dependencies (aiosqlite, opentelemetry) must be skipped gracefully in core-only runs using `pytest.importorskip()` or conditional skip markers.
+
+### 13.3 Build Verification
+
+An additional job in `ci-test.yml` (outside the matrix) that builds the wheel and verifies it installs cleanly:
+
+```yaml
+steps:
+  - uses: actions/checkout@v4
+  - uses: actions/setup-python@v5
+    with: { python-version: "3.13" }
+  - run: pip install hatchling build
+  - run: python -m build
+  - run: pip install dist/*.whl
+  - run: python -c "import tracemill; print(tracemill.__name__)"
+```
+
+Catches packaging issues (missing files in `hatch.build.targets.wheel.packages`, broken `__init__.py` exports).
+
+### 13.4 Publish (`publish.yml`)
+
+Runs on tag pushes matching `v*`. Uses PyPI trusted publishing (no API tokens stored in secrets):
+
+```yaml
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - run: pip install build
+      - run: python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+```
+
+Requires one-time setup: configure a "pypi" environment in GitHub repo settings and register the repo as a trusted publisher on PyPI.
+
+### 13.5 Copilot Agent Setup
+
+`.github/copilot-setup-steps.yml` — ensures the Copilot coding agent can run lint + tests when working on PRs:
+
+```yaml
+steps:
+  - uses: actions/setup-python@v5
+    with: { python-version: "3.13" }
+  - run: pip install -e ".[all,dev]"
+```
+
+### 13.6 Branch Protection
+
+`main` branch should require:
+- All CI checks passing (lint + test matrix) before merge
+- At least one approving review (or Copilot review for automated PRs)
+- Linear history (squash merge preferred)
+
+---
+
+## §14 — Implementation Plan
 
 ### Step 1: Types + Pipeline Skeleton
 
@@ -670,7 +784,7 @@ Include `malformed.jsonl` with:
 
 ---
 
-## §14 — Success Criteria
+## §15 — Success Criteria
 
 ### v0.1.0
 
@@ -682,7 +796,8 @@ Include `malformed.jsonl` with:
 - Zero heavy dependencies (core = Pydantic only)
 - Defensive parsing — never crashes on malformed input
 - >90% test coverage on core modules
-- Published to PyPI as `tracemill`
+- CI green: lint, test matrix (3 Python versions × core/full), build verification
+- Published to PyPI as `tracemill` via trusted publishing on tag push
 
 ### v0.2.0
 

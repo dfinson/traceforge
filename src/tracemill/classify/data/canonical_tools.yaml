@@ -1,57 +1,114 @@
 # Canonical tool name aliases — maps variant names to their canonical form.
+#
+# Each entry maps an exact tool_name string (as it appears in tool_call events)
+# to a canonical tool identity. Sources are attributed per-harness.
+#
 # Add entries here to teach tracemill about your custom tool names.
 
 canonical_tools:
-  # Shell (neutral — dialect detected from command content, not tool name)
-  bash: shell
-  bashtool: shell
-  powershell: shell
-  powershelltool: shell
-  exec_command: shell
-  run_shell: shell
-  execute_command: shell
-  terminal: shell
-  shell: shell
-  run_in_terminal: shell
-  sh: shell
-  zsh: shell
-  cmd: shell
+  # ─── Shell execution ───────────────────────────────────────────────────────
+  # Canonical: "shell" (dialect detected from command content, not tool name)
+  #
+  shell: shell                     # OpenAI Codex CLI (Responses API native)
+  bash: shell                      # GitHub Copilot, SWE-agent, Cline (native models)
+  powershell: shell                # GitHub Copilot (Windows)
+  Bash: shell                      # Claude Code, OpenAI Codex RS (hook name)
+  PowerShell: shell                # Claude Code (Windows)
+  execute_command: shell           # Cline (GENERIC model), Roo Code
+  run_terminal_command: shell      # Continue, Cursor
+  run_command: shell               # Windsurf
+  executeCommand: shell            # Amazon Q Developer
+  execute_bash: shell              # OpenHands
+  sh: shell                        # Unix shell alias
+  zsh: shell                       # Zsh alias
+  cmd: shell                       # Windows cmd.exe
 
-  # File read
-  read: view
-  read_file: view
-  view: view
-  view_file: view
-  open_file: view
-  filereadtool: view
-  cat: view
+  # ─── File read ─────────────────────────────────────────────────────────────
+  # Canonical: "view" (read file contents without modification)
+  #
+  view: view                       # GitHub Copilot
+  Read: view                       # Claude Code
+  read_file: view                  # Cline, Roo Code, Continue, Cursor, LangChain
+  read_file_range: view            # Continue
+  fsRead: view                     # Amazon Q Developer
+  view_code_item: view             # Windsurf
+  read_currently_open_file: view   # Continue
+  NotebookRead: view               # Claude Code (notebooks)
+  LS: view                         # Claude Code (list directory)
+  ls: view                         # Continue
+  list_dir: view                   # Cursor, Windsurf, Roo Code
+  list_files: view                 # Cline, Roo Code
+  fsList: view                     # Amazon Q Developer
 
-  # File write (edit existing)
-  edit: edit
-  edit_file: edit
-  fileedittool: edit
-  str_replace_editor: edit
-  apply_patch: edit
-  insert_edit_into_file: edit
-  multiedit: edit
-  notebookedit: edit
+  # ─── File write (edit existing) ────────────────────────────────────────────
+  # Canonical: "edit" (modify existing file content)
+  #
+  edit: edit                       # GitHub Copilot, Roo Code (native models)
+  Edit: edit                       # Claude Code
+  MultiEdit: edit                  # Claude Code
+  multi_edit: edit                 # Continue
+  edit_file: edit                  # Cursor, Roo Code
+  edit_existing_file: edit         # Continue
+  single_find_and_replace: edit    # Continue
+  replace_in_file: edit            # Cline
+  replace_file_contents: edit      # Windsurf
+  edit_code: edit                  # Windsurf
+  search_replace: edit             # Roo Code
+  search_and_replace: edit         # Sweep
+  fsSearchAndReplace: edit         # Amazon Q Developer
+  str_replace_editor: edit         # OpenHands, SWE-agent
+  apply_patch: edit                # OpenAI Codex RS, Cline
+  apply_diff: edit                 # Roo Code
+  NotebookEdit: edit               # Claude Code (notebooks)
 
-  # File write (create new)
-  write: create
-  create: create
-  create_file: create
-  write_file: create
-  filewritetool: create
+  # ─── File write (create new) ───────────────────────────────────────────────
+  # Canonical: "create" (create new file)
+  #
+  create: create                   # GitHub Copilot
+  Write: create                    # Claude Code
+  create_file: create              # Cursor, Cline
+  create_new_file: create          # Continue
+  write_to_file: create            # Cline, Roo Code
+  write_code: create               # Windsurf
+  write_file: create               # LangChain
+  fsWrite: create                  # Amazon Q Developer
+  fsAppend: create                 # Amazon Q Developer
 
-  # Search / file listing
-  grep: grep
-  glob: glob
-  greptool: grep
-  globtool: glob
-  ripgrep: grep
-  rg: grep
+  # ─── Content search (grep-like) ────────────────────────────────────────────
+  # Canonical: "grep" (search file contents by pattern)
+  #
+  grep: grep                       # GitHub Copilot
+  Grep: grep                       # Claude Code
+  grep_search: grep                # Continue, Cursor
+  search_files: grep               # Cline, Roo Code
+  search_code_snippet: grep        # Windsurf
+  search_file: grep                # SWE-agent
+  search_dir: grep                 # SWE-agent
+  rg: grep                         # ripgrep CLI binary name
+  ripgrep: grep                    # ripgrep full name
+  GrepTool: grep                   # Anthropic internal tooling
 
-  # Git
+  # ─── File pattern search (glob-like) ───────────────────────────────────────
+  # Canonical: "glob" (find files by name/path pattern)
+  #
+  glob: glob                       # GitHub Copilot
+  Glob: glob                       # Claude Code
+  file_glob_search: glob           # Continue
+  find_by_name: glob               # Cursor, Windsurf
+  find_file: glob                  # SWE-agent
+  GlobTool: glob                   # Anthropic internal tooling
+
+  # ─── Semantic codebase search ──────────────────────────────────────────────
+  # Canonical: "codebase_search" (AI-powered semantic search, NOT pattern grep)
+  #
+  codebase_search: codebase_search  # Cursor, Roo Code
+  codebase: codebase_search         # Continue
+  list_code_definition_names: codebase_search  # Cline
+
+  # ─── Git operations ────────────────────────────────────────────────────────
+  # These are only relevant for harnesses with dedicated git tools (rare).
+  # Most agents shell out to git via their shell tool.
+  #
   git_commit: git_commit
   git_push: git_push
   git_diff: git_diff
@@ -63,31 +120,61 @@ canonical_tools:
   git_rebase: git_rebase
   git_checkout: git_checkout
   git_branch: git_branch
+  view_diff: git_diff              # Continue
 
-  # Internal bookkeeping
-  report_intent: report_intent
-  think: think
-  todowrite: state_write
-  todoread: state_read
+  # ─── Internal / bookkeeping ────────────────────────────────────────────────
+  # Canonical: "report_intent" (agent intent declaration, not user-facing)
+  #
+  report_intent: report_intent     # GitHub Copilot
+  think: think                     # Internal reasoning step
+  plan_mode_respond: think         # Cline
+  act_mode_respond: think          # Cline
+  switch_mode: think               # Roo Code
+  update_todo_list: state_write    # Roo Code
+  attempt_completion: report_intent  # Cline (task complete signal)
+  finish: report_intent            # OpenHands, SWE-agent (submit)
+  submit: report_intent            # SWE-agent
 
-  # Interaction
-  ask_user: ask_user
+  # ─── User interaction ──────────────────────────────────────────────────────
+  # Canonical: "ask_user" (prompt user for input)
+  #
+  ask_user: ask_user               # GitHub Copilot
+  ask_followup_question: ask_user  # Cline, Roo Code
 
-  # Web
-  webfetch: web_fetch
-  websearch: web_search
-  web_fetch: web_fetch
-  web_search: web_search
-  fetch_url: web_fetch
-  browser: web_browse
+  # ─── Web fetch / browse ────────────────────────────────────────────────────
+  #
+  WebFetch: web_fetch              # Claude Code
+  web_fetch: web_fetch             # Cline, Roo Code
+  fetch_url: web_fetch             # generic
+  fetch_url_content: web_fetch     # Continue
+  read_url: web_fetch              # Windsurf
+  WebSearch: web_search            # Claude Code, OpenAI Codex
+  web_search: web_search           # Cline, Roo Code
+  search_web: web_search           # Continue
+  browser_action: web_browse       # Cline
+  browser: web_browse              # OpenHands
+  view_web_page: web_browse        # Windsurf
 
-  # Agent/delegation
-  task: task
-  agent: task
-  subagent: task
-  skill: task
+  # ─── Agent delegation / sub-tasks ──────────────────────────────────────────
+  # Canonical: "task" (spawn sub-agent or delegate work)
+  #
+  Task: task                       # Claude Code
+  task: task                       # GitHub Copilot
+  spawn_agent: task                # OpenAI Codex RS
+  new_task: task                   # Cline
+  subagent: task                   # Cline, Roo Code
 
-# Verb prefix → (effect, action) inference for unknown tools
+  # ─── Delete file ───────────────────────────────────────────────────────────
+  # Canonical: "delete_file"
+  #
+  delete_file: delete_file         # Cursor, Windsurf, Cline
+
+
+# ─── Verb inference ──────────────────────────────────────────────────────────
+# For unknown tools: extract verb prefix from tool name → infer effect + action.
+# Example: "find_users" → verb "find" → (read_only, retrieve)
+# This is a HEURISTIC fallback, not an alias system.
+
 verb_inference:
   # Read-only verbs → retrieve actions
   get: { effect: read_only, action: retrieve }

@@ -50,7 +50,7 @@ class TestNormalizeToolName:
         assert normalize_tool_name("PowerShell") == "shell"
 
     def test_hyphen_normalization(self):
-        assert normalize_tool_name("exec-command") == "shell"
+        assert normalize_tool_name("execute-command") == "shell"
         assert normalize_tool_name("read-file") == "view"
 
     def test_mcp_double_underscore_prefix(self):
@@ -137,8 +137,8 @@ class TestClassifyTool:
     def test_custom_on_canonical_name(self):
         custom_cls = Classification(mechanism="custom.shell", effect="mutating")
         custom = {"bash": custom_cls}
-        # "exec_command" normalizes to "shell", custom "bash" also normalizes to "shell" → match
-        result = classify_tool("exec_command", custom)
+        # "execute_command" normalizes to "shell", custom "bash" also normalizes to "shell" → match
+        result = classify_tool("execute_command", custom)
         assert result.mechanism == "custom.shell"
         assert result.phase_map
 

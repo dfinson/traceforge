@@ -197,3 +197,19 @@ tool_classifications:
     role: [retriever.web_scraper]
     action: [retrieve.browse]
     capability: [network_outbound, human_interaction]
+
+  codebase_search:
+    mechanism: filesystem
+    effect: read_only
+    scope: [artifact.source_code]
+    role: [retriever.search_index]
+    action: [retrieve.search]
+    capability: [filesystem_read]
+
+  delete_file:
+    mechanism: filesystem
+    effect: destructive
+    scope: [artifact.source_code]
+    role: [modifier.file_editor]
+    action: [remove]
+    capability: [filesystem_write]

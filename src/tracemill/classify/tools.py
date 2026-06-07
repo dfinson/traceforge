@@ -25,52 +25,82 @@ if TYPE_CHECKING:
 
 
 CANONICAL_TOOLS: Final[dict[str, str]] = {
-    # Shell (neutral — dialect detected from command content, not tool name)
-    "bash": "shell",
-    "bashtool": "shell",
-    "powershell": "shell",
-    "powershelltool": "shell",
-    "exec_command": "shell",
-    "run_shell": "shell",
-    "execute_command": "shell",
-    "terminal": "shell",
+    # All keys MUST be lowercase — normalize_tool_name() lowercases before lookup.
+    # Comments show original casing and source harness for attribution.
+    #
+    # ─── Shell ───────────────────────────────────────────────────────────────
     "shell": "shell",
-    "run_in_terminal": "shell",
+    "bash": "shell",               # GitHub Copilot, Claude Code (Bash), OpenAI Codex, SWE-agent, Cline
+    "powershell": "shell",         # GitHub Copilot, Claude Code (PowerShell)
+    "execute_command": "shell",    # Cline (GENERIC), Roo Code
+    "run_terminal_command": "shell",  # Continue, Cursor
+    "run_command": "shell",        # Windsurf
+    "executecommand": "shell",     # Amazon Q (executeCommand)
+    "execute_bash": "shell",       # OpenHands
     "sh": "shell",
     "zsh": "shell",
     "cmd": "shell",
-    # File read
-    "read": "view",
-    "read_file": "view",
-    "view": "view",
-    "view_file": "view",
-    "open_file": "view",
-    "filereadtool": "view",
-    "cat": "view",
-    # File write (edit existing)
-    "edit": "edit",
-    "edit_file": "edit",
-    "fileedittool": "edit",
-    "str_replace_editor": "edit",
-    "apply_patch": "edit",
-    "insert_edit_into_file": "edit",
-    "multiedit": "edit",
-    "notebookedit": "edit",
-    # File write (create new)
-    "write": "create",
-    "create": "create",
-    "create_file": "create",
-    "write_file": "create",
-    "filewritetool": "create",
-    # Search
-    # Search / file listing
-    "grep": "grep",
-    "glob": "glob",
-    "greptool": "grep",
-    "globtool": "glob",
-    "ripgrep": "grep",
-    "rg": "grep",
-    # Git
+    # ─── File read ───────────────────────────────────────────────────────────
+    "view": "view",                # GitHub Copilot
+    "read": "view",                # Claude Code (Read)
+    "read_file": "view",           # Cline, Roo Code, Continue, Cursor
+    "read_file_range": "view",     # Continue
+    "read_currently_open_file": "view",  # Continue
+    "fsread": "view",              # Amazon Q (fsRead)
+    "view_code_item": "view",      # Windsurf
+    "ls": "view",                  # Claude Code (LS), Continue
+    "list_dir": "view",            # Cursor, Windsurf
+    "list_files": "view",          # Cline, Roo Code
+    "fslist": "view",              # Amazon Q (fsList)
+    "notebookread": "view",        # Claude Code (NotebookRead)
+    # ─── File edit (modify existing) ─────────────────────────────────────────
+    "edit": "edit",                # GitHub Copilot, Claude Code (Edit)
+    "multiedit": "edit",           # Claude Code (MultiEdit)
+    "multi_edit": "edit",          # Continue
+    "edit_file": "edit",           # Cursor, Roo Code
+    "edit_existing_file": "edit",  # Continue
+    "single_find_and_replace": "edit",  # Continue
+    "replace_in_file": "edit",     # Cline
+    "replace_file_contents": "edit",  # Windsurf
+    "edit_code": "edit",           # Windsurf
+    "search_replace": "edit",      # Roo Code
+    "search_and_replace": "edit",  # Sweep
+    "fssearchandreplace": "edit",  # Amazon Q (fsSearchAndReplace)
+    "str_replace_editor": "edit",  # OpenHands, SWE-agent
+    "apply_patch": "edit",         # OpenAI Codex RS, Cline
+    "apply_diff": "edit",          # Roo Code
+    "notebookedit": "edit",        # Claude Code (NotebookEdit)
+    # ─── File create (new file) ──────────────────────────────────────────────
+    "create": "create",            # GitHub Copilot
+    "write": "create",             # Claude Code (Write)
+    "create_file": "create",       # Cursor, Cline
+    "create_new_file": "create",   # Continue
+    "write_to_file": "create",     # Cline, Roo Code
+    "write_code": "create",        # Windsurf
+    "write_file": "create",        # LangChain
+    "fswrite": "create",           # Amazon Q (fsWrite)
+    "fsappend": "create",          # Amazon Q (fsAppend)
+    # ─── Content search (grep-like) ──────────────────────────────────────────
+    "grep": "grep",                # GitHub Copilot, Claude Code (Grep)
+    "grep_search": "grep",         # Continue, Cursor
+    "search_files": "grep",        # Cline, Roo Code
+    "search_code_snippet": "grep", # Windsurf
+    "search_file": "grep",         # SWE-agent
+    "search_dir": "grep",          # SWE-agent
+    "rg": "grep",                  # ripgrep CLI binary
+    "ripgrep": "grep",             # ripgrep full name
+    "greptool": "grep",            # Anthropic internal tooling
+    # ─── File pattern search (glob-like) ─────────────────────────────────────
+    "glob": "glob",                # GitHub Copilot, Claude Code (Glob)
+    "file_glob_search": "glob",    # Continue
+    "find_by_name": "glob",        # Cursor, Windsurf
+    "find_file": "glob",           # SWE-agent
+    "globtool": "glob",            # Anthropic internal tooling
+    # ─── Semantic codebase search ────────────────────────────────────────────
+    "codebase_search": "codebase_search",  # Cursor, Roo Code
+    "codebase": "codebase_search",         # Continue
+    "list_code_definition_names": "codebase_search",  # Cline
+    # ─── Git ─────────────────────────────────────────────────────────────────
     "git_commit": "git_commit",
     "git_push": "git_push",
     "git_diff": "git_diff",
@@ -82,25 +112,38 @@ CANONICAL_TOOLS: Final[dict[str, str]] = {
     "git_rebase": "git_rebase",
     "git_checkout": "git_checkout",
     "git_branch": "git_branch",
-    # Internal bookkeeping (distinct semantics)
-    "report_intent": "report_intent",
+    "view_diff": "git_diff",       # Continue
+    # ─── Internal / bookkeeping ──────────────────────────────────────────────
+    "report_intent": "report_intent",  # GitHub Copilot
     "think": "think",
-    "todowrite": "state_write",
-    "todoread": "state_read",
-    # Interaction
-    "ask_user": "ask_user",
-    # Web (fetch vs browse are different mechanisms)
-    "webfetch": "web_fetch",
-    "websearch": "web_search",
-    "web_fetch": "web_fetch",
-    "web_search": "web_search",
-    "fetch_url": "web_fetch",
-    "browser": "web_browse",
-    # Agent/delegation
-    "task": "task",
-    "agent": "task",
-    "subagent": "task",
-    "skill": "task",
+    "plan_mode_respond": "think",      # Cline
+    "act_mode_respond": "think",       # Cline
+    "switch_mode": "think",            # Roo Code
+    "update_todo_list": "state_write", # Roo Code
+    "attempt_completion": "report_intent",  # Cline
+    "finish": "report_intent",         # OpenHands, SWE-agent
+    "submit": "report_intent",         # SWE-agent
+    # ─── User interaction ────────────────────────────────────────────────────
+    "ask_user": "ask_user",            # GitHub Copilot
+    "ask_followup_question": "ask_user",  # Cline, Roo Code
+    # ─── Web ─────────────────────────────────────────────────────────────────
+    "webfetch": "web_fetch",       # Claude Code (WebFetch)
+    "web_fetch": "web_fetch",      # Cline, Roo Code
+    "fetch_url_content": "web_fetch",  # Continue
+    "read_url": "web_fetch",       # Windsurf
+    "websearch": "web_search",     # Claude Code (WebSearch), OpenAI Codex
+    "web_search": "web_search",    # Cline, Roo Code
+    "search_web": "web_search",    # Continue
+    "browser_action": "web_browse",  # Cline
+    "browser": "web_browse",       # OpenHands
+    "view_web_page": "web_browse", # Windsurf
+    # ─── Agent delegation ────────────────────────────────────────────────────
+    "task": "task",                # GitHub Copilot, Claude Code (Task)
+    "spawn_agent": "task",         # OpenAI Codex RS
+    "new_task": "task",            # Cline
+    "subagent": "task",            # Cline, Roo Code
+    # ─── Delete file ─────────────────────────────────────────────────────────
+    "delete_file": "delete_file",  # Cursor, Windsurf, Cline
 }
 
 def normalize_tool_name(

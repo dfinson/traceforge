@@ -366,8 +366,10 @@ class ClassificationEngine:
         from tracemill.classify.mcp import McpServerProfile, McpToolOverride
         from tracemill.classify.rules import BinaryInfo, Rule, ShellActivity
 
-        # Canonical tool aliases
-        self.canonical_tools: dict[str, str] = dict(config.canonical_tools)
+        # Canonical tool aliases — normalize all keys to lowercase for lookup
+        self.canonical_tools: dict[str, str] = {
+            k.lower().replace("-", "_"): v for k, v in config.canonical_tools.items()
+        }
 
         # Tool classifications (with phase_map derived)
         self.tool_classifications: dict[str, Classification] = {}

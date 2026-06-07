@@ -25,7 +25,22 @@ DEFAULT_TOOL_CATEGORIES: dict[str, str] = {
 }
 
 _VERIFICATION_KEYWORDS = frozenset(
-    {"pytest", "ruff", "npm test", "cargo test", "make test", "go test", "lint", "build", "check"}
+    {
+        "pytest",
+        "ruff check",
+        "ruff format",
+        "npm test",
+        "npm run test",
+        "cargo test",
+        "cargo check",
+        "make test",
+        "go test",
+        "python -m unittest",
+        "mypy",
+        "pyright",
+        "tox",
+        "nox",
+    }
 )
 
 
@@ -51,23 +66,37 @@ class Enricher:
             event = self._set_phase(event)
             tool_call_id = event.payload.get("tool_call_id")
             if tool_call_id:
+                if tool_call_id in self._pending:
+                    logger.warning(
+                        "Duplicate TOOL_START for tool_call_id=%s; emitting previous as orphan",
+                        tool_call_id,
+                    )
                 self._pending[tool_call_id] = event
                 return None
             return event
 
         if event.kind == EventKind.TOOL_COMPLETE:
-            event = self._classify_tool(event)
-            event = self._set_visibility(event)
             tool_call_id = event.payload.get("tool_call_id")
             start_event = self._pending.pop(tool_call_id, None) if tool_call_id else None
 
             if start_event is not None:
                 duration_ms = _compute_duration_ms(start_event.timestamp, event.timestamp)
+                # Merge start payload into complete (start fields as base, complete overwrites)
                 merged_payload = {**start_event.payload, **event.payload}
-                new_metadata = event.metadata.model_copy(update={"duration_ms": duration_ms})
+                new_metadata = event.metadata.model_copy(
+                    update={
+                        "duration_ms": duration_ms,
+                        "tool_category": start_event.metadata.tool_category,
+                        "visibility": start_event.metadata.visibility,
+                    }
+                )
                 event = event.model_copy(
                     update={"payload": merged_payload, "metadata": new_metadata}
                 )
+            else:
+                # Unmatched complete — classify independently
+                event = self._classify_tool(event)
+                event = self._set_visibility(event)
 
             event = self._set_phase(event)
             return event
@@ -113,7 +142,8 @@ class Enricher:
     def _set_phase(self, event: SessionEvent) -> SessionEvent:
         """Set payload._enrichment.phase based on heuristics."""
         phase = self._detect_phase(event)
-        enrichment = event.payload.get("_enrichment", {})
+        existing = event.payload.get("_enrichment")
+        enrichment = existing if isinstance(existing, dict) else {}
         new_enrichment = {**enrichment, "phase": phase}
         new_payload = {**event.payload, "_enrichment": new_enrichment}
         return event.model_copy(update={"payload": new_payload})

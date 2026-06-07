@@ -363,3 +363,116 @@ class TestPipelineIntegration:
 
         assert len(recorder.events) == 1
         assert recorder.events[0] == event  # unchanged
+
+
+# =============================================================================
+# Red-team Edge Case Tests
+# =============================================================================
+
+
+class TestEdgeCases:
+    def test_complete_without_tool_name_inherits_from_start(self):
+        """Bug #1: TOOL_COMPLETE lacking tool_name should inherit classification from start."""
+        enricher = Enricher()
+        start = _make_tool_start(tool_name="report_intent")
+        complete = SessionEvent(
+            kind=EventKind.TOOL_COMPLETE,
+            session_id="sess-1",
+            timestamp=datetime(2024, 1, 1, 12, 0, 2, tzinfo=timezone.utc),
+            payload={"tool_call_id": "tc-1", "result": "ok"},
+        )
+
+        enricher.process(start)
+        result = enricher.process(complete)
+
+        assert result is not None
+        assert result.metadata.tool_category == "internal"
+        assert result.metadata.visibility == "internal"
+        assert result.payload["tool_name"] == "report_intent"
+
+    def test_duplicate_tool_start_does_not_lose_events(self):
+        """Bug #10: Second TOOL_START with same ID should not silently drop first."""
+        enricher = Enricher()
+        start1 = _make_tool_start(tool_call_id="dup", tool_name="bash")
+        start2 = _make_tool_start(tool_call_id="dup", tool_name="edit")
+
+        enricher.process(start1)
+        enricher.process(start2)
+
+        # Second start overwrites; flush gives us the second one
+        flushed = enricher.flush()
+        assert len(flushed) == 1
+        assert flushed[0].payload["tool_name"] == "edit"
+
+    def test_invalid_enrichment_value_in_payload(self):
+        """Bug #9: _enrichment that's not a dict should not crash."""
+        enricher = Enricher()
+        event = SessionEvent(
+            kind=EventKind.USER_MESSAGE,
+            session_id="sess-1",
+            timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            payload={"content": "hi", "_enrichment": "invalid_string"},
+        )
+        result = enricher.process(event)
+        assert result is not None
+        assert result.payload["_enrichment"]["phase"] == "planning"
+
+    def test_enrichment_none_in_payload(self):
+        """_enrichment: None should not crash."""
+        enricher = Enricher()
+        event = SessionEvent(
+            kind=EventKind.USER_MESSAGE,
+            session_id="sess-1",
+            timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            payload={"content": "hi", "_enrichment": None},
+        )
+        result = enricher.process(event)
+        assert result is not None
+        assert result.payload["_enrichment"]["phase"] == "planning"
+
+    def test_verification_no_false_positive_on_checkout(self):
+        """Bug #12: 'git checkout' should not trigger verification."""
+        enricher = Enricher()
+        event = _make_tool_start(
+            tool_name="bash",
+            arguments={"command": "git checkout feature-branch"},
+        )
+        enricher.process(event)
+        flushed = enricher.flush()
+        assert flushed[0].payload["_enrichment"]["phase"] == "implementation"
+
+    def test_verification_no_false_positive_on_build_dir(self):
+        """Bug #12: 'mkdir build-output' should not trigger verification."""
+        enricher = Enricher()
+        event = _make_tool_start(
+            tool_name="bash",
+            arguments={"command": "mkdir build-output"},
+        )
+        enricher.process(event)
+        flushed = enricher.flush()
+        assert flushed[0].payload["_enrichment"]["phase"] == "implementation"
+
+    def test_tool_start_without_tool_call_id_emitted_immediately(self):
+        """TOOL_START with no tool_call_id should not be buffered."""
+        enricher = Enricher()
+        event = SessionEvent(
+            kind=EventKind.TOOL_START,
+            session_id="sess-1",
+            timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            payload={"tool_name": "edit"},
+        )
+        result = enricher.process(event)
+        assert result is not None
+
+    def test_tool_complete_without_tool_call_id_emitted(self):
+        """TOOL_COMPLETE with no tool_call_id should pass through."""
+        enricher = Enricher()
+        event = SessionEvent(
+            kind=EventKind.TOOL_COMPLETE,
+            session_id="sess-1",
+            timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            payload={"tool_name": "edit", "result": "ok"},
+        )
+        result = enricher.process(event)
+        assert result is not None
+        assert result.metadata.duration_ms is None

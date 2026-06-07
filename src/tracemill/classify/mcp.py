@@ -72,6 +72,18 @@ def _infer_from_verb(
     return None, None
 
 
+_EFFECT_SEVERITY: dict[str | None, int] = {
+    None: 0,
+    "null": 0,
+    "read_only": 1,
+    "mutating": 2,
+    "destructive": 3,
+}
+
+_WRITE_EFFECTS = frozenset({"mutating", "destructive"})
+_FS_MECHANISMS = frozenset({"filesystem.local", "filesystem.remote"})
+
+
 def _build_classification(
     profile: McpServerProfile,
     override: McpToolOverride | None,
@@ -112,10 +124,34 @@ def _build_classification(
                 )
                 if verb_effect is not None:
                     break
-    if effect is None and verb_effect is not None:
+    # Verb inference: upgrade effect when inferred verb is more dangerous than
+    # the profile default (destructive > mutating > read_only > null).
+    # Explicit per-tool overrides take priority over verb inference.
+    has_explicit_override = override is not None and override.effect is not None
+    if not has_explicit_override and verb_effect is not None:
+        if _EFFECT_SEVERITY.get(verb_effect, 0) > _EFFECT_SEVERITY.get(effect, 0):
+            effect = verb_effect
+    elif effect is None and verb_effect is not None:
         effect = verb_effect
-    if not action and verb_action is not None:
-        action = frozenset({verb_action})
+
+    has_action_override = override is not None and override.action is not None
+    if not has_action_override and verb_action is not None:
+        action = frozenset({verb_action}) | action
+
+    # When verb inference upgraded the effect, ensure capabilities are consistent.
+    if (
+        effect in _WRITE_EFFECTS
+        and mechanism in _FS_MECHANISMS
+        and "filesystem_write" not in capability
+    ):
+        capability = capability | frozenset({"filesystem_write"})
+        # Also upgrade role from retriever → modifier for filesystem write ops
+        if any(r.startswith("retriever.") for r in role):
+            upgraded = frozenset(
+                r.replace("retriever.", "modifier.", 1) if r.startswith("retriever.") else r
+                for r in role
+            )
+            role = upgraded
 
     return Classification(
         mechanism=mechanism,

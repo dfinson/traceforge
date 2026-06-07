@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 import tree_sitter as ts
 import tree_sitter_powershell as tsps
@@ -14,6 +15,9 @@ from tracemill.classify.shell import (
     build_classification_from_commands,
     classify_single_command,
 )
+
+if TYPE_CHECKING:
+    from tracemill.classify.config import ClassificationEngine
 
 _PS_LANGUAGE = ts.Language(tsps.language())
 _parser = ts.Parser(_PS_LANGUAGE)
@@ -40,7 +44,10 @@ def _extract_from_command_node(node: ts.Node) -> tuple[str, str | None, list[str
     return name, subcmd, parameters
 
 
-def classify_powershell_command(command: str) -> Classification:
+def classify_powershell_command(
+    command: str,
+    engine: ClassificationEngine | None = None,
+) -> Classification:
     """Classify a PowerShell command string into a full Classification."""
     if not command or not command.strip():
         return Classification(
@@ -73,7 +80,7 @@ def classify_powershell_command(command: str) -> Classification:
                 if binary.endswith(suffix):
                     binary = binary[: -len(suffix)]
 
-            cmd_cls = classify_single_command(binary, subcmd, parameters)
+            cmd_cls = classify_single_command(binary, subcmd, parameters, engine=engine)
             command_results.append(cmd_cls)
 
     if not command_results:

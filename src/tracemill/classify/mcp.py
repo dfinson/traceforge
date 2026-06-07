@@ -12,7 +12,7 @@ map to unrelated first-party tools.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from tracemill.classify.core import (
     Action,
@@ -27,6 +27,10 @@ from tracemill.classify.coding import (
     CodingRole,
     CodingScope,
 )
+from tracemill.classify.phases import derive_phase, with_phase_map
+
+if TYPE_CHECKING:
+    from tracemill.classify.config import ClassificationEngine
 
 
 # ── Types ──
@@ -671,13 +675,17 @@ def _normalize_mcp_suffix(raw_name: str) -> str:
 # ── Classification logic ──
 
 
-def _infer_from_verb(tool_suffix: str) -> tuple[str | None, str | None]:
+def _infer_from_verb(
+    tool_suffix: str,
+    engine: ClassificationEngine | None = None,
+) -> tuple[str | None, str | None]:
     """Infer effect and action from tool name verb prefix.
 
     Returns (effect, action) or (None, None) if no verb matches.
     """
+    verb_map = engine.verb_inference if engine is not None else _VERB_INFERENCE
     lower = tool_suffix.lower()
-    for verb, (effect, action) in _VERB_INFERENCE.items():
+    for verb, (effect, action) in verb_map.items():
         if lower.startswith(verb + "_") or lower == verb:
             return effect, action
     return None, None
@@ -687,6 +695,7 @@ def _build_classification(
     profile: McpServerProfile,
     override: McpToolOverride | None,
     tool_suffix: str,
+    engine: ClassificationEngine | None = None,
 ) -> Classification:
     """Build a Classification from profile defaults + tool override + verb inference."""
     mechanism = profile.mechanism
@@ -714,14 +723,14 @@ def _build_classification(
     # Verb inference fills gaps (doesn't override explicit values)
     # Try raw suffix first, then strip namespace prefix for tools like
     # "slack_post_message", "notion_search", "browser_navigate"
-    verb_effect, verb_action = _infer_from_verb(tool_suffix)
+    verb_effect, verb_action = _infer_from_verb(tool_suffix, engine=engine)
     if verb_effect is None:
         # Strip namespace prefixes: try each alias the profile uses
         for alias in profile.namespace_aliases:
             prefix = alias + "_"
             if tool_suffix.startswith(prefix):
                 verb_effect, verb_action = _infer_from_verb(
-                    tool_suffix[len(prefix) :]
+                    tool_suffix[len(prefix) :], engine=engine
                 )
                 if verb_effect is not None:
                     break
@@ -740,37 +749,10 @@ def _build_classification(
     )
 
 
-def _with_phase_map(cls: Classification) -> Classification:
-    """Add a phase_map to an MCP classification.
-
-    Reuses the same phase derivation logic as tools.py to keep phase
-    assignment consistent across all tool types.
-    """
-    # Import here to avoid circular dependency — tools.py also imports from mcp.py
-    from tracemill.classify.tools import _derive_phase
-
-    phase = _derive_phase(cls)
-    seg = PhaseSegment(
-        phase=phase,
-        actions=cls.action,
-        scopes=cls.scope,
-        roles=cls.role,
-    )
-    return Classification(
-        mechanism=cls.mechanism,
-        effect=cls.effect,
-        scope=cls.scope,
-        role=cls.role,
-        action=cls.action,
-        capability=cls.capability,
-        structure=cls.structure,
-        shell_dialect=cls.shell_dialect,
-        binaries=cls.binaries,
-        phase_map=(seg,),
-    )
-
-
-def classify_mcp_tool(raw_name: str) -> Classification | None:
+def classify_mcp_tool(
+    raw_name: str,
+    engine: ClassificationEngine | None = None,
+) -> Classification | None:
     """Classify a tool using MCP server profiles.
 
     Checks the raw tool name against known MCP server profiles. If a profile
@@ -784,7 +766,8 @@ def classify_mcp_tool(raw_name: str) -> Classification | None:
     tool_suffix = _normalize_mcp_suffix(raw_name)
 
     # Try exact namespace match against profile aliases
-    profile = _ALIAS_INDEX.get(namespace) if namespace else None
+    alias_index = engine.mcp_alias_index if engine is not None else _ALIAS_INDEX
+    profile = alias_index.get(namespace) if namespace else None
 
     if profile is None:
         # No profile matched — return None to let caller fall through
@@ -794,5 +777,5 @@ def classify_mcp_tool(raw_name: str) -> Classification | None:
     # Check for tool-specific override
     override = profile.tool_overrides.get(tool_suffix)
 
-    cls = _build_classification(profile, override, tool_suffix)
-    return _with_phase_map(cls)
+    cls = _build_classification(profile, override, tool_suffix, engine=engine)
+    return with_phase_map(cls)

@@ -1,6 +1,14 @@
 """Classification package — multi-dimensional tool and shell analysis."""
 
 from tracemill.classify.cmd import classify_cmd_command
+from tracemill.classify.config import (
+    ClassificationEngine,
+    ClassifyConfig,
+    get_default_engine,
+    load_config,
+    reset_default_engine,
+    set_default_engine,
+)
 from tracemill.classify.core import (
     Action,
     Capability,
@@ -61,6 +69,13 @@ __all__ = [
     "CodingMechanism",
     "CodingRole",
     "CodingScope",
+    # Config
+    "ClassificationEngine",
+    "ClassifyConfig",
+    "get_default_engine",
+    "load_config",
+    "reset_default_engine",
+    "set_default_engine",
     # Registry
     "DimensionRegistry",
     "get_default_registry",

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import tree_sitter as ts
 import tree_sitter_bash as tsbash
@@ -36,6 +36,9 @@ from tracemill.classify.rules import (
     match_rule,
 )
 from tracemill.classify.workflow import Phase
+
+if TYPE_CHECKING:
+    from tracemill.classify.config import ClassificationEngine
 
 _BASH_LANGUAGE = ts.Language(tsbash.language())
 _parser = ts.Parser(_BASH_LANGUAGE)
@@ -75,8 +78,12 @@ def _looks_like_command(token: str) -> bool:
     return bool(token) and not token[0].isdigit() and "/" not in token
 
 
-def _unwrap_binary(words: list[str]) -> tuple[str, str | None, list[str]]:
+def _unwrap_binary(
+    words: list[str],
+    engine: ClassificationEngine | None = None,
+) -> tuple[str, str | None, list[str]]:
     """Extract binary, subcmd, and flags from a word list, unwrapping wrappers."""
+    transparent = engine.transparent_wrappers if engine is not None else _TRANSPARENT_WRAPPERS
     idx = 0
 
     while (
@@ -93,7 +100,7 @@ def _unwrap_binary(words: list[str]) -> tuple[str, str | None, list[str]]:
             if binary.endswith(suffix):
                 binary = binary[: -len(suffix)]
 
-        if binary not in _TRANSPARENT_WRAPPERS:
+        if binary not in transparent:
             break
 
         idx += 1
@@ -231,21 +238,31 @@ def classify_single_command(
     subcmd: str | None,
     flags: list[str],
     words: list[str] | None = None,
+    engine: ClassificationEngine | None = None,
 ) -> _CommandClassification:
     """Classify a single binary invocation into its dimensions.
 
     Shared across bash/powershell/cmd classifiers so all produce consistent
     Classification objects with phase_map.
     """
-    activity = classify_binary(binary, subcmd, flags, words)
-    rule = match_rule(binary, subcmd, flags)
+    activity = classify_binary(binary, subcmd, flags, words, engine=engine)
+    rule = match_rule(binary, subcmd, flags, engine=engine)
+
+    bi = engine.binary_info if engine is not None else BINARY_INFO
+    act_to_action = engine.activity_to_action if engine is not None else _ACTIVITY_TO_ACTION
+    act_to_scope = engine.activity_to_scope if engine is not None else _ACTIVITY_TO_SCOPE
+    act_to_phase = engine.activity_to_phase if engine is not None else _ACTIVITY_TO_PHASE
+    git_subcmd_action = engine.git_subcmd_actions if engine is not None else _GIT_SUBCMD_ACTION
+    verif_role_action = (
+        engine.verification_role_actions if engine is not None else _VERIFICATION_ROLE_ACTION
+    )
 
     # Role (rule-based, fallback to binary info)
     cmd_role = ""
     if rule and rule.role:
         cmd_role = rule.role
     else:
-        info = BINARY_INFO.get(binary)
+        info = bi.get(binary)
         if info:
             cmd_role = info.role
 
@@ -254,29 +271,29 @@ def classify_single_command(
     if rule and rule.action:
         cmd_action = rule.action
     elif activity == SHELL_GIT_OPS and binary == "git" and subcmd:
-        cmd_action = _GIT_SUBCMD_ACTION.get(subcmd, CodingAction.COMMIT)
+        cmd_action = git_subcmd_action.get(subcmd, CodingAction.COMMIT)
     elif activity == SHELL_VERIFICATION and cmd_role:
-        cmd_action = _VERIFICATION_ROLE_ACTION.get(cmd_role, CodingAction.TEST)
+        cmd_action = verif_role_action.get(cmd_role, CodingAction.TEST)
     else:
-        cmd_action = _ACTIVITY_TO_ACTION.get(activity, "")
+        cmd_action = act_to_action.get(activity, "")
 
     # Scope: rule override > activity default
     cmd_scope = ""
     if rule and rule.scope:
         cmd_scope = rule.scope
     else:
-        cmd_scope = _ACTIVITY_TO_SCOPE.get(activity, "")
+        cmd_scope = act_to_scope.get(activity, "")
 
     # Phase: rule override > activity default
     cmd_phase = ""
     if rule and rule.phase:
         cmd_phase = rule.phase
     else:
-        cmd_phase = _ACTIVITY_TO_PHASE.get(activity, Phase.IMPLEMENTATION)
+        cmd_phase = act_to_phase.get(activity, Phase.IMPLEMENTATION)
 
     # Capabilities
     caps: set[str] = set()
-    info = BINARY_INFO.get(binary)
+    info = bi.get(binary)
     if info and info.network:
         caps.add("network_outbound")
     if binary == "git" and subcmd in ("push", "pull", "fetch", "clone"):
@@ -288,7 +305,7 @@ def classify_single_command(
         caps.add("elevated_privilege")
 
     # Effect
-    effect = effect_for_binary(binary, subcmd, flags)
+    effect = effect_for_binary(binary, subcmd, flags, engine=engine)
     # Rule effect override (if rule matched and has explicit effect)
     if rule and rule.effect and effect is None:
         effect = rule.effect
@@ -408,7 +425,10 @@ def _check_tree_structure(node: ts.Node, structures: set[str]) -> None:
         _check_tree_structure(child, structures)
 
 
-def classify_shell(command: str) -> Classification:
+def classify_shell(
+    command: str,
+    engine: ClassificationEngine | None = None,
+) -> Classification:
     """Classify a bash shell command into a Classification object.
 
     For compound commands (e.g. `pytest && git push`), each command is classified
@@ -443,11 +463,11 @@ def classify_shell(command: str) -> Classification:
             if not words:
                 continue
 
-            binary, subcmd, flags = _unwrap_binary(words)
+            binary, subcmd, flags = _unwrap_binary(words, engine=engine)
             if not binary:
                 continue
 
-            cmd_cls = classify_single_command(binary, subcmd, flags, words)
+            cmd_cls = classify_single_command(binary, subcmd, flags, words, engine=engine)
             command_results.append(cmd_cls)
 
     if not command_results:

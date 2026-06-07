@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from pathlib import Path
 
 from tracemill.classify import classify_shell, classify_tool
+from tracemill.classify.config import ClassificationEngine, ClassifyConfig, load_config
 from tracemill.classify.core import Classification, PhaseSegment
 from tracemill.classify.coding import CodingMechanism, CodingScope
 from tracemill.classify.tools import normalize_tool_name
@@ -21,14 +23,27 @@ class Enricher:
     def __init__(
         self,
         custom_classifications: dict[str, Classification] | None = None,
+        config: ClassifyConfig | None = None,
+        config_path: Path | str | None = None,
     ) -> None:
         """
         Args:
             custom_classifications: Optional tool_name→Classification map
                 that extends/overrides built-in classifications.
+            config: Optional pre-built ClassifyConfig (takes priority over config_path).
+            config_path: Optional path to a YAML config file. If neither config nor
+                config_path is provided, the default discovery chain is used.
         """
         self._custom_classifications = custom_classifications
         self._pending: dict[str, SessionEvent] = {}
+
+        # Build engine eagerly so config errors surface at construction time
+        if config is not None:
+            self._engine = ClassificationEngine(config)
+        elif config_path is not None:
+            self._engine = ClassificationEngine(load_config(Path(config_path)))
+        else:
+            self._engine: ClassificationEngine | None = None
 
     def process(self, event: SessionEvent) -> SessionEvent | list[SessionEvent] | None:
         """Enrich a single event. Returns None if event is buffered (tool_start waiting
@@ -100,12 +115,12 @@ class Enricher:
         if not tool_name:
             return event
 
-        canonical = normalize_tool_name(tool_name)
+        canonical = normalize_tool_name(tool_name, engine=self._engine)
 
         if canonical == "shell":
             cls = self._classify_shell_command(event)
         else:
-            cls = classify_tool(tool_name, self._custom_classifications)
+            cls = classify_tool(tool_name, self._custom_classifications, engine=self._engine)
 
         # Refine scope from file paths in payload
         cls = _refine_scope_from_payload(cls, event.payload)
@@ -125,7 +140,7 @@ class Enricher:
         if not command:
             return Classification(mechanism=CodingMechanism.PROCESS_SHELL, effect=None)
 
-        return classify_shell(command)
+        return classify_shell(command, engine=self._engine)
 
     def _set_visibility(self, event: SessionEvent) -> SessionEvent:
         """Set metadata.visibility based on event kind and classification."""

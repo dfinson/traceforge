@@ -12,6 +12,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
+    from tracemill.classify.config import ClassificationEngine
     from tracemill.classify.core import Classification
 
 from tracemill.classify.core import Effect
@@ -561,12 +562,18 @@ INTERPRETER_VERIFY_MODULES: Final[frozenset[str]] = frozenset(
 )
 
 
-def match_rule(binary: str, subcmd: str | None, flags: list[str]) -> Rule | None:
+def match_rule(
+    binary: str,
+    subcmd: str | None,
+    flags: list[str],
+    engine: ClassificationEngine | None = None,
+) -> Rule | None:
     """Find the first matching rule for a (binary, subcmd, flags) tuple.
 
     Returns the matched Rule or None if no rule matches.
     """
-    for rule in RULES:
+    rules = engine.shell_rules if engine is not None else RULES
+    for rule in rules:
         if binary not in rule.binaries:
             continue
         if rule.subcmds is not None and subcmd not in rule.subcmds:
@@ -580,18 +587,26 @@ def match_rule(binary: str, subcmd: str | None, flags: list[str]) -> Rule | None
 
 
 def classify_binary(
-    binary: str, subcmd: str | None, flags: list[str], all_words: list[str] | None = None
+    binary: str,
+    subcmd: str | None,
+    flags: list[str],
+    all_words: list[str] | None = None,
+    engine: ClassificationEngine | None = None,
 ) -> ShellActivity:
     """Classify a command into a ShellActivity using the rule table + special cases."""
     if not binary:
         return ShellActivity.IMPLEMENTATION
 
-    rule = match_rule(binary, subcmd, flags)
+    rule = match_rule(binary, subcmd, flags, engine=engine)
+    npm_scripts = engine.npm_verify_scripts if engine is not None else NPM_VERIFY_SCRIPTS
+    interp_modules = (
+        engine.interpreter_verify_modules if engine is not None else INTERPRETER_VERIFY_MODULES
+    )
     if rule:
         # Special case: npm/pnpm/yarn "run" needs script-name inspection
         if binary in ("npm", "pnpm", "yarn") and subcmd == "run" and all_words:
             script = all_words[2].lower() if len(all_words) > 2 else ""
-            if script in NPM_VERIFY_SCRIPTS:
+            if script in npm_scripts:
                 return SHELL_VERIFICATION
             return SHELL_IMPLEMENTATION
         return rule.activity
@@ -601,7 +616,7 @@ def classify_binary(
     if binary in ("python", "python3", "node") and all_words and "-m" in all_words:
         try:
             m_idx = all_words.index("-m")
-            if m_idx + 1 < len(all_words) and all_words[m_idx + 1].lower() in INTERPRETER_VERIFY_MODULES:
+            if m_idx + 1 < len(all_words) and all_words[m_idx + 1].lower() in interp_modules:
                 return SHELL_VERIFICATION
         except ValueError:
             pass
@@ -609,7 +624,12 @@ def classify_binary(
     return SHELL_IMPLEMENTATION
 
 
-def effect_for_binary(binary: str, subcmd: str | None, flags: list[str]) -> Effect | None:
+def effect_for_binary(
+    binary: str,
+    subcmd: str | None,
+    flags: list[str],
+    engine: ClassificationEngine | None = None,
+) -> Effect | None:
     """Determine effect from binary + context, using rule table and binary info."""
     # Flag-dependent overrides
     if binary in ("ruff", "eslint", "rubocop", "clippy"):
@@ -660,7 +680,8 @@ def effect_for_binary(binary: str, subcmd: str | None, flags: list[str]) -> Effe
             return Effect.READ_ONLY
 
     # Look up in binary info
-    info = BINARY_INFO.get(binary)
+    bi = engine.binary_info if engine is not None else BINARY_INFO
+    info = bi.get(binary)
     if info:
         if info.destructive:
             return Effect.DESTRUCTIVE

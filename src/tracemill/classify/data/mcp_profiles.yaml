@@ -1,0 +1,383 @@
+# MCP server profiles — classification rules for known MCP servers.
+# Add profiles here for custom MCP servers your tools use.
+
+mcp_profiles:
+  - id: github
+    namespace_aliases: [github, gh]
+    mechanism: network.http
+    role: [retriever.api_client, persistence.version_control]
+    scope: [artifact.repository]
+    capability: [network_outbound]
+    tool_overrides:
+      delete_file:
+        effect: destructive
+      discussion_comment_write:
+        effect: mutating
+      label_write:
+        effect: mutating
+      projects_write:
+        effect: mutating
+      get_code_scanning_alert:
+        scope: [artifact.repository, artifact.source_code]
+      list_code_scanning_alerts:
+        scope: [artifact.repository, artifact.source_code]
+      get_dependabot_alert:
+        scope: [artifact.dependency]
+      list_dependabot_alerts:
+        scope: [artifact.dependency]
+      actions_run_trigger:
+        role: [executor.ci_cd]
+        scope: [artifact.ci_cd_config]
+      actions_list:
+        role: [executor.ci_cd]
+        scope: [artifact.ci_cd_config]
+      actions_get:
+        role: [executor.ci_cd]
+        scope: [artifact.ci_cd_config]
+      get_job_logs:
+        role: [executor.ci_cd]
+        scope: [artifact.ci_cd_config]
+      assign_copilot_to_issue:
+        mechanism: delegation.agent
+      request_copilot_review:
+        mechanism: delegation.agent
+      create_pull_request_with_copilot:
+        mechanism: delegation.agent
+
+  - id: gitlab
+    namespace_aliases: [gitlab]
+    mechanism: network.http
+    role: [retriever.api_client, persistence.version_control]
+    scope: [artifact.repository]
+    capability: [network_outbound]
+
+  - id: git_local
+    namespace_aliases: [git, mcp_server_git]
+    mechanism: process.shell
+    role: [persistence.version_control]
+    scope: [artifact.repository]
+    capability: [filesystem_write]
+
+  - id: filesystem
+    namespace_aliases: [filesystem, fs, file]
+    mechanism: filesystem
+    role: [retriever.file_browser]
+    scope: [artifact.source_code]
+    capability: [filesystem_read]
+    tool_overrides:
+      write_file:
+        effect: mutating
+        role: [modifier.file_editor]
+        capability: [filesystem_write]
+      edit_file:
+        effect: mutating
+        role: [modifier.file_editor]
+        capability: [filesystem_write]
+      create_directory:
+        effect: mutating
+        capability: [filesystem_write]
+      move_file:
+        effect: mutating
+        role: [modifier.file_editor]
+        capability: [filesystem_write]
+
+  - id: database_generic
+    namespace_aliases: [database, db, sql]
+    mechanism: database.sql
+    role: [persistence.database]
+    capability: [network_outbound]
+
+  - id: postgres
+    namespace_aliases: [postgres, postgresql, pg]
+    mechanism: database.sql
+    role: [persistence.database]
+    default_effect: read_only
+    capability: [network_outbound]
+
+  - id: sqlite
+    namespace_aliases: [sqlite]
+    mechanism: database.sql
+    role: [persistence.database]
+    capability: [filesystem_read]
+    tool_overrides:
+      write_query:
+        effect: mutating
+        capability: [filesystem_write]
+      create_table:
+        effect: mutating
+        capability: [filesystem_write]
+
+  - id: mysql
+    namespace_aliases: [mysql]
+    mechanism: database.sql
+    role: [persistence.database]
+    default_effect: read_only
+    capability: [network_outbound]
+
+  - id: mongodb
+    namespace_aliases: [mongodb, mongo]
+    mechanism: database.nosql
+    role: [persistence.database]
+    capability: [network_outbound]
+    tool_overrides:
+      drop_collection:
+        effect: destructive
+
+  - id: redis
+    namespace_aliases: [redis]
+    mechanism: database.nosql
+    role: [persistence.cache]
+    capability: [network_outbound]
+
+  - id: playwright
+    namespace_aliases: [playwright, browser]
+    mechanism: network.http
+    role: [retriever.web_scraper]
+    capability: [network_outbound]
+    tool_overrides:
+      browser_snapshot:
+        effect: read_only
+      browser_take_screenshot:
+        effect: read_only
+      browser_console_messages:
+        effect: read_only
+      browser_network_requests:
+        effect: read_only
+      browser_network_request:
+        effect: read_only
+      browser_cookie_list:
+        effect: read_only
+      browser_cookie_get:
+        effect: read_only
+      browser_route_list:
+        effect: read_only
+      browser_get_config:
+        effect: read_only
+      browser_evaluate:
+        effect: mutating
+      browser_run_code_unsafe:
+        effect: destructive
+      browser_cookie_delete:
+        effect: destructive
+      browser_cookie_clear:
+        effect: destructive
+      browser_localstorage_clear:
+        effect: destructive
+
+  - id: puppeteer
+    namespace_aliases: [puppeteer]
+    mechanism: network.http
+    role: [retriever.web_scraper]
+    capability: [network_outbound]
+    tool_overrides:
+      puppeteer_screenshot:
+        effect: read_only
+      puppeteer_evaluate:
+        effect: mutating
+
+  - id: brave_search
+    namespace_aliases: [brave, brave_search]
+    mechanism: network.http
+    role: [retriever.search_index]
+    default_effect: read_only
+    action: [retrieve.search]
+    capability: [network_outbound]
+
+  - id: fetch
+    namespace_aliases: [fetch]
+    mechanism: network.http
+    role: [retriever.web_scraper]
+    default_effect: read_only
+    action: [retrieve]
+    capability: [network_outbound]
+
+  - id: exa
+    namespace_aliases: [exa]
+    mechanism: network.http
+    role: [retriever.search_index]
+    default_effect: read_only
+    action: [retrieve.search]
+    capability: [network_outbound]
+
+  - id: tavily
+    namespace_aliases: [tavily]
+    mechanism: network.http
+    role: [retriever.search_index]
+    default_effect: read_only
+    action: [retrieve.search]
+    capability: [network_outbound]
+
+  - id: slack
+    namespace_aliases: [slack]
+    mechanism: network.http
+    role: [retriever.api_client]
+    capability: [network_outbound]
+
+  - id: discord
+    namespace_aliases: [discord]
+    mechanism: network.http
+    role: [retriever.api_client]
+    capability: [network_outbound]
+
+  - id: memory
+    namespace_aliases: [memory, knowledge]
+    mechanism: database
+    role: [persistence.database]
+    tool_overrides:
+      delete_entities:
+        effect: destructive
+      delete_relations:
+        effect: destructive
+      delete_observations:
+        effect: destructive
+
+  - id: thinking
+    namespace_aliases: [sequentialthinking, thinking]
+    mechanism: communication.system
+    role: [communicator.system_reporter]
+    default_effect: read_only
+    action: [analyze]
+
+  - id: sentry
+    namespace_aliases: [sentry]
+    mechanism: network.http
+    role: [retriever.api_client]
+    default_effect: read_only
+    capability: [network_outbound]
+
+  - id: datadog
+    namespace_aliases: [datadog]
+    mechanism: network.http
+    role: [retriever.api_client]
+    default_effect: read_only
+    capability: [network_outbound]
+
+  - id: aws
+    namespace_aliases: [aws, awslabs]
+    mechanism: network.http
+    role: [retriever.api_client]
+    scope: [configuration.infrastructure]
+    capability: [network_outbound, uses_credentials]
+
+  - id: azure
+    namespace_aliases: [azure]
+    mechanism: network.http
+    role: [retriever.api_client]
+    scope: [configuration.infrastructure]
+    capability: [network_outbound, uses_credentials]
+
+  - id: gcp
+    namespace_aliases: [gcp, gcloud, google_cloud]
+    mechanism: network.http
+    role: [retriever.api_client]
+    scope: [configuration.infrastructure]
+    capability: [network_outbound, uses_credentials]
+
+  - id: docker
+    namespace_aliases: [docker]
+    mechanism: process
+    role: [executor.container_runtime]
+    scope: [artifact.container_image]
+    capability: [subprocess]
+    tool_overrides:
+      docker_rm:
+        effect: destructive
+      docker_rmi:
+        effect: destructive
+      docker_volume_rm:
+        effect: destructive
+      docker_compose_down:
+        effect: destructive
+      docker_push:
+        mechanism: network.http
+        capability: [network_outbound]
+
+  - id: kubernetes
+    namespace_aliases: [kubernetes, k8s, kubectl]
+    mechanism: network.http
+    role: [executor.container_runtime]
+    scope: [state.deployment]
+    capability: [network_outbound, uses_credentials]
+    tool_overrides:
+      delete_pod:
+        effect: destructive
+      delete_deployment:
+        effect: destructive
+      delete_namespace:
+        effect: destructive
+      exec_in_pod:
+        mechanism: process
+        capability: [subprocess]
+
+  - id: notion
+    namespace_aliases: [notion]
+    mechanism: network.http
+    role: [retriever.api_client]
+    scope: [artifact.documentation]
+    capability: [network_outbound]
+    tool_overrides:
+      notion_delete_block:
+        effect: destructive
+
+  - id: gdrive
+    namespace_aliases: [gdrive, google_drive]
+    mechanism: network.http
+    role: [retriever.api_client]
+    scope: [artifact.documentation]
+    capability: [network_outbound]
+
+  - id: confluence
+    namespace_aliases: [confluence]
+    mechanism: network.http
+    role: [retriever.api_client]
+    scope: [artifact.documentation]
+    capability: [network_outbound]
+
+  - id: circleci
+    namespace_aliases: [circleci]
+    mechanism: network.http
+    role: [executor.ci_cd]
+    scope: [artifact.ci_cd_config]
+    capability: [network_outbound]
+
+  - id: npm
+    namespace_aliases: [npm, npmjs]
+    mechanism: network.http
+    role: [retriever.api_client]
+    scope: [artifact.dependency]
+    default_effect: read_only
+    action: [retrieve]
+    capability: [network_outbound]
+
+  - id: pypi
+    namespace_aliases: [pypi]
+    mechanism: network.http
+    role: [retriever.api_client]
+    scope: [artifact.dependency]
+    default_effect: read_only
+    action: [retrieve]
+    capability: [network_outbound]
+
+  - id: semgrep
+    namespace_aliases: [semgrep]
+    mechanism: process
+    role: [validator.security_scanner]
+    default_effect: read_only
+    action: [validate]
+    scope: [artifact.source_code]
+    capability: [subprocess]
+
+  - id: maps
+    namespace_aliases: [maps, google_maps]
+    mechanism: network.http
+    role: [retriever.api_client]
+    default_effect: read_only
+    action: [retrieve]
+    capability: [network_outbound]
+
+  - id: time
+    namespace_aliases: [time]
+    mechanism: communication.system
+    role: [communicator.system_reporter]
+    default_effect: read_only
+    action: [retrieve]

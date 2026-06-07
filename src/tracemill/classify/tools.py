@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from tracemill.classify.core import (
     Action,
@@ -17,59 +17,12 @@ from tracemill.classify.coding import (
     CodingRole,
     CodingScope,
 )
+from tracemill.classify.phases import derive_phase as _derive_phase, with_phase_map as _with_phase_map
 from tracemill.classify.workflow import Phase
 
+if TYPE_CHECKING:
+    from tracemill.classify.config import ClassificationEngine
 
-def _derive_phase(cls: Classification) -> str:
-    """Derive a single phase for a tool classification (used at definition time).
-
-    Same logic as _phases_from_classification fallback but returns one phase
-    for building the phase_map of single-action tools.
-    """
-    if cls.has_action("validate"):
-        return Phase.VERIFICATION
-    if cls.has_role("persistence.version_control") and (
-        cls.has_action("persist") or cls.has_action("deliver")
-    ):
-        return Phase.REVIEW
-    if cls.has_action("deliver"):
-        return Phase.REVIEW
-    if cls.has_action("retrieve") or cls.has_action("analyze"):
-        return Phase.EXPLORATION
-    if cls.has_action("modify") or cls.has_action("persist"):
-        return Phase.IMPLEMENTATION
-    if cls.has_action("configure") or cls.has_action("execute"):
-        return Phase.IMPLEMENTATION
-    if cls.mechanism.startswith("communication"):
-        return Phase.PLANNING
-    if cls.mechanism.startswith("delegation"):
-        return Phase.IMPLEMENTATION
-    if cls.mechanism == "filesystem" and cls.effect == "read_only":
-        return Phase.EXPLORATION
-    return Phase.IMPLEMENTATION
-
-
-def _with_phase_map(cls: Classification) -> Classification:
-    """Wrap a static Classification with its derived phase_map."""
-    phase = _derive_phase(cls)
-    seg = PhaseSegment(
-        phase=phase,
-        actions=cls.action,
-        scopes=cls.scope,
-        roles=cls.role,
-    )
-    return Classification(
-        mechanism=cls.mechanism,
-        effect=cls.effect,
-        scope=cls.scope,
-        role=cls.role,
-        action=cls.action,
-        capability=cls.capability,
-        structure=cls.structure,
-        shell_dialect=cls.shell_dialect,
-        binaries=cls.binaries,
-        phase_map=(seg,),
-    )
 
 CANONICAL_TOOLS: Final[dict[str, str]] = {
     # Shell (neutral — dialect detected from command content, not tool name)
@@ -152,7 +105,10 @@ CANONICAL_TOOLS: Final[dict[str, str]] = {
     "skill": "task",
 }
 
-def normalize_tool_name(raw_name: str) -> str:
+def normalize_tool_name(
+    raw_name: str,
+    engine: ClassificationEngine | None = None,
+) -> str:
     """Normalize a raw tool name to its canonical form."""
     if not raw_name:
         return raw_name
@@ -170,13 +126,15 @@ def normalize_tool_name(raw_name: str) -> str:
             name = name[dot_idx + 1 :]
 
     lowered = name.lower().replace("-", "_")
-    return CANONICAL_TOOLS.get(lowered, lowered)
+    canonical_map = engine.canonical_tools if engine is not None else CANONICAL_TOOLS
+    return canonical_map.get(lowered, lowered)
 
 
 
 def classify_tool(
     tool_name: str,
     custom_classifications: dict[str, Classification] | None = None,
+    engine: ClassificationEngine | None = None,
 ) -> Classification:
     """Classify a tool name into a full Classification object.
 
@@ -198,30 +156,31 @@ def classify_tool(
         return _with_phase_map(fallback)
 
     # Custom classifications checked first (user overrides everything)
-    canonical = normalize_tool_name(tool_name)
+    canonical = normalize_tool_name(tool_name, engine=engine)
     if custom_classifications:
         lower = canonical.lower()
         for key, cls in custom_classifications.items():
-            if key.lower() == lower or normalize_tool_name(key) == canonical:
+            if key.lower() == lower or normalize_tool_name(key, engine=engine) == canonical:
                 if not cls.phase_map:
                     return _with_phase_map(cls)
                 return cls
 
     # MCP profile classification — checked on raw name before canonical lookup
     # to avoid collisions (e.g. mcp__github__search ≠ grep)
-    mcp_result = classify_mcp_tool(tool_name)
+    mcp_result = classify_mcp_tool(tool_name, engine=engine)
     if mcp_result is not None:
         return mcp_result
 
     # Built-in canonical tool classifications
-    result = _TOOL_CLASSIFICATIONS.get(canonical)
+    tool_cls_map = engine.tool_classifications if engine is not None else _TOOL_CLASSIFICATIONS
+    result = tool_cls_map.get(canonical)
     if result is not None:
         return result
 
     # Genuinely unknown tool — try verb inference as last resort
     from tracemill.classify.mcp import _infer_from_verb
 
-    verb_effect, verb_action = _infer_from_verb(canonical)
+    verb_effect, verb_action = _infer_from_verb(canonical, engine=engine)
     if verb_effect is not None or verb_action is not None:
         cls = Classification(
             mechanism=Mechanism.UNKNOWN,

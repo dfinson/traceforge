@@ -2,7 +2,9 @@
 
 from tracemill.adapters.base import Adapter
 from tracemill.classify import (
+    ClassificationEngine,
     Classification,
+    ClassifyConfig,
     Phase,
     Visibility,
     classify_cmd_command,
@@ -10,6 +12,7 @@ from tracemill.classify import (
     classify_shell,
     classify_tool,
     get_default_registry,
+    load_config,
     normalize_tool_name,
 )
 from tracemill.enricher import Enricher
@@ -22,6 +25,8 @@ __all__ = [
     "Adapter",
     "CallbackSink",
     "Classification",
+    "ClassificationEngine",
+    "ClassifyConfig",
     "Enricher",
     "EventKind",
     "EventMetadata",
@@ -37,5 +42,6 @@ __all__ = [
     "classify_shell",
     "classify_tool",
     "get_default_registry",
+    "load_config",
     "normalize_tool_name",
 ]

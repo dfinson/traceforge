@@ -8,6 +8,7 @@ the shared rule table for binary-level classification.
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 from tracemill.classify.core import Classification
 from tracemill.classify.coding import CodingMechanism
@@ -15,6 +16,9 @@ from tracemill.classify.shell import (
     build_classification_from_commands,
     classify_single_command,
 )
+
+if TYPE_CHECKING:
+    from tracemill.classify.config import ClassificationEngine
 
 
 def _split_cmd_commands(command: str) -> list[str]:
@@ -66,7 +70,10 @@ def _extract_binary_and_subcmd(segment: str) -> tuple[str, str | None, list[str]
     return binary, subcmd, flags
 
 
-def classify_cmd_command(command: str) -> Classification:
+def classify_cmd_command(
+    command: str,
+    engine: ClassificationEngine | None = None,
+) -> Classification:
     """Classify a cmd.exe command string into a full Classification."""
     if not command or not command.strip():
         return Classification(
@@ -88,7 +95,7 @@ def classify_cmd_command(command: str) -> Classification:
         binary, subcmd, flags = _extract_binary_and_subcmd(segment)
         if not binary:
             continue
-        cmd_cls = classify_single_command(binary, subcmd, flags)
+        cmd_cls = classify_single_command(binary, subcmd, flags, engine=engine)
         command_results.append(cmd_cls)
 
     if not command_results:

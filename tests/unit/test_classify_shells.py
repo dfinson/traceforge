@@ -1,13 +1,15 @@
 """Tests for PowerShell and cmd.exe classifiers."""
 
 from tracemill.classify import (
+    classify_cmd_command,
+    classify_powershell_command,
+)
+from tracemill.classify.rules import (
     SHELL_GIT_OPS,
     SHELL_IMPLEMENTATION,
     SHELL_INVESTIGATION,
     SHELL_SETUP,
     SHELL_VERIFICATION,
-    classify_cmd_command,
-    classify_powershell_command,
 )
 
 

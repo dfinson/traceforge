@@ -11,13 +11,12 @@ import tree_sitter_bash as tsbash
 from tracemill.classify.core import (
     Classification,
     Effect,
-    ShellActivity,
+    Mechanism,
     Structure,
     aggregate_effect,
 )
 from tracemill.classify.coding import (
     CodingAction,
-    CodingMechanism,
     CodingScope,
 )
 from tracemill.classify.rules import (
@@ -40,8 +39,6 @@ _TRANSPARENT_WRAPPERS: Final[frozenset[str]] = frozenset(
     {"env", "nice", "timeout", "stdbuf", "nohup", "command", "sudo", "exec"}
 )
 
-# Re-export for backward compat
-_ACTIVITY_PRIORITY = ACTIVITY_PRIORITY
 
 # ── AST helpers ──
 
@@ -147,51 +144,13 @@ def _extract_commands_from_ast(command: str) -> list[str]:
     return commands
 
 
-def classify_shell_command(command: str) -> ShellActivity:
-    """Classify a shell command into an activity category (legacy API).
-
-    Decomposes compound commands via tree-sitter AST, classifies each,
-    returns the highest-priority activity.
-    """
-    if not command or not command.strip():
-        return SHELL_IMPLEMENTATION
-
-    tree = _parser.parse(command.encode("utf-8"))
-    cursor = ts.QueryCursor(_Q_COMMANDS)
-    matches = cursor.matches(tree.root_node)
-
-    if not matches:
-        return SHELL_IMPLEMENTATION
-
-    best_activity = SHELL_IMPLEMENTATION
-    best_priority = -1
-
-    for _pattern_idx, captures in matches:
-        for node in captures.get("cmd", []):
-            if _inside_command_substitution(node):
-                continue
-
-            words = _words_from_command_node(node)
-            if not words:
-                continue
-
-            binary, subcmd, flags = _unwrap_binary(words)
-            activity = classify_binary(binary, subcmd, flags, words)
-            priority = ACTIVITY_PRIORITY.get(activity, 0)
-            if priority > best_priority:
-                best_priority = priority
-                best_activity = activity
-
-    return best_activity
-
-
-# ── Detailed Classification API ──
+# ── Activity-to-dimension mappings ──
 
 _ACTIVITY_TO_ACTION: Final[dict[str, str]] = {
     SHELL_VERIFICATION: CodingAction.TEST,
-    SHELL_SETUP: CodingAction.INSTALL_DEPS,
-    SHELL_GIT_OPS: CodingAction.PUSH_VCS,
-    SHELL_INVESTIGATION: CodingAction.SEARCH_FILES,
+    SHELL_SETUP: CodingAction.INSTALL,
+    SHELL_GIT_OPS: CodingAction.PUSH,
+    SHELL_INVESTIGATION: CodingAction.SEARCH,
     SHELL_IMPLEMENTATION: CodingAction.RUN_SCRIPT,
 }
 
@@ -211,7 +170,6 @@ def _detect_structure(tree: ts.Tree) -> frozenset[str]:
 
     for child in root.children:
         if child.type == "list":
-            structures.add(Structure.COMPOUND)
             structures.add(Structure.SEQUENTIAL)
         elif child.type == "pipeline":
             if child.child_count > 1:
@@ -235,14 +193,11 @@ def _check_tree_structure(node: ts.Node, structures: set[str]) -> None:
 
 
 def classify_shell(command: str) -> Classification:
-    """Classify a bash shell command into a full Classification object.
-
-    This is the detailed API. For the legacy string API, use classify_shell_command().
-    """
+    """Classify a bash shell command into a Classification object."""
     if not command or not command.strip():
         return Classification(
-            mechanism=CodingMechanism.SHELL_BASH,
-            effect=Effect.UNKNOWN,
+            mechanism=Mechanism.SHELL,
+            effect=None,
         )
 
     tree = _parser.parse(command.encode("utf-8"))
@@ -251,8 +206,8 @@ def classify_shell(command: str) -> Classification:
 
     if not matches:
         return Classification(
-            mechanism=CodingMechanism.SHELL_BASH,
-            effect=Effect.UNKNOWN,
+            mechanism=Mechanism.SHELL,
+            effect=None,
             capability=frozenset({"subprocess"}),
         )
 
@@ -316,7 +271,7 @@ def classify_shell(command: str) -> Classification:
         all_scopes.add(scope_val)
 
     # Aggregate effect
-    agg_effect = aggregate_effect(*all_effects) if all_effects else Effect.UNKNOWN
+    agg_effect = aggregate_effect(*all_effects) if all_effects else None
 
     # Filesystem capabilities from effect
     if agg_effect in (Effect.MUTATING, Effect.DESTRUCTIVE):
@@ -328,7 +283,7 @@ def classify_shell(command: str) -> Classification:
     structure = _detect_structure(tree)
 
     return Classification(
-        mechanism=CodingMechanism.SHELL_BASH,
+        mechanism=Mechanism.SHELL,
         effect=agg_effect,
         scope=frozenset(all_scopes),
         role=frozenset(all_roles),

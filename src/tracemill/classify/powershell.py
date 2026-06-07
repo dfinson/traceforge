@@ -7,7 +7,7 @@ import os
 import tree_sitter as ts
 import tree_sitter_powershell as tsps
 
-from tracemill.classify.core import ShellActivity
+from tracemill.classify.rules import ShellActivity
 from tracemill.classify.rules import (
     ACTIVITY_PRIORITY,
     SHELL_IMPLEMENTATION,

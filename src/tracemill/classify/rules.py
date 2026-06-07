@@ -8,12 +8,30 @@ in order; first match wins.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Final
+from enum import StrEnum
+from typing import TYPE_CHECKING, Final
 
-from tracemill.classify.core import Effect, ShellActivity
+if TYPE_CHECKING:
+    from tracemill.classify.core import Classification
+
+from tracemill.classify.core import Effect
 from tracemill.classify.coding import CodingRole
 
-# Legacy activity constants (aliased from enum for backward compat)
+
+class ShellActivity(StrEnum):
+    """Internal: what a shell command primarily does (command-local intent).
+
+    Used as the intermediate label in the rule table for priority resolution
+    when compound commands contain multiple binaries.
+    """
+
+    VERIFICATION = "verification"
+    GIT_OPS = "git_ops"
+    SETUP = "setup"
+    INVESTIGATION = "investigation"
+    IMPLEMENTATION = "implementation"
+
+
 SHELL_VERIFICATION = ShellActivity.VERIFICATION
 SHELL_GIT_OPS = ShellActivity.GIT_OPS
 SHELL_SETUP = ShellActivity.SETUP
@@ -27,6 +45,19 @@ ACTIVITY_PRIORITY: Final[dict[ShellActivity, int]] = {
     ShellActivity.GIT_OPS: 3,
     ShellActivity.VERIFICATION: 4,
 }
+
+
+def activity_from_classification(cls: Classification) -> ShellActivity:
+    """Derive ShellActivity from a Classification's action dimensions."""
+    if cls.has_action("validate"):
+        return ShellActivity.VERIFICATION
+    if cls.has_action("configure"):
+        return ShellActivity.SETUP
+    if cls.has_action("retrieve") or cls.has_action("analyze"):
+        return ShellActivity.INVESTIGATION
+    if cls.has_action("persist") or cls.has_action("deliver"):
+        return ShellActivity.GIT_OPS
+    return ShellActivity.IMPLEMENTATION
 
 
 @dataclass(frozen=True)
@@ -55,7 +86,7 @@ class BinaryInfo:
     """Static metadata about a known binary."""
 
     role: CodingRole | str
-    default_effect: Effect
+    default_effect: Effect | None
     network: bool = False
     destructive: bool = False
 
@@ -128,7 +159,7 @@ RULES: Final[tuple[Rule, ...]] = (
 
     # ── npm/pnpm/yarn run <verify-script> ──
     Rule(binaries=frozenset({"npm", "pnpm", "yarn"}), subcmds=frozenset({"run"}),
-         activity=SHELL_VERIFICATION, role=CodingRole.TASK_RUNNER, effect=Effect.UNKNOWN),
+         activity=SHELL_VERIFICATION, role=CodingRole.TASK_RUNNER, effect=None),
     # Note: the npm "run" rule needs script-name inspection handled by the special-case handler
 
     # ── Git operations ──
@@ -186,34 +217,34 @@ BINARY_INFO: Final[dict[str, BinaryInfo]] = {
     "prettier": BinaryInfo(role=CodingRole.FORMATTER, default_effect=Effect.MUTATING),
     "pip": BinaryInfo(role=CodingRole.PACKAGE_MANAGER, default_effect=Effect.MUTATING, network=True),
     "pip3": BinaryInfo(role=CodingRole.PACKAGE_MANAGER, default_effect=Effect.MUTATING, network=True),
-    "npm": BinaryInfo(role=CodingRole.TASK_RUNNER, default_effect=Effect.UNKNOWN, network=True),
-    "pnpm": BinaryInfo(role=CodingRole.TASK_RUNNER, default_effect=Effect.UNKNOWN, network=True),
-    "yarn": BinaryInfo(role=CodingRole.TASK_RUNNER, default_effect=Effect.UNKNOWN, network=True),
-    "cargo": BinaryInfo(role=CodingRole.TASK_RUNNER, default_effect=Effect.UNKNOWN),
+    "npm": BinaryInfo(role=CodingRole.TASK_RUNNER, default_effect=None, network=True),
+    "pnpm": BinaryInfo(role=CodingRole.TASK_RUNNER, default_effect=None, network=True),
+    "yarn": BinaryInfo(role=CodingRole.TASK_RUNNER, default_effect=None, network=True),
+    "cargo": BinaryInfo(role=CodingRole.TASK_RUNNER, default_effect=None),
     "uv": BinaryInfo(role=CodingRole.PACKAGE_MANAGER, default_effect=Effect.MUTATING, network=True),
     "poetry": BinaryInfo(role=CodingRole.PACKAGE_MANAGER, default_effect=Effect.MUTATING, network=True),
     "brew": BinaryInfo(role=CodingRole.PACKAGE_MANAGER, default_effect=Effect.MUTATING, network=True),
     "apt": BinaryInfo(role=CodingRole.PACKAGE_MANAGER, default_effect=Effect.MUTATING, network=True),
     "apt-get": BinaryInfo(role=CodingRole.PACKAGE_MANAGER, default_effect=Effect.MUTATING, network=True),
-    "docker": BinaryInfo(role=CodingRole.CONTAINER_RUNTIME, default_effect=Effect.UNKNOWN, network=True),
-    "kubectl": BinaryInfo(role=CodingRole.CLOUD_CLI, default_effect=Effect.UNKNOWN, network=True),
-    "terraform": BinaryInfo(role=CodingRole.CLOUD_CLI, default_effect=Effect.UNKNOWN, network=True),
-    "git": BinaryInfo(role=CodingRole.VERSION_CONTROL, default_effect=Effect.UNKNOWN),
-    "make": BinaryInfo(role=CodingRole.TASK_RUNNER, default_effect=Effect.UNKNOWN),
-    "gradle": BinaryInfo(role=CodingRole.TASK_RUNNER, default_effect=Effect.UNKNOWN),
-    "mvn": BinaryInfo(role=CodingRole.TASK_RUNNER, default_effect=Effect.UNKNOWN),
+    "docker": BinaryInfo(role=CodingRole.CONTAINER_RUNTIME, default_effect=None, network=True),
+    "kubectl": BinaryInfo(role=CodingRole.CLOUD_CLI, default_effect=None, network=True),
+    "terraform": BinaryInfo(role=CodingRole.CLOUD_CLI, default_effect=None, network=True),
+    "git": BinaryInfo(role=CodingRole.VERSION_CONTROL, default_effect=None),
+    "make": BinaryInfo(role=CodingRole.TASK_RUNNER, default_effect=None),
+    "gradle": BinaryInfo(role=CodingRole.TASK_RUNNER, default_effect=None),
+    "mvn": BinaryInfo(role=CodingRole.TASK_RUNNER, default_effect=None),
     "webpack": BinaryInfo(role=CodingRole.BUNDLER, default_effect=Effect.MUTATING),
-    "vite": BinaryInfo(role=CodingRole.BUNDLER, default_effect=Effect.UNKNOWN),
-    "dotnet": BinaryInfo(role=CodingRole.TASK_RUNNER, default_effect=Effect.UNKNOWN),
-    "go": BinaryInfo(role=CodingRole.TASK_RUNNER, default_effect=Effect.UNKNOWN),
-    "python": BinaryInfo(role=CodingRole.SCRIPT_RUNNER, default_effect=Effect.UNKNOWN),
-    "python3": BinaryInfo(role=CodingRole.SCRIPT_RUNNER, default_effect=Effect.UNKNOWN),
-    "node": BinaryInfo(role=CodingRole.SCRIPT_RUNNER, default_effect=Effect.UNKNOWN),
+    "vite": BinaryInfo(role=CodingRole.BUNDLER, default_effect=None),
+    "dotnet": BinaryInfo(role=CodingRole.TASK_RUNNER, default_effect=None),
+    "go": BinaryInfo(role=CodingRole.TASK_RUNNER, default_effect=None),
+    "python": BinaryInfo(role=CodingRole.SCRIPT_RUNNER, default_effect=None),
+    "python3": BinaryInfo(role=CodingRole.SCRIPT_RUNNER, default_effect=None),
+    "node": BinaryInfo(role=CodingRole.SCRIPT_RUNNER, default_effect=None),
     "curl": BinaryInfo(role=CodingRole.API_CLIENT, default_effect=Effect.READ_ONLY, network=True),
     "wget": BinaryInfo(role=CodingRole.API_CLIENT, default_effect=Effect.MUTATING, network=True),
     "rm": BinaryInfo(role=CodingRole.SHELL_RUNTIME, default_effect=Effect.DESTRUCTIVE),
     "rmdir": BinaryInfo(role=CodingRole.SHELL_RUNTIME, default_effect=Effect.DESTRUCTIVE),
-    "sudo": BinaryInfo(role=CodingRole.SHELL_RUNTIME, default_effect=Effect.UNKNOWN),
+    "sudo": BinaryInfo(role=CodingRole.SHELL_RUNTIME, default_effect=None),
     "choco": BinaryInfo(role=CodingRole.PACKAGE_MANAGER, default_effect=Effect.MUTATING, network=True),
     "winget": BinaryInfo(role=CodingRole.PACKAGE_MANAGER, default_effect=Effect.MUTATING, network=True),
     "scoop": BinaryInfo(role=CodingRole.PACKAGE_MANAGER, default_effect=Effect.MUTATING, network=True),
@@ -298,4 +329,4 @@ def effect_for_binary(binary: str, subcmd: str | None, flags: list[str]) -> Effe
             return Effect.DESTRUCTIVE
         return info.default_effect
 
-    return Effect.UNKNOWN
+    return None

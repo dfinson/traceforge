@@ -21,7 +21,7 @@ from tracemill.classify.coding import (
 )
 from tracemill.classify.registry import DimensionRegistry, get_default_registry
 from tracemill.classify.shell import classify_shell
-from tracemill.classify.tools import classify_tool_detailed
+from tracemill.classify.tools import classify_tool
 
 
 # ── Classification dataclass tests ──
@@ -35,7 +35,7 @@ class TestClassification:
 
     def test_to_dict_full(self):
         c = Classification(
-            mechanism="shell.bash",
+            mechanism="shell",
             effect="mutating",
             scope=frozenset({"artifact.source_code"}),
             role=frozenset({"validator.test_runner"}),
@@ -46,7 +46,7 @@ class TestClassification:
             binaries=("pytest", "pip"),
         )
         d = c.to_dict()
-        assert d["mechanism"] == "shell.bash"
+        assert d["mechanism"] == "shell"
         assert d["effect"] == "mutating"
         assert d["scope"] == ["artifact.source_code"]
         assert d["role"] == ["validator.test_runner"]
@@ -58,7 +58,7 @@ class TestClassification:
 
     def test_from_dict_roundtrip(self):
         original = Classification(
-            mechanism="shell.bash",
+            mechanism="shell",
             effect="read_only",
             scope=frozenset({"artifact.test_code"}),
             role=frozenset({"validator.test_runner"}),
@@ -121,7 +121,7 @@ class TestAggregateEffect:
         assert aggregate_effect("unknown", "read_only") == "read_only"
 
     def test_empty(self):
-        assert aggregate_effect() == "unknown"
+        assert aggregate_effect() is None
 
 
 # ── Registry tests ──
@@ -140,7 +140,7 @@ class TestDimensionRegistry:
         reg.register_dimension("mechanism", Mechanism)
         reg.extend_dimension("mechanism", CodingMechanism)
         assert reg.validate("mechanism", "file.read")
-        assert reg.validate("mechanism", "shell.bash")
+        assert reg.validate("mechanism", "shell")
 
     def test_extend_rejects_orphan(self):
         from enum import StrEnum
@@ -189,7 +189,7 @@ class TestDimensionRegistry:
     def test_default_registry_loads(self):
         reg = get_default_registry()
         assert reg.validate("mechanism", "file")
-        assert reg.validate("mechanism", "shell.bash")
+        assert reg.validate("mechanism", "shell")
         assert reg.validate("role", "validator.test_runner")
         assert reg.validate("action", "validate.test")
         assert reg.validate("scope", "artifact.source_code")
@@ -209,7 +209,7 @@ class TestDimensionRegistry:
 class TestClassifyShell:
     def test_pytest(self):
         c = classify_shell("pytest tests/ -v")
-        assert c.mechanism == "shell.bash"
+        assert c.mechanism == "shell"
         assert c.effect == "read_only"
         assert c.has_role("validator.test_runner")
         assert c.has_action("validate")
@@ -255,8 +255,8 @@ class TestClassifyShell:
 
     def test_empty_command(self):
         c = classify_shell("")
-        assert c.mechanism == "shell.bash"
-        assert c.effect == "unknown"
+        assert c.mechanism == "shell"
+        assert c.effect is None
 
     def test_piped_command(self):
         c = classify_shell("cat file.txt | grep pattern")
@@ -272,61 +272,61 @@ class TestClassifyShell:
 
 class TestClassifyToolDetailed:
     def test_view(self):
-        c = classify_tool_detailed("view")
+        c = classify_tool("view")
         assert c.mechanism == "file.read"
         assert c.effect == "read_only"
         assert c.has_scope("artifact.source_code")
         assert "filesystem_read" in c.capability
 
     def test_edit(self):
-        c = classify_tool_detailed("edit")
+        c = classify_tool("edit")
         assert c.mechanism == "file.write"
         assert c.effect == "mutating"
         assert "filesystem_write" in c.capability
 
     def test_grep(self):
-        c = classify_tool_detailed("grep")
-        assert c.mechanism == "file.search"
+        c = classify_tool("grep")
+        assert c.mechanism == "file.read"
         assert c.effect == "read_only"
         assert c.has_role("retriever.search_index")
 
     def test_git_commit(self):
-        c = classify_tool_detailed("git_commit")
-        assert c.mechanism == "git"
+        c = classify_tool("git_commit")
+        assert c.mechanism == "shell"
         assert c.effect == "mutating"
         assert c.has_role("orchestrator.version_control")
-        assert c.has_action("store.commit")
+        assert c.has_action("persist.commit")
 
     def test_report_intent(self):
-        c = classify_tool_detailed("report_intent")
+        c = classify_tool("report_intent")
         assert c.mechanism == "communication.system"
         assert c.effect == "read_only"
 
     def test_ask_user(self):
-        c = classify_tool_detailed("ask_user")
+        c = classify_tool("ask_user")
         assert c.mechanism == "communication.user"
         assert "human_interaction" in c.capability
 
     def test_web_fetch(self):
-        c = classify_tool_detailed("web_fetch")
+        c = classify_tool("web_fetch")
         assert c.mechanism == "network.http"
         assert "network_outbound" in c.capability
 
     def test_bash_tool(self):
-        c = classify_tool_detailed("bash")
-        assert c.mechanism == "shell.bash"
+        c = classify_tool("bash")
+        assert c.mechanism == "shell"
         assert c.shell_dialect == "bash"
 
     def test_unknown_tool(self):
-        c = classify_tool_detailed("totally_unknown_tool")
+        c = classify_tool("totally_unknown_tool")
         assert c.mechanism == "communication"
-        assert c.effect == "unknown"
+        assert c.effect is None
 
     def test_normalized_aliases(self):
-        c = classify_tool_detailed("read_file")
+        c = classify_tool("read_file")
         assert c.mechanism == "file.read"
 
-        c2 = classify_tool_detailed("str_replace_editor")
+        c2 = classify_tool("str_replace_editor")
         assert c2.mechanism == "file.write"
 
     def test_custom_classifications(self):
@@ -335,11 +335,11 @@ class TestClassifyToolDetailed:
                 mechanism="database",
                 effect="mutating",
                 role=frozenset({"store.database_writer"}),
-                action=frozenset({"store.commit"}),
+                action=frozenset({"persist.commit"}),
                 capability=frozenset({"network_outbound"}),
             )
         }
-        c = classify_tool_detailed("my_tool", custom_classifications=custom)
+        c = classify_tool("my_tool", custom_classifications=custom)
         assert c.mechanism == "database"
         assert c.effect == "mutating"
 

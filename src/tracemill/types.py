@@ -5,9 +5,12 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from enum import Enum
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+if TYPE_CHECKING:
+    pass
 
 
 class EventKind(str, Enum):
@@ -27,13 +30,14 @@ def _uuid4_str() -> str:
 
 
 class EventMetadata(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     repo: str | None = None
     agent_sdk: str | None = None
     turn_id: str | None = None
-    visibility: Literal["visible", "internal", "collapsed"] = "visible"
-    tool_category: str | None = None
+    visibility: Literal["visible", "system", "collapsed"] = "visible"
+    phase: str | None = None
+    classification: Any = None  # Classification | None (Any to avoid circular import)
     tool_display: str | None = None
     tool_intent: str | None = None
     duration_ms: float | None = None

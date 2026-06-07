@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 
-from tracemill.classify.core import ShellActivity
+from tracemill.classify.rules import ShellActivity
 from tracemill.classify.rules import (
     ACTIVITY_PRIORITY,
     SHELL_IMPLEMENTATION,

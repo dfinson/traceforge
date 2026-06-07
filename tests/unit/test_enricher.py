@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from tracemill import Enricher, EventKind, EventPipeline, SessionEvent
-from tracemill.classify import TOOL_CATEGORY_MAP
+from tracemill.classify.core import Classification
 
 from tests.conftest import RecordingSink
 
@@ -171,34 +171,39 @@ class TestDurationCalculation:
 
 
 class TestToolClassification:
-    def test_known_tool_names(self):
-        """Canonical tool names get correct categories via the enricher."""
+    def test_known_tool_gets_classification(self):
+        """Known tools get a Classification object on metadata."""
         enricher = Enricher()
-        for canonical_name, expected_category in TOOL_CATEGORY_MAP.items():
-            event = _make_tool_start(tool_name=canonical_name)
-            enricher.process(event)
-            flushed = enricher.flush()
-            assert len(flushed) == 1
-            assert flushed[0].metadata.tool_category == expected_category, (
-                f"{canonical_name} should be '{expected_category}'"
-            )
+        event = _make_tool_start(tool_name="edit")
+        enricher.process(event)
+        flushed = enricher.flush()
+        assert len(flushed) == 1
+        cls = flushed[0].metadata.classification
+        assert cls is not None
+        assert isinstance(cls, Classification)
+        assert cls.mechanism == "file.write"
+        assert cls.effect == "mutating"
 
-    def test_unknown_tool_gets_other(self):
+    def test_unknown_tool_gets_classification(self):
         enricher = Enricher()
         event = _make_tool_start(tool_name="some_custom_tool")
         enricher.process(event)
         flushed = enricher.flush()
-        assert flushed[0].metadata.tool_category == "other"
+        cls = flushed[0].metadata.classification
+        assert cls is not None
+        assert cls.mechanism == "communication"
 
-    def test_custom_category_overrides_defaults(self):
-        enricher = Enricher(tool_categories={"edit": "custom_write"})
+    def test_custom_classification_overrides_defaults(self):
+        custom = Classification(mechanism="custom.write", effect="mutating")
+        enricher = Enricher(custom_classifications={"edit": custom})
         event = _make_tool_start(tool_name="edit")
         enricher.process(event)
         flushed = enricher.flush()
-        assert flushed[0].metadata.tool_category == "custom_write"
+        assert flushed[0].metadata.classification is custom
 
-    def test_custom_category_extends_defaults(self):
-        enricher = Enricher(tool_categories={"my_tool": "my_category"})
+    def test_custom_classification_extends_defaults(self):
+        custom = Classification(mechanism="custom.thing", effect="read_only")
+        enricher = Enricher(custom_classifications={"my_tool": custom})
         # Default still works
         event_edit = _make_tool_start(tool_name="edit", tool_call_id="tc-edit")
         enricher.process(event_edit)
@@ -207,9 +212,9 @@ class TestToolClassification:
         enricher.process(event_custom)
 
         flushed = enricher.flush()
-        categories = {e.payload["tool_name"]: e.metadata.tool_category for e in flushed}
-        assert categories["edit"] == "file_write"
-        assert categories["my_tool"] == "my_category"
+        classifications = {e.payload["tool_name"]: e.metadata.classification for e in flushed}
+        assert classifications["edit"].mechanism == "file.write"
+        assert classifications["my_tool"] is custom
 
 
 # =============================================================================
@@ -223,21 +228,21 @@ class TestVisibility:
         event = _make_tool_start(tool_name="report_intent")
         enricher.process(event)
         flushed = enricher.flush()
-        assert flushed[0].metadata.visibility == "internal"
+        assert flushed[0].metadata.visibility == "system"
 
     def test_session_start_is_internal(self):
         enricher = Enricher()
         event = _make_event(EventKind.SESSION_START)
         result = enricher.process(event)
         assert result is not None
-        assert result.metadata.visibility == "internal"
+        assert result.metadata.visibility == "system"
 
     def test_session_end_is_internal(self):
         enricher = Enricher()
         event = _make_event(EventKind.SESSION_END)
         result = enricher.process(event)
         assert result is not None
-        assert result.metadata.visibility == "internal"
+        assert result.metadata.visibility == "system"
 
     def test_file_edit_is_visible(self):
         enricher = Enricher()
@@ -264,20 +269,20 @@ class TestPhaseDetection:
         enricher = Enricher()
         event = _make_event(EventKind.USER_MESSAGE)
         result = enricher.process(event)
-        assert result.payload["_enrichment"]["phase"] == "planning"
+        assert result.metadata.phase == "planning"
 
     def test_assistant_message_is_planning(self):
         enricher = Enricher()
         event = _make_event(EventKind.ASSISTANT_MESSAGE)
         result = enricher.process(event)
-        assert result.payload["_enrichment"]["phase"] == "planning"
+        assert result.metadata.phase == "planning"
 
     def test_file_write_is_implementation(self):
         enricher = Enricher()
         event = _make_tool_start(tool_name="edit")
         enricher.process(event)
         flushed = enricher.flush()
-        assert flushed[0].payload["_enrichment"]["phase"] == "implementation"
+        assert flushed[0].metadata.phase == "implementation"
 
     def test_shell_with_pytest_is_verification(self):
         enricher = Enricher()
@@ -287,7 +292,7 @@ class TestPhaseDetection:
         )
         enricher.process(event)
         flushed = enricher.flush()
-        assert flushed[0].payload["_enrichment"]["phase"] == "verification"
+        assert flushed[0].metadata.phase == "verification"
 
     def test_shell_without_keywords_is_implementation(self):
         enricher = Enricher()
@@ -297,21 +302,21 @@ class TestPhaseDetection:
         )
         enricher.process(event)
         flushed = enricher.flush()
-        assert flushed[0].payload["_enrichment"]["phase"] == "implementation"
+        assert flushed[0].metadata.phase == "implementation"
 
     def test_git_tool_is_review(self):
         enricher = Enricher()
         event = _make_tool_start(tool_name="git_commit")
         enricher.process(event)
         flushed = enricher.flush()
-        assert flushed[0].payload["_enrichment"]["phase"] == "review"
+        assert flushed[0].metadata.phase == "review"
 
     def test_internal_tool_is_planning(self):
         enricher = Enricher()
         event = _make_tool_start(tool_name="report_intent")
         enricher.process(event)
         flushed = enricher.flush()
-        assert flushed[0].payload["_enrichment"]["phase"] == "planning"
+        assert flushed[0].metadata.phase == "planning"
 
 
 # =============================================================================
@@ -388,8 +393,9 @@ class TestEdgeCases:
         result = enricher.process(complete)
 
         assert result is not None
-        assert result.metadata.tool_category == "internal"
-        assert result.metadata.visibility == "internal"
+        assert result.metadata.classification is not None
+        assert result.metadata.classification.mechanism == "communication.system"
+        assert result.metadata.visibility == "system"
         assert result.payload["tool_name"] == "report_intent"
 
     def test_duplicate_tool_start_emits_orphan(self):
@@ -424,7 +430,7 @@ class TestEdgeCases:
         )
         result = enricher.process(event)
         assert result is not None
-        assert result.payload["_enrichment"]["phase"] == "planning"
+        assert result.metadata.phase == "planning"
 
     def test_enrichment_none_in_payload(self):
         """_enrichment: None should not crash."""
@@ -437,7 +443,7 @@ class TestEdgeCases:
         )
         result = enricher.process(event)
         assert result is not None
-        assert result.payload["_enrichment"]["phase"] == "planning"
+        assert result.metadata.phase == "planning"
 
     def test_verification_no_false_positive_on_checkout(self):
         """Bug #12: 'git checkout' should not trigger verification."""
@@ -448,7 +454,7 @@ class TestEdgeCases:
         )
         enricher.process(event)
         flushed = enricher.flush()
-        assert flushed[0].payload["_enrichment"]["phase"] == "implementation"
+        assert flushed[0].metadata.phase == "implementation"
 
     def test_verification_no_false_positive_on_build_dir(self):
         """Bug #12: 'mkdir build-output' should not trigger verification."""
@@ -459,7 +465,7 @@ class TestEdgeCases:
         )
         enricher.process(event)
         flushed = enricher.flush()
-        assert flushed[0].payload["_enrichment"]["phase"] == "implementation"
+        assert flushed[0].metadata.phase == "implementation"
 
     def test_tool_start_without_tool_call_id_emitted_immediately(self):
         """TOOL_START with no tool_call_id should not be buffered."""
@@ -636,7 +642,7 @@ class TestIDStabilityAndRobustness:
         enricher.process(start)
         result = enricher.process(complete)
         assert result.payload["arguments"] == {"command": "pytest tests/"}
-        assert result.payload["_enrichment"]["phase"] == "verification"
+        assert result.metadata.phase == "verification"
 
     def test_non_string_tool_call_id_treated_as_missing(self):
         """Non-string tool_call_id should not crash or buffer."""

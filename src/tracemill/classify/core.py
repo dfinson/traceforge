@@ -12,33 +12,12 @@ from enum import StrEnum
 from typing import Any
 
 
-class ToolCategory(StrEnum):
-    """High-level category of an agent tool invocation."""
-
-    SHELL = "shell"
-    FILE_WRITE = "file_write"
-    FILE_READ = "file_read"
-    SEARCH = "search"
-    GIT = "git"
-    INTERNAL = "internal"
-    INTERACTION = "interaction"
-    BROWSER = "browser"
-    AGENT = "agent"
-    OTHER = "other"
-
-
-class ShellActivity(StrEnum):
-    """Classification of a shell command's primary activity."""
-
-    VERIFICATION = "verification"
-    GIT_OPS = "git_ops"
-    SETUP = "setup"
-    INVESTIGATION = "investigation"
-    IMPLEMENTATION = "implementation"
-
 
 class Phase(StrEnum):
-    """High-level workflow phase an event belongs to."""
+    """Workflow stage at the session level.
+
+    Inferred from classification dimensions of recent events.
+    """
 
     PLANNING = "planning"
     IMPLEMENTATION = "implementation"
@@ -48,11 +27,19 @@ class Phase(StrEnum):
 
 
 class Visibility(StrEnum):
-    """Whether an event is shown, hidden, or collapsed in a trace view."""
+    """Display audience for an event in a trace view.
+
+    SYSTEM = not shown to end users (bookkeeping, internal tools).
+    VISIBLE = shown by default.
+    COLLAPSED = shown but minimized (e.g. repeated similar events).
+    """
 
     VISIBLE = "visible"
-    INTERNAL = "internal"
+    SYSTEM = "system"
     COLLAPSED = "collapsed"
+
+
+# ── Semantic classification dimensions ──
 
 
 class Mechanism(StrEnum):
@@ -62,23 +49,24 @@ class Mechanism(StrEnum):
     SHELL = "shell"
     NETWORK = "network"
     DATABASE = "database"
-    RUNTIME = "runtime"
-    AGENT = "agent"
+    PROCESS = "process"
+    DELEGATION = "delegation"
     COMMUNICATION = "communication"
 
 
 class Effect(StrEnum):
-    """Impact on state outside the agent."""
+    """Impact on state outside the agent.
+
+    Use None/absent on Classification when the effect cannot be determined.
+    """
 
     READ_ONLY = "read_only"
     MUTATING = "mutating"
     DESTRUCTIVE = "destructive"
-    UNKNOWN = "unknown"
 
 
 # Precedence for aggregating compound effects (highest wins)
 EFFECT_PRECEDENCE: dict[str, int] = {
-    Effect.UNKNOWN: 0,
     Effect.READ_ONLY: 1,
     Effect.MUTATING: 2,
     Effect.DESTRUCTIVE: 3,
@@ -94,7 +82,7 @@ class Scope(StrEnum):
     CONFIGURATION = "configuration"
     KNOWLEDGE = "knowledge"
     IDENTITY = "identity"
-    COMMUNICATION = "communication"
+    MESSAGE = "message"
 
 
 class Role(StrEnum):
@@ -108,7 +96,7 @@ class Role(StrEnum):
     COMMUNICATOR = "communicator"
     ORCHESTRATOR = "orchestrator"
     OBSERVER = "observer"
-    STORE = "store"
+    PERSISTENCE = "persistence"
 
 
 class Action(StrEnum):
@@ -122,8 +110,8 @@ class Action(StrEnum):
     DELIVER = "deliver"
     CONFIGURE = "configure"
     ANALYZE = "analyze"
-    STORE = "store"
-    DESTROY = "destroy"
+    PERSIST = "persist"
+    REMOVE = "remove"
 
 
 class Capability(StrEnum):
@@ -134,7 +122,7 @@ class Capability(StrEnum):
     NETWORK_INBOUND = "network_inbound"
     NETWORK_OUTBOUND = "network_outbound"
     SUBPROCESS = "subprocess"
-    CREDENTIALS = "credentials"
+    USES_CREDENTIALS = "uses_credentials"
     ELEVATED_PRIVILEGE = "elevated_privilege"
     HUMAN_INTERACTION = "human_interaction"
 
@@ -142,14 +130,12 @@ class Capability(StrEnum):
 class Structure(StrEnum):
     """Compositional properties of the invocation."""
 
-    COMPOUND = "compound"
     SEQUENTIAL = "sequential"
     PARALLEL = "parallel"
     CONDITIONAL = "conditional"
     PIPED = "piped"
     REDIRECTED = "redirected"
     INTERACTIVE = "interactive"
-    IDEMPOTENT = "idempotent"
 
 
 class ShellDialect(StrEnum):
@@ -160,7 +146,7 @@ class ShellDialect(StrEnum):
     CMD = "cmd"
     ZSH = "zsh"
     FISH = "fish"
-    SH = "sh"
+    POSIX_SH = "posix_sh"
 
 
 @dataclass(frozen=True)
@@ -172,7 +158,7 @@ class Classification:
     """
 
     mechanism: str
-    effect: str
+    effect: str | None = None
     scope: frozenset[str] = frozenset()
     role: frozenset[str] = frozenset()
     action: frozenset[str] = frozenset()
@@ -185,8 +171,9 @@ class Classification:
         """Serialize to a JSON-safe dictionary."""
         d: dict[str, Any] = {
             "mechanism": self.mechanism,
-            "effect": self.effect,
         }
+        if self.effect is not None:
+            d["effect"] = self.effect
         if self.scope:
             d["scope"] = sorted(self.scope)
         if self.role:
@@ -208,7 +195,7 @@ class Classification:
         """Deserialize from a dictionary."""
         return cls(
             mechanism=d["mechanism"],
-            effect=d["effect"],
+            effect=d.get("effect"),
             scope=frozenset(d.get("scope", ())),
             role=frozenset(d.get("role", ())),
             action=frozenset(d.get("action", ())),
@@ -231,10 +218,13 @@ class Classification:
         return any(s == ancestor or s.startswith(ancestor + ".") for s in self.scope)
 
 
-def aggregate_effect(*effects: str) -> str:
-    """Return the highest-precedence effect from a set of effects."""
-    best = Effect.UNKNOWN
-    best_p = -1
+def aggregate_effect(*effects: str) -> str | None:
+    """Return the highest-precedence effect from a set of effects.
+
+    Returns None if no effects are provided or all are unrecognized.
+    """
+    best: str | None = None
+    best_p = 0
     for e in effects:
         p = EFFECT_PRECEDENCE.get(e, 0)
         if p > best_p:

@@ -10,10 +10,8 @@ from tracemill.classify.core import (
     Phase,
     Role,
     Scope,
-    ShellActivity,
     ShellDialect,
     Structure,
-    ToolCategory,
     Visibility,
     aggregate_effect,
 )
@@ -26,20 +24,12 @@ from tracemill.classify.coding import (
 from tracemill.classify.powershell import classify_powershell_command
 from tracemill.classify.registry import DimensionRegistry, get_default_registry
 from tracemill.classify.shell import (
-    SHELL_GIT_OPS,
-    SHELL_IMPLEMENTATION,
-    SHELL_INVESTIGATION,
-    SHELL_SETUP,
-    SHELL_VERIFICATION,
     _extract_commands_from_ast,
     classify_shell,
-    classify_shell_command,
 )
 from tracemill.classify.tools import (
     CANONICAL_TOOLS,
-    TOOL_CATEGORY_MAP,
     classify_tool,
-    classify_tool_detailed,
     normalize_tool_name,
 )
 
@@ -53,10 +43,8 @@ __all__ = [
     "Phase",
     "Role",
     "Scope",
-    "ShellActivity",
     "ShellDialect",
     "Structure",
-    "ToolCategory",
     "Visibility",
     "aggregate_effect",
     # Coding domain
@@ -67,21 +55,12 @@ __all__ = [
     # Registry
     "DimensionRegistry",
     "get_default_registry",
-    # Shell classifiers
-    "SHELL_GIT_OPS",
-    "SHELL_IMPLEMENTATION",
-    "SHELL_INVESTIGATION",
-    "SHELL_SETUP",
-    "SHELL_VERIFICATION",
+    # Classifiers
     "_extract_commands_from_ast",
     "classify_shell",
-    "classify_shell_command",
     "classify_cmd_command",
     "classify_powershell_command",
-    # Tool classifiers
-    "CANONICAL_TOOLS",
-    "TOOL_CATEGORY_MAP",
     "classify_tool",
-    "classify_tool_detailed",
+    "CANONICAL_TOOLS",
     "normalize_tool_name",
 ]

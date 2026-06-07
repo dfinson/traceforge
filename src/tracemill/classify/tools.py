@@ -1,13 +1,14 @@
-"""Tool name normalization and category mapping."""
+"""Tool name normalization and classification."""
 
 from __future__ import annotations
 
 from typing import Final
 
 from tracemill.classify.core import (
+    Action,
     Classification,
     Effect,
-    ToolCategory,
+    Mechanism,
 )
 from tracemill.classify.coding import (
     CodingAction,
@@ -97,32 +98,6 @@ CANONICAL_TOOLS: Final[dict[str, str]] = {
     "skill": "task",
 }
 
-TOOL_CATEGORY_MAP: Final[dict[str, ToolCategory]] = {
-    "bash": ToolCategory.SHELL,
-    "edit": ToolCategory.FILE_WRITE,
-    "create": ToolCategory.FILE_WRITE,
-    "view": ToolCategory.FILE_READ,
-    "grep": ToolCategory.SEARCH,
-    "glob": ToolCategory.SEARCH,
-    "git_commit": ToolCategory.GIT,
-    "git_push": ToolCategory.GIT,
-    "git_diff": ToolCategory.GIT,
-    "git_status": ToolCategory.GIT,
-    "git_add": ToolCategory.GIT,
-    "git_log": ToolCategory.GIT,
-    "git_pull": ToolCategory.GIT,
-    "git_merge": ToolCategory.GIT,
-    "git_rebase": ToolCategory.GIT,
-    "git_checkout": ToolCategory.GIT,
-    "git_branch": ToolCategory.GIT,
-    "report_intent": ToolCategory.INTERNAL,
-    "ask_user": ToolCategory.INTERACTION,
-    "web_fetch": ToolCategory.BROWSER,
-    "web_search": ToolCategory.BROWSER,
-    "task": ToolCategory.AGENT,
-}
-
-
 def normalize_tool_name(raw_name: str) -> str:
     """Normalize a raw tool name to its canonical form."""
     if not raw_name:
@@ -146,44 +121,25 @@ def normalize_tool_name(raw_name: str) -> str:
 
 def classify_tool(
     tool_name: str,
-    custom_categories: dict[str, str] | None = None,
-) -> ToolCategory | str:
-    """Classify a tool name into a category.
-
-    Precedence: custom(raw) → custom(canonical) → default map → "other".
-    Returns a ToolCategory enum value, or a custom string from the user's map.
-    """
+    custom_classifications: dict[str, Classification] | None = None,
+) -> Classification:
+    """Classify a tool name into a full Classification object."""
     if not tool_name:
-        return ToolCategory.OTHER
-
-    if custom_categories:
-        raw_lower = tool_name.lower().replace("-", "_")
-        cat = (
-            custom_categories.get(tool_name)
-            or custom_categories.get(raw_lower)
-            or next(
-                (
-                    v
-                    for k, v in custom_categories.items()
-                    if k.lower().replace("-", "_") == raw_lower
-                ),
-                None,
-            )
-        )
-        if cat:
-            return cat
+        return Classification(mechanism=Mechanism.COMMUNICATION, effect=None)
 
     canonical = normalize_tool_name(tool_name)
 
-    if custom_categories:
-        cat = custom_categories.get(canonical)
-        if cat:
-            return cat
+    if custom_classifications:
+        lower = canonical.lower()
+        for key, cls in custom_classifications.items():
+            if key.lower() == lower or normalize_tool_name(key) == canonical:
+                return cls
 
-    return TOOL_CATEGORY_MAP.get(canonical, ToolCategory.OTHER)
+    return _TOOL_CLASSIFICATIONS.get(
+        canonical,
+        Classification(mechanism=Mechanism.COMMUNICATION, effect=None),
+    )
 
-
-# ── Detailed Classification API ──
 
 # Maps canonical tool names to Classification objects
 _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
@@ -192,7 +148,7 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         effect=Effect.READ_ONLY,
         scope=frozenset({CodingScope.SOURCE_CODE}),
         role=frozenset({CodingRole.FILE_BROWSER}),
-        action=frozenset({CodingAction.READ_FILE}),
+        action=frozenset({CodingAction.READ}),
         capability=frozenset({"filesystem_read"}),
     ),
     "edit": Classification(
@@ -200,7 +156,7 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         effect=Effect.MUTATING,
         scope=frozenset({CodingScope.SOURCE_CODE}),
         role=frozenset(),
-        action=frozenset({CodingAction.WRITE_FILE}),
+        action=frozenset({CodingAction.WRITE}),
         capability=frozenset({"filesystem_write"}),
     ),
     "create": Classification(
@@ -208,27 +164,27 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         effect=Effect.MUTATING,
         scope=frozenset({CodingScope.SOURCE_CODE}),
         role=frozenset(),
-        action=frozenset({CodingAction.WRITE_FILE}),
+        action=frozenset({CodingAction.WRITE}),
         capability=frozenset({"filesystem_write"}),
     ),
     "grep": Classification(
-        mechanism=CodingMechanism.FILE_SEARCH,
+        mechanism=CodingMechanism.FILE_READ,
         effect=Effect.READ_ONLY,
         scope=frozenset({CodingScope.SOURCE_CODE}),
         role=frozenset({CodingRole.SEARCH_INDEX}),
-        action=frozenset({CodingAction.SEARCH_FILES}),
+        action=frozenset({CodingAction.SEARCH}),
         capability=frozenset({"filesystem_read"}),
     ),
     "glob": Classification(
-        mechanism=CodingMechanism.FILE_SEARCH,
+        mechanism=CodingMechanism.FILE_READ,
         effect=Effect.READ_ONLY,
         scope=frozenset({CodingScope.SOURCE_CODE}),
         role=frozenset({CodingRole.FILE_BROWSER}),
-        action=frozenset({CodingAction.BROWSE_DIR}),
+        action=frozenset({CodingAction.BROWSE}),
         capability=frozenset({"filesystem_read"}),
     ),
     "git_commit": Classification(
-        mechanism="git",
+        mechanism=Mechanism.SHELL,
         effect=Effect.MUTATING,
         scope=frozenset({CodingScope.REPOSITORY}),
         role=frozenset({CodingRole.VERSION_CONTROL}),
@@ -236,15 +192,15 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         capability=frozenset({"filesystem_write"}),
     ),
     "git_push": Classification(
-        mechanism="git",
+        mechanism=Mechanism.SHELL,
         effect=Effect.MUTATING,
         scope=frozenset({CodingScope.REPOSITORY}),
         role=frozenset({CodingRole.VERSION_CONTROL}),
-        action=frozenset({CodingAction.PUSH_VCS}),
+        action=frozenset({CodingAction.PUSH}),
         capability=frozenset({"filesystem_write", "network_outbound"}),
     ),
     "git_diff": Classification(
-        mechanism="git",
+        mechanism=Mechanism.SHELL,
         effect=Effect.READ_ONLY,
         scope=frozenset({CodingScope.REPOSITORY}),
         role=frozenset({CodingRole.VERSION_CONTROL}),
@@ -252,7 +208,7 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         capability=frozenset({"filesystem_read"}),
     ),
     "git_status": Classification(
-        mechanism="git",
+        mechanism=Mechanism.SHELL,
         effect=Effect.READ_ONLY,
         scope=frozenset({CodingScope.REPOSITORY}),
         role=frozenset({CodingRole.VERSION_CONTROL}),
@@ -260,15 +216,15 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         capability=frozenset({"filesystem_read"}),
     ),
     "git_log": Classification(
-        mechanism="git",
+        mechanism=Mechanism.SHELL,
         effect=Effect.READ_ONLY,
         scope=frozenset({CodingScope.REPOSITORY}),
         role=frozenset({CodingRole.VERSION_CONTROL}),
-        action=frozenset({CodingAction.DIFF}),
+        action=frozenset({CodingAction.BROWSE}),
         capability=frozenset({"filesystem_read"}),
     ),
     "git_add": Classification(
-        mechanism="git",
+        mechanism=Mechanism.SHELL,
         effect=Effect.MUTATING,
         scope=frozenset({CodingScope.REPOSITORY}),
         role=frozenset({CodingRole.VERSION_CONTROL}),
@@ -276,15 +232,15 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         capability=frozenset({"filesystem_write"}),
     ),
     "git_pull": Classification(
-        mechanism="git",
+        mechanism=Mechanism.NETWORK,
         effect=Effect.MUTATING,
         scope=frozenset({CodingScope.REPOSITORY}),
         role=frozenset({CodingRole.VERSION_CONTROL}),
-        action=frozenset({CodingAction.PUSH_VCS}),
+        action=frozenset({Action.RETRIEVE}),
         capability=frozenset({"filesystem_write", "network_outbound"}),
     ),
     "git_merge": Classification(
-        mechanism="git",
+        mechanism=Mechanism.SHELL,
         effect=Effect.MUTATING,
         scope=frozenset({CodingScope.REPOSITORY}),
         role=frozenset({CodingRole.VERSION_CONTROL}),
@@ -292,7 +248,7 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         capability=frozenset({"filesystem_write"}),
     ),
     "git_rebase": Classification(
-        mechanism="git",
+        mechanism=Mechanism.SHELL,
         effect=Effect.MUTATING,
         scope=frozenset({CodingScope.REPOSITORY}),
         role=frozenset({CodingRole.VERSION_CONTROL}),
@@ -300,19 +256,19 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         capability=frozenset({"filesystem_write"}),
     ),
     "git_checkout": Classification(
-        mechanism="git",
+        mechanism=Mechanism.SHELL,
         effect=Effect.MUTATING,
         scope=frozenset({CodingScope.REPOSITORY}),
         role=frozenset({CodingRole.VERSION_CONTROL}),
-        action=frozenset({CodingAction.COMMIT}),
+        action=frozenset({Action.RETRIEVE}),
         capability=frozenset({"filesystem_write"}),
     ),
     "git_branch": Classification(
-        mechanism="git",
+        mechanism=Mechanism.SHELL,
         effect=Effect.READ_ONLY,
         scope=frozenset({CodingScope.REPOSITORY}),
         role=frozenset({CodingRole.VERSION_CONTROL}),
-        action=frozenset({CodingAction.DIFF}),
+        action=frozenset({CodingAction.BROWSE}),
         capability=frozenset({"filesystem_read"}),
     ),
     "report_intent": Classification(
@@ -334,26 +290,26 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         effect=Effect.READ_ONLY,
         scope=frozenset({CodingScope.DOCUMENTATION}),
         role=frozenset({CodingRole.WEB_SCRAPER}),
-        action=frozenset({CodingAction.SEARCH_WEB}),
+        action=frozenset({Action.RETRIEVE}),
         capability=frozenset({"network_outbound"}),
     ),
     "web_search": Classification(
-        mechanism=CodingMechanism.NETWORK_SEARCH,
+        mechanism=CodingMechanism.NETWORK_HTTP,
         effect=Effect.READ_ONLY,
         role=frozenset({CodingRole.SEARCH_INDEX}),
-        action=frozenset({CodingAction.SEARCH_WEB}),
+        action=frozenset({CodingAction.SEARCH}),
         capability=frozenset({"network_outbound"}),
     ),
     "task": Classification(
-        mechanism=CodingMechanism.AGENT_DELEGATE,
-        effect=Effect.UNKNOWN,
+        mechanism=CodingMechanism.DELEGATION_AGENT,
+        effect=None,
         role=frozenset(),
         action=frozenset(),
         capability=frozenset({"subprocess"}),
     ),
     "bash": Classification(
-        mechanism=CodingMechanism.SHELL_BASH,
-        effect=Effect.UNKNOWN,
+        mechanism=Mechanism.SHELL,
+        effect=None,
         role=frozenset({CodingRole.SHELL_RUNTIME}),
         action=frozenset({CodingAction.RUN_SCRIPT}),
         capability=frozenset({"subprocess"}),
@@ -362,25 +318,3 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
 }
 
 
-def classify_tool_detailed(
-    tool_name: str,
-    custom_classifications: dict[str, Classification] | None = None,
-) -> Classification:
-    """Classify a tool name into a full Classification object.
-
-    For the legacy string API, use classify_tool().
-    """
-    if not tool_name:
-        return Classification(mechanism="communication", effect=Effect.UNKNOWN)
-
-    canonical = normalize_tool_name(tool_name)
-
-    if custom_classifications:
-        cls = custom_classifications.get(tool_name) or custom_classifications.get(canonical)
-        if cls:
-            return cls
-
-    return _TOOL_CLASSIFICATIONS.get(
-        canonical,
-        Classification(mechanism="communication", effect=Effect.UNKNOWN),
-    )

@@ -41,7 +41,7 @@ class TestEventMetadata:
         assert meta.agent_sdk is None
         assert meta.turn_id is None
         assert meta.visibility == "visible"
-        assert meta.tool_category is None
+        assert meta.classification is None
         assert meta.tool_display is None
         assert meta.tool_intent is None
         assert meta.duration_ms is None
@@ -85,14 +85,14 @@ class TestSessionEvent:
         event = make_event(
             kind=EventKind.TOOL_START,
             payload={"tool": "grep", "args": ["pattern"]},
-            metadata=EventMetadata(tool_category="search", duration_ms=42.0),
+            metadata=EventMetadata(classification=None, duration_ms=42.0),
         )
         json_str = event.model_dump_json()
         restored = SessionEvent.model_validate_json(json_str)
         assert restored == event
         assert restored.id == event.id
         assert restored.kind == EventKind.TOOL_START
-        assert restored.metadata.tool_category == "search"
+        assert restored.metadata.classification is None
 
     def test_payload_preserved(self):
         payload = {"nested": {"key": [1, 2, 3]}, "flag": True}
@@ -164,7 +164,7 @@ class TestEventMetadataValidation:
             EventMetadata(visibility="hidden")
 
     def test_valid_visibility_values(self):
-        for v in ("visible", "internal", "collapsed"):
+        for v in ("visible", "system", "collapsed"):
             meta = EventMetadata(visibility=v)
             assert meta.visibility == v
 

@@ -1,5 +1,7 @@
 """Classification package — tool normalization, category mapping, and shell analysis."""
 
+from tracemill.classify.cmd import classify_cmd_command
+from tracemill.classify.powershell import classify_powershell_command
 from tracemill.classify.shell import (
     SHELL_GIT_OPS,
     SHELL_IMPLEMENTATION,
@@ -25,6 +27,8 @@ __all__ = [
     "SHELL_VERIFICATION",
     "TOOL_CATEGORY_MAP",
     "_extract_commands_from_ast",
+    "classify_cmd_command",
+    "classify_powershell_command",
     "classify_shell_command",
     "classify_tool",
     "normalize_tool_name",

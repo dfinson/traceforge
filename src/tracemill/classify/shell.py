@@ -1,185 +1,16 @@
-"""Tool name normalization and classification."""
+"""Shell command classification via tree-sitter AST analysis."""
 
 from __future__ import annotations
 
-import logging
 import os
 from typing import Final
 
 import tree_sitter as ts
 import tree_sitter_bash as tsbash
 
-logger = logging.getLogger(__name__)
-
 _BASH_LANGUAGE = ts.Language(tsbash.language())
 _parser = ts.Parser(_BASH_LANGUAGE)
-
-CANONICAL_TOOLS: Final[dict[str, str]] = {
-    # Shell
-    "bash": "bash",
-    "bashtool": "bash",
-    "powershell": "bash",
-    "powershelltool": "bash",
-    "exec_command": "bash",
-    "run_shell": "bash",
-    "execute_command": "bash",
-    "terminal": "bash",
-    "shell": "bash",
-    "run_in_terminal": "bash",
-    "sh": "bash",
-    "zsh": "bash",
-    "cmd": "bash",
-    # File read
-    "read": "view",
-    "read_file": "view",
-    "view": "view",
-    "view_file": "view",
-    "open_file": "view",
-    "filereadtool": "view",
-    "cat": "view",
-    # File write (edit existing)
-    "edit": "edit",
-    "edit_file": "edit",
-    "fileedittool": "edit",
-    "str_replace_editor": "edit",
-    "apply_patch": "edit",
-    "insert_edit_into_file": "edit",
-    "multiedit": "edit",
-    "notebookedit": "edit",
-    # File write (create new)
-    "write": "create",
-    "create": "create",
-    "create_file": "create",
-    "write_file": "create",
-    "filewritetool": "create",
-    # Search
-    "grep": "grep",
-    "glob": "glob",
-    "greptool": "grep",
-    "globtool": "glob",
-    "search": "grep",
-    "ripgrep": "grep",
-    "find": "glob",
-    "search_files": "grep",
-    "rg": "grep",
-    # Git
-    "git_commit": "git_commit",
-    "git_push": "git_push",
-    "git_diff": "git_diff",
-    "git_status": "git_status",
-    "git_add": "git_add",
-    "git_log": "git_log",
-    "git_pull": "git_pull",
-    "git_merge": "git_merge",
-    "git_rebase": "git_rebase",
-    "git_checkout": "git_checkout",
-    "git_branch": "git_branch",
-    # Internal/bookkeeping
-    "report_intent": "report_intent",
-    "todowrite": "report_intent",
-    "todoread": "report_intent",
-    "think": "report_intent",
-    # Interaction
-    "ask_user": "ask_user",
-    # Browser/web
-    "webfetch": "web_fetch",
-    "websearch": "web_search",
-    "web_fetch": "web_fetch",
-    "web_search": "web_search",
-    "fetch_url": "web_fetch",
-    "browser": "web_fetch",
-    # Agent/delegation
-    "task": "task",
-    "agent": "task",
-    "subagent": "task",
-    "skill": "task",
-}
-
-TOOL_CATEGORY_MAP: Final[dict[str, str]] = {
-    "bash": "shell",
-    "edit": "file_write",
-    "create": "file_write",
-    "view": "file_read",
-    "grep": "search",
-    "glob": "search",
-    "git_commit": "git",
-    "git_push": "git",
-    "git_diff": "git",
-    "git_status": "git",
-    "git_add": "git",
-    "git_log": "git",
-    "git_pull": "git",
-    "git_merge": "git",
-    "git_rebase": "git",
-    "git_checkout": "git",
-    "git_branch": "git",
-    "report_intent": "internal",
-    "ask_user": "interaction",
-    "web_fetch": "browser",
-    "web_search": "browser",
-    "task": "agent",
-}
-
-
-def normalize_tool_name(raw_name: str) -> str:
-    """Normalize a raw tool name to its canonical form."""
-    if not raw_name:
-        return raw_name
-
-    name = raw_name.strip()
-
-    if name.startswith("mcp__"):
-        parts = name.split("__", 2)
-        if len(parts) == 3:
-            name = parts[2]
-    elif "." in name:
-        dot_idx = name.index(".")
-        prefix = name[:dot_idx]
-        if prefix.replace("_", "").isalpha() and prefix.islower():
-            name = name[dot_idx + 1 :]
-
-    lowered = name.lower().replace("-", "_")
-    return CANONICAL_TOOLS.get(lowered, lowered)
-
-
-def classify_tool(
-    tool_name: str,
-    custom_categories: dict[str, str] | None = None,
-) -> str:
-    """Classify a tool name into a category.
-
-    Precedence: custom(raw) → custom(canonical) → default map → "other".
-    """
-    if not tool_name:
-        return "other"
-
-    # Check raw name in custom map first (preserves backward compat)
-    if custom_categories:
-        raw_lower = tool_name.lower().replace("-", "_")
-        cat = (
-            custom_categories.get(tool_name)
-            or custom_categories.get(raw_lower)
-            or next(
-                (
-                    v
-                    for k, v in custom_categories.items()
-                    if k.lower().replace("-", "_") == raw_lower
-                ),
-                None,
-            )
-        )
-        if cat:
-            return cat
-
-    canonical = normalize_tool_name(tool_name)
-
-    if custom_categories:
-        cat = custom_categories.get(canonical)
-        if cat:
-            return cat
-
-    return TOOL_CATEGORY_MAP.get(canonical, "other")
-
+_Q_COMMANDS = ts.Query(_BASH_LANGUAGE, "(command) @cmd")
 
 _TRANSPARENT_WRAPPERS: Final[frozenset[str]] = frozenset(
     {"env", "nice", "timeout", "stdbuf", "nohup", "command", "sudo", "exec"}
@@ -199,51 +30,7 @@ _ACTIVITY_PRIORITY: Final[dict[str, int]] = {
     SHELL_VERIFICATION: 4,
 }
 
-# ── Query: find all top-level command nodes ──
-
-_Q_COMMANDS = ts.Query(_BASH_LANGUAGE, "(command) @cmd")
-
-
-def _inside_command_substitution(node: ts.Node) -> bool:
-    """Check if a node is inside a $(…) substitution."""
-    p = node.parent
-    while p:
-        if p.type == "command_substitution":
-            return True
-        p = p.parent
-    return False
-
-
-def _extract_commands_from_ast(command: str) -> list[str]:
-    """Extract individual command texts from a shell string via tree-sitter query."""
-    if not command or not command.strip():
-        return []
-
-    tree = _parser.parse(command.encode("utf-8"))
-    cursor = ts.QueryCursor(_Q_COMMANDS)
-    matches = cursor.matches(tree.root_node)
-
-    commands: list[str] = []
-    for _pat, captures in matches:
-        for node in captures.get("cmd", []):
-            if _inside_command_substitution(node):
-                continue
-            text = node.text.decode("utf-8").strip() if node.text else ""
-            if text:
-                commands.append(text)
-
-    if not commands:
-        commands.append(command.strip())
-
-    return commands
-
-
-# ── Classification rules table ──
-# Each rule: (binaries, subcmds, activity, reject_flags)
-# - binaries: set of binary names that trigger this rule
-# - subcmds: set of subcmds required (None = any/no subcmd needed)
-# - activity: the classification result
-# - reject_flags: if ANY of these flags present, skip this rule (None = no rejection)
+# ── Classification rules ──
 
 _Rule = tuple[frozenset[str], frozenset[str] | None, str, frozenset[str] | None]
 
@@ -295,8 +82,20 @@ _INTERPRETER_VERIFY_MODULES: Final[frozenset[str]] = frozenset(
 )
 
 
+# ── AST helpers ──
+
+
+def _inside_command_substitution(node: ts.Node) -> bool:
+    p = node.parent
+    while p:
+        if p.type == "command_substitution":
+            return True
+        p = p.parent
+    return False
+
+
 def _words_from_command_node(node: ts.Node) -> list[str]:
-    """Extract word tokens from a command AST node (replaces shlex)."""
+    """Extract word tokens from a command AST node."""
     words: list[str] = []
     for child in node.children:
         if child.type == "command_name":
@@ -308,11 +107,14 @@ def _words_from_command_node(node: ts.Node) -> list[str]:
     return words
 
 
+def _looks_like_command(token: str) -> bool:
+    return bool(token) and not token[0].isdigit() and "/" not in token
+
+
 def _unwrap_binary(words: list[str]) -> tuple[str, str | None, list[str]]:
     """Extract binary, subcmd, and flags from a word list, unwrapping wrappers."""
     idx = 0
 
-    # Skip env var assignments (parsed as words like VAR=val in some contexts)
     while (
         idx < len(words)
         and "=" in words[idx]
@@ -331,10 +133,8 @@ def _unwrap_binary(words: list[str]) -> tuple[str, str | None, list[str]]:
             break
 
         idx += 1
-        # Skip VAR=val after wrapper
         while idx < len(words) and "=" in words[idx] and not words[idx].startswith("-"):
             idx += 1
-        # Skip flags (and their values)
         while idx < len(words) and words[idx].startswith("-"):
             idx += 1
             if (
@@ -359,8 +159,7 @@ def _unwrap_binary(words: list[str]) -> tuple[str, str | None, list[str]]:
     return binary, subcmd, flags
 
 
-def _looks_like_command(token: str) -> bool:
-    return bool(token) and not token[0].isdigit() and "/" not in token
+# ── Classification logic ──
 
 
 def _classify_from_words(
@@ -370,21 +169,17 @@ def _classify_from_words(
     if not binary:
         return SHELL_IMPLEMENTATION
 
-    # Setup rules (table-driven)
     for binaries, subcmds, activity, reject_flags in _SETUP_RULES:
         if binary in binaries and (subcmds is None or subcmd in subcmds):
             if reject_flags is None or not any(f in flags for f in reject_flags):
                 return activity
 
-    # Test runners (binary alone is sufficient)
     if binary in _TEST_RUNNER_BINARIES:
         return SHELL_VERIFICATION
 
-    # "X test" pattern
     if subcmd in ("test", "tests") and binary in _TEST_SUBCMD_BINARIES:
         return SHELL_VERIFICATION
 
-    # Linters / type checkers
     if binary in _LINTER_BINARIES:
         return SHELL_VERIFICATION
     if binary == "ruff":
@@ -405,7 +200,6 @@ def _classify_from_words(
     if binary == "cargo" and subcmd == "clippy":
         return SHELL_VERIFICATION
 
-    # Build tools
     if binary in ("cargo", "go", "make", "dotnet") and subcmd == "build":
         return SHELL_VERIFICATION
     if binary == "webpack" or (binary == "vite" and subcmd == "build"):
@@ -416,7 +210,6 @@ def _classify_from_words(
             return SHELL_VERIFICATION
         return SHELL_IMPLEMENTATION
 
-    # Interpreters with -m module
     if binary in ("python", "python3", "node") and "-m" in all_words:
         try:
             m_idx = all_words.index("-m")
@@ -429,7 +222,6 @@ def _classify_from_words(
             pass
         return SHELL_IMPLEMENTATION
 
-    # Git operations
     if binary == "git":
         if subcmd in _GIT_WRITE_SUBCMDS:
             return SHELL_GIT_OPS
@@ -437,6 +229,33 @@ def _classify_from_words(
             return SHELL_INVESTIGATION
 
     return SHELL_IMPLEMENTATION
+
+
+# ── Public API ──
+
+
+def _extract_commands_from_ast(command: str) -> list[str]:
+    """Extract individual command texts from a shell string via tree-sitter query."""
+    if not command or not command.strip():
+        return []
+
+    tree = _parser.parse(command.encode("utf-8"))
+    cursor = ts.QueryCursor(_Q_COMMANDS)
+    matches = cursor.matches(tree.root_node)
+
+    commands: list[str] = []
+    for _pat, captures in matches:
+        for node in captures.get("cmd", []):
+            if _inside_command_substitution(node):
+                continue
+            text = node.text.decode("utf-8").strip() if node.text else ""
+            if text:
+                commands.append(text)
+
+    if not commands:
+        commands.append(command.strip())
+
+    return commands
 
 
 def classify_shell_command(command: str) -> str:

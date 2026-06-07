@@ -1,0 +1,74 @@
+"""Event pipeline that fans out events to registered storage sinks."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Any
+
+from tracemill.sinks.base import StorageSink
+from tracemill.types import SessionEvent, TelemetrySpan, UsageRecord
+
+logger = logging.getLogger(__name__)
+
+
+class EventPipeline:
+    """Routes events, spans, and usage records to multiple storage sinks.
+
+    Sinks are error-isolated — one failing sink does not block others.
+    """
+
+    def __init__(self, sinks: list[StorageSink], enricher: Any | None = None) -> None:
+        self._sinks = list(sinks)
+        self._enricher = enricher  # accepted but not used yet (Step 2)
+
+    async def push(self, event: SessionEvent) -> None:
+        """Fan-out event to all registered sinks."""
+        results = await asyncio.gather(
+            *(sink.on_event(event) for sink in self._sinks),
+            return_exceptions=True,
+        )
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                logger.error("Sink %d failed on event %s: %s", i, event.id, result)
+
+    async def push_span(self, span: TelemetrySpan) -> None:
+        """Fan-out span to all registered sinks."""
+        results = await asyncio.gather(
+            *(sink.on_span(span) for sink in self._sinks),
+            return_exceptions=True,
+        )
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                logger.error("Sink %d failed on span %s: %s", i, span.name, result)
+
+    async def push_usage(self, usage: UsageRecord) -> None:
+        """Fan-out usage record to all registered sinks."""
+        results = await asyncio.gather(
+            *(sink.on_usage(usage) for sink in self._sinks),
+            return_exceptions=True,
+        )
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                logger.error("Sink %d failed on usage record: %s", i, result)
+
+    async def flush(self) -> None:
+        """Flush all sinks. Error-isolated."""
+        results = await asyncio.gather(
+            *(sink.flush() for sink in self._sinks),
+            return_exceptions=True,
+        )
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                logger.error("Sink %d failed on flush: %s", i, result)
+
+    async def close(self) -> None:
+        """Flush then close all sinks. Error-isolated."""
+        await self.flush()
+        results = await asyncio.gather(
+            *(sink.close() for sink in self._sinks),
+            return_exceptions=True,
+        )
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                logger.error("Sink %d failed on close: %s", i, result)

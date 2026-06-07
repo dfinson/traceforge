@@ -23,7 +23,7 @@ class Mechanism(StrEnum):
     Domain plugins extend with dot-path subtypes (e.g., "process.shell").
     """
 
-    FILE = "file"  # Direct filesystem access (read/write/search files)
+    FILESYSTEM = "filesystem"  # Direct filesystem access (read/write/search files)
     PROCESS = "process"  # Spawns or interacts with OS processes
     NETWORK = "network"  # Makes network requests (HTTP, WebSocket, etc.)
     DATABASE = "database"  # Queries or mutates a database

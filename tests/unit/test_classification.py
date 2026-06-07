@@ -29,9 +29,9 @@ from tracemill.classify.tools import classify_tool
 
 class TestClassification:
     def test_to_dict_minimal(self):
-        c = Classification(mechanism="file", effect="read_only")
+        c = Classification(mechanism="filesystem", effect="read_only")
         d = c.to_dict()
-        assert d == {"mechanism": "file", "effect": "read_only"}
+        assert d == {"mechanism": "filesystem", "effect": "read_only"}
 
     def test_to_dict_full(self):
         c = Classification(
@@ -93,13 +93,13 @@ class TestClassification:
         assert not c.has_action("transform")
 
     def test_has_scope_hierarchy(self):
-        c = Classification(mechanism="file", effect="mutating", scope=frozenset({"artifact.source_code"}))
+        c = Classification(mechanism="filesystem", effect="mutating", scope=frozenset({"artifact.source_code"}))
         assert c.has_scope("artifact.source_code")
         assert c.has_scope("artifact")
         assert not c.has_scope("data")
 
     def test_frozen(self):
-        c = Classification(mechanism="file", effect="read_only")
+        c = Classification(mechanism="filesystem", effect="read_only")
         with pytest.raises(AttributeError):
             c.mechanism = "shell"  # type: ignore[misc]
 
@@ -131,7 +131,7 @@ class TestDimensionRegistry:
     def test_register_and_validate(self):
         reg = DimensionRegistry()
         reg.register_dimension("mechanism", Mechanism)
-        assert reg.validate("mechanism", "file")
+        assert reg.validate("mechanism", "filesystem")
         assert reg.validate("mechanism", "process")
         assert not reg.validate("mechanism", "nonexistent")
 
@@ -188,7 +188,7 @@ class TestDimensionRegistry:
 
     def test_default_registry_loads(self):
         reg = get_default_registry()
-        assert reg.validate("mechanism", "file")
+        assert reg.validate("mechanism", "filesystem")
         assert reg.validate("mechanism", "process.shell")
         assert reg.validate("role", "validator.test_runner")
         assert reg.validate("action", "validate.test")
@@ -273,20 +273,20 @@ class TestClassifyShell:
 class TestClassifyToolDetailed:
     def test_view(self):
         c = classify_tool("view")
-        assert c.mechanism == "file"
+        assert c.mechanism == "filesystem"
         assert c.effect == "read_only"
         assert c.has_scope("artifact.source_code")
         assert "filesystem_read" in c.capability
 
     def test_edit(self):
         c = classify_tool("edit")
-        assert c.mechanism == "file"
+        assert c.mechanism == "filesystem"
         assert c.effect == "mutating"
         assert "filesystem_write" in c.capability
 
     def test_grep(self):
         c = classify_tool("grep")
-        assert c.mechanism == "file"
+        assert c.mechanism == "filesystem"
         assert c.effect == "read_only"
         assert c.has_role("retriever.search_index")
 
@@ -325,10 +325,10 @@ class TestClassifyToolDetailed:
 
     def test_normalized_aliases(self):
         c = classify_tool("read_file")
-        assert c.mechanism == "file"
+        assert c.mechanism == "filesystem"
 
         c2 = classify_tool("str_replace_editor")
-        assert c2.mechanism == "file"
+        assert c2.mechanism == "filesystem"
 
     def test_custom_classifications(self):
         custom = {
@@ -350,7 +350,7 @@ class TestClassifyToolDetailed:
 
 class TestCoreEnums:
     def test_mechanism_values(self):
-        assert Mechanism.FILE == "file"
+        assert Mechanism.FILESYSTEM == "filesystem"
         assert CodingMechanism.PROCESS_SHELL == "process.shell"
 
     def test_effect_values(self):

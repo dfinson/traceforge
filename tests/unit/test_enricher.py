@@ -181,7 +181,7 @@ class TestToolClassification:
         cls = flushed[0].metadata.classification
         assert cls is not None
         assert isinstance(cls, Classification)
-        assert cls.mechanism == "file"
+        assert cls.mechanism == "filesystem"
         assert cls.effect == "mutating"
 
     def test_unknown_tool_gets_classification(self):
@@ -214,7 +214,7 @@ class TestToolClassification:
 
         flushed = enricher.flush()
         classifications = {e.payload["tool_name"]: e.metadata.classification for e in flushed}
-        assert classifications["edit"].mechanism == "file"
+        assert classifications["edit"].mechanism == "filesystem"
         assert classifications["my_tool"].mechanism == "custom.thing"
         assert classifications["my_tool"].phase_map
 

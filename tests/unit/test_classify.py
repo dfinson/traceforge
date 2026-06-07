@@ -93,11 +93,11 @@ class TestClassifyTool:
 
     def test_known_tools(self):
         assert classify_tool("bash").mechanism == "process.shell"
-        assert classify_tool("edit").mechanism == "file"
-        assert classify_tool("create").mechanism == "file"
-        assert classify_tool("view").mechanism == "file"
-        assert classify_tool("grep").mechanism == "file"
-        assert classify_tool("glob").mechanism == "file"
+        assert classify_tool("edit").mechanism == "filesystem"
+        assert classify_tool("create").mechanism == "filesystem"
+        assert classify_tool("view").mechanism == "filesystem"
+        assert classify_tool("grep").mechanism == "filesystem"
+        assert classify_tool("glob").mechanism == "filesystem"
         assert classify_tool("git_commit").mechanism == "process.shell"
         assert classify_tool("git_commit").has_role("persistence.version_control")
         assert classify_tool("report_intent").mechanism == "communication.system"
@@ -105,13 +105,13 @@ class TestClassifyTool:
 
     def test_alias_classified(self):
         assert classify_tool("powershell").mechanism == "process.shell"
-        assert classify_tool("read_file").mechanism == "file"
-        assert classify_tool("str_replace_editor").mechanism == "file"
-        assert classify_tool("greptool").mechanism == "file"
+        assert classify_tool("read_file").mechanism == "filesystem"
+        assert classify_tool("str_replace_editor").mechanism == "filesystem"
+        assert classify_tool("greptool").mechanism == "filesystem"
 
     def test_mcp_prefixed_classified(self):
         assert classify_tool("mcp__server__bash").mechanism == "process.shell"
-        assert classify_tool("mcp__fs__edit").mechanism == "file"
+        assert classify_tool("mcp__fs__edit").mechanism == "filesystem"
 
     def test_unknown_tool(self):
         c = classify_tool("unknowntool")
@@ -249,7 +249,7 @@ class TestEdgeCases:
 
     def test_namespace_prefixed_search_classified(self):
         """Namespace-prefixed grep still classified correctly."""
-        assert classify_tool("tools.grep").mechanism == "file"
+        assert classify_tool("tools.grep").mechanism == "filesystem"
 
     def test_case_insensitive_custom(self):
         """Custom map works case-insensitively."""

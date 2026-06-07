@@ -44,7 +44,7 @@ def _derive_phase(cls: Classification) -> str:
         return Phase.PLANNING
     if cls.mechanism.startswith("delegation"):
         return Phase.IMPLEMENTATION
-    if cls.mechanism == "file" and cls.effect == "read_only":
+    if cls.mechanism == "filesystem" and cls.effect == "read_only":
         return Phase.EXPLORATION
     return Phase.IMPLEMENTATION
 
@@ -215,7 +215,7 @@ def classify_tool(
 # - delegation.*: tools that spawn sub-agents
 _RAW_TOOL_CLASSIFICATIONS: dict[str, Classification] = {
     "view": Classification(
-        mechanism=Mechanism.FILE,
+        mechanism=Mechanism.FILESYSTEM,
         effect=Effect.READ_ONLY,
         scope=frozenset({CodingScope.SOURCE_CODE}),
         role=frozenset({CodingRole.FILE_BROWSER}),
@@ -223,7 +223,7 @@ _RAW_TOOL_CLASSIFICATIONS: dict[str, Classification] = {
         capability=frozenset({"filesystem_read"}),
     ),
     "edit": Classification(
-        mechanism=Mechanism.FILE,
+        mechanism=Mechanism.FILESYSTEM,
         effect=Effect.MUTATING,
         scope=frozenset({CodingScope.SOURCE_CODE}),
         role=frozenset({CodingRole.FILE_EDITOR}),
@@ -231,7 +231,7 @@ _RAW_TOOL_CLASSIFICATIONS: dict[str, Classification] = {
         capability=frozenset({"filesystem_write"}),
     ),
     "create": Classification(
-        mechanism=Mechanism.FILE,
+        mechanism=Mechanism.FILESYSTEM,
         effect=Effect.MUTATING,
         scope=frozenset({CodingScope.SOURCE_CODE}),
         role=frozenset({CodingRole.FILE_EDITOR}),
@@ -239,7 +239,7 @@ _RAW_TOOL_CLASSIFICATIONS: dict[str, Classification] = {
         capability=frozenset({"filesystem_write"}),
     ),
     "grep": Classification(
-        mechanism=Mechanism.FILE,
+        mechanism=Mechanism.FILESYSTEM,
         effect=Effect.READ_ONLY,
         scope=frozenset({CodingScope.SOURCE_CODE}),
         role=frozenset({CodingRole.SEARCH_INDEX}),
@@ -247,7 +247,7 @@ _RAW_TOOL_CLASSIFICATIONS: dict[str, Classification] = {
         capability=frozenset({"filesystem_read"}),
     ),
     "glob": Classification(
-        mechanism=Mechanism.FILE,
+        mechanism=Mechanism.FILESYSTEM,
         effect=Effect.READ_ONLY,
         scope=frozenset({CodingScope.SOURCE_CODE}),
         role=frozenset({CodingRole.FILE_BROWSER}),

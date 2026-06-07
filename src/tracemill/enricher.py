@@ -193,7 +193,7 @@ def _phases_from_classification(cls: Classification) -> frozenset[str]:
         phases.add(Phase.PLANNING)
     if cls.mechanism.startswith("delegation"):
         phases.add(Phase.IMPLEMENTATION)
-    if cls.mechanism == "file" and cls.effect == "read_only":
+    if cls.mechanism == "filesystem" and cls.effect == "read_only":
         phases.add(Phase.EXPLORATION)
 
     return frozenset(phases) if phases else frozenset({Phase.IMPLEMENTATION})

@@ -65,7 +65,7 @@ class Enricher:
             event = self._classify_tool(event)
             event = self._set_visibility(event)
             event = self._set_phase(event)
-            tool_call_id = event.payload.get("tool_call_id")
+            tool_call_id = _extract_tool_call_id(event)
             if tool_call_id:
                 displaced = self._pending.pop(tool_call_id, None)
                 self._pending[tool_call_id] = event
@@ -80,7 +80,7 @@ class Enricher:
             return event
 
         if event.kind == EventKind.TOOL_COMPLETE:
-            tool_call_id = event.payload.get("tool_call_id")
+            tool_call_id = _extract_tool_call_id(event)
             start_event = self._pending.get(tool_call_id) if tool_call_id else None
 
             if start_event is not None:
@@ -187,6 +187,17 @@ def _compute_duration_ms(start: datetime, end: datetime) -> float:
     """Compute duration in milliseconds between two timestamps."""
     delta = (end - start).total_seconds() * 1000.0
     return max(delta, 0.0)
+
+
+def _extract_tool_call_id(event: SessionEvent) -> str | None:
+    """Extract and validate tool_call_id from event payload.
+    Returns None if missing, empty, or non-string."""
+    value = event.payload.get("tool_call_id")
+    if isinstance(value, str) and value:
+        return value
+    if value is not None and not isinstance(value, str):
+        logger.debug("Ignoring non-string tool_call_id: %r", value)
+    return None
 
 
 def _merge_metadata(

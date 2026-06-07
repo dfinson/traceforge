@@ -635,3 +635,29 @@ class TestIDStabilityAndRobustness:
         result = enricher.process(complete)
         assert result.payload["arguments"] == {"command": "pytest tests/"}
         assert result.payload["_enrichment"]["phase"] == "verification"
+
+    def test_non_string_tool_call_id_treated_as_missing(self):
+        """Non-string tool_call_id should not crash or buffer."""
+        enricher = Enricher()
+        event = SessionEvent(
+            kind=EventKind.TOOL_START,
+            session_id="sess-1",
+            timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            payload={"tool_call_id": 12345, "tool_name": "edit"},
+        )
+        result = enricher.process(event)
+        # Treated as no ID — emitted immediately, not buffered
+        assert result is not None
+        assert enricher.flush() == []
+
+    def test_empty_string_tool_call_id_treated_as_missing(self):
+        """Empty string tool_call_id should not buffer."""
+        enricher = Enricher()
+        event = SessionEvent(
+            kind=EventKind.TOOL_START,
+            session_id="sess-1",
+            timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            payload={"tool_call_id": "", "tool_name": "edit"},
+        )
+        result = enricher.process(event)
+        assert result is not None

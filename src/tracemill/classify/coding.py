@@ -35,20 +35,21 @@ class ShellStructure(StrEnum):
 class CodingMechanism(StrEnum):
     """Coding-specific mechanism subtypes.
 
-    Mechanism is the invocation surface ONLY — direction/verb is expressed
-    through Action and Effect dimensions, not mechanism subtypes.
+    Extends core Mechanism with finer-grained resource domains specific to
+    software development. Mechanism is the resource domain ONLY — what the
+    tool talks to. Direction/intent is expressed through Action and Effect.
     """
 
-    PROCESS_SHELL = "process.shell"
-    PROCESS_REPL = "process.repl"
-    PROCESS_DEBUG = "process.debug"
-    NETWORK_HTTP = "network.http"
-    DATABASE_SQL = "database.sql"
-    DATABASE_NOSQL = "database.nosql"
-    DELEGATION_AGENT = "delegation.agent"
-    DELEGATION_SELF = "delegation.self"
-    COMMUNICATION_USER = "communication.user"
-    COMMUNICATION_SYSTEM = "communication.system"
+    PROCESS_SHELL = "process.shell"  # Runs commands in a shell (bash, powershell)
+    PROCESS_REPL = "process.repl"  # Interactive language runtime (python, node)
+    PROCESS_DEBUG = "process.debug"  # Debugger attached to a process (gdb, lldb)
+    NETWORK_HTTP = "network.http"  # HTTP/HTTPS requests (fetch, curl, API calls)
+    DATABASE_SQL = "database.sql"  # SQL database queries (postgres, mysql, sqlite)
+    DATABASE_NOSQL = "database.nosql"  # NoSQL database operations (mongo, redis)
+    DELEGATION_AGENT = "delegation.agent"  # Spawns a sub-agent to do work
+    DELEGATION_SELF = "delegation.self"  # Self-delegates (plans, checkpoints)
+    COMMUNICATION_USER = "communication.user"  # Talks to the human user
+    COMMUNICATION_SYSTEM = "communication.system"  # Internal agent bookkeeping
 
 
 # ── Scope subtypes ──

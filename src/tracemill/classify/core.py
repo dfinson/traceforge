@@ -16,28 +16,31 @@ from typing import Any
 
 
 class Mechanism(StrEnum):
-    """How the action was physically performed — the invocation surface.
+    """Primary resource domain the tool operates in.
 
+    Answers: "What kind of system resource does this tool interact with?"
+    NOT "how does the agent invoke it" (all tools are invoked via tool calls).
     Domain plugins extend with dot-path subtypes (e.g., "process.shell").
     """
 
-    FILE = "file"
-    PROCESS = "process"
-    NETWORK = "network"
-    DATABASE = "database"
-    DELEGATION = "delegation"
-    COMMUNICATION = "communication"
+    FILE = "file"  # Direct filesystem access (read/write/search files)
+    PROCESS = "process"  # Spawns or interacts with OS processes
+    NETWORK = "network"  # Makes network requests (HTTP, WebSocket, etc.)
+    DATABASE = "database"  # Queries or mutates a database
+    DELEGATION = "delegation"  # Delegates work to another agent or system
+    COMMUNICATION = "communication"  # Exchanges messages (user or system)
 
 
 class Effect(StrEnum):
-    """Impact on state outside the agent.
+    """Observable impact on state outside the agent.
 
-    Use None/absent on Classification when the effect cannot be determined.
+    Use None/absent on Classification when the effect cannot be determined
+    statically (e.g., a shell command whose behavior depends on arguments).
     """
 
-    READ_ONLY = "read_only"
-    MUTATING = "mutating"
-    DESTRUCTIVE = "destructive"
+    READ_ONLY = "read_only"  # No external state change; pure observation
+    MUTATING = "mutating"  # Changes external state (files, DB, services)
+    DESTRUCTIVE = "destructive"  # Irreversible state change (delete, drop, rm -rf)
 
 
 # Precedence for aggregating compound effects (highest wins)
@@ -49,68 +52,87 @@ EFFECT_PRECEDENCE: dict[str, int] = {
 
 
 class Scope(StrEnum):
-    """What is being operated on — the subject matter domain."""
+    """What is being operated on — the subject matter domain.
 
-    ARTIFACT = "artifact"
-    STATE = "state"
-    DATA = "data"
-    CONFIGURATION = "configuration"
-    KNOWLEDGE = "knowledge"
-    IDENTITY = "identity"
-    MESSAGE = "message"
+    Scopes identify the TYPE of thing being touched, not the specific instance.
+    Domain plugins extend with dot-paths (e.g., "artifact.source_code").
+    """
+
+    ARTIFACT = "artifact"  # A produced/maintained file or object (code, docs, images)
+    STATE = "state"  # Runtime/operational state (processes, deployments, sessions)
+    DATA = "data"  # Application-level data (user records, logs, metrics)
+    CONFIGURATION = "configuration"  # Settings that control behavior (env vars, configs)
+    KNOWLEDGE = "knowledge"  # Reference information (APIs, specs, documentation)
+    IDENTITY = "identity"  # Auth/identity artifacts (keys, tokens, certs)
+    MESSAGE = "message"  # Communication payloads (chat messages, notifications)
 
 
 class Role(StrEnum):
-    """What archetype of tool is performing this action."""
+    """What archetype of tool is performing this action.
 
-    VALIDATOR = "validator"
-    RETRIEVER = "retriever"
-    TRANSFORMER = "transformer"
-    GENERATOR = "generator"
-    MODIFIER = "modifier"
-    EXECUTOR = "executor"
-    COMMUNICATOR = "communicator"
-    ORCHESTRATOR = "orchestrator"
-    OBSERVER = "observer"
-    PERSISTENCE = "persistence"
+    Roles describe the tool's PURPOSE, not its implementation.
+    A tool's role is stable across invocations (a linter is always a validator).
+    """
+
+    VALIDATOR = "validator"  # Checks correctness without changing anything
+    RETRIEVER = "retriever"  # Finds and returns existing information
+    TRANSFORMER = "transformer"  # Converts input to a different form (compile, format, bundle)
+    GENERATOR = "generator"  # Produces new content from specifications
+    MODIFIER = "modifier"  # Makes targeted changes to existing content
+    EXECUTOR = "executor"  # Runs code/commands as a side effect
+    COMMUNICATOR = "communicator"  # Exchanges messages with humans or systems
+    ORCHESTRATOR = "orchestrator"  # Coordinates other tools or workflows
+    OBSERVER = "observer"  # Monitors/inspects without changing state (debug, profile)
+    PERSISTENCE = "persistence"  # Manages durable storage (VCS, DB, cache)
 
 
 class Action(StrEnum):
-    """The abstract operation being performed — the verb."""
+    """The abstract operation being performed — the verb.
 
-    VALIDATE = "validate"
-    RETRIEVE = "retrieve"
-    TRANSFORM = "transform"
-    GENERATE = "generate"
-    EXECUTE = "execute"
-    DELIVER = "deliver"
-    CONFIGURE = "configure"
-    ANALYZE = "analyze"
-    PERSIST = "persist"
-    MODIFY = "modify"
-    REMOVE = "remove"
+    Actions are WHAT is done, independent of HOW (mechanism) or BY WHOM (role).
+    Domain plugins extend with dot-paths (e.g., "validate.lint").
+    """
+
+    VALIDATE = "validate"  # Check correctness, report pass/fail
+    RETRIEVE = "retrieve"  # Fetch existing data from a source
+    TRANSFORM = "transform"  # Convert data from one form to another
+    GENERATE = "generate"  # Create new content that didn't exist
+    EXECUTE = "execute"  # Run a process for its side effects
+    DELIVER = "deliver"  # Send/push data to an external destination
+    CONFIGURE = "configure"  # Set up or change system configuration
+    ANALYZE = "analyze"  # Inspect data to produce insights (not retrieve)
+    PERSIST = "persist"  # Save data durably (commit, write, store)
+    MODIFY = "modify"  # Change existing content in-place
+    REMOVE = "remove"  # Delete or tear down something
 
 
 class Capability(StrEnum):
-    """What system access the action requires."""
+    """What system access the action requires — the permission model.
 
-    FILESYSTEM_READ = "filesystem_read"
-    FILESYSTEM_WRITE = "filesystem_write"
-    NETWORK_INBOUND = "network_inbound"
-    NETWORK_OUTBOUND = "network_outbound"
-    SUBPROCESS = "subprocess"
-    USES_CREDENTIALS = "uses_credentials"
-    ELEVATED_PRIVILEGE = "elevated_privilege"
-    HUMAN_INTERACTION = "human_interaction"
+    Capabilities are cumulative (a tool may need multiple).
+    Used for policy/gating decisions (e.g., "this action needs network access").
+    """
+
+    FILESYSTEM_READ = "filesystem_read"  # Read files from disk
+    FILESYSTEM_WRITE = "filesystem_write"  # Write/create/delete files on disk
+    NETWORK_INBOUND = "network_inbound"  # Accept incoming connections
+    NETWORK_OUTBOUND = "network_outbound"  # Make outgoing requests
+    SUBPROCESS = "subprocess"  # Spawn child processes
+    USES_CREDENTIALS = "uses_credentials"  # Accesses secrets/tokens
+    ELEVATED_PRIVILEGE = "elevated_privilege"  # Requires sudo/admin
+    HUMAN_INTERACTION = "human_interaction"  # Requires human response
 
 
 class Structure(StrEnum):
-    """Compositional properties of the invocation — universal patterns."""
+    """Compositional properties of the invocation — how steps are arranged.
 
-    SEQUENTIAL = "sequential"
-    PARALLEL = "parallel"
-    CONDITIONAL = "conditional"
-    INTERACTIVE = "interactive"
+    Describes the structural pattern of the operation, not its content.
+    """
+
+    SEQUENTIAL = "sequential"  # Steps execute one after another
+    PARALLEL = "parallel"  # Steps execute concurrently
+    CONDITIONAL = "conditional"  # Execution depends on a condition (if/then)
+    INTERACTIVE = "interactive"  # Requires back-and-forth interaction
 
 
 @dataclass(frozen=True)

@@ -141,7 +141,13 @@ def classify_tool(
     )
 
 
-# Maps canonical tool names to Classification objects
+# Maps canonical tool names to Classification objects.
+# Mechanism reflects the RESOURCE DOMAIN the tool accesses (not implementation):
+# - file: tools that read/write/search filesystem content directly
+# - process.shell: tools that execute commands in a shell subprocess
+# - network.http: tools that make HTTP requests
+# - communication.*: tools that exchange messages (user or system)
+# - delegation.*: tools that spawn sub-agents
 _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
     "view": Classification(
         mechanism=Mechanism.FILE,
@@ -163,7 +169,7 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         mechanism=Mechanism.FILE,
         effect=Effect.MUTATING,
         scope=frozenset({CodingScope.SOURCE_CODE}),
-        role=frozenset(),
+        role=frozenset({CodingRole.FILE_EDITOR}),
         action=frozenset({CodingAction.WRITE}),
         capability=frozenset({"filesystem_write"}),
     ),
@@ -260,7 +266,7 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         effect=Effect.MUTATING,
         scope=frozenset({CodingScope.REPOSITORY}),
         role=frozenset({CodingRole.VERSION_CONTROL}),
-        action=frozenset({Action.RETRIEVE}),
+        action=frozenset({CodingAction.BROWSE}),
         capability=frozenset({"filesystem_write"}),
     ),
     "git_branch": Classification(
@@ -288,7 +294,6 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
     "web_fetch": Classification(
         mechanism=CodingMechanism.NETWORK_HTTP,
         effect=Effect.READ_ONLY,
-        scope=frozenset({CodingScope.DOCUMENTATION}),
         role=frozenset({CodingRole.WEB_SCRAPER}),
         action=frozenset({Action.RETRIEVE}),
         capability=frozenset({"network_outbound"}),
@@ -338,7 +343,6 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
     "web_browse": Classification(
         mechanism=CodingMechanism.NETWORK_HTTP,
         effect=Effect.READ_ONLY,
-        scope=frozenset({CodingScope.DOCUMENTATION}),
         role=frozenset({CodingRole.WEB_SCRAPER}),
         action=frozenset({CodingAction.BROWSE}),
         capability=frozenset({"network_outbound", "human_interaction"}),

@@ -35,24 +35,24 @@ class TestClassification:
 
     def test_to_dict_full(self):
         c = Classification(
-            mechanism="shell",
+            mechanism="process.shell",
             effect="mutating",
             scope=frozenset({"artifact.source_code"}),
             role=frozenset({"validator.test_runner"}),
             action=frozenset({"validate.test"}),
             capability=frozenset({"subprocess", "filesystem_read"}),
-            structure=frozenset({"compound", "sequential"}),
+            structure=frozenset({"piped", "sequential"}),
             shell_dialect="bash",
             binaries=("pytest", "pip"),
         )
         d = c.to_dict()
-        assert d["mechanism"] == "shell"
+        assert d["mechanism"] == "process.shell"
         assert d["effect"] == "mutating"
         assert d["scope"] == ["artifact.source_code"]
         assert d["role"] == ["validator.test_runner"]
         assert d["action"] == ["validate.test"]
         assert sorted(d["capability"]) == ["filesystem_read", "subprocess"]
-        assert sorted(d["structure"]) == ["compound", "sequential"]
+        assert sorted(d["structure"]) == ["piped", "sequential"]
         assert d["shell_dialect"] == "bash"
         assert d["binaries"] == ["pytest", "pip"]
 
@@ -132,15 +132,15 @@ class TestDimensionRegistry:
         reg = DimensionRegistry()
         reg.register_dimension("mechanism", Mechanism)
         assert reg.validate("mechanism", "file")
-        assert reg.validate("mechanism", "shell")
+        assert reg.validate("mechanism", "process")
         assert not reg.validate("mechanism", "nonexistent")
 
     def test_extend_validates_parent(self):
         reg = DimensionRegistry()
         reg.register_dimension("mechanism", Mechanism)
         reg.extend_dimension("mechanism", CodingMechanism)
-        assert reg.validate("mechanism", "file.read")
-        assert reg.validate("mechanism", "shell")
+        assert reg.validate("mechanism", "process.shell")
+        assert reg.validate("mechanism", "process.shell")
 
     def test_extend_rejects_orphan(self):
         from enum import StrEnum
@@ -189,7 +189,7 @@ class TestDimensionRegistry:
     def test_default_registry_loads(self):
         reg = get_default_registry()
         assert reg.validate("mechanism", "file")
-        assert reg.validate("mechanism", "shell")
+        assert reg.validate("mechanism", "process.shell")
         assert reg.validate("role", "validator.test_runner")
         assert reg.validate("action", "validate.test")
         assert reg.validate("scope", "artifact.source_code")
@@ -209,7 +209,7 @@ class TestDimensionRegistry:
 class TestClassifyShell:
     def test_pytest(self):
         c = classify_shell("pytest tests/ -v")
-        assert c.mechanism == "shell"
+        assert c.mechanism == "process.shell"
         assert c.effect == "read_only"
         assert c.has_role("validator.test_runner")
         assert c.has_action("validate")
@@ -231,7 +231,7 @@ class TestClassifyShell:
 
     def test_git_push(self):
         c = classify_shell("git push origin main")
-        assert c.has_role("orchestrator.version_control")
+        assert c.has_role("persistence.version_control")
         assert c.effect == "mutating"
         assert "network_outbound" in c.capability
 
@@ -255,7 +255,7 @@ class TestClassifyShell:
 
     def test_empty_command(self):
         c = classify_shell("")
-        assert c.mechanism == "shell"
+        assert c.mechanism == "process.shell"
         assert c.effect is None
 
     def test_piped_command(self):
@@ -273,28 +273,28 @@ class TestClassifyShell:
 class TestClassifyToolDetailed:
     def test_view(self):
         c = classify_tool("view")
-        assert c.mechanism == "file.read"
+        assert c.mechanism == "file"
         assert c.effect == "read_only"
         assert c.has_scope("artifact.source_code")
         assert "filesystem_read" in c.capability
 
     def test_edit(self):
         c = classify_tool("edit")
-        assert c.mechanism == "file.write"
+        assert c.mechanism == "file"
         assert c.effect == "mutating"
         assert "filesystem_write" in c.capability
 
     def test_grep(self):
         c = classify_tool("grep")
-        assert c.mechanism == "file.read"
+        assert c.mechanism == "file"
         assert c.effect == "read_only"
         assert c.has_role("retriever.search_index")
 
     def test_git_commit(self):
         c = classify_tool("git_commit")
-        assert c.mechanism == "shell"
+        assert c.mechanism == "process.shell"
         assert c.effect == "mutating"
-        assert c.has_role("orchestrator.version_control")
+        assert c.has_role("persistence.version_control")
         assert c.has_action("persist.commit")
 
     def test_report_intent(self):
@@ -314,7 +314,7 @@ class TestClassifyToolDetailed:
 
     def test_bash_tool(self):
         c = classify_tool("bash")
-        assert c.mechanism == "shell"
+        assert c.mechanism == "process.shell"
         assert c.shell_dialect == "bash"
 
     def test_unknown_tool(self):
@@ -324,10 +324,10 @@ class TestClassifyToolDetailed:
 
     def test_normalized_aliases(self):
         c = classify_tool("read_file")
-        assert c.mechanism == "file.read"
+        assert c.mechanism == "file"
 
         c2 = classify_tool("str_replace_editor")
-        assert c2.mechanism == "file.write"
+        assert c2.mechanism == "file"
 
     def test_custom_classifications(self):
         custom = {
@@ -350,7 +350,7 @@ class TestClassifyToolDetailed:
 class TestCoreEnums:
     def test_mechanism_values(self):
         assert Mechanism.FILE == "file"
-        assert Mechanism.SHELL == "shell"
+        assert CodingMechanism.PROCESS_SHELL == "process.shell"
 
     def test_effect_values(self):
         assert Effect.READ_ONLY == "read_only"
@@ -372,3 +372,5 @@ class TestCoreEnums:
         for v in CodingScope:
             parent = v.value.rsplit(".", 1)[0]
             assert parent in [s.value for s in Scope], f"{v.value} has invalid parent {parent}"
+
+

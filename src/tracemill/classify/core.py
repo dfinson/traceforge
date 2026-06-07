@@ -12,44 +12,19 @@ from enum import StrEnum
 from typing import Any
 
 
-
-class Phase(StrEnum):
-    """Workflow stage at the session level.
-
-    Inferred from classification dimensions of recent events.
-    """
-
-    PLANNING = "planning"
-    IMPLEMENTATION = "implementation"
-    VERIFICATION = "verification"
-    EXPLORATION = "exploration"
-    REVIEW = "review"
-
-
-class Visibility(StrEnum):
-    """Display audience for an event in a trace view.
-
-    SYSTEM = not shown to end users (bookkeeping, internal tools).
-    VISIBLE = shown by default.
-    COLLAPSED = shown but minimized (e.g. repeated similar events).
-    """
-
-    VISIBLE = "visible"
-    SYSTEM = "system"
-    COLLAPSED = "collapsed"
-
-
 # ── Semantic classification dimensions ──
 
 
 class Mechanism(StrEnum):
-    """How the action was physically performed — the invocation surface."""
+    """How the action was physically performed — the invocation surface.
+
+    Domain plugins extend with dot-path subtypes (e.g., "process.shell").
+    """
 
     FILE = "file"
-    SHELL = "shell"
+    PROCESS = "process"
     NETWORK = "network"
     DATABASE = "database"
-    PROCESS = "process"
     DELEGATION = "delegation"
     COMMUNICATION = "communication"
 
@@ -111,6 +86,7 @@ class Action(StrEnum):
     CONFIGURE = "configure"
     ANALYZE = "analyze"
     PERSIST = "persist"
+    MODIFY = "modify"
     REMOVE = "remove"
 
 
@@ -128,25 +104,12 @@ class Capability(StrEnum):
 
 
 class Structure(StrEnum):
-    """Compositional properties of the invocation."""
+    """Compositional properties of the invocation — universal patterns."""
 
     SEQUENTIAL = "sequential"
     PARALLEL = "parallel"
     CONDITIONAL = "conditional"
-    PIPED = "piped"
-    REDIRECTED = "redirected"
     INTERACTIVE = "interactive"
-
-
-class ShellDialect(StrEnum):
-    """Shell language dialect."""
-
-    BASH = "bash"
-    POWERSHELL = "powershell"
-    CMD = "cmd"
-    ZSH = "zsh"
-    FISH = "fish"
-    POSIX_SH = "posix_sh"
 
 
 @dataclass(frozen=True)

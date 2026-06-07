@@ -211,3 +211,4 @@ class TestCmdClassification:
 
     def test_scoop_install(self):
         assert classify_cmd_command("scoop install rust") == SHELL_SETUP
+

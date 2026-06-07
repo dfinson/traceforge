@@ -6,7 +6,9 @@ import logging
 from datetime import datetime
 
 from tracemill.classify import classify_shell, classify_tool
-from tracemill.classify.core import Classification, Mechanism, Phase, Visibility
+from tracemill.classify.core import Classification
+from tracemill.classify.coding import CodingMechanism
+from tracemill.classify.workflow import Phase, Visibility
 from tracemill.types import EventKind, EventMetadata, SessionEvent
 
 logger = logging.getLogger(__name__)
@@ -106,7 +108,7 @@ class Enricher:
             command = arguments
 
         if not command:
-            return Classification(mechanism=Mechanism.SHELL, effect=None)
+            return Classification(mechanism=CodingMechanism.PROCESS_SHELL, effect=None)
 
         return classify_shell(command)
 
@@ -159,35 +161,42 @@ class Enricher:
 
 
 def _phase_from_classification(cls: Classification) -> str:
-    """Derive phase from a Classification's action/role dimensions."""
+    """Derive phase from a Classification's action/role dimensions.
+
+    Uses action and role dimensions (not mechanism) because mechanism is
+    the invocation surface, not the semantic intent.
+    """
     # Validate/test/lint → verification
     if cls.has_action("validate"):
         return Phase.VERIFICATION
-    # Git/VCS commit/push/deliver → review
-    if cls.has_role("orchestrator.version_control") and (
+    # VCS persist/deliver → review (commit, push, publish, deploy)
+    if cls.has_role("persistence.version_control") and (
         cls.has_action("persist") or cls.has_action("deliver")
     ):
         return Phase.REVIEW
     if cls.has_action("deliver"):
         return Phase.REVIEW
-    # Retrieve/search/analyze → exploration
+    # Retrieve/search/analyze/browse → exploration
     if cls.has_action("retrieve") or cls.has_action("analyze"):
         return Phase.EXPLORATION
-    # Configure/install → implementation (setup is part of implementation)
+    # Modify/persist (non-VCS: file edits, writes) → implementation
+    if cls.has_action("modify") or cls.has_action("persist"):
+        return Phase.IMPLEMENTATION
+    # Configure/install → implementation
     if cls.has_action("configure"):
         return Phase.IMPLEMENTATION
-    # File write/mutating → implementation
-    if cls.mechanism.startswith("file.write"):
+    # Execute (scripts, services) → implementation
+    if cls.has_action("execute"):
         return Phase.IMPLEMENTATION
-    # File read → exploration
-    if cls.mechanism.startswith("file.read") or cls.mechanism.startswith("file."):
-        return Phase.EXPLORATION
-    # Communication/internal → planning
+    # Communication → planning
     if cls.mechanism.startswith("communication"):
         return Phase.PLANNING
     # Delegation → implementation
     if cls.mechanism.startswith("delegation"):
         return Phase.IMPLEMENTATION
+    # File mechanism with read-only effect → exploration
+    if cls.mechanism == "file" and cls.effect == "read_only":
+        return Phase.EXPLORATION
 
     return Phase.IMPLEMENTATION
 

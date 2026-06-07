@@ -48,13 +48,15 @@ ACTIVITY_PRIORITY: Final[dict[ShellActivity, int]] = {
 
 
 def activity_from_classification(cls: Classification) -> ShellActivity:
-    """Derive ShellActivity from a Classification's action dimensions."""
+    """Derive ShellActivity from a Classification's action/role dimensions."""
     if cls.has_action("validate"):
         return ShellActivity.VERIFICATION
     if cls.has_action("configure"):
         return ShellActivity.SETUP
     if cls.has_action("retrieve") or cls.has_action("analyze"):
         return ShellActivity.INVESTIGATION
+    if cls.has_role("persistence.version_control"):
+        return ShellActivity.GIT_OPS
     if cls.has_action("persist") or cls.has_action("deliver"):
         return ShellActivity.GIT_OPS
     return ShellActivity.IMPLEMENTATION
@@ -227,8 +229,8 @@ BINARY_INFO: Final[dict[str, BinaryInfo]] = {
     "apt": BinaryInfo(role=CodingRole.PACKAGE_MANAGER, default_effect=Effect.MUTATING, network=True),
     "apt-get": BinaryInfo(role=CodingRole.PACKAGE_MANAGER, default_effect=Effect.MUTATING, network=True),
     "docker": BinaryInfo(role=CodingRole.CONTAINER_RUNTIME, default_effect=None, network=True),
-    "kubectl": BinaryInfo(role=CodingRole.CLOUD_CLI, default_effect=None, network=True),
-    "terraform": BinaryInfo(role=CodingRole.CLOUD_CLI, default_effect=None, network=True),
+    "kubectl": BinaryInfo(role=CodingRole.CONTAINER_RUNTIME, default_effect=None, network=True),
+    "terraform": BinaryInfo(role=CodingRole.TASK_RUNNER, default_effect=None, network=True),
     "git": BinaryInfo(role=CodingRole.VERSION_CONTROL, default_effect=None),
     "make": BinaryInfo(role=CodingRole.TASK_RUNNER, default_effect=None),
     "gradle": BinaryInfo(role=CodingRole.TASK_RUNNER, default_effect=None),
@@ -242,9 +244,9 @@ BINARY_INFO: Final[dict[str, BinaryInfo]] = {
     "node": BinaryInfo(role=CodingRole.SCRIPT_RUNNER, default_effect=None),
     "curl": BinaryInfo(role=CodingRole.API_CLIENT, default_effect=Effect.READ_ONLY, network=True),
     "wget": BinaryInfo(role=CodingRole.API_CLIENT, default_effect=Effect.MUTATING, network=True),
-    "rm": BinaryInfo(role=CodingRole.SHELL_RUNTIME, default_effect=Effect.DESTRUCTIVE),
-    "rmdir": BinaryInfo(role=CodingRole.SHELL_RUNTIME, default_effect=Effect.DESTRUCTIVE),
-    "sudo": BinaryInfo(role=CodingRole.SHELL_RUNTIME, default_effect=None),
+    "rm": BinaryInfo(role=CodingRole.SCRIPT_RUNNER, default_effect=Effect.DESTRUCTIVE),
+    "rmdir": BinaryInfo(role=CodingRole.SCRIPT_RUNNER, default_effect=Effect.DESTRUCTIVE),
+    "sudo": BinaryInfo(role=CodingRole.SCRIPT_RUNNER, default_effect=None),
     "choco": BinaryInfo(role=CodingRole.PACKAGE_MANAGER, default_effect=Effect.MUTATING, network=True),
     "winget": BinaryInfo(role=CodingRole.PACKAGE_MANAGER, default_effect=Effect.MUTATING, network=True),
     "scoop": BinaryInfo(role=CodingRole.PACKAGE_MANAGER, default_effect=Effect.MUTATING, network=True),
@@ -309,7 +311,7 @@ def classify_binary(
     return SHELL_IMPLEMENTATION
 
 
-def effect_for_binary(binary: str, subcmd: str | None, flags: list[str]) -> Effect:
+def effect_for_binary(binary: str, subcmd: str | None, flags: list[str]) -> Effect | None:
     """Determine effect from binary + context, using rule table and binary info."""
     # Flag-dependent overrides
     if binary in ("ruff", "eslint", "rubocop", "clippy"):

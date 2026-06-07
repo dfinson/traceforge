@@ -7,12 +7,9 @@ from tracemill.classify.core import (
     Classification,
     Effect,
     Mechanism,
-    Phase,
     Role,
     Scope,
-    ShellDialect,
     Structure,
-    Visibility,
     aggregate_effect,
 )
 from tracemill.classify.coding import (
@@ -20,6 +17,8 @@ from tracemill.classify.coding import (
     CodingMechanism,
     CodingRole,
     CodingScope,
+    ShellDialect,
+    ShellStructure,
 )
 from tracemill.classify.powershell import classify_powershell_command
 from tracemill.classify.registry import DimensionRegistry, get_default_registry
@@ -32,6 +31,7 @@ from tracemill.classify.tools import (
     classify_tool,
     normalize_tool_name,
 )
+from tracemill.classify.workflow import Phase, Visibility
 
 __all__ = [
     # Core types
@@ -44,6 +44,7 @@ __all__ = [
     "Role",
     "Scope",
     "ShellDialect",
+    "ShellStructure",
     "Structure",
     "Visibility",
     "aggregate_effect",

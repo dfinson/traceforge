@@ -11,13 +11,14 @@ import tree_sitter_bash as tsbash
 from tracemill.classify.core import (
     Classification,
     Effect,
-    Mechanism,
     Structure,
     aggregate_effect,
 )
 from tracemill.classify.coding import (
     CodingAction,
+    CodingMechanism,
     CodingScope,
+    ShellStructure,
 )
 from tracemill.classify.rules import (
     ACTIVITY_PRIORITY,
@@ -29,6 +30,7 @@ from tracemill.classify.rules import (
     SHELL_VERIFICATION,
     classify_binary,
     effect_for_binary,
+    match_rule,
 )
 
 _BASH_LANGUAGE = ts.Language(tsbash.language())
@@ -144,13 +146,13 @@ def _extract_commands_from_ast(command: str) -> list[str]:
     return commands
 
 
-# ── Activity-to-dimension mappings ──
+# ── Activity-to-dimension mappings (fallback when no rule role) ──
 
 _ACTIVITY_TO_ACTION: Final[dict[str, str]] = {
     SHELL_VERIFICATION: CodingAction.TEST,
     SHELL_SETUP: CodingAction.INSTALL,
-    SHELL_GIT_OPS: CodingAction.PUSH,
-    SHELL_INVESTIGATION: CodingAction.SEARCH,
+    SHELL_GIT_OPS: CodingAction.COMMIT,
+    SHELL_INVESTIGATION: CodingAction.READ,
     SHELL_IMPLEMENTATION: CodingAction.RUN_SCRIPT,
 }
 
@@ -160,6 +162,41 @@ _ACTIVITY_TO_SCOPE: Final[dict[str, str]] = {
     SHELL_GIT_OPS: CodingScope.REPOSITORY,
     SHELL_INVESTIGATION: CodingScope.SOURCE_CODE,
     SHELL_IMPLEMENTATION: CodingScope.SOURCE_CODE,
+}
+
+# Per-git-subcommand action (instead of mapping all git ops to one action)
+_GIT_SUBCMD_ACTION: Final[dict[str, str]] = {
+    "commit": CodingAction.COMMIT,
+    "push": CodingAction.PUSH,
+    "merge": CodingAction.MERGE,
+    "rebase": CodingAction.REBASE,
+    "cherry-pick": CodingAction.MERGE,
+    "tag": CodingAction.STAGE,
+    "reset": CodingAction.EDIT,
+    "stash": CodingAction.STAGE,
+    "diff": CodingAction.DIFF,
+    "log": CodingAction.BROWSE,
+    "status": CodingAction.BROWSE,
+    "show": CodingAction.READ,
+    "blame": CodingAction.READ,
+    "branch": CodingAction.BROWSE,
+    "checkout": CodingAction.RUN_SCRIPT,
+    "switch": CodingAction.RUN_SCRIPT,
+    "fetch": CodingAction.READ,
+    "pull": CodingAction.READ,
+    "clone": CodingAction.READ,
+    "add": CodingAction.STAGE,
+}
+
+# Per-verification-role action (maps to validate.* subtypes)
+_VERIFICATION_ROLE_ACTION: Final[dict[str, str]] = {
+    "validator.linter": CodingAction.LINT,
+    "validator.test_runner": CodingAction.TEST,
+    "validator.type_checker": CodingAction.TYPECHECK,
+    "validator.security_scanner": CodingAction.SECURITY_SCAN,
+    "validator.build_checker": CodingAction.BUILD_CHECK,
+    "transformer.formatter": CodingAction.LINT,  # formatter in check mode = linting
+    "transformer.bundler": CodingAction.BUILD_CHECK,  # bundler build = build check
 }
 
 
@@ -173,7 +210,7 @@ def _detect_structure(tree: ts.Tree) -> frozenset[str]:
             structures.add(Structure.SEQUENTIAL)
         elif child.type == "pipeline":
             if child.child_count > 1:
-                structures.add(Structure.PIPED)
+                structures.add(ShellStructure.PIPED)
 
     _check_tree_structure(root, structures)
     return frozenset(structures)
@@ -182,9 +219,9 @@ def _detect_structure(tree: ts.Tree) -> frozenset[str]:
 def _check_tree_structure(node: ts.Node, structures: set[str]) -> None:
     """Recursively check for structural patterns."""
     if node.type == "redirected_statement":
-        structures.add(Structure.REDIRECTED)
+        structures.add(ShellStructure.REDIRECTED)
     elif node.type == "pipeline" and node.child_count > 1:
-        structures.add(Structure.PIPED)
+        structures.add(ShellStructure.PIPED)
     elif node.type in ("if_statement", "case_statement"):
         structures.add(Structure.CONDITIONAL)
 
@@ -196,7 +233,7 @@ def classify_shell(command: str) -> Classification:
     """Classify a bash shell command into a Classification object."""
     if not command or not command.strip():
         return Classification(
-            mechanism=Mechanism.SHELL,
+            mechanism=CodingMechanism.PROCESS_SHELL,
             effect=None,
         )
 
@@ -206,7 +243,7 @@ def classify_shell(command: str) -> Classification:
 
     if not matches:
         return Classification(
-            mechanism=Mechanism.SHELL,
+            mechanism=CodingMechanism.PROCESS_SHELL,
             effect=None,
             capability=frozenset({"subprocess"}),
         )
@@ -219,6 +256,10 @@ def classify_shell(command: str) -> Classification:
     all_binaries: list[str] = []
     best_activity = SHELL_IMPLEMENTATION
     best_priority = -1
+    # Track per-command details for precise action mapping
+    best_binary: str = ""
+    best_subcmd: str | None = None
+    best_rule_role: str = ""
 
     for _pattern_idx, captures in matches:
         for node in captures.get("cmd", []):
@@ -241,17 +282,28 @@ def classify_shell(command: str) -> Classification:
             if priority > best_priority:
                 best_priority = priority
                 best_activity = activity
+                best_binary = binary
+                best_subcmd = subcmd
 
-            # Role from binary info
-            info = BINARY_INFO.get(binary)
-            if info:
-                all_roles.add(info.role)
+            # Use rule role (more precise than binary info fallback)
+            rule = match_rule(binary, subcmd, flags)
+            if rule and rule.role:
+                all_roles.add(rule.role)
+                if priority == best_priority:
+                    best_rule_role = rule.role
+            else:
+                # Fallback: role from binary info
+                info = BINARY_INFO.get(binary)
+                if info:
+                    all_roles.add(info.role)
 
             # Effect from shared function
             effect = effect_for_binary(binary, subcmd, flags)
-            all_effects.append(effect)
+            if effect:
+                all_effects.append(effect)
 
             # Capabilities from binary info
+            info = BINARY_INFO.get(binary)
             if info and info.network:
                 all_capabilities.add("network_outbound")
             if binary == "git" and subcmd in ("push", "pull", "fetch", "clone"):
@@ -262,10 +314,18 @@ def classify_shell(command: str) -> Classification:
             if binary == "sudo":
                 all_capabilities.add("elevated_privilege")
 
-    # Map activity to action/scope
-    action_val = _ACTIVITY_TO_ACTION.get(best_activity)
-    if action_val:
+    # Map activity to action — use per-subcommand precision when available
+    if best_activity == SHELL_GIT_OPS and best_binary == "git" and best_subcmd:
+        action_val = _GIT_SUBCMD_ACTION.get(best_subcmd, CodingAction.COMMIT)
         all_actions.add(action_val)
+    elif best_activity == SHELL_VERIFICATION and best_rule_role:
+        action_val = _VERIFICATION_ROLE_ACTION.get(best_rule_role, CodingAction.TEST)
+        all_actions.add(action_val)
+    else:
+        action_val = _ACTIVITY_TO_ACTION.get(best_activity)
+        if action_val:
+            all_actions.add(action_val)
+
     scope_val = _ACTIVITY_TO_SCOPE.get(best_activity)
     if scope_val:
         all_scopes.add(scope_val)
@@ -283,7 +343,7 @@ def classify_shell(command: str) -> Classification:
     structure = _detect_structure(tree)
 
     return Classification(
-        mechanism=Mechanism.SHELL,
+        mechanism=CodingMechanism.PROCESS_SHELL,
         effect=agg_effect,
         scope=frozenset(all_scopes),
         role=frozenset(all_roles),

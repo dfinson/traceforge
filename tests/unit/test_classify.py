@@ -92,26 +92,26 @@ class TestClassifyTool:
         assert c.mechanism == "communication"
 
     def test_known_tools(self):
-        assert classify_tool("bash").mechanism == "shell"
-        assert classify_tool("edit").mechanism == "file.write"
-        assert classify_tool("create").mechanism == "file.write"
-        assert classify_tool("view").mechanism == "file.read"
-        assert classify_tool("grep").mechanism == "file.read"
-        assert classify_tool("glob").mechanism == "file.read"
-        assert classify_tool("git_commit").mechanism == "shell"
-        assert classify_tool("git_commit").has_role("orchestrator.version_control")
+        assert classify_tool("bash").mechanism == "process.shell"
+        assert classify_tool("edit").mechanism == "file"
+        assert classify_tool("create").mechanism == "file"
+        assert classify_tool("view").mechanism == "file"
+        assert classify_tool("grep").mechanism == "file"
+        assert classify_tool("glob").mechanism == "file"
+        assert classify_tool("git_commit").mechanism == "process.shell"
+        assert classify_tool("git_commit").has_role("persistence.version_control")
         assert classify_tool("report_intent").mechanism == "communication.system"
         assert classify_tool("ask_user").mechanism == "communication.user"
 
     def test_alias_classified(self):
-        assert classify_tool("powershell").mechanism == "shell"
-        assert classify_tool("read_file").mechanism == "file.read"
-        assert classify_tool("str_replace_editor").mechanism == "file.write"
-        assert classify_tool("greptool").mechanism == "file.read"
+        assert classify_tool("powershell").mechanism == "process.shell"
+        assert classify_tool("read_file").mechanism == "file"
+        assert classify_tool("str_replace_editor").mechanism == "file"
+        assert classify_tool("greptool").mechanism == "file"
 
     def test_mcp_prefixed_classified(self):
-        assert classify_tool("mcp__server__bash").mechanism == "shell"
-        assert classify_tool("mcp__fs__edit").mechanism == "file.write"
+        assert classify_tool("mcp__server__bash").mechanism == "process.shell"
+        assert classify_tool("mcp__fs__edit").mechanism == "file"
 
     def test_unknown_tool(self):
         c = classify_tool("unknowntool")
@@ -128,7 +128,7 @@ class TestClassifyTool:
         custom = {"my_tool": custom_cls}
         assert classify_tool("my_tool", custom) is custom_cls
         # Default still works
-        assert classify_tool("bash", custom).mechanism == "shell"
+        assert classify_tool("bash", custom).mechanism == "process.shell"
 
     def test_custom_on_canonical_name(self):
         custom_cls = Classification(mechanism="custom.shell", effect="mutating")
@@ -238,11 +238,11 @@ class TestEdgeCases:
 
     def test_mcp_prefixed_shell_classified(self):
         """MCP-prefixed shell tool still classified as shell."""
-        assert classify_tool("mcp__terminal__bash").mechanism == "shell"
+        assert classify_tool("mcp__terminal__bash").mechanism == "process.shell"
 
     def test_namespace_prefixed_search_classified(self):
         """Namespace-prefixed grep still classified correctly."""
-        assert classify_tool("tools.grep").mechanism == "file.read"
+        assert classify_tool("tools.grep").mechanism == "file"
 
     def test_case_insensitive_custom(self):
         """Custom map works case-insensitively."""
@@ -252,7 +252,7 @@ class TestEdgeCases:
 
     def test_classify_tool_with_none_custom(self):
         """None custom_classifications doesn't crash."""
-        assert classify_tool("bash", None).mechanism == "shell"
+        assert classify_tool("bash", None).mechanism == "process.shell"
 
     def test_all_git_tools_classified(self):
         """All git_* variants have version_control role."""
@@ -267,7 +267,7 @@ class TestEdgeCases:
             "git_merge",
         ]
         for tool in git_tools:
-            assert classify_tool(tool).has_role("orchestrator.version_control"), f"{tool} should have version_control role"
+            assert classify_tool(tool).has_role("persistence.version_control"), f"{tool} should have version_control role"
 
 
 # =============================================================================
@@ -372,3 +372,4 @@ class TestShellClassificationQuoteAware:
         """sudo/env/nohup transparently unwrap to the real command."""
         assert _activity("sudo pytest") == SHELL_VERIFICATION
         assert _activity("nohup git push &") == SHELL_GIT_OPS
+

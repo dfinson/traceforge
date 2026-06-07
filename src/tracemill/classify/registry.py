@@ -97,6 +97,7 @@ def build_default_registry() -> DimensionRegistry:
         CodingMechanism,
         CodingRole,
         CodingScope,
+        ShellDialect,
     )
     from tracemill.classify.core import (
         Action,
@@ -105,7 +106,6 @@ def build_default_registry() -> DimensionRegistry:
         Mechanism,
         Role,
         Scope,
-        ShellDialect,
         Structure,
     )
 
@@ -119,13 +119,13 @@ def build_default_registry() -> DimensionRegistry:
     reg.register_dimension("action", Action)
     reg.register_dimension("capability", Capability)
     reg.register_dimension("structure", Structure)
-    reg.register_dimension("shell_dialect", ShellDialect)
 
     # Coding extensions
     reg.extend_dimension("mechanism", CodingMechanism)
     reg.extend_dimension("scope", CodingScope)
     reg.extend_dimension("role", CodingRole)
     reg.extend_dimension("action", CodingAction)
+    reg.register_dimension("shell_dialect", ShellDialect)
 
     return reg
 

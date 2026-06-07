@@ -8,23 +8,43 @@ from __future__ import annotations
 from enum import StrEnum
 
 
+# ── Shell-specific types (coding domain only) ──
+
+
+class ShellDialect(StrEnum):
+    """Shell language dialect for process.shell mechanism."""
+
+    BASH = "bash"
+    POWERSHELL = "powershell"
+    CMD = "cmd"
+    ZSH = "zsh"
+    FISH = "fish"
+    POSIX_SH = "posix_sh"
+
+
+class ShellStructure(StrEnum):
+    """Shell-specific structural patterns (extends core Structure)."""
+
+    PIPED = "piped"
+    REDIRECTED = "redirected"
+
+
 # ── Mechanism subtypes ──
 
 
 class CodingMechanism(StrEnum):
     """Coding-specific mechanism subtypes.
 
-    Use Mechanism + ShellDialect for shell variants; do not duplicate here.
+    Mechanism is the invocation surface ONLY — direction/verb is expressed
+    through Action and Effect dimensions, not mechanism subtypes.
     """
 
-    FILE_READ = "file.read"
-    FILE_WRITE = "file.write"
-    FILE_DELETE = "file.delete"
+    PROCESS_SHELL = "process.shell"
+    PROCESS_REPL = "process.repl"
+    PROCESS_DEBUG = "process.debug"
     NETWORK_HTTP = "network.http"
     DATABASE_SQL = "database.sql"
     DATABASE_NOSQL = "database.nosql"
-    PROCESS_REPL = "process.repl"
-    PROCESS_DEBUG = "process.debug"
     DELEGATION_AGENT = "delegation.agent"
     DELEGATION_SELF = "delegation.self"
     COMMUNICATION_USER = "communication.user"
@@ -42,8 +62,8 @@ class CodingScope(StrEnum):
     BUILD_OUTPUT = "artifact.build_output"
     CONTAINER_IMAGE = "artifact.container_image"
     PACKAGE = "artifact.package"
-    DOCUMENTATION = "knowledge.documentation"
-    API_SPEC = "knowledge.api_spec"
+    DOCUMENTATION = "artifact.documentation"
+    API_SPEC = "artifact.api_spec"
     DEPENDENCY = "configuration.dependency"
     ENVIRONMENT = "configuration.environment"
     INFRASTRUCTURE = "configuration.infrastructure"
@@ -81,17 +101,14 @@ class CodingRole(StrEnum):
     DOC_GENERATOR = "generator.doc_generator"
 
     # executor.*
-    SHELL_RUNTIME = "executor.shell_runtime"
-    REPL = "executor.repl"
     SCRIPT_RUNNER = "executor.script_runner"
+    REPL = "executor.repl"
+    CONTAINER_RUNTIME = "executor.container_runtime"
 
     # orchestrator.*
     PACKAGE_MANAGER = "orchestrator.package_manager"
     TASK_RUNNER = "orchestrator.task_runner"
     CI_CD = "orchestrator.ci_cd"
-    CONTAINER_RUNTIME = "orchestrator.container_runtime"
-    CLOUD_CLI = "orchestrator.cloud_cli"
-    VERSION_CONTROL = "orchestrator.version_control"
 
     # observer.*
     DEBUGGER = "observer.debugger"
@@ -105,9 +122,9 @@ class CodingRole(StrEnum):
     API_CLIENT = "retriever.api_client"
 
     # persistence.*
-    VERSIONED_STORE = "persistence.versioned_store"
+    VERSION_CONTROL = "persistence.version_control"
+    DATABASE = "persistence.database"
     CACHE = "persistence.cache"
-    DATABASE_WRITER = "persistence.database_writer"
 
     # communicator.*
     USER_PROMPT = "communicator.user_prompt"
@@ -167,7 +184,12 @@ class CodingAction(StrEnum):
     # persist.*
     COMMIT = "persist.commit"
     WRITE = "persist.write"
-    CACHE = "persist.cache"
+    STAGE = "persist.stage"
+
+    # modify.*
+    EDIT = "modify.edit"
+    MERGE = "modify.merge"
+    REBASE = "modify.rebase"
 
     # remove.*
     DELETE = "remove.delete"
@@ -179,3 +201,4 @@ class CodingAction(StrEnum):
     PROFILE = "analyze.profile"
     MEASURE = "analyze.measure"
     DIFF = "analyze.diff"
+

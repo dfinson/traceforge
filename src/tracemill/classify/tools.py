@@ -144,7 +144,7 @@ def classify_tool(
 # Maps canonical tool names to Classification objects
 _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
     "view": Classification(
-        mechanism=CodingMechanism.FILE_READ,
+        mechanism=Mechanism.FILE,
         effect=Effect.READ_ONLY,
         scope=frozenset({CodingScope.SOURCE_CODE}),
         role=frozenset({CodingRole.FILE_BROWSER}),
@@ -152,15 +152,15 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         capability=frozenset({"filesystem_read"}),
     ),
     "edit": Classification(
-        mechanism=CodingMechanism.FILE_WRITE,
+        mechanism=Mechanism.FILE,
         effect=Effect.MUTATING,
         scope=frozenset({CodingScope.SOURCE_CODE}),
         role=frozenset(),
-        action=frozenset({CodingAction.WRITE}),
+        action=frozenset({CodingAction.EDIT}),
         capability=frozenset({"filesystem_write"}),
     ),
     "create": Classification(
-        mechanism=CodingMechanism.FILE_WRITE,
+        mechanism=Mechanism.FILE,
         effect=Effect.MUTATING,
         scope=frozenset({CodingScope.SOURCE_CODE}),
         role=frozenset(),
@@ -168,7 +168,7 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         capability=frozenset({"filesystem_write"}),
     ),
     "grep": Classification(
-        mechanism=CodingMechanism.FILE_READ,
+        mechanism=Mechanism.FILE,
         effect=Effect.READ_ONLY,
         scope=frozenset({CodingScope.SOURCE_CODE}),
         role=frozenset({CodingRole.SEARCH_INDEX}),
@@ -176,7 +176,7 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         capability=frozenset({"filesystem_read"}),
     ),
     "glob": Classification(
-        mechanism=CodingMechanism.FILE_READ,
+        mechanism=Mechanism.FILE,
         effect=Effect.READ_ONLY,
         scope=frozenset({CodingScope.SOURCE_CODE}),
         role=frozenset({CodingRole.FILE_BROWSER}),
@@ -184,7 +184,7 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         capability=frozenset({"filesystem_read"}),
     ),
     "git_commit": Classification(
-        mechanism=Mechanism.SHELL,
+        mechanism=CodingMechanism.PROCESS_SHELL,
         effect=Effect.MUTATING,
         scope=frozenset({CodingScope.REPOSITORY}),
         role=frozenset({CodingRole.VERSION_CONTROL}),
@@ -192,7 +192,7 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         capability=frozenset({"filesystem_write"}),
     ),
     "git_push": Classification(
-        mechanism=Mechanism.SHELL,
+        mechanism=CodingMechanism.PROCESS_SHELL,
         effect=Effect.MUTATING,
         scope=frozenset({CodingScope.REPOSITORY}),
         role=frozenset({CodingRole.VERSION_CONTROL}),
@@ -200,7 +200,7 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         capability=frozenset({"filesystem_write", "network_outbound"}),
     ),
     "git_diff": Classification(
-        mechanism=Mechanism.SHELL,
+        mechanism=CodingMechanism.PROCESS_SHELL,
         effect=Effect.READ_ONLY,
         scope=frozenset({CodingScope.REPOSITORY}),
         role=frozenset({CodingRole.VERSION_CONTROL}),
@@ -208,15 +208,15 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         capability=frozenset({"filesystem_read"}),
     ),
     "git_status": Classification(
-        mechanism=Mechanism.SHELL,
+        mechanism=CodingMechanism.PROCESS_SHELL,
         effect=Effect.READ_ONLY,
         scope=frozenset({CodingScope.REPOSITORY}),
         role=frozenset({CodingRole.VERSION_CONTROL}),
-        action=frozenset({CodingAction.DIFF}),
+        action=frozenset({CodingAction.BROWSE}),
         capability=frozenset({"filesystem_read"}),
     ),
     "git_log": Classification(
-        mechanism=Mechanism.SHELL,
+        mechanism=CodingMechanism.PROCESS_SHELL,
         effect=Effect.READ_ONLY,
         scope=frozenset({CodingScope.REPOSITORY}),
         role=frozenset({CodingRole.VERSION_CONTROL}),
@@ -224,11 +224,11 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         capability=frozenset({"filesystem_read"}),
     ),
     "git_add": Classification(
-        mechanism=Mechanism.SHELL,
+        mechanism=CodingMechanism.PROCESS_SHELL,
         effect=Effect.MUTATING,
         scope=frozenset({CodingScope.REPOSITORY}),
         role=frozenset({CodingRole.VERSION_CONTROL}),
-        action=frozenset({CodingAction.COMMIT}),
+        action=frozenset({CodingAction.STAGE}),
         capability=frozenset({"filesystem_write"}),
     ),
     "git_pull": Classification(
@@ -240,23 +240,23 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         capability=frozenset({"filesystem_write", "network_outbound"}),
     ),
     "git_merge": Classification(
-        mechanism=Mechanism.SHELL,
+        mechanism=CodingMechanism.PROCESS_SHELL,
         effect=Effect.MUTATING,
         scope=frozenset({CodingScope.REPOSITORY}),
         role=frozenset({CodingRole.VERSION_CONTROL}),
-        action=frozenset({CodingAction.COMMIT}),
+        action=frozenset({CodingAction.MERGE}),
         capability=frozenset({"filesystem_write"}),
     ),
     "git_rebase": Classification(
-        mechanism=Mechanism.SHELL,
+        mechanism=CodingMechanism.PROCESS_SHELL,
         effect=Effect.MUTATING,
         scope=frozenset({CodingScope.REPOSITORY}),
         role=frozenset({CodingRole.VERSION_CONTROL}),
-        action=frozenset({CodingAction.COMMIT}),
+        action=frozenset({CodingAction.REBASE}),
         capability=frozenset({"filesystem_write"}),
     ),
     "git_checkout": Classification(
-        mechanism=Mechanism.SHELL,
+        mechanism=CodingMechanism.PROCESS_SHELL,
         effect=Effect.MUTATING,
         scope=frozenset({CodingScope.REPOSITORY}),
         role=frozenset({CodingRole.VERSION_CONTROL}),
@@ -264,7 +264,7 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         capability=frozenset({"filesystem_write"}),
     ),
     "git_branch": Classification(
-        mechanism=Mechanism.SHELL,
+        mechanism=CodingMechanism.PROCESS_SHELL,
         effect=Effect.READ_ONLY,
         scope=frozenset({CodingScope.REPOSITORY}),
         role=frozenset({CodingRole.VERSION_CONTROL}),
@@ -308,13 +308,12 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         capability=frozenset({"subprocess"}),
     ),
     "bash": Classification(
-        mechanism=Mechanism.SHELL,
+        mechanism=CodingMechanism.PROCESS_SHELL,
         effect=None,
-        role=frozenset({CodingRole.SHELL_RUNTIME}),
+        role=frozenset({CodingRole.SCRIPT_RUNNER}),
         action=frozenset({CodingAction.RUN_SCRIPT}),
         capability=frozenset({"subprocess"}),
         shell_dialect="bash",
     ),
 }
-
 

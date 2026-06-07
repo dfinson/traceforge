@@ -1,0 +1,343 @@
+# Binary metadata - role and default effect for known CLI binaries.
+# Used by shell classification to determine effect and role when
+# no specific rule matches.
+#
+# IMPORTANT: role values MUST match CodingRole enum values in coding.py.
+# Valid prefixes: validator.*, transformer.*, generator.*, executor.*,
+# orchestrator.*, observer.*, retriever.*, modifier.*, persistence.*,
+# communicator.*
+
+binary_info:
+  # --- Test runners ---
+  bats: { role: validator.test_runner, default_effect: read_only }
+  invoke-pester: { role: validator.test_runner, default_effect: read_only }
+  jest: { role: validator.test_runner, default_effect: read_only }
+  mocha: { role: validator.test_runner, default_effect: read_only }
+  nox: { role: validator.test_runner, default_effect: null, network: true }
+  pest: { role: validator.test_runner, default_effect: read_only }
+  phpunit: { role: validator.test_runner, default_effect: read_only }
+  playwright: { role: validator.test_runner, default_effect: read_only }
+  pytest: { role: validator.test_runner, default_effect: read_only }
+  rspec: { role: validator.test_runner, default_effect: read_only }
+  tox: { role: validator.test_runner, default_effect: null, network: true }
+  vitest: { role: validator.test_runner, default_effect: read_only }
+
+  # --- Type checkers ---
+  mypy: { role: validator.type_checker, default_effect: read_only }
+  pyright: { role: validator.type_checker, default_effect: read_only }
+
+  # --- Linters ---
+  clippy: { role: validator.linter, default_effect: read_only }
+  eslint: { role: validator.linter, default_effect: read_only }
+  flake8: { role: validator.linter, default_effect: read_only }
+  golangci-lint: { role: validator.linter, default_effect: read_only }
+  invoke-scriptanalyzer: { role: validator.linter, default_effect: read_only }
+  pylint: { role: validator.linter, default_effect: read_only }
+  rubocop: { role: validator.linter, default_effect: read_only }
+  ruff: { role: validator.linter, default_effect: read_only }
+
+  # --- Security scanners ---
+  bandit: { role: validator.security_scanner, default_effect: read_only }
+  safety: { role: validator.security_scanner, default_effect: read_only, network: true }
+  semgrep: { role: validator.security_scanner, default_effect: read_only }
+  snyk: { role: validator.security_scanner, default_effect: read_only, network: true }
+  trivy: { role: validator.security_scanner, default_effect: read_only }
+
+  # --- Build checkers ---
+  bazel: { role: validator.build_checker, default_effect: null, network: true }
+  build-module: { role: validator.build_checker, default_effect: mutating }
+  cmake: { role: validator.build_checker, default_effect: mutating }
+  invoke-build: { role: validator.build_checker, default_effect: mutating }
+  ninja: { role: validator.build_checker, default_effect: mutating }
+
+  # --- Formatters ---
+  black: { role: transformer.formatter, default_effect: mutating }
+  prettier: { role: transformer.formatter, default_effect: read_only }
+
+  # --- Compilers ---
+  clang: { role: transformer.compiler, default_effect: mutating }
+  clang++: { role: transformer.compiler, default_effect: mutating }
+  g++: { role: transformer.compiler, default_effect: mutating }
+  gcc: { role: transformer.compiler, default_effect: mutating }
+  javac: { role: transformer.compiler, default_effect: mutating }
+  rustc: { role: transformer.compiler, default_effect: mutating }
+
+  # --- Bundlers ---
+  vite: { role: transformer.bundler, default_effect: null }
+  webpack: { role: transformer.bundler, default_effect: mutating }
+
+  # --- Transpilers / encoding ---
+  b64encode: { role: transformer.transpiler, default_effect: read_only }
+  base64: { role: transformer.transpiler, default_effect: read_only }
+  gpg: { role: transformer.transpiler, default_effect: null }
+  hexdump: { role: transformer.transpiler, default_effect: read_only }
+  od: { role: transformer.transpiler, default_effect: read_only }
+  openssl: { role: transformer.transpiler, default_effect: null }
+  tsc: { role: transformer.transpiler, default_effect: null }
+  xxd: { role: transformer.transpiler, default_effect: read_only }
+
+  # --- Package managers ---
+  apt: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  apt-get: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  asdf: { role: orchestrator.package_manager, default_effect: mutating }
+  brew: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  choco: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  conda: { role: orchestrator.package_manager, default_effect: null, network: true }
+  dnf: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  dpkg: { role: orchestrator.package_manager, default_effect: mutating }
+  emerge: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  flatpak: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  fnm: { role: orchestrator.package_manager, default_effect: mutating }
+  helm: { role: orchestrator.package_manager, default_effect: null, network: true }
+  install-module: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  install-package: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  install-psresource: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  mise: { role: orchestrator.package_manager, default_effect: mutating }
+  nix: { role: orchestrator.package_manager, default_effect: null, network: true }
+  nvm: { role: orchestrator.package_manager, default_effect: mutating }
+  pacman: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  pip: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  pip-compile: { role: orchestrator.package_manager, default_effect: mutating }
+  pip3: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  pipx: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  poetry: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  pyenv: { role: orchestrator.package_manager, default_effect: mutating }
+  rbenv: { role: orchestrator.package_manager, default_effect: mutating }
+  register-psrepository: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  rpm: { role: orchestrator.package_manager, default_effect: mutating }
+  rtx: { role: orchestrator.package_manager, default_effect: mutating }
+  rustup: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  scoop: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  snap: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  update-module: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  uv: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  virtualenv: { role: orchestrator.package_manager, default_effect: mutating }
+  winget: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  yum: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  zypper: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+
+  # --- Task runners ---
+  ansible: { role: orchestrator.task_runner, default_effect: null, network: true }
+  bun: { role: orchestrator.task_runner, default_effect: null, network: true }
+  bunx: { role: orchestrator.task_runner, default_effect: null, network: true }
+  cargo: { role: orchestrator.task_runner, default_effect: null, network: true }
+  dart: { role: orchestrator.task_runner, default_effect: null, network: true }
+  deno: { role: orchestrator.task_runner, default_effect: null, network: true }
+  dotnet: { role: orchestrator.task_runner, default_effect: null, network: true }
+  go: { role: orchestrator.task_runner, default_effect: null, network: true }
+  gradle: { role: orchestrator.task_runner, default_effect: null, network: true }
+  make: { role: orchestrator.task_runner, default_effect: null }
+  mvn: { role: orchestrator.task_runner, default_effect: null, network: true }
+  npm: { role: orchestrator.task_runner, default_effect: null, network: true }
+  npx: { role: orchestrator.task_runner, default_effect: null, network: true }
+  pnpm: { role: orchestrator.task_runner, default_effect: null, network: true }
+  pulumi: { role: orchestrator.task_runner, default_effect: null, network: true }
+  swift: { role: orchestrator.task_runner, default_effect: null, network: true }
+  terraform: { role: orchestrator.task_runner, default_effect: null, network: true }
+  tofu: { role: orchestrator.task_runner, default_effect: null, network: true }
+  twine: { role: orchestrator.task_runner, default_effect: null, network: true }
+  yarn: { role: orchestrator.task_runner, default_effect: null, network: true }
+
+  # --- Container runtimes ---
+  docker: { role: executor.container_runtime, default_effect: null, network: true }
+  docker-compose: { role: executor.container_runtime, default_effect: null, network: true }
+  eksctl: { role: executor.container_runtime, default_effect: null, network: true }
+  kind: { role: executor.container_runtime, default_effect: null, network: true }
+  kubectl: { role: executor.container_runtime, default_effect: null, network: true }
+  minikube: { role: executor.container_runtime, default_effect: null, network: true }
+  podman: { role: executor.container_runtime, default_effect: null, network: true }
+  vagrant: { role: executor.container_runtime, default_effect: null, network: true }
+
+  # --- Script runners / process control ---
+  bash: { role: executor.script_runner, default_effect: null }
+  crontab: { role: executor.script_runner, default_effect: mutating }
+  iptables: { role: executor.script_runner, default_effect: null, network: true }
+  kill: { role: executor.script_runner, default_effect: destructive, destructive: true }
+  mount: { role: executor.script_runner, default_effect: mutating }
+  node: { role: executor.script_runner, default_effect: null }
+  perl: { role: executor.script_runner, default_effect: null }
+  php: { role: executor.script_runner, default_effect: null, network: true }
+  python: { role: executor.script_runner, default_effect: null }
+  python3: { role: executor.script_runner, default_effect: null }
+  restart-service: { role: executor.script_runner, default_effect: mutating }
+  ruby: { role: executor.script_runner, default_effect: null }
+  sh: { role: executor.script_runner, default_effect: null }
+  ssh: { role: executor.script_runner, default_effect: null, network: true }
+  start-process: { role: executor.script_runner, default_effect: mutating }
+  start-service: { role: executor.script_runner, default_effect: mutating }
+  stop-process: { role: executor.script_runner, default_effect: destructive, destructive: true }
+  stop-service: { role: executor.script_runner, default_effect: mutating }
+  sudo: { role: executor.script_runner, default_effect: null }
+  systemctl: { role: executor.script_runner, default_effect: null }
+  umount: { role: executor.script_runner, default_effect: mutating }
+  xargs: { role: executor.script_runner, default_effect: null }
+  zsh: { role: executor.script_runner, default_effect: null }
+
+  # --- Version control ---
+  git: { role: persistence.version_control, default_effect: null }
+  hg: { role: persistence.version_control, default_effect: null, network: true }
+  svn: { role: persistence.version_control, default_effect: null, network: true }
+
+  # --- Databases ---
+  mongosh: { role: persistence.database, default_effect: null, network: true }
+  mysql: { role: persistence.database, default_effect: null, network: true }
+  psql: { role: persistence.database, default_effect: null, network: true }
+  redis-cli: { role: persistence.cache, default_effect: null, network: true }
+  sqlite3: { role: persistence.database, default_effect: null }
+
+  # --- API clients / network ---
+  aws: { role: retriever.api_client, default_effect: null, network: true }
+  az: { role: retriever.api_client, default_effect: null, network: true }
+  curl: { role: retriever.api_client, default_effect: read_only, network: true }
+  dig: { role: retriever.api_client, default_effect: read_only, network: true }
+  ftp: { role: retriever.api_client, default_effect: null, network: true }
+  gcloud: { role: retriever.api_client, default_effect: null, network: true }
+  gh: { role: retriever.api_client, default_effect: null, network: true }
+  invoke-restmethod: { role: retriever.api_client, default_effect: null, network: true }
+  invoke-webrequest: { role: retriever.api_client, default_effect: null, network: true }
+  nc: { role: retriever.api_client, default_effect: null, network: true }
+  ncat: { role: retriever.api_client, default_effect: null, network: true }
+  nslookup: { role: retriever.api_client, default_effect: read_only, network: true }
+  ping: { role: retriever.api_client, default_effect: read_only, network: true }
+  socat: { role: retriever.api_client, default_effect: null, network: true }
+  telnet: { role: retriever.api_client, default_effect: null, network: true }
+  test-connection: { role: retriever.api_client, default_effect: read_only, network: true }
+  test-netconnection: { role: retriever.api_client, default_effect: read_only, network: true }
+  traceroute: { role: retriever.api_client, default_effect: read_only, network: true }
+  wget: { role: retriever.api_client, default_effect: mutating, network: true }
+
+  # --- File browsers / system info ---
+  bat: { role: retriever.file_browser, default_effect: read_only }
+  cat: { role: retriever.file_browser, default_effect: read_only }
+  date: { role: retriever.file_browser, default_effect: read_only }
+  df: { role: retriever.file_browser, default_effect: read_only }
+  dir: { role: retriever.file_browser, default_effect: read_only }
+  du: { role: retriever.file_browser, default_effect: read_only }
+  env: { role: retriever.file_browser, default_effect: read_only }
+  exa: { role: retriever.file_browser, default_effect: read_only }
+  eza: { role: retriever.file_browser, default_effect: read_only }
+  fd: { role: retriever.file_browser, default_effect: read_only }
+  fdfind: { role: retriever.file_browser, default_effect: read_only }
+  find: { role: retriever.file_browser, default_effect: read_only }
+  format-list: { role: retriever.file_browser, default_effect: read_only }
+  format-table: { role: retriever.file_browser, default_effect: read_only }
+  free: { role: retriever.file_browser, default_effect: read_only }
+  get-childitem: { role: retriever.file_browser, default_effect: read_only }
+  get-command: { role: retriever.file_browser, default_effect: read_only }
+  get-content: { role: retriever.file_browser, default_effect: read_only }
+  get-help: { role: retriever.file_browser, default_effect: read_only }
+  get-item: { role: retriever.file_browser, default_effect: read_only }
+  get-itemproperty: { role: retriever.file_browser, default_effect: read_only }
+  get-module: { role: retriever.file_browser, default_effect: read_only }
+  get-process: { role: retriever.file_browser, default_effect: read_only }
+  get-service: { role: retriever.file_browser, default_effect: read_only }
+  get-variable: { role: retriever.file_browser, default_effect: read_only }
+  head: { role: retriever.file_browser, default_effect: read_only }
+  hostname: { role: retriever.file_browser, default_effect: read_only }
+  less: { role: retriever.file_browser, default_effect: read_only }
+  ll: { role: retriever.file_browser, default_effect: read_only }
+  ls: { role: retriever.file_browser, default_effect: read_only }
+  lsd: { role: retriever.file_browser, default_effect: read_only }
+  man: { role: retriever.file_browser, default_effect: read_only }
+  more: { role: retriever.file_browser, default_effect: read_only }
+  netstat: { role: retriever.file_browser, default_effect: read_only }
+  printenv: { role: retriever.file_browser, default_effect: read_only }
+  ps: { role: retriever.file_browser, default_effect: read_only }
+  pwd: { role: retriever.file_browser, default_effect: read_only }
+  set: { role: retriever.file_browser, default_effect: null }
+  ss: { role: retriever.file_browser, default_effect: read_only }
+  tail: { role: retriever.file_browser, default_effect: read_only }
+  test-path: { role: retriever.file_browser, default_effect: read_only }
+  tree: { role: retriever.file_browser, default_effect: read_only }
+  type: { role: retriever.file_browser, default_effect: read_only }
+  uname: { role: retriever.file_browser, default_effect: read_only }
+  uptime: { role: retriever.file_browser, default_effect: read_only }
+  where: { role: retriever.file_browser, default_effect: read_only }
+  whereis: { role: retriever.file_browser, default_effect: read_only }
+  which: { role: retriever.file_browser, default_effect: read_only }
+  whoami: { role: retriever.file_browser, default_effect: read_only }
+  write-host: { role: retriever.file_browser, default_effect: read_only }
+  write-output: { role: retriever.file_browser, default_effect: read_only }
+
+  # --- Search / text processing ---
+  ag: { role: retriever.search_index, default_effect: read_only }
+  awk: { role: retriever.search_index, default_effect: read_only }
+  comm: { role: retriever.search_index, default_effect: read_only }
+  cut: { role: retriever.search_index, default_effect: read_only }
+  diff: { role: retriever.search_index, default_effect: read_only }
+  egrep: { role: retriever.search_index, default_effect: read_only }
+  fgrep: { role: retriever.search_index, default_effect: read_only }
+  findstr: { role: retriever.search_index, default_effect: read_only }
+  gawk: { role: retriever.search_index, default_effect: read_only }
+  grep: { role: retriever.search_index, default_effect: read_only }
+  jq: { role: retriever.search_index, default_effect: read_only }
+  mawk: { role: retriever.search_index, default_effect: read_only }
+  measure-object: { role: retriever.search_index, default_effect: read_only }
+  nawk: { role: retriever.search_index, default_effect: read_only }
+  out-string: { role: retriever.search_index, default_effect: read_only }
+  paste: { role: retriever.search_index, default_effect: read_only }
+  rg: { role: retriever.search_index, default_effect: read_only }
+  ripgrep: { role: retriever.search_index, default_effect: read_only }
+  sed: { role: retriever.search_index, default_effect: read_only }
+  select-object: { role: retriever.search_index, default_effect: read_only }
+  select-string: { role: retriever.search_index, default_effect: read_only }
+  sort: { role: retriever.search_index, default_effect: read_only }
+  sort-object: { role: retriever.search_index, default_effect: read_only }
+  tr: { role: retriever.search_index, default_effect: read_only }
+  uniq: { role: retriever.search_index, default_effect: read_only }
+  wc: { role: retriever.search_index, default_effect: read_only }
+  where-object: { role: retriever.search_index, default_effect: read_only }
+  yq: { role: retriever.search_index, default_effect: read_only }
+
+  # --- Debuggers / profilers ---
+  gdb: { role: observer.debugger, default_effect: null }
+  lsof: { role: observer.debugger, default_effect: read_only }
+  ltrace: { role: observer.debugger, default_effect: read_only }
+  strace: { role: observer.debugger, default_effect: read_only }
+
+  # --- File editors / modifiers ---
+  add-content: { role: modifier.file_editor, default_effect: mutating }
+  bzip2: { role: modifier.file_editor, default_effect: null }
+  chgrp: { role: modifier.file_editor, default_effect: mutating }
+  chmod: { role: modifier.file_editor, default_effect: mutating }
+  chown: { role: modifier.file_editor, default_effect: mutating }
+  copy: { role: modifier.file_editor, default_effect: mutating }
+  copy-item: { role: modifier.file_editor, default_effect: mutating }
+  cp: { role: modifier.file_editor, default_effect: mutating }
+  cpio: { role: modifier.file_editor, default_effect: null }
+  dd: { role: modifier.file_editor, default_effect: destructive, destructive: true }
+  del: { role: modifier.file_editor, default_effect: destructive, destructive: true }
+  emacs: { role: modifier.file_editor, default_effect: mutating }
+  erase: { role: modifier.file_editor, default_effect: destructive, destructive: true }
+  gunzip: { role: modifier.file_editor, default_effect: null }
+  gzip: { role: modifier.file_editor, default_effect: null }
+  icacls: { role: modifier.file_editor, default_effect: mutating }
+  ln: { role: modifier.file_editor, default_effect: mutating }
+  mkdir: { role: modifier.file_editor, default_effect: mutating }
+  mkfs: { role: modifier.file_editor, default_effect: destructive, destructive: true }
+  move: { role: modifier.file_editor, default_effect: mutating }
+  move-item: { role: modifier.file_editor, default_effect: mutating }
+  mv: { role: modifier.file_editor, default_effect: mutating }
+  nano: { role: modifier.file_editor, default_effect: mutating }
+  new-item: { role: modifier.file_editor, default_effect: mutating }
+  out-file: { role: modifier.file_editor, default_effect: mutating }
+  patch: { role: modifier.file_editor, default_effect: mutating }
+  rd: { role: modifier.file_editor, default_effect: destructive, destructive: true }
+  remove-item: { role: modifier.file_editor, default_effect: destructive, destructive: true }
+  rename: { role: modifier.file_editor, default_effect: mutating }
+  rename-item: { role: modifier.file_editor, default_effect: mutating }
+  rm: { role: modifier.file_editor, default_effect: destructive, destructive: true }
+  rmdir: { role: modifier.file_editor, default_effect: destructive, destructive: true }
+  rsync: { role: modifier.file_editor, default_effect: mutating, network: true }
+  scp: { role: modifier.file_editor, default_effect: mutating, network: true }
+  set-content: { role: modifier.file_editor, default_effect: mutating }
+  set-itemproperty: { role: modifier.file_editor, default_effect: mutating }
+  tar: { role: modifier.file_editor, default_effect: null }
+  tee: { role: modifier.file_editor, default_effect: mutating }
+  touch: { role: modifier.file_editor, default_effect: mutating }
+  truncate: { role: modifier.file_editor, default_effect: destructive, destructive: true }
+  unzip: { role: modifier.file_editor, default_effect: null }
+  vi: { role: modifier.file_editor, default_effect: mutating }
+  vim: { role: modifier.file_editor, default_effect: mutating }
+  xz: { role: modifier.file_editor, default_effect: null }
+  zip: { role: modifier.file_editor, default_effect: null }

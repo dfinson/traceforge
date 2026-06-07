@@ -1,0 +1,215 @@
+# Native tool classifications — maps canonical tool names to Classification objects.
+# Mechanism reflects the RESOURCE DOMAIN the tool accesses (not implementation).
+
+tool_classifications:
+  view:
+    mechanism: filesystem
+    effect: read_only
+    scope: [artifact.source_code]
+    role: [retriever.file_browser]
+    action: [retrieve.read]
+    capability: [filesystem_read]
+
+  edit:
+    mechanism: filesystem
+    effect: mutating
+    scope: [artifact.source_code]
+    role: [modifier.file_editor]
+    action: [modify.edit]
+    capability: [filesystem_write]
+
+  create:
+    mechanism: filesystem
+    effect: mutating
+    scope: [artifact.source_code]
+    role: [modifier.file_editor]
+    action: [persist.write]
+    capability: [filesystem_write]
+
+  grep:
+    mechanism: filesystem
+    effect: read_only
+    scope: [artifact.source_code]
+    role: [retriever.search_index]
+    action: [retrieve.search]
+    capability: [filesystem_read]
+
+  glob:
+    mechanism: filesystem
+    effect: read_only
+    scope: [artifact.source_code]
+    role: [retriever.file_browser]
+    action: [retrieve.browse]
+    capability: [filesystem_read]
+
+  git_commit:
+    mechanism: process.shell
+    effect: mutating
+    scope: [artifact.repository]
+    role: [persistence.version_control]
+    action: [persist.commit]
+    capability: [filesystem_write]
+
+  git_push:
+    mechanism: process.shell
+    effect: mutating
+    scope: [artifact.repository]
+    role: [persistence.version_control]
+    action: [deliver.push]
+    capability: [filesystem_write, network_outbound]
+
+  git_diff:
+    mechanism: process.shell
+    effect: read_only
+    scope: [artifact.repository]
+    role: [persistence.version_control]
+    action: [retrieve.diff]
+    capability: [filesystem_read]
+
+  git_status:
+    mechanism: process.shell
+    effect: read_only
+    scope: [artifact.repository]
+    role: [persistence.version_control]
+    action: [retrieve.browse]
+    capability: [filesystem_read]
+
+  git_log:
+    mechanism: process.shell
+    effect: read_only
+    scope: [artifact.repository]
+    role: [persistence.version_control]
+    action: [retrieve.browse]
+    capability: [filesystem_read]
+
+  git_add:
+    mechanism: process.shell
+    effect: mutating
+    scope: [artifact.repository]
+    role: [persistence.version_control]
+    action: [persist.stage]
+    capability: [filesystem_write]
+
+  git_pull:
+    mechanism: process.shell
+    effect: mutating
+    scope: [artifact.repository]
+    role: [persistence.version_control]
+    action: [retrieve]
+    capability: [filesystem_write, network_outbound]
+
+  git_merge:
+    mechanism: process.shell
+    effect: mutating
+    scope: [artifact.repository]
+    role: [persistence.version_control]
+    action: [persist.merge]
+    capability: [filesystem_write]
+
+  git_rebase:
+    mechanism: process.shell
+    effect: mutating
+    scope: [artifact.repository]
+    role: [persistence.version_control]
+    action: [persist.rebase]
+    capability: [filesystem_write]
+
+  git_checkout:
+    mechanism: process.shell
+    effect: mutating
+    scope: [artifact.repository]
+    role: [persistence.version_control]
+    action: [retrieve.browse]
+    capability: [filesystem_write]
+
+  git_branch:
+    mechanism: process.shell
+    effect: read_only
+    scope: [artifact.repository]
+    role: [persistence.version_control]
+    action: [retrieve.browse]
+    capability: [filesystem_read]
+
+  report_intent:
+    mechanism: communication.system
+    effect: read_only
+    role: [communicator.system_reporter]
+    action: []
+    capability: []
+
+  ask_user:
+    mechanism: communication.user
+    effect: read_only
+    role: [communicator.user_prompt]
+    action: []
+    capability: [human_interaction]
+
+  web_fetch:
+    mechanism: network.http
+    effect: read_only
+    role: [retriever.web_scraper]
+    action: [retrieve]
+    capability: [network_outbound]
+
+  web_search:
+    mechanism: network.http
+    effect: read_only
+    role: [retriever.search_index]
+    action: [retrieve.search]
+    capability: [network_outbound]
+
+  task:
+    mechanism: delegation.agent
+    role: []
+    action: []
+    capability: [subprocess]
+
+  shell:
+    mechanism: process.shell
+    role: [executor.script_runner]
+    action: [execute.run_script]
+    capability: [subprocess]
+
+  think:
+    mechanism: communication.system
+    effect: read_only
+    role: [communicator.system_reporter]
+    action: [analyze]
+    capability: []
+
+  state_write:
+    mechanism: communication.system
+    effect: mutating
+    role: [communicator.system_reporter]
+    action: [persist]
+    capability: []
+
+  state_read:
+    mechanism: communication.system
+    effect: read_only
+    role: [communicator.system_reporter]
+    action: [retrieve]
+    capability: []
+
+  web_browse:
+    mechanism: network.http
+    effect: read_only
+    role: [retriever.web_scraper]
+    action: [retrieve.browse]
+    capability: [network_outbound, human_interaction]
+
+  codebase_search:
+    mechanism: filesystem
+    effect: read_only
+    scope: [artifact.source_code]
+    role: [retriever.search_index]
+    action: [retrieve.search]
+    capability: [filesystem_read]
+
+  delete_file:
+    mechanism: filesystem
+    effect: destructive
+    scope: [artifact.source_code]
+    role: [modifier.file_editor]
+    action: [remove]
+    capability: [filesystem_write]

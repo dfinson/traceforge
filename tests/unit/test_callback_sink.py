@@ -69,7 +69,7 @@ class TestCallbackSinkIndependence:
 
         sink = CallbackSink(on_event=handler)
         await sink.on_event(make_event())
-        await sink.on_span(make_span())   # should be no-op
+        await sink.on_span(make_span())  # should be no-op
         await sink.on_usage(make_usage())  # should be no-op
         assert len(events) == 1
 

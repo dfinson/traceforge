@@ -1,0 +1,135 @@
+name: Weekly Tool Surface Audit
+
+on:
+  schedule:
+    # Every Monday at 08:00 UTC
+    - cron: '0 8 * * 1'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit-tool-surfaces:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Validate YAML data files
+        run: |
+          python -c "
+          import sys
+          import yaml
+          from pathlib import Path
+
+          data_dir = Path('src/tracemill/classify/data')
+          errors = []
+
+          for f in sorted(data_dir.glob('*.yaml')):
+              try:
+                  with open(f, encoding='utf-8') as fh:
+                      data = yaml.safe_load(fh)
+                  if data is None:
+                      errors.append(f'{f.name}: empty file')
+                  print(f'  ✓ {f.name} — {type(data).__name__}')
+              except yaml.YAMLError as e:
+                  errors.append(f'{f.name}: {e}')
+
+          if errors:
+              print('\n❌ YAML validation errors:')
+              for err in errors:
+                  print(f'  • {err}')
+              sys.exit(1)
+          else:
+              print('\n✅ All YAML files valid')
+          "
+
+      - name: Validate enum dimensions in YAML
+        run: |
+          python -c "
+          import sys
+          from tracemill.classify.coding import CodingRole, CodingScope, CodingAction
+          from tracemill.classify.config import load_config
+
+          config = load_config()
+          errors = []
+
+          # Validate binary_info roles
+          valid_role_prefixes = {r.value.split('.')[0] for r in CodingRole}
+          for name, info in config.binary_info.items():
+              role = info.get('role', '')
+              if '.' in role:
+                  prefix = role.split('.')[0]
+                  if prefix not in valid_role_prefixes:
+                      errors.append(f'binary_info[{name}].role={role} — invalid prefix')
+
+          # Validate MCP profile dimensions
+          for profile_name, profile in config.mcp_profiles.items():
+              for dim_key in ('role', 'scope', 'action'):
+                  values = profile.get(dim_key, [])
+                  if isinstance(values, list):
+                      for v in values:
+                          if '.' in str(v):
+                              prefix = str(v).split('.')[0]
+                              if dim_key == 'role' and prefix not in valid_role_prefixes:
+                                  errors.append(f'mcp_profiles[{profile_name}].{dim_key}={v} — invalid')
+
+          if errors:
+              print(f'❌ {len(errors)} dimension validation errors:')
+              for err in errors[:20]:
+                  print(f'  • {err}')
+              sys.exit(1)
+          else:
+              print('✅ All dimensions valid')
+          "
+
+      - name: Run classification engine smoke test
+        run: |
+          python -c "
+          from tracemill.classify import get_default_engine, classify_shell, classify_tool
+          from tracemill.classify.mcp import classify_mcp_tool
+          from functools import partial
+
+          engine = get_default_engine()
+          classify_shell = partial(classify_shell, engine=engine)
+          classify_tool = partial(classify_tool, engine=engine)
+          classify_mcp_tool = partial(classify_mcp_tool, engine=engine)
+
+          # Smoke test core classification paths
+          assert classify_shell('pytest tests/').effect is not None, 'pytest classification failed'
+          assert classify_shell('git push origin main').effect is not None, 'git push classification failed'
+          assert classify_tool('edit') is not None, 'edit tool classification failed'
+          assert classify_tool('bash') is not None, 'bash tool classification failed'
+          assert classify_mcp_tool('mcp__github__list_repos') is not None, 'MCP github classification failed'
+          assert classify_mcp_tool('mcp__filesystem__read_file') is not None, 'MCP filesystem classification failed'
+
+          print(f'✅ Engine loaded: {len(engine.binary_info)} binaries, {len(engine.shell_rules)} rules')
+          print(f'   {len(engine.mcp_alias_index)} MCP profile aliases')
+          print(f'   {len(engine.canonical_tools)} canonical tools')
+          print('✅ All smoke tests passed')
+          "
+
+      - name: Run full test suite
+        run: python -m pytest tests/ -q --tb=short
+
+      - name: Report summary
+        if: always()
+        run: |
+          python -c "
+          from tracemill.classify import get_default_engine
+          engine = get_default_engine()
+          print('## Tool Surface Summary')
+          print(f'- **Binaries**: {len(engine.binary_info)}')
+          print(f'- **Shell rules**: {len(engine.shell_rules)}')
+          print(f'- **MCP profiles**: {len(engine.mcp_alias_index)} aliases')
+          print(f'- **Canonical tools**: {len(engine.canonical_tools)}')
+          print(f'- **Risk config keys**: {len(engine.risk_config)}')
+          " >> "$GITHUB_STEP_SUMMARY"

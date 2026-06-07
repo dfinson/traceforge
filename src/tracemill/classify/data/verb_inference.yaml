@@ -1,0 +1,218 @@
+# Verb prefix → (effect, action) inference for MCP tool names.
+# When a tool name contains a recognized verb prefix, these defaults apply.
+# Used by mcp.py for tools not matched by any server profile.
+
+verb_inference:
+  # ─── Read-only verbs ─────────────────────────────────────────────────────────
+  get:
+    effect: read_only
+    action: retrieve
+  list:
+    effect: read_only
+    action: retrieve
+  read:
+    effect: read_only
+    action: retrieve
+  search:
+    effect: read_only
+    action: retrieve
+  query:
+    effect: read_only
+    action: retrieve
+  describe:
+    effect: read_only
+    action: analyze
+  fetch:
+    effect: read_only
+    action: retrieve
+  browse:
+    effect: read_only
+    action: retrieve
+  find:
+    effect: read_only
+    action: retrieve
+  show:
+    effect: read_only
+    action: retrieve
+  inspect:
+    effect: read_only
+    action: analyze
+  check:
+    effect: read_only
+    action: validate
+  scan:
+    effect: read_only
+    action: validate
+  view:
+    effect: read_only
+    action: retrieve
+
+  # ─── Mutating verbs (create/modify) ─────────────────────────────────────────
+  create:
+    effect: mutating
+    action: generate
+  update:
+    effect: mutating
+    action: modify
+  write:
+    effect: mutating
+    action: persist
+  set:
+    effect: mutating
+    action: persist
+  add:
+    effect: mutating
+    action: persist
+  append:
+    effect: mutating
+    action: persist
+  apply:
+    effect: mutating
+    action: execute
+  run:
+    effect: mutating
+    action: execute
+  execute:
+    effect: mutating
+    action: execute
+  start:
+    effect: mutating
+    action: execute
+  trigger:
+    effect: mutating
+    action: execute
+  deploy:
+    effect: mutating
+    action: deliver
+  publish:
+    effect: mutating
+    action: deliver
+  push:
+    effect: mutating
+    action: deliver
+  send:
+    effect: mutating
+    action: deliver
+  post:
+    effect: mutating
+    action: deliver
+  submit:
+    effect: mutating
+    action: deliver
+  upload:
+    effect: mutating
+    action: deliver
+  fork:
+    effect: mutating
+    action: generate
+  star:
+    effect: mutating
+    action: persist
+  assign:
+    effect: mutating
+    action: modify
+  merge:
+    effect: mutating
+    action: modify
+  approve:
+    effect: mutating
+    action: modify
+  dismiss:
+    effect: mutating
+    action: modify
+  resolve:
+    effect: mutating
+    action: modify
+  configure:
+    effect: mutating
+    action: configure
+  install:
+    effect: mutating
+    action: configure
+  scale:
+    effect: mutating
+    action: configure
+  build:
+    effect: mutating
+    action: transform
+  pull:
+    effect: mutating
+    action: retrieve
+  edit:
+    effect: mutating
+    action: modify
+  replace:
+    effect: mutating
+    action: modify
+  rename:
+    effect: mutating
+    action: modify
+  restore:
+    effect: mutating
+    action: modify
+  archive:
+    effect: mutating
+    action: modify
+  manage:
+    effect: mutating
+    action: modify
+  move:
+    effect: mutating
+    action: modify
+
+  # ─── Mutating verbs (browser/UI interaction) ────────────────────────────────
+  navigate:
+    effect: mutating
+    action: execute
+  click:
+    effect: mutating
+    action: execute
+  type:
+    effect: mutating
+    action: execute
+  fill:
+    effect: mutating
+    action: execute
+  select:
+    effect: mutating
+    action: execute
+  hover:
+    effect: mutating
+    action: execute
+  press:
+    effect: mutating
+    action: execute
+  drag:
+    effect: mutating
+    action: execute
+
+  # ─── Destructive verbs ──────────────────────────────────────────────────────
+  delete:
+    effect: destructive
+    action: remove
+  destroy:
+    effect: destructive
+    action: remove
+  drop:
+    effect: destructive
+    action: remove
+  remove:
+    effect: destructive
+    action: remove
+  clear:
+    effect: destructive
+    action: remove
+  terminate:
+    effect: destructive
+    action: remove
+
+  # ─── Lifecycle/cancel ───────────────────────────────────────────────────────
+  unstar:
+    effect: mutating
+    action: modify
+  stop:
+    effect: mutating
+    action: execute
+  cancel:
+    effect: mutating
+    action: execute

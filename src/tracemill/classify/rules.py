@@ -38,15 +38,6 @@ SHELL_SETUP = ShellActivity.SETUP
 SHELL_INVESTIGATION = ShellActivity.INVESTIGATION
 SHELL_IMPLEMENTATION = ShellActivity.IMPLEMENTATION
 
-ACTIVITY_PRIORITY: Final[dict[ShellActivity, int]] = {
-    ShellActivity.IMPLEMENTATION: 0,
-    ShellActivity.INVESTIGATION: 1,
-    ShellActivity.SETUP: 2,
-    ShellActivity.GIT_OPS: 3,
-    ShellActivity.VERIFICATION: 4,
-}
-
-
 def activity_from_classification(cls: Classification) -> ShellActivity:
     """Derive ShellActivity from a Classification's action/role dimensions."""
     if cls.has_action("validate"):

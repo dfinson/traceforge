@@ -7,11 +7,12 @@ import os
 import tree_sitter as ts
 import tree_sitter_powershell as tsps
 
-from tracemill.classify.rules import ShellActivity
-from tracemill.classify.rules import (
-    ACTIVITY_PRIORITY,
-    SHELL_IMPLEMENTATION,
-    classify_binary,
+from tracemill.classify.core import Classification
+from tracemill.classify.coding import CodingMechanism
+from tracemill.classify.shell import (
+    _CommandClassification,
+    build_classification_from_commands,
+    classify_single_command,
 )
 
 _PS_LANGUAGE = ts.Language(tsps.language())
@@ -39,20 +40,26 @@ def _extract_from_command_node(node: ts.Node) -> tuple[str, str | None, list[str
     return name, subcmd, parameters
 
 
-def classify_powershell_command(command: str) -> ShellActivity:
-    """Classify a PowerShell command string into an activity category."""
+def classify_powershell_command(command: str) -> Classification:
+    """Classify a PowerShell command string into a full Classification."""
     if not command or not command.strip():
-        return SHELL_IMPLEMENTATION
+        return Classification(
+            mechanism=CodingMechanism.PROCESS_SHELL,
+            effect=None,
+        )
 
     tree = _parser.parse(command.encode("utf-8"))
     cursor = ts.QueryCursor(_Q_COMMANDS)
     matches = cursor.matches(tree.root_node)
 
     if not matches:
-        return SHELL_IMPLEMENTATION
+        return Classification(
+            mechanism=CodingMechanism.PROCESS_SHELL,
+            effect=None,
+            capability=frozenset({"subprocess"}),
+        )
 
-    best_activity = SHELL_IMPLEMENTATION
-    best_priority = -1
+    command_results: list[_CommandClassification] = []
 
     for _pat, captures in matches:
         for node in captures.get("cmd", []):
@@ -66,11 +73,14 @@ def classify_powershell_command(command: str) -> ShellActivity:
                 if binary.endswith(suffix):
                     binary = binary[: -len(suffix)]
 
-            # Use shared rule table (handles both cmdlets and binaries)
-            activity = classify_binary(binary, subcmd, parameters)
-            priority = ACTIVITY_PRIORITY.get(activity, 0)
-            if priority > best_priority:
-                best_priority = priority
-                best_activity = activity
+            cmd_cls = classify_single_command(binary, subcmd, parameters)
+            command_results.append(cmd_cls)
 
-    return best_activity
+    if not command_results:
+        return Classification(
+            mechanism=CodingMechanism.PROCESS_SHELL,
+            effect=None,
+            capability=frozenset({"subprocess"}),
+        )
+
+    return build_classification_from_commands(command_results, shell_dialect="powershell")

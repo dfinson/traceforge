@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import os
 
-from tracemill.classify.rules import ShellActivity
-from tracemill.classify.rules import (
-    ACTIVITY_PRIORITY,
-    SHELL_IMPLEMENTATION,
-    classify_binary,
+from tracemill.classify.core import Classification
+from tracemill.classify.coding import CodingMechanism
+from tracemill.classify.shell import (
+    build_classification_from_commands,
+    classify_single_command,
 )
 
 
@@ -66,24 +66,36 @@ def _extract_binary_and_subcmd(segment: str) -> tuple[str, str | None, list[str]
     return binary, subcmd, flags
 
 
-def classify_cmd_command(command: str) -> ShellActivity:
-    """Classify a cmd.exe command string into an activity category."""
+def classify_cmd_command(command: str) -> Classification:
+    """Classify a cmd.exe command string into a full Classification."""
     if not command or not command.strip():
-        return SHELL_IMPLEMENTATION
+        return Classification(
+            mechanism=CodingMechanism.PROCESS_SHELL,
+            effect=None,
+        )
 
     segments = _split_cmd_commands(command)
     if not segments:
-        return SHELL_IMPLEMENTATION
+        return Classification(
+            mechanism=CodingMechanism.PROCESS_SHELL,
+            effect=None,
+        )
 
-    best_activity = SHELL_IMPLEMENTATION
-    best_priority = -1
+    from tracemill.classify.shell import _CommandClassification
 
+    command_results: list[_CommandClassification] = []
     for segment in segments:
         binary, subcmd, flags = _extract_binary_and_subcmd(segment)
-        activity = classify_binary(binary, subcmd, flags)
-        priority = ACTIVITY_PRIORITY.get(activity, 0)
-        if priority > best_priority:
-            best_priority = priority
-            best_activity = activity
+        if not binary:
+            continue
+        cmd_cls = classify_single_command(binary, subcmd, flags)
+        command_results.append(cmd_cls)
 
-    return best_activity
+    if not command_results:
+        return Classification(
+            mechanism=CodingMechanism.PROCESS_SHELL,
+            effect=None,
+            capability=frozenset({"subprocess"}),
+        )
+
+    return build_classification_from_commands(command_results, shell_dialect="cmd")

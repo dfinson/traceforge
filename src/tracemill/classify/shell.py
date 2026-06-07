@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import Final
 
 import tree_sitter as ts
@@ -211,6 +212,160 @@ _VERIFICATION_ROLE_ACTION: Final[dict[str, str]] = {
 }
 
 
+@dataclass(frozen=True)
+class _CommandClassification:
+    """Per-command classification result (internal helper)."""
+
+    binary: str
+    activity: ShellActivity
+    action: str
+    scope: str
+    role: str
+    phase: str
+    capabilities: frozenset[str]
+    effect: str | None
+
+
+def classify_single_command(
+    binary: str,
+    subcmd: str | None,
+    flags: list[str],
+    words: list[str] | None = None,
+) -> _CommandClassification:
+    """Classify a single binary invocation into its dimensions.
+
+    Shared across bash/powershell/cmd classifiers so all produce consistent
+    Classification objects with phase_map.
+    """
+    activity = classify_binary(binary, subcmd, flags, words)
+
+    # Role (rule-based, fallback to binary info)
+    cmd_role = ""
+    rule = match_rule(binary, subcmd, flags)
+    if rule and rule.role:
+        cmd_role = rule.role
+    else:
+        info = BINARY_INFO.get(binary)
+        if info:
+            cmd_role = info.role
+
+    # Action (per-subcommand precision for git/verification)
+    cmd_action = ""
+    if activity == SHELL_GIT_OPS and binary == "git" and subcmd:
+        cmd_action = _GIT_SUBCMD_ACTION.get(subcmd, CodingAction.COMMIT)
+    elif activity == SHELL_VERIFICATION and cmd_role:
+        cmd_action = _VERIFICATION_ROLE_ACTION.get(cmd_role, CodingAction.TEST)
+    else:
+        cmd_action = _ACTIVITY_TO_ACTION.get(activity, "")
+
+    # Scope
+    cmd_scope = _ACTIVITY_TO_SCOPE.get(activity, "")
+
+    # Phase
+    cmd_phase = _ACTIVITY_TO_PHASE.get(activity, Phase.IMPLEMENTATION)
+
+    # Capabilities
+    caps: set[str] = set()
+    info = BINARY_INFO.get(binary)
+    if info and info.network:
+        caps.add("network_outbound")
+    if binary == "git" and subcmd in ("push", "pull", "fetch", "clone"):
+        caps.add("network_outbound")
+    if activity == SHELL_SETUP:
+        caps.add("filesystem_write")
+        caps.add("network_outbound")
+    if binary == "sudo":
+        caps.add("elevated_privilege")
+
+    # Effect
+    effect = effect_for_binary(binary, subcmd, flags)
+
+    return _CommandClassification(
+        binary=binary,
+        activity=activity,
+        action=cmd_action,
+        scope=cmd_scope,
+        role=cmd_role,
+        phase=cmd_phase,
+        capabilities=frozenset(caps),
+        effect=effect,
+    )
+
+
+def build_classification_from_commands(
+    command_results: list[_CommandClassification],
+    structure: frozenset[str] = frozenset(),
+    shell_dialect: str | None = None,
+) -> Classification:
+    """Build a Classification from a list of per-command results.
+
+    Shared across bash/powershell/cmd classifiers.
+    """
+    all_roles: set[str] = set()
+    all_actions: set[str] = set()
+    all_scopes: set[str] = set()
+    all_capabilities: set[str] = {"subprocess"}
+    all_effects: list[str] = []
+    all_binaries: list[str] = []
+    phase_actions: dict[str, set[str]] = defaultdict(set)
+    phase_scopes: dict[str, set[str]] = defaultdict(set)
+    phase_roles: dict[str, set[str]] = defaultdict(set)
+
+    for cmd in command_results:
+        all_binaries.append(cmd.binary)
+        if cmd.role:
+            all_roles.add(cmd.role)
+        if cmd.action:
+            all_actions.add(cmd.action)
+        if cmd.scope:
+            all_scopes.add(cmd.scope)
+        all_capabilities.update(cmd.capabilities)
+        if cmd.effect:
+            all_effects.append(cmd.effect)
+
+        # Group by phase
+        if cmd.action:
+            phase_actions[cmd.phase].add(cmd.action)
+        if cmd.scope:
+            phase_scopes[cmd.phase].add(cmd.scope)
+        if cmd.role:
+            phase_roles[cmd.phase].add(cmd.role)
+
+    # Aggregate effect
+    agg_effect = aggregate_effect(*all_effects) if all_effects else None
+
+    # Filesystem capabilities from aggregate effect
+    if agg_effect in (Effect.MUTATING, Effect.DESTRUCTIVE):
+        all_capabilities.add("filesystem_write")
+    else:
+        all_capabilities.add("filesystem_read")
+
+    # Build phase_map
+    all_phases = set(phase_actions.keys()) | set(phase_scopes.keys()) | set(phase_roles.keys())
+    phase_map = tuple(
+        PhaseSegment(
+            phase=phase,
+            actions=frozenset(phase_actions.get(phase, set())),
+            scopes=frozenset(phase_scopes.get(phase, set())),
+            roles=frozenset(phase_roles.get(phase, set())),
+        )
+        for phase in sorted(all_phases)
+    )
+
+    return Classification(
+        mechanism=CodingMechanism.PROCESS_SHELL,
+        effect=agg_effect,
+        scope=frozenset(all_scopes),
+        role=frozenset(all_roles),
+        action=frozenset(all_actions),
+        capability=frozenset(all_capabilities),
+        structure=structure,
+        shell_dialect=shell_dialect,
+        binaries=tuple(dict.fromkeys(all_binaries)),
+        phase_map=phase_map,
+    )
+
+
 def _detect_structure(tree: ts.Tree) -> frozenset[str]:
     """Detect structural properties from the AST."""
     structures: set[str] = set()
@@ -264,18 +419,7 @@ def classify_shell(command: str) -> Classification:
             capability=frozenset({"subprocess"}),
         )
 
-    # Aggregate sets (union across all commands)
-    all_roles: set[str] = set()
-    all_actions: set[str] = set()
-    all_scopes: set[str] = set()
-    all_capabilities: set[str] = {"subprocess"}
-    all_effects: list[str] = []
-    all_binaries: list[str] = []
-
-    # Per-phase grouping: phase → (actions, scopes, roles)
-    phase_actions: dict[str, set[str]] = defaultdict(set)
-    phase_scopes: dict[str, set[str]] = defaultdict(set)
-    phase_roles: dict[str, set[str]] = defaultdict(set)
+    command_results: list[_CommandClassification] = []
 
     for _pattern_idx, captures in matches:
         for node in captures.get("cmd", []):
@@ -290,100 +434,15 @@ def classify_shell(command: str) -> Classification:
             if not binary:
                 continue
 
-            all_binaries.append(binary)
+            cmd_cls = classify_single_command(binary, subcmd, flags, words)
+            command_results.append(cmd_cls)
 
-            # Activity classification via shared rule table
-            activity = classify_binary(binary, subcmd, flags, words)
-
-            # Derive this command's role
-            cmd_role: str = ""
-            rule = match_rule(binary, subcmd, flags)
-            if rule and rule.role:
-                cmd_role = rule.role
-            else:
-                info = BINARY_INFO.get(binary)
-                if info:
-                    cmd_role = info.role
-
-            if cmd_role:
-                all_roles.add(cmd_role)
-
-            # Derive this command's action (per-subcommand precision)
-            cmd_action: str = ""
-            if activity == SHELL_GIT_OPS and binary == "git" and subcmd:
-                cmd_action = _GIT_SUBCMD_ACTION.get(subcmd, CodingAction.COMMIT)
-            elif activity == SHELL_VERIFICATION and cmd_role:
-                cmd_action = _VERIFICATION_ROLE_ACTION.get(cmd_role, CodingAction.TEST)
-            else:
-                cmd_action = _ACTIVITY_TO_ACTION.get(activity, "")
-
-            if cmd_action:
-                all_actions.add(cmd_action)
-
-            # Derive this command's scope
-            cmd_scope = _ACTIVITY_TO_SCOPE.get(activity, "")
-            if cmd_scope:
-                all_scopes.add(cmd_scope)
-
-            # Derive this command's phase and group labels under it
-            cmd_phase = _ACTIVITY_TO_PHASE.get(activity, Phase.IMPLEMENTATION)
-            if cmd_action:
-                phase_actions[cmd_phase].add(cmd_action)
-            if cmd_scope:
-                phase_scopes[cmd_phase].add(cmd_scope)
-            if cmd_role:
-                phase_roles[cmd_phase].add(cmd_role)
-
-            # Effect from shared function
-            effect = effect_for_binary(binary, subcmd, flags)
-            if effect:
-                all_effects.append(effect)
-
-            # Capabilities
-            info = BINARY_INFO.get(binary)
-            if info and info.network:
-                all_capabilities.add("network_outbound")
-            if binary == "git" and subcmd in ("push", "pull", "fetch", "clone"):
-                all_capabilities.add("network_outbound")
-            if activity == SHELL_SETUP:
-                all_capabilities.add("filesystem_write")
-                all_capabilities.add("network_outbound")
-            if binary == "sudo":
-                all_capabilities.add("elevated_privilege")
-
-    # Aggregate effect
-    agg_effect = aggregate_effect(*all_effects) if all_effects else None
-
-    # Filesystem capabilities from effect
-    if agg_effect in (Effect.MUTATING, Effect.DESTRUCTIVE):
-        all_capabilities.add("filesystem_write")
-    else:
-        all_capabilities.add("filesystem_read")
-
-    # Structural properties from AST
-    structure = _detect_structure(tree)
-
-    # Build phase_map
-    all_phases = set(phase_actions.keys()) | set(phase_scopes.keys()) | set(phase_roles.keys())
-    phase_map = tuple(
-        PhaseSegment(
-            phase=phase,
-            actions=frozenset(phase_actions.get(phase, set())),
-            scopes=frozenset(phase_scopes.get(phase, set())),
-            roles=frozenset(phase_roles.get(phase, set())),
+    if not command_results:
+        return Classification(
+            mechanism=CodingMechanism.PROCESS_SHELL,
+            effect=None,
+            capability=frozenset({"subprocess"}),
         )
-        for phase in sorted(all_phases)
-    )
 
-    return Classification(
-        mechanism=CodingMechanism.PROCESS_SHELL,
-        effect=agg_effect,
-        scope=frozenset(all_scopes),
-        role=frozenset(all_roles),
-        action=frozenset(all_actions),
-        capability=frozenset(all_capabilities),
-        structure=structure,
-        shell_dialect="bash",
-        binaries=tuple(dict.fromkeys(all_binaries)),
-        phase_map=phase_map,
-    )
+    structure = _detect_structure(tree)
+    return build_classification_from_commands(command_results, structure, "bash")

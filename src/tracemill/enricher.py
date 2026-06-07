@@ -126,23 +126,31 @@ class Enricher:
             return "planning"
 
         category = event.metadata.tool_category
-        if category == "internal":
-            return "planning"
-        if category == "git":
-            return "review"
+
+        # Category → phase mapping (replaces if-chain)
+        _CATEGORY_PHASE: dict[str | None, str] = {
+            "internal": "planning",
+            "git": "review",
+            "file_write": "implementation",
+            "file_read": "exploration",
+            "search": "exploration",
+            "interaction": "planning",
+            "browser": "exploration",
+            "agent": "implementation",
+        }
+
         if category == "shell":
             shell_activity = self._classify_shell_activity(event)
-            if shell_activity == SHELL_VERIFICATION:
-                return "verification"
-            if shell_activity == SHELL_GIT_OPS:
-                return "review"
-            if shell_activity == SHELL_INVESTIGATION:
-                return "exploration"
-            return "implementation"
-        if category == "file_write":
-            return "implementation"
+            _SHELL_PHASE: dict[str, str] = {
+                SHELL_VERIFICATION: "verification",
+                SHELL_GIT_OPS: "review",
+                SHELL_INVESTIGATION: "exploration",
+            }
+            return _SHELL_PHASE.get(shell_activity, "implementation")
 
-        # Default for other tool events
+        if category in _CATEGORY_PHASE:
+            return _CATEGORY_PHASE[category]
+
         if event.kind in (EventKind.TOOL_START, EventKind.TOOL_COMPLETE):
             return "implementation"
 

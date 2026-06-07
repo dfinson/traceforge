@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from tracemill import EventPipeline, SessionEvent, StorageSink, TelemetrySpan, UsageRecord
 from tests.conftest import RecordingSink, make_event, make_span, make_usage
 
@@ -155,3 +157,33 @@ class TestPipelineFlushClose:
         await pipeline.close()
         assert tracker.flushed
         assert tracker.closed
+
+
+class TestStorageSinkABC:
+    """Verify the StorageSink contract: only on_event is abstract."""
+
+    async def test_minimal_sink_only_needs_on_event(self):
+        class MinimalSink(StorageSink):
+            async def on_event(self, event: SessionEvent) -> None:
+                pass
+
+        sink = MinimalSink()
+        event = make_event()
+        await sink.on_event(event)
+        await sink.on_span(make_span())
+        await sink.on_usage(make_usage())
+        await sink.flush()
+        await sink.close()
+
+
+class TestPipelineErrorLogging:
+    async def test_failing_sink_logs_error_with_traceback(self, caplog):
+        pipeline = EventPipeline(sinks=[FailingSink()])
+        event = make_event()
+        with caplog.at_level(logging.ERROR, logger="tracemill.pipeline"):
+            await pipeline.push(event)
+        assert len(caplog.records) == 1
+        record = caplog.records[0]
+        assert "boom" in record.message
+        assert record.exc_info is not None
+        assert record.exc_info[0] is RuntimeError

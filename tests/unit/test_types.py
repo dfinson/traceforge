@@ -186,3 +186,16 @@ class TestFrozenModels:
         span = make_span()
         with pytest.raises(Exception):
             span.name = "mutated"
+
+    def test_frozen_is_shallow_payload_dict_is_mutable(self):
+        """Frozen prevents field reassignment, but payload dict internals
+        are still mutable. This is by design — deep-freezing dicts would
+        require copying on every fan-out, which is too expensive. Sinks
+        must treat event data as read-only by convention."""
+        event = make_event(payload={"key": "original"})
+        # Field reassignment is blocked
+        with pytest.raises(Exception):
+            event.payload = {"key": "replaced"}
+        # But in-place mutation of the dict itself is allowed (shallow freeze)
+        event.payload["key"] = "mutated"
+        assert event.payload["key"] == "mutated"

@@ -1,6 +1,11 @@
 # Binary metadata — role and default effect for known CLI binaries.
 # Used by shell classification to determine effect and role when
 # no specific rule matches.
+#
+# IMPORTANT: role values MUST match CodingRole enum values in coding.py.
+# Valid prefixes: validator.*, transformer.*, generator.*, executor.*,
+# orchestrator.*, observer.*, retriever.*, modifier.*, persistence.*,
+# communicator.*
 
 binary_info:
   # ─── Test runners ───────────────────────────────────────────────────────────
@@ -80,68 +85,68 @@ binary_info:
     role: transformer.formatter
     default_effect: mutating
 
-  # ─── Package managers ──────────────────────────────────────────────────────
+  # ─── Package managers ──────────────────────────────────────────────────
   pip:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: mutating
     network: true
   pip3:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: mutating
     network: true
   uv:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: mutating
     network: true
   poetry:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: mutating
     network: true
   brew:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: mutating
     network: true
   apt:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: mutating
     network: true
   apt-get:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: mutating
     network: true
   choco:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: mutating
     network: true
   winget:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: mutating
     network: true
   scoop:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: mutating
     network: true
   helm:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: null
     network: true
 
   # ─── Environment managers ──────────────────────────────────────────────────
   conda:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: null
     network: true
   virtualenv:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: mutating
   nvm:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: mutating
   rbenv:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: mutating
   pyenv:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: mutating
 
   # ─── Task runners (npm/cargo/etc.) ─────────────────────────────────────────
@@ -193,21 +198,21 @@ binary_info:
     role: transformer.bundler
     default_effect: null
 
-  # ─── Container runtimes ────────────────────────────────────────────────────
+  # ─── Container runtimes ────────────────────────────────────────────────
   docker:
-    role: orchestrator.container_runtime
+    role: executor.container_runtime
     default_effect: null
     network: true
   podman:
-    role: orchestrator.container_runtime
+    role: executor.container_runtime
     default_effect: null
     network: true
   docker-compose:
-    role: orchestrator.container_runtime
+    role: executor.container_runtime
     default_effect: null
     network: true
   kubectl:
-    role: orchestrator.container_runtime
+    role: executor.container_runtime
     default_effect: null
     network: true
 
@@ -225,124 +230,124 @@ binary_info:
     default_effect: null
     network: true
 
-  # ─── Version control ───────────────────────────────────────────────────────
+  # ─── Version control ───────────────────────────────────────────────────
   git:
-    role: vcs.version_control
+    role: persistence.version_control
     default_effect: null
   gh:
-    role: network.api_client
+    role: retriever.api_client
     default_effect: null
     network: true
 
   # ─── Script runners ────────────────────────────────────────────────────
   bash:
-    role: orchestrator.script_runner
+    role: executor.script_runner
     default_effect: null
   sh:
-    role: orchestrator.script_runner
+    role: executor.script_runner
     default_effect: null
   zsh:
-    role: orchestrator.script_runner
+    role: executor.script_runner
     default_effect: null
   python:
-    role: orchestrator.script_runner
+    role: executor.script_runner
     default_effect: null
   python3:
-    role: orchestrator.script_runner
+    role: executor.script_runner
     default_effect: null
   node:
-    role: orchestrator.script_runner
+    role: executor.script_runner
     default_effect: null
   perl:
-    role: orchestrator.script_runner
+    role: executor.script_runner
     default_effect: null
 
-  # ─── Network clients ──────────────────────────────────────────────────────
+  # ─── Network clients ──────────────────────────────────────────────────
   curl:
-    role: network.api_client
+    role: retriever.api_client
     default_effect: read_only
     network: true
   wget:
-    role: network.api_client
+    role: retriever.api_client
     default_effect: mutating
     network: true
 
-  # ─── File operations ───────────────────────────────────────────────────────
+  # ─── File operations ───────────────────────────────────────────────────
   rm:
-    role: orchestrator.script_runner
+    role: modifier.file_editor
     default_effect: destructive
     destructive: true
   rmdir:
-    role: orchestrator.script_runner
+    role: modifier.file_editor
     default_effect: destructive
     destructive: true
   cp:
-    role: filesystem.file_editor
+    role: modifier.file_editor
     default_effect: mutating
   mv:
-    role: filesystem.file_editor
+    role: modifier.file_editor
     default_effect: mutating
   mkdir:
-    role: filesystem.file_editor
+    role: modifier.file_editor
     default_effect: mutating
   chmod:
-    role: orchestrator.script_runner
+    role: modifier.file_editor
     default_effect: mutating
   chown:
-    role: orchestrator.script_runner
+    role: modifier.file_editor
     default_effect: mutating
   touch:
-    role: filesystem.file_editor
+    role: modifier.file_editor
     default_effect: mutating
   ln:
-    role: filesystem.file_editor
+    role: modifier.file_editor
     default_effect: mutating
   sudo:
-    role: orchestrator.script_runner
+    role: executor.script_runner
     default_effect: null
 
-  # ─── Text processors / search ──────────────────────────────────────────────
+  # ─── Text processors / search ──────────────────────────────────────────
   sed:
-    role: filesystem.file_editor
+    role: modifier.file_editor
     default_effect: mutating
   awk:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   gawk:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   jq:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   yq:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   cat:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   head:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   tail:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   less:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   grep:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   rg:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   ag:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   fd:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   fdfind:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
 
   # ─── Security scanners ────────────────────────────────────────────────────
@@ -366,270 +371,270 @@ binary_info:
 
   # ─── System utilities ────────────────────────────────────────────────────
   find:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   xargs:
-    role: orchestrator.script_runner
+    role: executor.script_runner
     default_effect: null
   tee:
-    role: filesystem.file_editor
+    role: modifier.file_editor
     default_effect: mutating
   sort:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   cut:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   paste:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   tr:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   uniq:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   wc:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   comm:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   diff:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
 
   # ─── System info ────────────────────────────────────────────────────────
   pwd:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   hostname:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   whoami:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   env:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   printenv:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   uname:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   date:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   df:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   du:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   free:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   uptime:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   which:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   whereis:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
 
   # ─── Destructive / dangerous system tools ───────────────────────────────
   dd:
-    role: orchestrator.script_runner
+    role: modifier.file_editor
     default_effect: destructive
     destructive: true
   mkfs:
-    role: orchestrator.script_runner
+    role: modifier.file_editor
     default_effect: destructive
     destructive: true
   truncate:
-    role: filesystem.file_editor
+    role: modifier.file_editor
     default_effect: destructive
     destructive: true
   kill:
-    role: orchestrator.script_runner
+    role: executor.script_runner
     default_effect: mutating
   systemctl:
-    role: orchestrator.script_runner
+    role: executor.script_runner
     default_effect: mutating
   iptables:
-    role: orchestrator.script_runner
+    role: executor.script_runner
     default_effect: mutating
     network: true
 
   # ─── Network tools ─────────────────────────────────────────────────────
   nc:
-    role: network.api_client
+    role: retriever.api_client
     default_effect: null
     network: true
   ncat:
-    role: network.api_client
+    role: retriever.api_client
     default_effect: null
     network: true
   socat:
-    role: network.api_client
+    role: retriever.api_client
     default_effect: null
     network: true
   telnet:
-    role: network.api_client
+    role: retriever.api_client
     default_effect: null
     network: true
   rsync:
-    role: network.api_client
+    role: retriever.api_client
     default_effect: mutating
     network: true
   scp:
-    role: network.api_client
+    role: retriever.api_client
     default_effect: mutating
     network: true
   ftp:
-    role: network.api_client
+    role: retriever.api_client
     default_effect: null
     network: true
 
   # ─── Encoding / data transformation ────────────────────────────────────
   base64:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   b64encode:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   xxd:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   od:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   hexdump:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   openssl:
-    role: orchestrator.script_runner
+    role: executor.script_runner
     default_effect: null
     network: true
   gpg:
-    role: orchestrator.script_runner
+    role: executor.script_runner
     default_effect: null
 
   # ─── Compression ───────────────────────────────────────────────────────
   tar:
-    role: filesystem.file_editor
+    role: modifier.file_editor
     default_effect: mutating
   zip:
-    role: filesystem.file_editor
+    role: modifier.file_editor
     default_effect: mutating
   unzip:
-    role: filesystem.file_editor
+    role: modifier.file_editor
     default_effect: mutating
   gzip:
-    role: filesystem.file_editor
+    role: modifier.file_editor
     default_effect: mutating
   gunzip:
-    role: filesystem.file_editor
+    role: modifier.file_editor
     default_effect: mutating
   bzip2:
-    role: filesystem.file_editor
+    role: modifier.file_editor
     default_effect: mutating
   xz:
-    role: filesystem.file_editor
+    role: modifier.file_editor
     default_effect: mutating
   cpio:
-    role: filesystem.file_editor
+    role: modifier.file_editor
     default_effect: mutating
 
   # ─── Directory listing variants ────────────────────────────────────────
   ls:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   ll:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   exa:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   eza:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   lsd:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   tree:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
 
   # ─── File viewers (extra) ──────────────────────────────────────────────
   bat:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   more:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
 
   # ─── Grep variants (extra) ────────────────────────────────────────────
   egrep:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   fgrep:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   ripgrep:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
 
   # ─── GTFOBins-relevant tools ───────────────────────────────────────────
   vim:
-    role: filesystem.file_editor
+    role: modifier.file_editor
     default_effect: mutating
   vi:
-    role: filesystem.file_editor
+    role: modifier.file_editor
     default_effect: mutating
   man:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   gdb:
-    role: orchestrator.script_runner
+    role: observer.debugger
     default_effect: null
   nawk:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   mawk:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   php:
-    role: orchestrator.script_runner
+    role: executor.script_runner
     default_effect: null
     network: true
   ruby:
-    role: orchestrator.script_runner
+    role: executor.script_runner
     default_effect: null
 
   # ─── Version managers (extra) ──────────────────────────────────────────
   asdf:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: mutating
   fnm:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: mutating
   mise:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: mutating
   rtx:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: mutating
   venv:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: mutating
 
   # ─── Publishing tools ──────────────────────────────────────────────────
   twine:
-    role: network.api_client
+    role: retriever.api_client
     default_effect: mutating
     network: true
 
@@ -643,47 +648,47 @@ binary_info:
 
   # ─── File permissions (extra) ──────────────────────────────────────────
   chgrp:
-    role: orchestrator.script_runner
+    role: modifier.file_editor
     default_effect: mutating
   icacls:
-    role: orchestrator.script_runner
+    role: modifier.file_editor
     default_effect: mutating
 
   # ─── Windows / cmd.exe builtins ────────────────────────────────────────
   dir:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   type:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   findstr:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   where:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   set:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   copy:
-    role: filesystem.file_editor
+    role: modifier.file_editor
     default_effect: mutating
   move:
-    role: filesystem.file_editor
+    role: modifier.file_editor
     default_effect: mutating
   rename:
-    role: filesystem.file_editor
+    role: modifier.file_editor
     default_effect: mutating
   del:
-    role: orchestrator.script_runner
+    role: modifier.file_editor
     default_effect: destructive
     destructive: true
   erase:
-    role: orchestrator.script_runner
+    role: modifier.file_editor
     default_effect: destructive
     destructive: true
   rd:
-    role: orchestrator.script_runner
+    role: modifier.file_editor
     default_effect: destructive
     destructive: true
 
@@ -702,105 +707,105 @@ binary_info:
     role: validator.linter
     default_effect: read_only
   test-connection:
-    role: filesystem.file_browser
+    role: validator.build_checker
     default_effect: read_only
     network: true
   test-netconnection:
-    role: filesystem.file_browser
+    role: validator.build_checker
     default_effect: read_only
     network: true
   test-path:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
 
   # Package management
   install-module:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: mutating
     network: true
   install-package:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: mutating
     network: true
   install-psresource:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: mutating
     network: true
   register-psrepository:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: mutating
     network: true
   update-module:
-    role: dependency.package_manager
+    role: orchestrator.package_manager
     default_effect: mutating
     network: true
 
   # Read-only inspection
   format-list:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   format-table:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   get-childitem:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   get-command:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   get-content:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   get-help:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   get-item:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   get-itemproperty:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   get-module:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   get-process:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   get-service:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   get-variable:
-    role: filesystem.file_browser
+    role: retriever.file_browser
     default_effect: read_only
   measure-object:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   out-string:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   select-object:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   select-string:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   sort-object:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
   where-object:
-    role: filesystem.search_index
+    role: retriever.search_index
     default_effect: read_only
 
-  # ─── Cloud CLIs ───────────────────────────────────────────────────────────
+  # ─── Cloud CLIs ───────────────────────────────────────────────────────
   az:
-    role: network.api_client
+    role: retriever.api_client
     default_effect: null
     network: true
   aws:
-    role: network.api_client
+    role: retriever.api_client
     default_effect: null
     network: true
   gcloud:
-    role: network.api_client
+    role: retriever.api_client
     default_effect: null
     network: true

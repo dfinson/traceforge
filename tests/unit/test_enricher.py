@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from tracemill import Enricher, EventKind, EventPipeline, SessionEvent
-from tracemill.enricher import DEFAULT_TOOL_CATEGORIES
+from tracemill.classify import TOOL_CATEGORY_MAP
 
 from tests.conftest import RecordingSink
 
@@ -172,14 +172,16 @@ class TestDurationCalculation:
 
 class TestToolClassification:
     def test_known_tool_names(self):
+        """Canonical tool names get correct categories via the enricher."""
         enricher = Enricher()
-        for tool_name, expected_category in DEFAULT_TOOL_CATEGORIES.items():
-            event = _make_tool_start(tool_name=tool_name)
+        for canonical_name, expected_category in TOOL_CATEGORY_MAP.items():
+            event = _make_tool_start(tool_name=canonical_name)
             enricher.process(event)
-            # Flush to retrieve buffered events
             flushed = enricher.flush()
             assert len(flushed) == 1
-            assert flushed[0].metadata.tool_category == expected_category
+            assert flushed[0].metadata.tool_category == expected_category, (
+                f"{canonical_name} should be '{expected_category}'"
+            )
 
     def test_unknown_tool_gets_other(self):
         enricher = Enricher()

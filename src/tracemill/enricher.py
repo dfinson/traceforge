@@ -5,43 +5,16 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
+from tracemill.classify import (
+    SHELL_GIT_OPS,
+    SHELL_INVESTIGATION,
+    SHELL_VERIFICATION,
+    classify_shell_command,
+    classify_tool,
+)
 from tracemill.types import EventKind, EventMetadata, SessionEvent
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_TOOL_CATEGORIES: dict[str, str] = {
-    "create": "file_write",
-    "edit": "file_write",
-    "view": "file_read",
-    "glob": "file_read",
-    "grep": "search",
-    "powershell": "shell",
-    "bash": "shell",
-    "git_commit": "git",
-    "git_push": "git",
-    "git_diff": "git",
-    "report_intent": "internal",
-    "ask_user": "interaction",
-}
-
-_VERIFICATION_KEYWORDS = frozenset(
-    {
-        "pytest",
-        "ruff check",
-        "ruff format",
-        "npm test",
-        "npm run test",
-        "cargo test",
-        "cargo check",
-        "make test",
-        "go test",
-        "python -m unittest",
-        "mypy",
-        "pyright",
-        "tox",
-        "nox",
-    }
-)
 
 
 class Enricher:
@@ -52,9 +25,7 @@ class Enricher:
         Args:
             tool_categories: Optional custom tool→category map that extends/overrides defaults.
         """
-        self._categories: dict[str, str] = {**DEFAULT_TOOL_CATEGORIES}
-        if tool_categories:
-            self._categories.update(tool_categories)
+        self._custom_categories = tool_categories
         self._pending: dict[str, SessionEvent] = {}
 
     def process(self, event: SessionEvent) -> SessionEvent | list[SessionEvent] | None:
@@ -123,7 +94,7 @@ class Enricher:
     def _classify_tool(self, event: SessionEvent) -> SessionEvent:
         """Set metadata.tool_category based on tool name."""
         tool_name = event.payload.get("tool_name", "")
-        category = self._categories.get(tool_name, "other")
+        category = classify_tool(tool_name, self._custom_categories)
         new_metadata = event.metadata.model_copy(update={"tool_category": category})
         return event.model_copy(update={"metadata": new_metadata})
 
@@ -159,9 +130,16 @@ class Enricher:
             return "planning"
         if category == "git":
             return "review"
-        if category in ("file_write", "shell"):
-            if category == "shell" and self._has_verification_keywords(event):
+        if category == "shell":
+            shell_activity = self._classify_shell_activity(event)
+            if shell_activity == SHELL_VERIFICATION:
                 return "verification"
+            if shell_activity == SHELL_GIT_OPS:
+                return "review"
+            if shell_activity == SHELL_INVESTIGATION:
+                return "exploration"
+            return "implementation"
+        if category == "file_write":
             return "implementation"
 
         # Default for other tool events
@@ -170,17 +148,15 @@ class Enricher:
 
         return "planning"
 
-    def _has_verification_keywords(self, event: SessionEvent) -> bool:
-        """Check if event payload contains test/lint/build keywords."""
-        searchable = ""
-        tool_name = event.payload.get("tool_name", "")
+    def _classify_shell_activity(self, event: SessionEvent) -> str:
+        """Extract command from shell event and classify it."""
         arguments = event.payload.get("arguments", {})
+        command = ""
         if isinstance(arguments, dict):
-            searchable = " ".join(str(v) for v in arguments.values())
+            command = arguments.get("command", "") or arguments.get("cmd", "")
         elif isinstance(arguments, str):
-            searchable = arguments
-        searchable = f"{tool_name} {searchable}".lower()
-        return any(kw in searchable for kw in _VERIFICATION_KEYWORDS)
+            command = arguments
+        return classify_shell_command(command)
 
 
 def _compute_duration_ms(start: datetime, end: datetime) -> float:

@@ -244,34 +244,82 @@ The enricher is **stateful per session** (not per event). State is bounded: at m
 
 Buffers `tool_start` events. When a matching `tool_complete` arrives (same `tool_call_id`), the enricher:
 1. Computes `duration_ms` from the timestamps
-2. Merges the start's arguments with the complete's result
+2. Merges the start's arguments with the complete's result (preserving start's `_enrichment` data)
 3. Emits a single enriched `tool_complete` event with full context
 
 Unpaired tool starts (no matching complete within the session) are emitted as-is when `flush()` is called at session end, with `duration_ms = None`.
 
-### 5.2 Tool Classification
+### 5.2 Pluggable Classification System
 
-Maps tool names to canonical categories. The default classification map:
+Classification is driven by a `ClassificationEngine` loaded from YAML data files. The engine provides:
 
-```python
-TOOL_CATEGORIES = {
-    # File operations
-    "create": "file_write", "edit": "file_write", "view": "file_read",
-    "glob": "file_read", "grep": "search",
-    # Shell
-    "powershell": "shell", "bash": "shell",
-    # Git
-    "git_commit": "git", "git_push": "git", "git_diff": "git",
-    # Reasoning
-    "report_intent": "internal", "ask_user": "interaction",
-    # Default
-    "_default": "other",
-}
-```
+- **Binary info** (`binary_info.yaml`): 294 entries mapping CLI binaries to roles, effects, scopes, and capabilities
+- **Shell rules** (`shell_rules.yaml`): 95 pattern-matching rules for compound shell commands
+- **MCP profiles** (`mcp_profiles.yaml`): 50 MCP server profiles with tool-level overrides and verb inference
+- **Canonical tools** (`canonical_tools.yaml`): Native tool → classification mapping
+- **Risk scoring** (`risk.yaml`): 4-layer risk assessment with CVSS/CWSS-anchored weights
+- **Verb inference** (`verb_inference.yaml`): MCP tool name → effect/action mapping
+- **Effect overrides** (`effect_overrides.yaml`): Flag-based effect escalation rules
+- **Shell defaults** (`shell_defaults.yaml`): Default shell classification values
 
-Consumers can pass a custom classification map to override or extend defaults.
+Custom configurations can extend or override built-in defaults. YAML files merge per-key for dicts and prepend for lists.
 
-### 5.3 Visibility Classification
+### 5.3 Classification Dimensions
+
+Every classified event carries a `Classification` dataclass with:
+
+| Dimension | Type | Description |
+| --- | --- | --- |
+| `mechanism` | `str` | How the tool operates: `process.shell`, `filesystem.local`, `network.http`, etc. |
+| `effect` | `str \| None` | Side-effect level: `null`, `read_only`, `mutating`, `destructive` |
+| `role` | `frozenset[str]` | Semantic roles from `CodingRole` enum: `validator.test_runner`, `modifier.file_editor`, etc. |
+| `action` | `frozenset[str]` | Actions from `CodingAction` enum: `validate.test`, `modify.write`, `retrieve.search`, etc. |
+| `scope` | `frozenset[str]` | Artifact scopes from `CodingScope` enum: `artifact.source_code`, `configuration.dependency`, etc. |
+| `capability` | `frozenset[str]` | Required capabilities: `filesystem_read`, `filesystem_write`, `network`, `subprocess` |
+
+### 5.4 Shell Classification
+
+Shell commands are classified via tree-sitter AST parsing (bash dialect). The classifier:
+1. Parses the command into an AST via tree-sitter
+2. Extracts individual commands from compound statements (`;`, `&&`, `||`, `|`)
+3. Unwraps transparent wrappers (`env`, `sudo`, `nohup`, `nice`, etc.)
+4. Looks up the binary in `binary_info.yaml` for base classification
+5. Applies subcmd-specific rules (e.g., `git push` vs `git log`)
+6. Detects flag modifiers (`--force`, `--recursive`, `--privileged`)
+7. Infers scope from file targets in the command
+
+PowerShell and cmd.exe commands use dedicated classifiers dispatched by tool name.
+
+### 5.5 MCP Tool Classification
+
+MCP tools (prefixed `mcp__<namespace>__<tool>`) are classified via server profiles:
+1. Extract namespace from tool name
+2. Match against registered `McpServerProfile` aliases
+3. Apply profile defaults (mechanism, role, scope, capability, effect)
+4. Apply per-tool overrides if defined
+5. Run verb inference from tool name suffix (e.g., `delete_` → destructive)
+6. Verb inference upgrades effect when inferred effect is more dangerous than profile default
+7. Filesystem tools with mutating/destructive verbs get capability and role upgrades
+
+### 5.6 Risk Scoring
+
+Every tool event receives a 0-100 risk score with 4 layers (shell) or 2 layers (native/MCP):
+
+**Shell commands (4-layer additive model):**
+1. **Structural** (0-60): Base score from effect × scope matrix
+2. **Flag modifiers** (±15 each): `--force`, `--recursive`, `--no-verify`, `--privileged`, etc.
+3. **Injection/evasion patterns** (0-20 cap): GTFOBins usage, encoding chains, eval injection
+4. **Pipeline taint** (0-30): Source→sink analysis across all adjacent pipe segments
+
+**Context adjustment** (±20): Project-relative targeting reduces score; path escape (`../`, absolute paths outside project) increases score.
+
+**Native/MCP tools (2-layer model):**
+1. Scope sensitivity from target file analysis
+2. Effect-based base scoring
+
+Risk levels: `safe` (0-20), `low` (21-40), `moderate` (41-60), `elevated` (61-80), `critical` (81-100).
+
+### 5.7 Visibility Classification
 
 Determines whether an event is meaningful to downstream consumers:
 
@@ -279,17 +327,17 @@ Determines whether an event is meaningful to downstream consumers:
 | --- | --- | --- |
 | `visible` | User-facing, meaningful work | File edits, shell commands, messages |
 | `internal` | Agent machinery, not interesting | `report_intent`, heartbeats, progress |
-| `collapsed` | Repeated retries → summarize as one | 5 failed `grep` calls → "5 search attempts" |
+| `collapsed` | Repeated retries → summarize as one | Future: sequence tracking |
 
-### 5.4 Phase Detection
+### 5.8 Phase Detection
 
-Heuristic phase assignment based on event sequence patterns:
-- **planning**: Messages without tool calls, or `report_intent` calls
-- **implementation**: File writes, shell commands, code edits
-- **verification**: Test runs, linting, build commands
-- **review**: Git operations, PR-related tool calls
+Heuristic phase assignment based on event kind and tool classification:
+- **planning**: Messages without tool calls, or `report_intent` / `internal` category tools
+- **implementation**: `file_write` or `shell` category tools
+- **verification**: Shell tools with test/lint/build keywords (`pytest`, `ruff`, `npm test`, `cargo test`)
+- **review**: Git category tools
 
-Phase is a hint, not a guarantee. Consumers use it for optional grouping.
+Phase is stored in `payload["_enrichment"]["phase"]` as a hint, not a guarantee.
 
 ---
 
@@ -464,53 +512,49 @@ tracemill/
 ├── LICENSE                     # MIT
 │
 ├── src/tracemill/
-│   ├── __init__.py             # Public API: Pipeline, Enricher, SessionEvent, StorageSink
-│   ├── types.py                # SessionEvent, EventKind, TelemetrySpan, UsageRecord, enums
-│   ├── pipeline.py             # EventPipeline: orchestration, sink fan-out
-│   ├── enricher.py             # Enricher: tool pairing, classification, phase detection
-│   ├── bus.py                  # EventBus: optional in-process pub/sub
+│   ├── __init__.py             # Public API: Pipeline, Enricher, SessionEvent, EventKind
+│   ├── types.py                # SessionEvent, EventKind, EventMetadata, Sink protocol
+│   ├── pipeline.py             # EventPipeline: enricher integration, sink fan-out
+│   ├── enricher.py             # Enricher: tool pairing, classification, risk, phase, visibility
 │   │
-│   ├── adapters/
-│   │   ├── __init__.py
-│   │   ├── base.py             # Adapter ABC
-│   │   ├── copilot_sdk.py      # Copilot SDK stdout → SessionEvent
-│   │   ├── claude_sdk.py       # Claude SDK stdout → SessionEvent
-│   │   ├── cli_jsonl.py        # Copilot CLI events.jsonl → SessionEvent
-│   │   └── claude_jsonl.py     # Claude session_state → SessionEvent
-│   │
-│   ├── sinks/
-│   │   ├── __init__.py
-│   │   ├── base.py             # StorageSink ABC
-│   │   ├── sqlite.py           # SQLiteSink (optional dep: aiosqlite)
-│   │   ├── otel.py             # OTELSink (optional dep: opentelemetry-sdk)
-│   │   └── callback.py         # CallbackSink (for testing / custom routing)
-│   │
-│   ├── telemetry/
-│   │   ├── __init__.py
-│   │   ├── instruments.py      # OTEL instrument definitions
-│   │   └── setup.py            # Meter/tracer provider initialization
-│   │
-│   └── formatting/
-│       ├── __init__.py
-│       ├── density.py          # classify_density(), attention scoring
-│       └── budget.py           # Token-budgeted output assembly
+│   └── classify/               # Pluggable classification engine
+│       ├── __init__.py         # Public API: classify_shell, classify_tool, get_default_engine
+│       ├── config.py           # ClassificationEngine, ClassifyConfig, YAML loading
+│       ├── core.py             # Classification dataclass, classify_tool dispatch
+│       ├── coding.py           # CodingRole, CodingAction, CodingScope, CodingMechanism enums
+│       ├── shell.py            # Tree-sitter bash classifier with wrapper unwrapping
+│       ├── powershell.py       # PowerShell cmdlet classifier
+│       ├── cmd.py              # Windows cmd.exe classifier
+│       ├── mcp.py              # MCP server profile matching with verb inference
+│       ├── tools.py            # Native tool classification via canonical registry
+│       ├── rules.py            # Shell rule matching and activity derivation
+│       ├── risk.py             # 4-layer risk scoring (structural, flags, injection, taint)
+│       ├── phases.py           # Phase map generation from classification
+│       ├── registry.py         # Tool classification registry
+│       ├── workflow.py         # Workflow activity classification
+│       │
+│       └── data/               # YAML configuration files
+│           ├── binary_info.yaml       # 294 CLI binary classifications
+│           ├── shell_rules.yaml       # 95 shell command pattern rules
+│           ├── mcp_profiles.yaml      # 50 MCP server profiles
+│           ├── canonical_tools.yaml   # Native tool → classification map
+│           ├── risk.yaml              # Risk scoring weights and rules
+│           ├── verb_inference.yaml    # MCP verb → effect/action map
+│           ├── effect_overrides.yaml  # Flag-based effect escalation
+│           ├── shell_defaults.yaml    # Default shell classification
+│           └── tool_classifications.yaml  # Tool category defaults
 │
 └── tests/
-    ├── conftest.py             # Shared fixtures
-    ├── unit/                   # Pure function + enricher state tests
-    │   ├── test_types.py
-    │   ├── test_enricher.py
-    │   ├── test_pipeline.py
-    │   ├── test_adapters.py
-    │   └── test_formatting.py
-    ├── integration/            # Pipeline → sink roundtrips
-    │   ├── test_sqlite_sink.py
-    │   ├── test_otel_sink.py
-    │   └── test_pipeline_sinks.py
-    └── fixtures/               # Sample events.jsonl from real sessions
-        ├── copilot_session.jsonl
-        ├── claude_session.jsonl
-        └── malformed.jsonl     # For defensive parsing tests
+    ├── conftest.py             # Shared fixtures (RecordingSink)
+    └── unit/
+        ├── test_types.py
+        ├── test_enricher.py        # 1200+ lines, comprehensive enricher tests
+        ├── test_callback_sink.py
+        ├── test_classification.py  # Binary + shell rule classification
+        ├── test_classify.py        # Integration: classify_tool dispatch
+        ├── test_classify_shells.py # PS, cmd, quoted tokens, wrapper unwrapping
+        ├── test_mcp.py             # MCP profile matching, verb inference
+        └── test_risk.py            # Risk scoring, context paths, taint
 ```
 
 ---
@@ -731,17 +775,28 @@ steps:
 
 **Gate:** `EventPipeline` accepts `SessionEvent`, fans out to `CallbackSink`, error-isolated.
 
-### Step 2: Enricher
+### Step 2: Enricher + Classification System ✅
 
-- Extract and adapt `EventEnricher` from CodePlane's `event_enricher.py`
-- Tool pairing with duration tracking
-- Tool classification with default map + custom override
-- Visibility classification
-- Phase detection
-- Wire enricher into pipeline
-- Unit tests for all enricher behaviors
+- `enricher.py` — Tool pairing with duration tracking, tool classification dispatch, visibility, phase detection, risk scoring
+- `classify/` package — Pluggable YAML-based classification engine:
+  - `config.py` — `ClassificationEngine` with YAML loading, pre-indexed lookups
+  - `core.py` — `Classification` dataclass, `classify_tool()` dispatch
+  - `shell.py` — Tree-sitter AST-based bash classifier with wrapper unwrapping
+  - `powershell.py` — PowerShell cmdlet classifier
+  - `cmd.py` — Windows cmd.exe classifier
+  - `mcp.py` — MCP server profile matching with verb inference and effect escalation
+  - `tools.py` — Native tool classification via canonical tool registry
+  - `rules.py` — Shell rule matching and activity derivation
+  - `risk.py` — 4-layer risk scoring (structural, flags, injection, taint)
+  - `phases.py` — Phase map generation from classification dimensions
+  - `coding.py` — `CodingRole`, `CodingAction`, `CodingScope`, `CodingMechanism` enums
+  - `registry.py` — Tool classification registry
+  - `workflow.py` — Workflow activity classification
+- `classify/data/` — 8 YAML data files (294 binaries, 95 shell rules, 50 MCP profiles)
+- Wire enricher into pipeline `push()`/`flush()`/`close()`
+- 458 unit tests covering all enricher behaviors, classification, risk scoring
 
-**Gate:** Tool start/complete pairing works, duration computed, classification assigned.
+**Gate:** Tool start/complete pairing works, duration computed, multi-dimensional classification assigned, risk scored, MCP tools classified with verb inference.
 
 ### Step 3: Adapters
 

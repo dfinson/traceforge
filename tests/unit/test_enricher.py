@@ -390,16 +390,23 @@ class TestEdgeCases:
         assert result.metadata.visibility == "internal"
         assert result.payload["tool_name"] == "report_intent"
 
-    def test_duplicate_tool_start_does_not_lose_events(self):
-        """Bug #10: Second TOOL_START with same ID should not silently drop first."""
+    def test_duplicate_tool_start_emits_orphan(self):
+        """Bug #10: Second TOOL_START with same ID should emit first as orphan."""
         enricher = Enricher()
         start1 = _make_tool_start(tool_call_id="dup", tool_name="bash")
         start2 = _make_tool_start(tool_call_id="dup", tool_name="edit")
 
-        enricher.process(start1)
-        enricher.process(start2)
+        result1 = enricher.process(start1)
+        assert result1 is None  # buffered
 
-        # Second start overwrites; flush gives us the second one
+        result2 = enricher.process(start2)
+        # Returns the displaced orphan as a list
+        assert isinstance(result2, list)
+        assert len(result2) == 1
+        assert result2[0].payload["tool_name"] == "bash"
+        assert result2[0].metadata.duration_ms is None
+
+        # Flush gives us the second (current) one
         flushed = enricher.flush()
         assert len(flushed) == 1
         assert flushed[0].payload["tool_name"] == "edit"
@@ -476,3 +483,63 @@ class TestEdgeCases:
         result = enricher.process(event)
         assert result is not None
         assert result.metadata.duration_ms is None
+
+    def test_metadata_merged_from_start_to_complete(self):
+        """Bug #5: Start-side metadata (turn_id, repo) should survive into paired event."""
+        from tracemill import EventMetadata
+
+        enricher = Enricher()
+        start = SessionEvent(
+            kind=EventKind.TOOL_START,
+            session_id="sess-1",
+            timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            payload={"tool_call_id": "tc-m", "tool_name": "edit"},
+            metadata=EventMetadata(turn_id="turn-42", repo="my/repo"),
+        )
+        complete = SessionEvent(
+            kind=EventKind.TOOL_COMPLETE,
+            session_id="sess-1",
+            timestamp=datetime(2024, 1, 1, 12, 0, 1, tzinfo=timezone.utc),
+            payload={"tool_call_id": "tc-m", "result": "done"},
+        )
+
+        enricher.process(start)
+        result = enricher.process(complete)
+        assert result.metadata.turn_id == "turn-42"
+        assert result.metadata.repo == "my/repo"
+        assert result.metadata.duration_ms == 1000.0
+
+    async def test_pipeline_handles_displaced_orphan_list(self):
+        """Pipeline correctly pushes displaced orphan starts to sinks."""
+        recorder = RecordingSink()
+        enricher = Enricher()
+        pipeline = EventPipeline(sinks=[recorder.sink], enricher=enricher)
+
+        start1 = _make_tool_start(tool_call_id="dup", tool_name="bash")
+        start2 = _make_tool_start(tool_call_id="dup", tool_name="edit")
+
+        await pipeline.push(start1)
+        assert len(recorder.events) == 0
+
+        await pipeline.push(start2)
+        # The displaced start1 should have been emitted
+        assert len(recorder.events) == 1
+        assert recorder.events[0].payload["tool_name"] == "bash"
+        assert recorder.events[0].metadata.duration_ms is None
+
+    async def test_pipeline_survives_enricher_exception(self):
+        """Pipeline passes raw event to sinks if enricher raises."""
+        from unittest.mock import patch
+
+        recorder = RecordingSink()
+        enricher = Enricher()
+        pipeline = EventPipeline(sinks=[recorder.sink], enricher=enricher)
+
+        event = _make_event(EventKind.USER_MESSAGE)
+
+        with patch.object(enricher, "process", side_effect=RuntimeError("boom")):
+            await pipeline.push(event)
+
+        # Event still reached the sink (raw, un-enriched)
+        assert len(recorder.events) == 1
+        assert recorder.events[0] == event

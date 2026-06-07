@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from tracemill.types import EventKind, SessionEvent
+from tracemill.types import EventKind, EventMetadata, SessionEvent
 
 logger = logging.getLogger(__name__)
 
@@ -57,21 +57,25 @@ class Enricher:
             self._categories.update(tool_categories)
         self._pending: dict[str, SessionEvent] = {}
 
-    def process(self, event: SessionEvent) -> SessionEvent | None:
+    def process(self, event: SessionEvent) -> SessionEvent | list[SessionEvent] | None:
         """Enrich a single event. Returns None if event is buffered (tool_start waiting
-        for its tool_complete pair). Returns enriched event when ready."""
+        for its tool_complete pair). Returns enriched event when ready. May return a list
+        if a displaced orphan start needs to be emitted alongside buffering a new start."""
         if event.kind == EventKind.TOOL_START:
             event = self._classify_tool(event)
             event = self._set_visibility(event)
             event = self._set_phase(event)
             tool_call_id = event.payload.get("tool_call_id")
             if tool_call_id:
-                if tool_call_id in self._pending:
+                displaced = self._pending.pop(tool_call_id, None)
+                self._pending[tool_call_id] = event
+                if displaced is not None:
                     logger.warning(
                         "Duplicate TOOL_START for tool_call_id=%s; emitting previous as orphan",
                         tool_call_id,
                     )
-                self._pending[tool_call_id] = event
+                    orphan_metadata = displaced.metadata.model_copy(update={"duration_ms": None})
+                    return [displaced.model_copy(update={"metadata": orphan_metadata})]
                 return None
             return event
 
@@ -83,15 +87,10 @@ class Enricher:
                 duration_ms = _compute_duration_ms(start_event.timestamp, event.timestamp)
                 # Merge start payload into complete (start fields as base, complete overwrites)
                 merged_payload = {**start_event.payload, **event.payload}
-                new_metadata = event.metadata.model_copy(
-                    update={
-                        "duration_ms": duration_ms,
-                        "tool_category": start_event.metadata.tool_category,
-                        "visibility": start_event.metadata.visibility,
-                    }
-                )
+                # Merge metadata: start as base, overlay non-null complete fields
+                merged_metadata = _merge_metadata(start_event.metadata, event.metadata, duration_ms)
                 event = event.model_copy(
-                    update={"payload": merged_payload, "metadata": new_metadata}
+                    update={"payload": merged_payload, "metadata": merged_metadata}
                 )
             else:
                 # Unmatched complete — classify independently
@@ -186,3 +185,30 @@ def _compute_duration_ms(start: datetime, end: datetime) -> float:
     """Compute duration in milliseconds between two timestamps."""
     delta = (end - start).total_seconds() * 1000.0
     return max(delta, 0.0)
+
+
+def _merge_metadata(
+    start: EventMetadata, complete: EventMetadata, duration_ms: float
+) -> EventMetadata:
+    """Merge metadata from start and complete events. Start is the base;
+    non-None complete fields override. Duration is always set from computation.
+    For tool_category and visibility, start takes priority (it was classified with
+    the authoritative tool_name)."""
+    updates: dict[str, object] = {"duration_ms": duration_ms}
+    # These fields are authoritatively set by the start event's classification
+    _start_authoritative = {"tool_category", "visibility"}
+    for field_name in EventMetadata.model_fields:
+        if field_name == "duration_ms":
+            continue
+        start_val = getattr(start, field_name)
+        complete_val = getattr(complete, field_name)
+        if field_name in _start_authoritative:
+            # Start's classification is authoritative
+            updates[field_name] = start_val if start_val is not None else complete_val
+        else:
+            # Prefer complete's non-None value, fall back to start
+            if complete_val is not None:
+                updates[field_name] = complete_val
+            elif start_val is not None:
+                updates[field_name] = start_val
+    return EventMetadata(**updates)

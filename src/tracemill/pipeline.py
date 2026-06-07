@@ -25,8 +25,22 @@ class EventPipeline:
     async def push(self, event: SessionEvent) -> None:
         """Fan-out event to all registered sinks."""
         if self._enricher is not None:
-            enriched = self._enricher.process(event)
+            try:
+                enriched = self._enricher.process(event)
+            except Exception as exc:
+                logger.error(
+                    "Enricher failed on event %s: %s — passing raw event to sinks",
+                    event.id,
+                    exc,
+                    exc_info=True,
+                )
+                enriched = event
+
             if enriched is None:
+                return
+            if isinstance(enriched, list):
+                for e in enriched:
+                    await self._push_to_sinks(e)
                 return
             event = enriched
 

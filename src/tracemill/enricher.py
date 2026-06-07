@@ -133,73 +133,70 @@ class Enricher:
         return event
 
     def _set_phase(self, event: SessionEvent) -> SessionEvent:
-        """Set metadata.phase based on Classification dimensions."""
-        phase = self._detect_phase(event)
-        if phase != event.metadata.phase:
-            new_metadata = event.metadata.model_copy(update={"phase": phase})
+        """Set metadata.phases based on Classification dimensions."""
+        phases = self._detect_phases(event)
+        if phases != event.metadata.phases:
+            new_metadata = event.metadata.model_copy(update={"phases": phases})
             return event.model_copy(update={"metadata": new_metadata})
         return event
 
-    def _detect_phase(self, event: SessionEvent) -> str:
-        """Determine the phase for an event from its Classification."""
+    def _detect_phases(self, event: SessionEvent) -> frozenset[str]:
+        """Determine the phase(s) for an event from its Classification."""
         if event.kind in (EventKind.USER_MESSAGE, EventKind.ASSISTANT_MESSAGE):
-            return Phase.PLANNING
+            return frozenset({Phase.PLANNING})
 
         cls: Classification | None = event.metadata.classification
 
         if cls is None:
             if event.kind in (EventKind.TOOL_START, EventKind.TOOL_COMPLETE):
-                return Phase.IMPLEMENTATION
-            return Phase.PLANNING
+                return frozenset({Phase.IMPLEMENTATION})
+            return frozenset({Phase.PLANNING})
 
         # Shell executor tools: classify the actual command for finer phase
         tool_name = event.payload.get("tool_name", "")
         if normalize_tool_name(tool_name) == "shell":
             shell_cls = self._classify_shell_event(event)
-            return _phase_from_classification(shell_cls)
+            return _phases_from_classification(shell_cls)
 
-        return _phase_from_classification(cls)
+        return _phases_from_classification(cls)
 
 
-def _phase_from_classification(cls: Classification) -> str:
-    """Derive phase from a Classification's action/role dimensions.
+def _phases_from_classification(cls: Classification) -> frozenset[str]:
+    """Derive phases from a Classification.
 
-    Uses action and role dimensions (not mechanism) because mechanism is
-    the invocation surface, not the semantic intent.
+    If the classification has a phase_map (built per-command), use it directly.
+    Otherwise, derive phases from the aggregate action/role dimensions.
     """
-    # Validate/test/lint → verification
+    # Prefer phase_map when available (compound commands already grouped)
+    if cls.phase_map:
+        return frozenset(seg.phase for seg in cls.phase_map)
+
+    # Fallback: derive from aggregate dimensions (single-command tools)
+    phases: set[str] = set()
+
     if cls.has_action("validate"):
-        return Phase.VERIFICATION
-    # VCS persist/deliver → review (commit, push, publish, deploy)
+        phases.add(Phase.VERIFICATION)
     if cls.has_role("persistence.version_control") and (
         cls.has_action("persist") or cls.has_action("deliver")
     ):
-        return Phase.REVIEW
-    if cls.has_action("deliver"):
-        return Phase.REVIEW
-    # Retrieve/search/analyze/browse → exploration
+        phases.add(Phase.REVIEW)
+    elif cls.has_action("deliver"):
+        phases.add(Phase.REVIEW)
     if cls.has_action("retrieve") or cls.has_action("analyze"):
-        return Phase.EXPLORATION
-    # Modify/persist (non-VCS: file edits, writes) → implementation
+        phases.add(Phase.EXPLORATION)
     if cls.has_action("modify") or cls.has_action("persist"):
-        return Phase.IMPLEMENTATION
-    # Configure/install → implementation
-    if cls.has_action("configure"):
-        return Phase.IMPLEMENTATION
-    # Execute (scripts, services) → implementation
-    if cls.has_action("execute"):
-        return Phase.IMPLEMENTATION
-    # Communication → planning
+        if not (cls.has_role("persistence.version_control") and cls.has_action("persist")):
+            phases.add(Phase.IMPLEMENTATION)
+    if cls.has_action("configure") or cls.has_action("execute"):
+        phases.add(Phase.IMPLEMENTATION)
     if cls.mechanism.startswith("communication"):
-        return Phase.PLANNING
-    # Delegation → implementation
+        phases.add(Phase.PLANNING)
     if cls.mechanism.startswith("delegation"):
-        return Phase.IMPLEMENTATION
-    # File mechanism with read-only effect → exploration
+        phases.add(Phase.IMPLEMENTATION)
     if cls.mechanism == "file" and cls.effect == "read_only":
-        return Phase.EXPLORATION
+        phases.add(Phase.EXPLORATION)
 
-    return Phase.IMPLEMENTATION
+    return frozenset(phases) if phases else frozenset({Phase.IMPLEMENTATION})
 
 
 def _compute_duration_ms(start: datetime, end: datetime) -> float:

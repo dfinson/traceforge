@@ -36,7 +36,7 @@ class EventMetadata(BaseModel):
     agent_sdk: str | None = None
     turn_id: str | None = None
     visibility: Literal["visible", "system", "collapsed"] = "visible"
-    phase: str | None = None
+    phases: frozenset[str] | None = None
     classification: Any = None  # Classification | None (Any to avoid circular import)
     tool_display: str | None = None
     tool_intent: str | None = None

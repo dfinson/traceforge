@@ -269,20 +269,20 @@ class TestPhaseDetection:
         enricher = Enricher()
         event = _make_event(EventKind.USER_MESSAGE)
         result = enricher.process(event)
-        assert result.metadata.phase == "planning"
+        assert result.metadata.phases == frozenset({"planning"})
 
     def test_assistant_message_is_planning(self):
         enricher = Enricher()
         event = _make_event(EventKind.ASSISTANT_MESSAGE)
         result = enricher.process(event)
-        assert result.metadata.phase == "planning"
+        assert result.metadata.phases == frozenset({"planning"})
 
     def test_file_write_is_implementation(self):
         enricher = Enricher()
         event = _make_tool_start(tool_name="edit")
         enricher.process(event)
         flushed = enricher.flush()
-        assert flushed[0].metadata.phase == "implementation"
+        assert flushed[0].metadata.phases == frozenset({"implementation"})
 
     def test_shell_with_pytest_is_verification(self):
         enricher = Enricher()
@@ -292,7 +292,7 @@ class TestPhaseDetection:
         )
         enricher.process(event)
         flushed = enricher.flush()
-        assert flushed[0].metadata.phase == "verification"
+        assert "verification" in flushed[0].metadata.phases
 
     def test_shell_without_keywords_is_implementation(self):
         enricher = Enricher()
@@ -302,26 +302,51 @@ class TestPhaseDetection:
         )
         enricher.process(event)
         flushed = enricher.flush()
-        assert flushed[0].metadata.phase == "implementation"
+        assert "implementation" in flushed[0].metadata.phases
 
     def test_git_tool_is_review(self):
         enricher = Enricher()
         event = _make_tool_start(tool_name="git_commit")
         enricher.process(event)
         flushed = enricher.flush()
-        assert flushed[0].metadata.phase == "review"
+        assert "review" in flushed[0].metadata.phases
 
     def test_internal_tool_is_planning(self):
         enricher = Enricher()
         event = _make_tool_start(tool_name="report_intent")
         enricher.process(event)
         flushed = enricher.flush()
-        assert flushed[0].metadata.phase == "planning"
+        assert "planning" in flushed[0].metadata.phases
 
+    def test_compound_command_produces_multi_phase(self):
+        """pytest && git push spans VERIFICATION and REVIEW."""
+        enricher = Enricher()
+        event = _make_tool_start(
+            tool_name="bash",
+            arguments={"command": "pytest tests/ && git push"},
+        )
+        enricher.process(event)
+        flushed = enricher.flush()
+        phases = flushed[0].metadata.phases
+        assert "verification" in phases
+        assert "review" in phases
 
-# =============================================================================
-# Pipeline Integration Tests
-# =============================================================================
+    def test_compound_command_phase_map_groups_labels(self):
+        """phase_map preserves which actions belong to which phase."""
+        from tracemill.classify import classify_shell
+
+        cls = classify_shell("pytest tests/ && git push origin main")
+        # Both actions present in aggregate
+        assert cls.has_action("validate")
+        assert cls.has_action("deliver")
+        # phase_map groups them correctly
+        phase_dict = {seg.phase: seg for seg in cls.phase_map}
+        assert "verification" in phase_dict
+        assert "review" in phase_dict
+        verification_seg = phase_dict["verification"]
+        review_seg = phase_dict["review"]
+        assert any(a.startswith("validate") for a in verification_seg.actions)
+        assert any(a.startswith("deliver") for a in review_seg.actions)
 
 
 class TestPipelineIntegration:
@@ -430,7 +455,7 @@ class TestEdgeCases:
         )
         result = enricher.process(event)
         assert result is not None
-        assert result.metadata.phase == "planning"
+        assert result.metadata.phases == frozenset({"planning"})
 
     def test_enrichment_none_in_payload(self):
         """_enrichment: None should not crash."""
@@ -443,7 +468,7 @@ class TestEdgeCases:
         )
         result = enricher.process(event)
         assert result is not None
-        assert result.metadata.phase == "planning"
+        assert result.metadata.phases == frozenset({"planning"})
 
     def test_verification_no_false_positive_on_checkout(self):
         """Bug #12: 'git checkout' should not trigger verification."""
@@ -454,7 +479,7 @@ class TestEdgeCases:
         )
         enricher.process(event)
         flushed = enricher.flush()
-        assert flushed[0].metadata.phase == "implementation"
+        assert "verification" not in flushed[0].metadata.phases
 
     def test_verification_no_false_positive_on_build_dir(self):
         """Bug #12: 'mkdir build-output' should not trigger verification."""
@@ -465,7 +490,7 @@ class TestEdgeCases:
         )
         enricher.process(event)
         flushed = enricher.flush()
-        assert flushed[0].metadata.phase == "implementation"
+        assert "implementation" in flushed[0].metadata.phases
 
     def test_tool_start_without_tool_call_id_emitted_immediately(self):
         """TOOL_START with no tool_call_id should not be buffered."""
@@ -642,7 +667,7 @@ class TestIDStabilityAndRobustness:
         enricher.process(start)
         result = enricher.process(complete)
         assert result.payload["arguments"] == {"command": "pytest tests/"}
-        assert result.metadata.phase == "verification"
+        assert "verification" in result.metadata.phases
 
     def test_non_string_tool_call_id_treated_as_missing(self):
         """Non-string tool_call_id should not crash or buffer."""

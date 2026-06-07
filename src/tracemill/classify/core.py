@@ -136,11 +136,30 @@ class Structure(StrEnum):
 
 
 @dataclass(frozen=True)
+class PhaseSegment:
+    """One phase's contribution to a compound classification.
+
+    Groups the actions, scopes, and roles that together produced this phase.
+    Preserves the pairing so downstream consumers know which labels belong together.
+    """
+
+    phase: str
+    actions: frozenset[str] = frozenset()
+    scopes: frozenset[str] = frozenset()
+    roles: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
 class Classification:
     """Multi-dimensional classification of an agent action.
 
     All dimension values are dot-path strings from registered enums.
     Use the registry to validate values and query hierarchy.
+
+    For compound commands, `phase_map` groups labels by their derived phase —
+    each segment contains the actions/scopes/roles that produced that phase.
+    The top-level `action`, `scope`, `role` sets are the aggregate union
+    for quick flat queries.
     """
 
     mechanism: str
@@ -152,6 +171,7 @@ class Classification:
     structure: frozenset[str] = frozenset()
     shell_dialect: str | None = None
     binaries: tuple[str, ...] = ()
+    phase_map: tuple[PhaseSegment, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-safe dictionary."""
@@ -174,11 +194,31 @@ class Classification:
             d["shell_dialect"] = self.shell_dialect
         if self.binaries:
             d["binaries"] = list(self.binaries)
+        if self.phase_map:
+            d["phase_map"] = [
+                {
+                    "phase": seg.phase,
+                    "actions": sorted(seg.actions),
+                    "scopes": sorted(seg.scopes),
+                    "roles": sorted(seg.roles),
+                }
+                for seg in self.phase_map
+            ]
         return d
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Classification:
         """Deserialize from a dictionary."""
+        phase_map_raw = d.get("phase_map", ())
+        phase_map = tuple(
+            PhaseSegment(
+                phase=seg["phase"],
+                actions=frozenset(seg.get("actions", ())),
+                scopes=frozenset(seg.get("scopes", ())),
+                roles=frozenset(seg.get("roles", ())),
+            )
+            for seg in phase_map_raw
+        )
         return cls(
             mechanism=d["mechanism"],
             effect=d.get("effect"),
@@ -189,6 +229,7 @@ class Classification:
             structure=frozenset(d.get("structure", ())),
             shell_dialect=d.get("shell_dialect"),
             binaries=tuple(d.get("binaries", ())),
+            phase_map=phase_map,
         )
 
     def has_role(self, ancestor: str) -> bool:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections import defaultdict
 from typing import Final
 
 import tree_sitter as ts
@@ -11,6 +12,7 @@ import tree_sitter_bash as tsbash
 from tracemill.classify.core import (
     Classification,
     Effect,
+    PhaseSegment,
     Structure,
     aggregate_effect,
 )
@@ -21,17 +23,18 @@ from tracemill.classify.coding import (
     ShellStructure,
 )
 from tracemill.classify.rules import (
-    ACTIVITY_PRIORITY,
     BINARY_INFO,
     SHELL_GIT_OPS,
     SHELL_IMPLEMENTATION,
     SHELL_INVESTIGATION,
     SHELL_SETUP,
     SHELL_VERIFICATION,
+    ShellActivity,
     classify_binary,
     effect_for_binary,
     match_rule,
 )
+from tracemill.classify.workflow import Phase
 
 _BASH_LANGUAGE = ts.Language(tsbash.language())
 _parser = ts.Parser(_BASH_LANGUAGE)
@@ -146,9 +149,9 @@ def _extract_commands_from_ast(command: str) -> list[str]:
     return commands
 
 
-# ── Activity-to-dimension mappings (fallback when no rule role) ──
+# ── Per-command dimension mappings ──
 
-_ACTIVITY_TO_ACTION: Final[dict[str, str]] = {
+_ACTIVITY_TO_ACTION: Final[dict[ShellActivity, str]] = {
     SHELL_VERIFICATION: CodingAction.TEST,
     SHELL_SETUP: CodingAction.INSTALL,
     SHELL_GIT_OPS: CodingAction.COMMIT,
@@ -156,12 +159,20 @@ _ACTIVITY_TO_ACTION: Final[dict[str, str]] = {
     SHELL_IMPLEMENTATION: CodingAction.RUN_SCRIPT,
 }
 
-_ACTIVITY_TO_SCOPE: Final[dict[str, str]] = {
+_ACTIVITY_TO_SCOPE: Final[dict[ShellActivity, str]] = {
     SHELL_VERIFICATION: CodingScope.TEST_CODE,
     SHELL_SETUP: CodingScope.DEPENDENCY,
     SHELL_GIT_OPS: CodingScope.REPOSITORY,
     SHELL_INVESTIGATION: CodingScope.SOURCE_CODE,
     SHELL_IMPLEMENTATION: CodingScope.SOURCE_CODE,
+}
+
+_ACTIVITY_TO_PHASE: Final[dict[ShellActivity, str]] = {
+    SHELL_VERIFICATION: Phase.VERIFICATION,
+    SHELL_GIT_OPS: Phase.REVIEW,
+    SHELL_SETUP: Phase.IMPLEMENTATION,
+    SHELL_INVESTIGATION: Phase.EXPLORATION,
+    SHELL_IMPLEMENTATION: Phase.IMPLEMENTATION,
 }
 
 # Per-git-subcommand action (instead of mapping all git ops to one action)
@@ -230,7 +241,12 @@ def _check_tree_structure(node: ts.Node, structures: set[str]) -> None:
 
 
 def classify_shell(command: str) -> Classification:
-    """Classify a bash shell command into a Classification object."""
+    """Classify a bash shell command into a Classification object.
+
+    For compound commands (e.g. `pytest && git push`), each command is classified
+    independently. Actions, scopes, and roles are grouped by derived phase in
+    `phase_map`, and also unioned into the top-level aggregate sets.
+    """
     if not command or not command.strip():
         return Classification(
             mechanism=CodingMechanism.PROCESS_SHELL,
@@ -248,18 +264,18 @@ def classify_shell(command: str) -> Classification:
             capability=frozenset({"subprocess"}),
         )
 
+    # Aggregate sets (union across all commands)
     all_roles: set[str] = set()
     all_actions: set[str] = set()
     all_scopes: set[str] = set()
     all_capabilities: set[str] = {"subprocess"}
     all_effects: list[str] = []
     all_binaries: list[str] = []
-    best_activity = SHELL_IMPLEMENTATION
-    best_priority = -1
-    # Track per-command details for precise action mapping
-    best_binary: str = ""
-    best_subcmd: str | None = None
-    best_rule_role: str = ""
+
+    # Per-phase grouping: phase → (actions, scopes, roles)
+    phase_actions: dict[str, set[str]] = defaultdict(set)
+    phase_scopes: dict[str, set[str]] = defaultdict(set)
+    phase_roles: dict[str, set[str]] = defaultdict(set)
 
     for _pattern_idx, captures in matches:
         for node in captures.get("cmd", []):
@@ -278,31 +294,52 @@ def classify_shell(command: str) -> Classification:
 
             # Activity classification via shared rule table
             activity = classify_binary(binary, subcmd, flags, words)
-            priority = ACTIVITY_PRIORITY.get(activity, 0)
-            if priority > best_priority:
-                best_priority = priority
-                best_activity = activity
-                best_binary = binary
-                best_subcmd = subcmd
 
-            # Use rule role (more precise than binary info fallback)
+            # Derive this command's role
+            cmd_role: str = ""
             rule = match_rule(binary, subcmd, flags)
             if rule and rule.role:
-                all_roles.add(rule.role)
-                if priority == best_priority:
-                    best_rule_role = rule.role
+                cmd_role = rule.role
             else:
-                # Fallback: role from binary info
                 info = BINARY_INFO.get(binary)
                 if info:
-                    all_roles.add(info.role)
+                    cmd_role = info.role
+
+            if cmd_role:
+                all_roles.add(cmd_role)
+
+            # Derive this command's action (per-subcommand precision)
+            cmd_action: str = ""
+            if activity == SHELL_GIT_OPS and binary == "git" and subcmd:
+                cmd_action = _GIT_SUBCMD_ACTION.get(subcmd, CodingAction.COMMIT)
+            elif activity == SHELL_VERIFICATION and cmd_role:
+                cmd_action = _VERIFICATION_ROLE_ACTION.get(cmd_role, CodingAction.TEST)
+            else:
+                cmd_action = _ACTIVITY_TO_ACTION.get(activity, "")
+
+            if cmd_action:
+                all_actions.add(cmd_action)
+
+            # Derive this command's scope
+            cmd_scope = _ACTIVITY_TO_SCOPE.get(activity, "")
+            if cmd_scope:
+                all_scopes.add(cmd_scope)
+
+            # Derive this command's phase and group labels under it
+            cmd_phase = _ACTIVITY_TO_PHASE.get(activity, Phase.IMPLEMENTATION)
+            if cmd_action:
+                phase_actions[cmd_phase].add(cmd_action)
+            if cmd_scope:
+                phase_scopes[cmd_phase].add(cmd_scope)
+            if cmd_role:
+                phase_roles[cmd_phase].add(cmd_role)
 
             # Effect from shared function
             effect = effect_for_binary(binary, subcmd, flags)
             if effect:
                 all_effects.append(effect)
 
-            # Capabilities from binary info
+            # Capabilities
             info = BINARY_INFO.get(binary)
             if info and info.network:
                 all_capabilities.add("network_outbound")
@@ -313,22 +350,6 @@ def classify_shell(command: str) -> Classification:
                 all_capabilities.add("network_outbound")
             if binary == "sudo":
                 all_capabilities.add("elevated_privilege")
-
-    # Map activity to action — use per-subcommand precision when available
-    if best_activity == SHELL_GIT_OPS and best_binary == "git" and best_subcmd:
-        action_val = _GIT_SUBCMD_ACTION.get(best_subcmd, CodingAction.COMMIT)
-        all_actions.add(action_val)
-    elif best_activity == SHELL_VERIFICATION and best_rule_role:
-        action_val = _VERIFICATION_ROLE_ACTION.get(best_rule_role, CodingAction.TEST)
-        all_actions.add(action_val)
-    else:
-        action_val = _ACTIVITY_TO_ACTION.get(best_activity)
-        if action_val:
-            all_actions.add(action_val)
-
-    scope_val = _ACTIVITY_TO_SCOPE.get(best_activity)
-    if scope_val:
-        all_scopes.add(scope_val)
 
     # Aggregate effect
     agg_effect = aggregate_effect(*all_effects) if all_effects else None
@@ -342,6 +363,18 @@ def classify_shell(command: str) -> Classification:
     # Structural properties from AST
     structure = _detect_structure(tree)
 
+    # Build phase_map
+    all_phases = set(phase_actions.keys()) | set(phase_scopes.keys()) | set(phase_roles.keys())
+    phase_map = tuple(
+        PhaseSegment(
+            phase=phase,
+            actions=frozenset(phase_actions.get(phase, set())),
+            scopes=frozenset(phase_scopes.get(phase, set())),
+            roles=frozenset(phase_roles.get(phase, set())),
+        )
+        for phase in sorted(all_phases)
+    )
+
     return Classification(
         mechanism=CodingMechanism.PROCESS_SHELL,
         effect=agg_effect,
@@ -352,4 +385,5 @@ def classify_shell(command: str) -> Classification:
         structure=structure,
         shell_dialect="bash",
         binaries=tuple(dict.fromkeys(all_binaries)),
+        phase_map=phase_map,
     )

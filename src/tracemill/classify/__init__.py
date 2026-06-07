@@ -21,6 +21,12 @@ from tracemill.classify.coding import (
     ShellDialect,
     ShellStructure,
 )
+from tracemill.classify.mcp import (
+    McpServerProfile,
+    McpToolOverride,
+    classify_mcp_tool,
+    extract_mcp_namespace,
+)
 from tracemill.classify.powershell import classify_powershell_command
 from tracemill.classify.registry import DimensionRegistry, get_default_registry
 from tracemill.classify.shell import (
@@ -64,6 +70,10 @@ __all__ = [
     "classify_cmd_command",
     "classify_powershell_command",
     "classify_tool",
+    "classify_mcp_tool",
+    "extract_mcp_namespace",
+    "McpServerProfile",
+    "McpToolOverride",
     "CANONICAL_TOOLS",
     "normalize_tool_name",
 ]

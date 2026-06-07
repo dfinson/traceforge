@@ -173,98 +173,6 @@ def normalize_tool_name(raw_name: str) -> str:
     return CANONICAL_TOOLS.get(lowered, lowered)
 
 
-# ── MCP/unknown tool heuristics ──
-
-# Namespace tokens → (mechanism, role, effect)
-_NAMESPACE_HINTS: Final[dict[str, tuple[str, str, str | None]]] = {
-    "filesystem": (Mechanism.FILESYSTEM, CodingRole.FILE_BROWSER, None),
-    "fs": (Mechanism.FILESYSTEM, CodingRole.FILE_BROWSER, None),
-    "file": (Mechanism.FILESYSTEM, CodingRole.FILE_BROWSER, None),
-    "database": (CodingMechanism.DATABASE_SQL, CodingRole.DATABASE, None),
-    "db": (CodingMechanism.DATABASE_SQL, CodingRole.DATABASE, None),
-    "sql": (CodingMechanism.DATABASE_SQL, CodingRole.DATABASE, None),
-    "postgres": (CodingMechanism.DATABASE_SQL, CodingRole.DATABASE, None),
-    "mysql": (CodingMechanism.DATABASE_SQL, CodingRole.DATABASE, None),
-    "sqlite": (CodingMechanism.DATABASE_SQL, CodingRole.DATABASE, None),
-    "mongo": (CodingMechanism.DATABASE_NOSQL, CodingRole.DATABASE, None),
-    "redis": (CodingMechanism.DATABASE_NOSQL, CodingRole.CACHE, None),
-    "github": (CodingMechanism.NETWORK_HTTP, CodingRole.API_CLIENT, None),
-    "gitlab": (CodingMechanism.NETWORK_HTTP, CodingRole.API_CLIENT, None),
-    "browser": (CodingMechanism.NETWORK_HTTP, CodingRole.WEB_SCRAPER, None),
-    "web": (CodingMechanism.NETWORK_HTTP, CodingRole.WEB_SCRAPER, None),
-    "docker": (Mechanism.PROCESS, CodingRole.CONTAINER_RUNTIME, None),
-    "k8s": (Mechanism.PROCESS, CodingRole.CONTAINER_RUNTIME, None),
-    "kubernetes": (Mechanism.PROCESS, CodingRole.CONTAINER_RUNTIME, None),
-}
-
-# Tool name verb tokens → effect
-_VERB_EFFECTS: Final[dict[str, str]] = {
-    "get": Effect.READ_ONLY,
-    "list": Effect.READ_ONLY,
-    "read": Effect.READ_ONLY,
-    "search": Effect.READ_ONLY,
-    "query": Effect.READ_ONLY,
-    "describe": Effect.READ_ONLY,
-    "fetch": Effect.READ_ONLY,
-    "browse": Effect.READ_ONLY,
-    "create": Effect.MUTATING,
-    "update": Effect.MUTATING,
-    "write": Effect.MUTATING,
-    "apply": Effect.MUTATING,
-    "run": Effect.MUTATING,
-    "execute": Effect.MUTATING,
-    "delete": Effect.DESTRUCTIVE,
-    "destroy": Effect.DESTRUCTIVE,
-    "drop": Effect.DESTRUCTIVE,
-    "remove": Effect.DESTRUCTIVE,
-}
-
-
-def _extract_mcp_namespace(raw_name: str) -> str:
-    """Extract the MCP server namespace from a raw tool name (middle segment)."""
-    name = raw_name.strip()
-    if name.startswith("mcp__"):
-        parts = name.split("__", 2)
-        if len(parts) == 3:
-            return parts[1].lower()
-    return ""
-
-
-def _infer_unknown_tool(raw_name: str, canonical: str) -> Classification:
-    """Infer classification for an unknown tool from naming patterns.
-
-    Conservative: only matches clear namespace/verb tokens. Falls back to
-    unknown mechanism if no patterns match — we don't fabricate a domain.
-    """
-    mechanism: str = Mechanism.UNKNOWN
-    role: str = ""
-    effect: str | None = None
-
-    # Check MCP namespace
-    namespace = _extract_mcp_namespace(raw_name)
-    if namespace:
-        for token, (mech, r, eff) in _NAMESPACE_HINTS.items():
-            if token in namespace:
-                mechanism = mech
-                role = r
-                if eff is not None:
-                    effect = eff
-                break
-
-    # Check tool name for verb → effect hints
-    name_lower = canonical.lower()
-    for verb, eff in _VERB_EFFECTS.items():
-        if name_lower.startswith(verb + "_") or name_lower.startswith(verb):
-            if effect is None:
-                effect = eff
-            break
-
-    return Classification(
-        mechanism=mechanism,
-        effect=effect,
-        role=frozenset({role}) if role else frozenset(),
-    )
-
 
 def classify_tool(
     tool_name: str,
@@ -273,29 +181,56 @@ def classify_tool(
     """Classify a tool name into a full Classification object.
 
     All returned Classifications carry phase_map — same system as shell commands.
-    Unknown tools and MCP tools get heuristic classification from name patterns.
+
+    Classification priority:
+    1. Custom user-provided classifications
+    2. MCP server profiles (checked on raw name BEFORE canonical normalization,
+       so that MCP-specific suffixes like 'search' don't collide with first-party
+       canonical aliases like 'grep')
+    3. Built-in canonical tool classifications
+    4. MCP verb inference for MCP-formatted names with unknown namespaces
+    5. UNKNOWN mechanism fallback
     """
+    from tracemill.classify.mcp import classify_mcp_tool
+
     if not tool_name:
         fallback = Classification(mechanism=Mechanism.UNKNOWN, effect=None)
         return _with_phase_map(fallback)
 
+    # Custom classifications checked first (user overrides everything)
     canonical = normalize_tool_name(tool_name)
-
     if custom_classifications:
         lower = canonical.lower()
         for key, cls in custom_classifications.items():
             if key.lower() == lower or normalize_tool_name(key) == canonical:
-                # Ensure custom classifications also carry phase_map
                 if not cls.phase_map:
                     return _with_phase_map(cls)
                 return cls
 
+    # MCP profile classification — checked on raw name before canonical lookup
+    # to avoid collisions (e.g. mcp__github__search ≠ grep)
+    mcp_result = classify_mcp_tool(tool_name)
+    if mcp_result is not None:
+        return mcp_result
+
+    # Built-in canonical tool classifications
     result = _TOOL_CLASSIFICATIONS.get(canonical)
     if result is not None:
         return result
 
-    # Unknown/MCP tool — infer from naming patterns
-    return _with_phase_map(_infer_unknown_tool(tool_name, canonical))
+    # Genuinely unknown tool — try verb inference as last resort
+    from tracemill.classify.mcp import _infer_from_verb
+
+    verb_effect, verb_action = _infer_from_verb(canonical)
+    if verb_effect is not None or verb_action is not None:
+        cls = Classification(
+            mechanism=Mechanism.UNKNOWN,
+            effect=verb_effect,
+            action=frozenset({verb_action}) if verb_action else frozenset(),
+        )
+        return _with_phase_map(cls)
+
+    return _with_phase_map(Classification(mechanism=Mechanism.UNKNOWN, effect=None))
 
 
 # Maps canonical tool names to Classification objects.

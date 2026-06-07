@@ -647,3 +647,87 @@ class TestToolRisk:
         risk_data = flushed[0].payload["_enrichment"]["risk"]
         assert risk_data["score"] <= 20
         assert risk_data["level"] == "safe"
+
+
+# ── Context path normalization tests ──
+
+
+class TestContextPathNormalization:
+    """Context adjustment should handle degenerate paths safely."""
+
+    def test_dotdot_escape_detected(self):
+        from tracemill.classify.risk import _compute_context_adjustment
+
+        adj = _compute_context_adjustment(
+            targets=["../../../etc/passwd"],
+            project_root="/home/user/project",
+            adjustments={"escapes_project": 20, "inside_project": -10},
+        )
+        assert adj >= 20
+
+    def test_relative_path_inside_project(self):
+        from tracemill.classify.risk import _compute_context_adjustment
+
+        adj = _compute_context_adjustment(
+            targets=["src/main.py"],
+            project_root="/home/user/project",
+            adjustments={"escapes_project": 20, "inside_project": -10},
+        )
+        assert adj <= 0
+
+    def test_absolute_path_escaping(self):
+        from tracemill.classify.risk import _compute_context_adjustment
+
+        adj = _compute_context_adjustment(
+            targets=["/etc/shadow"],
+            project_root="/home/user/project",
+            adjustments={"escapes_project": 20, "inside_project": -10},
+        )
+        assert adj >= 20
+
+    def test_empty_targets(self):
+        from tracemill.classify.risk import _compute_context_adjustment
+
+        adj = _compute_context_adjustment(
+            targets=[],
+            project_root="/home/user/project",
+            adjustments={"escapes_project": 20, "inside_project": -10},
+        )
+        assert adj == 0
+
+    def test_none_in_targets_skipped(self):
+        from tracemill.classify.risk import _compute_context_adjustment
+
+        adj = _compute_context_adjustment(
+            targets=[None, "", "src/foo.py"],
+            project_root="/home/user/project",
+            adjustments={"escapes_project": 20, "inside_project": -10},
+        )
+        assert adj <= 0
+
+
+class TestTaintMiddleSegments:
+    """Pipeline taint should detect dangerous sinks in middle segments."""
+
+    def test_middle_segment_execution_sink(self):
+        from tracemill.classify.risk import _compute_taint_bonus
+
+        # cat file | sh | tee out — sh in the middle is a source→execution pair
+        segments = [
+            {"binary": "cat", "targets": ["/etc/shadow"], "effect": "read_only"},
+            {"binary": "sh", "effect": "mutating"},
+            {"binary": "tee", "targets": ["out.txt"], "effect": "mutating"},
+        ]
+        engine = get_default_engine()
+        factors: list[str] = []
+        mitre: list[str] = []
+        escalation = _compute_taint_bonus(
+            pipe_segments=segments,
+            taint_rules=engine.risk_config.get("taint_rules", []),
+            sensitive_paths=engine.risk_config.get("sensitive_paths", {}),
+            encoding_commands=frozenset(engine.risk_config.get("encoding_commands", [])),
+            factors=factors,
+            mitre_ids=mitre,
+        )
+        # Should detect taint flow through the middle sh segment
+        assert escalation > 0

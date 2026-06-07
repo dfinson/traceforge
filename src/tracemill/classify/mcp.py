@@ -81,7 +81,7 @@ _EFFECT_SEVERITY: dict[str | None, int] = {
 }
 
 _WRITE_EFFECTS = frozenset({"mutating", "destructive"})
-_FS_MECHANISMS = frozenset({"filesystem.local", "filesystem.remote"})
+_FS_MECHANISMS = frozenset({"filesystem", "filesystem.local", "filesystem.remote"})
 
 
 def _build_classification(

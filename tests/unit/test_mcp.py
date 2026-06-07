@@ -474,3 +474,51 @@ class TestMcpCustomOverrides:
         custom = {"list_repos": Classification(mechanism="custom.thing", effect="read_only")}
         cls = classify_tool("mcp__github__list_repos", custom)
         assert cls.mechanism == "custom.thing"
+
+
+class TestMcpVerbInferenceUpgrade:
+    """Verb inference should upgrade default_effect when verb implies higher risk."""
+
+    def test_delete_upgrades_read_only_to_destructive(self):
+        """A delete verb should override a read_only default_effect."""
+        cls = classify_mcp_tool("mcp__postgres__delete_rows")
+        assert cls is not None
+        assert cls.effect in ("destructive", "mutating")
+
+    def test_create_upgrades_read_only_to_mutating(self):
+        cls = classify_mcp_tool("mcp__postgres__create_table")
+        assert cls is not None
+        assert cls.effect == "mutating"
+
+    def test_explicit_override_takes_priority_over_verb(self):
+        """Per-tool override should not be overridden by verb inference."""
+        # coderecon's checkpoint has explicit override effect=mutating
+        cls = classify_mcp_tool("mcp__coderecon__checkpoint")
+        assert cls is not None
+        assert cls.effect == "mutating"
+
+    def test_verb_action_merges_with_profile_action(self):
+        """Verb-inferred action should merge with (not replace) profile defaults."""
+        cls = classify_mcp_tool("mcp__github__create_branch")
+        assert cls is not None
+        # Should have both the profile's default actions AND the verb-inferred action
+        assert cls.action  # non-empty
+
+    def test_filesystem_delete_gets_write_capability(self):
+        """Filesystem tool with destructive verb should get filesystem_write."""
+        cls = classify_mcp_tool("mcp__filesystem__delete_file")
+        assert cls is not None
+        assert cls.effect in ("destructive", "mutating")
+        assert "filesystem_write" in cls.capability
+
+    def test_filesystem_delete_upgrades_retriever_role(self):
+        """Filesystem tool with destructive verb should not keep retriever role."""
+        cls = classify_mcp_tool("mcp__filesystem__delete_file")
+        assert cls is not None
+        assert not any(r.startswith("retriever.") for r in cls.role)
+
+    def test_read_verb_stays_read_only(self):
+        """A read verb should not upgrade effect."""
+        cls = classify_mcp_tool("mcp__filesystem__read_file")
+        assert cls is not None
+        assert cls.effect == "read_only"

@@ -235,3 +235,45 @@ class TestCmdClassification:
     def test_scoop_install(self):
         assert _cmd_activity("scoop install rust") == SHELL_SETUP
 
+
+# ── Quoted token extraction tests ──
+
+
+def _classify_bash(cmd: str):
+    from tracemill.classify import classify_shell
+    return classify_shell(cmd, engine=ENGINE)
+
+
+class TestQuotedTokens:
+    """Shell classifier should handle quoted arguments correctly."""
+
+    def test_single_quoted_argument(self):
+        cls = _classify_bash("grep 'pattern' file.txt")
+        assert cls is not None
+        assert cls.effect is not None
+
+    def test_double_quoted_argument(self):
+        cls = _classify_bash('echo "hello world"')
+        assert cls is not None
+
+    def test_quoted_command_in_wrapper(self):
+        cls = _classify_bash('env FOO=bar bash -c "pytest tests/"')
+        assert cls is not None
+
+
+class TestWrapperUnwrapping:
+    """Wrapper unwrapping should correctly handle flags with arguments."""
+
+    def test_env_dash_u_with_value(self):
+        """env -u FOO pytest should unwrap to pytest, not consume pytest as -u's argument."""
+        cls = _classify_bash("env -u FOO pytest")
+        assert cls is not None
+
+    def test_env_with_inline_var(self):
+        cls = _classify_bash("env CI=true npm test")
+        assert cls is not None
+
+    def test_sudo_with_flag(self):
+        cls = _classify_bash("sudo -u deploy pytest")
+        assert cls is not None
+

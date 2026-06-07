@@ -1108,3 +1108,105 @@ class TestScopeInference:
         flushed = enricher.flush()
         cls = flushed[0].metadata.classification
         assert "artifact.test_code" in cls.scope
+
+
+# ── Enricher audit fix coverage ──
+
+
+class TestEnrichmentTypeGuard:
+    """_enrichment in payload must handle non-dict values without crashing."""
+
+    def test_non_dict_enrichment_in_payload(self):
+        """If _enrichment is a string/int/None, enricher should not crash."""
+        enricher = Enricher()
+        event = SessionEvent(
+            kind=EventKind.TOOL_START,
+            session_id="sess-1",
+            timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            payload={
+                "tool_name": "bash",
+                "tool_call_id": "tg1",
+                "arguments": {"command": "echo hi"},
+                "_enrichment": "not-a-dict",
+            },
+        )
+        result = enricher.process(event)
+        assert result is None
+        flushed = enricher.flush()
+        assert len(flushed) == 1
+        enrichment = flushed[0].payload.get("_enrichment")
+        assert isinstance(enrichment, dict)
+
+    def test_none_enrichment_in_payload(self):
+        enricher = Enricher()
+        event = SessionEvent(
+            kind=EventKind.TOOL_START,
+            session_id="sess-1",
+            timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            payload={
+                "tool_name": "view",
+                "tool_call_id": "tg2",
+                "_enrichment": None,
+            },
+        )
+        result = enricher.process(event)
+        assert result is None
+        flushed = enricher.flush()
+        enrichment = flushed[0].payload.get("_enrichment")
+        assert isinstance(enrichment, dict)
+
+
+class TestPayloadMergePreservesEnrichment:
+    """TOOL_COMPLETE merge should preserve start's _enrichment data."""
+
+    def test_start_enrichment_preserved_after_merge(self):
+        enricher = Enricher()
+        t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
+        t2 = t1 + timedelta(seconds=2)
+
+        start = _make_tool_start(tool_call_id="merge1", tool_name="bash", ts=t1,
+                                  arguments={"command": "pytest"})
+        complete = _make_tool_complete(tool_call_id="merge1", tool_name="bash", ts=t2,
+                                       result="ok")
+
+        assert enricher.process(start) is None
+        result = enricher.process(complete)
+        assert result is not None
+
+        enrichment = result.payload.get("_enrichment")
+        assert isinstance(enrichment, dict)
+        assert "classification" in enrichment or "risk" in enrichment
+
+
+class TestPowerShellDispatch:
+    """PowerShell tool_name should dispatch to PS classifier, not bash."""
+
+    def test_powershell_tool_dispatched(self):
+        enricher = Enricher()
+        event = _make_tool_start(
+            tool_call_id="ps1",
+            tool_name="powershell",
+            arguments={"command": "Get-ChildItem -Recurse"},
+        )
+        result = enricher.process(event)
+        assert result is None
+        flushed = enricher.flush()
+        assert len(flushed) == 1
+        cls = flushed[0].metadata.classification
+        assert cls is not None
+
+
+class TestInfraDirScopeInference:
+    """Infra dir scope should check path segments, not just basename."""
+
+    def test_nested_infra_dir(self):
+        """project/terraform/main.tf should match terraform in path segments."""
+        enricher = Enricher()
+        event = _make_tool_start(
+            tool_name="edit",
+            path="project/terraform/main.tf",
+        )
+        enricher.process(event)
+        flushed = enricher.flush()
+        cls = flushed[0].metadata.classification
+        assert "configuration.infrastructure" in cls.scope

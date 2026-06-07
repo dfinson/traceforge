@@ -129,7 +129,7 @@ class TestMcpProfileMatching:
     def test_github_actions_ci_cd_scope(self):
         cls = classify_mcp_tool("mcp__github__actions_list")
         assert cls is not None
-        assert cls.has_role("executor.ci_cd")
+        assert cls.has_role("orchestrator.ci_cd")
 
     def test_github_copilot_delegation(self):
         cls = classify_mcp_tool("mcp__github__assign_copilot_to_issue")
@@ -322,7 +322,7 @@ class TestMcpProfileMatching:
     def test_circleci(self):
         cls = classify_mcp_tool("mcp__circleci__trigger_pipeline")
         assert cls is not None
-        assert cls.has_role("executor.ci_cd")
+        assert cls.has_role("orchestrator.ci_cd")
         assert cls.effect == "mutating"
 
     # ── Package registries ──

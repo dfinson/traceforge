@@ -12,6 +12,7 @@ All rule data comes from risk.yaml via ClassificationEngine.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from fnmatch import fnmatch
@@ -415,31 +416,31 @@ def _compute_taint_bonus(
 
     Only applies across pipe-connected segments (not ; or &&).
     """
-    # Classify first segment as source, last as sink
-    source_seg = pipe_segments[0]
-    sink_seg = pipe_segments[-1]
+    # Check all adjacent pairs: any segment can be a source feeding the next as sink.
+    # Also check middle segments for dangerous sinks (e.g., cat foo | sh | tee out).
+    best_escalation = 0
     has_encoding = any(seg.get("binary") in encoding_commands for seg in pipe_segments[1:-1])
 
-    source_type = _classify_taint_source(source_seg, sensitive_paths)
-    sink_type = _classify_taint_sink(sink_seg)
+    for i in range(len(pipe_segments) - 1):
+        source_seg = pipe_segments[i]
+        sink_seg = pipe_segments[i + 1]
 
-    best_escalation = 0
-    for rule in taint_rules:
-        # Check source matches
-        if rule["source"] == source_type or (
-            rule["source"] == "any_read" and source_type in ("sensitive_read", "any_read")
-        ):
-            # Check sink matches
-            if rule["sink"] == sink_type:
-                # Check encoding requirement
-                if rule.get("has_encoding") and not has_encoding:
-                    continue
-                escalation = rule.get("escalation", 0)
-                if escalation > best_escalation:
-                    best_escalation = escalation
-                    factors.append(rule.get("factor", "taint_flow"))
-                    if rule.get("mitre"):
-                        mitre_ids.append(rule["mitre"])
+        source_type = _classify_taint_source(source_seg, sensitive_paths)
+        sink_type = _classify_taint_sink(sink_seg)
+
+        for rule in taint_rules:
+            if rule["source"] == source_type or (
+                rule["source"] == "any_read" and source_type in ("sensitive_read", "any_read")
+            ):
+                if rule["sink"] == sink_type:
+                    if rule.get("has_encoding") and not has_encoding:
+                        continue
+                    escalation = rule.get("escalation", 0)
+                    if escalation > best_escalation:
+                        best_escalation = escalation
+                        factors.append(rule.get("factor", "taint_flow"))
+                        if rule.get("mitre"):
+                            mitre_ids.append(rule["mitre"])
 
     return best_escalation
 
@@ -497,12 +498,26 @@ def _compute_context_adjustment(
         return 0
 
     adj = 0
+    # Normalize project_root for consistent comparison
+    norm_root = os.path.normpath(project_root) if project_root else ""
     for target in targets:
-        if target.startswith(project_root) or target.startswith("./") or not target.startswith("/"):
+        if not target or not isinstance(target, str):
+            continue
+        norm_target = os.path.normpath(target)
+        # Resolve relative paths: ./foo, foo/bar, ../etc  → check if they escape
+        is_relative = not os.path.isabs(norm_target)
+        if is_relative:
+            # Relative targets that traverse upward could escape the project
+            if norm_target.startswith(".."):
+                return max(adj, adjustments.get("escapes_project", 20))
             adj = min(adj, adjustments.get("inside_project", -10))
-            if any(d in target for d in _BUILD_DIRS):
+            if any(d in norm_target.split(os.sep) for d in _BUILD_DIRS):
                 adj = min(adj, adjustments.get("inside_build_dir", -5) + adjustments.get("inside_project", -10))
-        elif target.startswith("/"):
+        elif norm_root and norm_target.startswith(norm_root):
+            adj = min(adj, adjustments.get("inside_project", -10))
+            if any(d in norm_target.split(os.sep) for d in _BUILD_DIRS):
+                adj = min(adj, adjustments.get("inside_build_dir", -5) + adjustments.get("inside_project", -10))
+        else:
             return max(adj, adjustments.get("escapes_project", 20))
 
     return adj

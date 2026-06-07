@@ -61,15 +61,23 @@ def _inside_command_substitution(node: ts.Node) -> bool:
 
 
 def _words_from_command_node(node: ts.Node) -> list[str]:
-    """Extract word tokens from a command AST node."""
+    """Extract word tokens from a command AST node, including quoted strings."""
+    _EXTRACTABLE = frozenset({"word", "raw_string", "string", "simple_expansion", "concatenation"})
     words: list[str] = []
     for child in node.children:
         if child.type == "command_name":
             for sub in child.children:
-                if sub.type == "word" and sub.text:
-                    words.append(sub.text.decode("utf-8"))
-        elif child.type == "word" and child.text:
-            words.append(child.text.decode("utf-8"))
+                if sub.type in _EXTRACTABLE and sub.text:
+                    # Strip surrounding quotes from string literals
+                    text = sub.text.decode("utf-8")
+                    if len(text) >= 2 and text[0] in ("'", '"') and text[-1] == text[0]:
+                        text = text[1:-1]
+                    words.append(text)
+        elif child.type in _EXTRACTABLE and child.text:
+            text = child.text.decode("utf-8")
+            if len(text) >= 2 and text[0] in ("'", '"') and text[-1] == text[0]:
+                text = text[1:-1]
+            words.append(text)
     return words
 
 
@@ -96,13 +104,23 @@ def _unwrap_binary(
             break
 
         idx += 1
+        # Skip env-style VAR=val assignments
         while idx < len(words) and "=" in words[idx] and not words[idx].startswith("-"):
             idx += 1
+        # Skip wrapper flags — be conservative: only consume one argument
+        # for flags, not arbitrary tokens that might be the real command
         while idx < len(words) and words[idx].startswith("-"):
+            flag = words[idx]
             idx += 1
+            # Flags with = already have their value inline (e.g., --timeout=5)
+            if "=" in flag:
+                continue
+            # Short flags that take an argument: consume next token if it
+            # doesn't look like another flag or a command name
             if (
                 idx < len(words)
                 and not words[idx].startswith("-")
+                and "=" not in words[idx]
                 and not _looks_like_command(words[idx])
             ):
                 idx += 1

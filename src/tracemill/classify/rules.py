@@ -37,9 +37,7 @@ def activity_from_classification(cls: Classification) -> ShellActivity:
         return ShellActivity.VERIFICATION
     if (
         cls.has_action("configure")
-        or cls.has_action("persist.install")
-        or cls.has_scope("artifact.dependency")
-        or cls.has_role("modifier.package_manager")
+        or cls.has_scope("configuration.dependency")
         or cls.has_role("orchestrator.package_manager")
     ):
         return ShellActivity.SETUP

@@ -7,9 +7,11 @@ from datetime import datetime
 from pathlib import Path
 
 from tracemill.classify import classify_shell, classify_tool, get_default_engine
+from tracemill.classify.cmd import classify_cmd_command
 from tracemill.classify.config import ClassificationEngine, ClassifyConfig, load_config
 from tracemill.classify.core import Classification, PhaseSegment
 from tracemill.classify.coding import CodingMechanism, CodingScope
+from tracemill.classify.powershell import classify_powershell_command
 from tracemill.classify.risk import RiskAssessment, assess_risk, assess_tool_risk
 from tracemill.classify.tools import normalize_tool_name
 from tracemill.classify.workflow import Phase, Visibility
@@ -74,7 +76,16 @@ class Enricher:
 
             if start_event is not None:
                 duration_ms = _compute_duration_ms(start_event.timestamp, event.timestamp)
+                # Merge payloads: start is base, complete overrides, but preserve
+                # start's _enrichment (classification/risk already computed on start)
                 merged_payload = {**start_event.payload, **event.payload}
+                start_enrichment = start_event.payload.get("_enrichment")
+                if isinstance(start_enrichment, dict):
+                    complete_enrichment = event.payload.get("_enrichment")
+                    if isinstance(complete_enrichment, dict):
+                        merged_payload["_enrichment"] = {**start_enrichment, **complete_enrichment}
+                    else:
+                        merged_payload["_enrichment"] = start_enrichment
                 merged_metadata = _merge_metadata(start_event.metadata, event.metadata, duration_ms)
                 event = event.model_copy(
                     update={"payload": merged_payload, "metadata": merged_metadata}
@@ -141,7 +152,7 @@ class Enricher:
         return event
 
     def _classify_shell_command(self, event: SessionEvent) -> Classification:
-        """Deep-classify the actual shell command via tree-sitter AST."""
+        """Deep-classify the actual shell command via the appropriate dialect classifier."""
         arguments = event.payload.get("arguments", {})
         command = ""
         if isinstance(arguments, dict):
@@ -151,6 +162,13 @@ class Enricher:
 
         if not command:
             return Classification(mechanism=CodingMechanism.PROCESS_SHELL, effect=None)
+
+        # Dispatch to dialect-specific classifier based on raw tool name
+        raw_tool = event.payload.get("tool_name", "").lower()
+        if raw_tool in ("powershell", "pwsh"):
+            return classify_powershell_command(command, engine=self._engine)
+        if raw_tool == "cmd":
+            return classify_cmd_command(command, engine=self._engine)
 
         return classify_shell(command, engine=self._engine)
 
@@ -173,7 +191,8 @@ class Enricher:
         )
 
         # Store risk assessment in payload under _enrichment
-        enrichment = dict(event.payload.get("_enrichment", {}))
+        enrichment_raw = event.payload.get("_enrichment")
+        enrichment = dict(enrichment_raw) if isinstance(enrichment_raw, dict) else {}
         enrichment["risk"] = {
             "score": risk.score,
             "level": risk.level,
@@ -196,7 +215,8 @@ class Enricher:
             targets=targets or None,
         )
 
-        enrichment = dict(event.payload.get("_enrichment", {}))
+        enrichment_raw = event.payload.get("_enrichment")
+        enrichment = dict(enrichment_raw) if isinstance(enrichment_raw, dict) else {}
         enrichment["risk"] = {
             "score": risk.score,
             "level": risk.level,
@@ -350,7 +370,7 @@ def _infer_scope_from_path(path: str) -> str | None:
 
     if any(basename.endswith(ext) for ext in _INFRA_EXTENSIONS):
         return CodingScope.INFRASTRUCTURE
-    if basename in _INFRA_DIRS:
+    if _INFRA_DIRS.intersection(segments):
         return CodingScope.INFRASTRUCTURE
 
     return None

@@ -6,7 +6,7 @@ mcp_profiles:
     namespace_aliases: [github, gh]
     mechanism: network.http
     role: [retriever.api_client, persistence.version_control]
-    scope: [artifact.repository]
+    scope: [state.repository]
     capability: [network_outbound]
     tool_overrides:
       delete_file:
@@ -18,25 +18,25 @@ mcp_profiles:
       projects_write:
         effect: mutating
       get_code_scanning_alert:
-        scope: [artifact.repository, artifact.source_code]
+        scope: [state.repository, artifact.source_code]
       list_code_scanning_alerts:
-        scope: [artifact.repository, artifact.source_code]
+        scope: [state.repository, artifact.source_code]
       get_dependabot_alert:
-        scope: [artifact.dependency]
+        scope: [configuration.dependency]
       list_dependabot_alerts:
-        scope: [artifact.dependency]
+        scope: [configuration.dependency]
       actions_run_trigger:
-        role: [executor.ci_cd]
-        scope: [artifact.ci_cd_config]
+        role: [orchestrator.ci_cd]
+        scope: [configuration.ci_cd]
       actions_list:
-        role: [executor.ci_cd]
-        scope: [artifact.ci_cd_config]
+        role: [orchestrator.ci_cd]
+        scope: [configuration.ci_cd]
       actions_get:
-        role: [executor.ci_cd]
-        scope: [artifact.ci_cd_config]
+        role: [orchestrator.ci_cd]
+        scope: [configuration.ci_cd]
       get_job_logs:
-        role: [executor.ci_cd]
-        scope: [artifact.ci_cd_config]
+        role: [orchestrator.ci_cd]
+        scope: [configuration.ci_cd]
       assign_copilot_to_issue:
         mechanism: delegation.agent
       request_copilot_review:
@@ -48,14 +48,14 @@ mcp_profiles:
     namespace_aliases: [gitlab]
     mechanism: network.http
     role: [retriever.api_client, persistence.version_control]
-    scope: [artifact.repository]
+    scope: [state.repository]
     capability: [network_outbound]
 
   - id: git_local
     namespace_aliases: [git, mcp_server_git]
     mechanism: process.shell
     role: [persistence.version_control]
-    scope: [artifact.repository]
+    scope: [state.repository]
     capability: [filesystem_write]
 
   - id: filesystem
@@ -188,7 +188,7 @@ mcp_profiles:
     mechanism: network.http
     role: [retriever.web_scraper]
     default_effect: read_only
-    action: [retrieve]
+    action: [retrieve.read]
     capability: [network_outbound]
 
   - id: exa
@@ -236,7 +236,6 @@ mcp_profiles:
     mechanism: communication.system
     role: [communicator.system_reporter]
     default_effect: read_only
-    action: [analyze]
 
   - id: sentry
     namespace_aliases: [sentry]
@@ -336,26 +335,26 @@ mcp_profiles:
   - id: circleci
     namespace_aliases: [circleci]
     mechanism: network.http
-    role: [executor.ci_cd]
-    scope: [artifact.ci_cd_config]
+    role: [orchestrator.ci_cd]
+    scope: [configuration.ci_cd]
     capability: [network_outbound]
 
   - id: npm
     namespace_aliases: [npm, npmjs]
     mechanism: network.http
     role: [retriever.api_client]
-    scope: [artifact.dependency]
+    scope: [configuration.dependency]
     default_effect: read_only
-    action: [retrieve]
+    action: [retrieve.read]
     capability: [network_outbound]
 
   - id: pypi
     namespace_aliases: [pypi]
     mechanism: network.http
     role: [retriever.api_client]
-    scope: [artifact.dependency]
+    scope: [configuration.dependency]
     default_effect: read_only
-    action: [retrieve]
+    action: [retrieve.read]
     capability: [network_outbound]
 
   - id: semgrep
@@ -363,7 +362,7 @@ mcp_profiles:
     mechanism: process
     role: [validator.security_scanner]
     default_effect: read_only
-    action: [validate]
+    action: [validate.security_scan]
     scope: [artifact.source_code]
     capability: [subprocess]
 
@@ -372,7 +371,7 @@ mcp_profiles:
     mechanism: network.http
     role: [retriever.api_client]
     default_effect: read_only
-    action: [retrieve]
+    action: [retrieve.read]
     capability: [network_outbound]
 
   - id: time
@@ -380,7 +379,7 @@ mcp_profiles:
     mechanism: communication.system
     role: [communicator.system_reporter]
     default_effect: read_only
-    action: [retrieve]
+    action: [retrieve.read]
 
   # ─── Code intelligence / agent supervision ─────────────────────────────
 

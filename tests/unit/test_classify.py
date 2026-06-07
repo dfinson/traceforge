@@ -215,8 +215,13 @@ class TestClassifyShellCommand:
         assert _activity("python main.py") == SHELL_IMPLEMENTATION
         assert _activity("node server.js") == SHELL_IMPLEMENTATION
         assert _activity("echo hello") == SHELL_IMPLEMENTATION
-        assert _activity("ls -la") == SHELL_IMPLEMENTATION
-        assert _activity("cat file.txt") == SHELL_IMPLEMENTATION
+
+    def test_investigation_utility_commands(self):
+        assert _activity("ls -la") == SHELL_INVESTIGATION
+        assert _activity("cat file.txt") == SHELL_INVESTIGATION
+        assert _activity("head -n 10 file.txt") == SHELL_INVESTIGATION
+        assert _activity("grep pattern file.txt") == SHELL_INVESTIGATION
+        assert _activity("wc -l file.txt") == SHELL_INVESTIGATION
 
     def test_compound_highest_priority(self):
         # verification > git > setup > investigation > implementation

@@ -238,10 +238,10 @@ def classify_single_command(
     Classification objects with phase_map.
     """
     activity = classify_binary(binary, subcmd, flags, words)
+    rule = match_rule(binary, subcmd, flags)
 
     # Role (rule-based, fallback to binary info)
     cmd_role = ""
-    rule = match_rule(binary, subcmd, flags)
     if rule and rule.role:
         cmd_role = rule.role
     else:
@@ -249,20 +249,30 @@ def classify_single_command(
         if info:
             cmd_role = info.role
 
-    # Action (per-subcommand precision for git/verification)
+    # Action: rule override > per-subcommand precision > activity default
     cmd_action = ""
-    if activity == SHELL_GIT_OPS and binary == "git" and subcmd:
+    if rule and rule.action:
+        cmd_action = rule.action
+    elif activity == SHELL_GIT_OPS and binary == "git" and subcmd:
         cmd_action = _GIT_SUBCMD_ACTION.get(subcmd, CodingAction.COMMIT)
     elif activity == SHELL_VERIFICATION and cmd_role:
         cmd_action = _VERIFICATION_ROLE_ACTION.get(cmd_role, CodingAction.TEST)
     else:
         cmd_action = _ACTIVITY_TO_ACTION.get(activity, "")
 
-    # Scope
-    cmd_scope = _ACTIVITY_TO_SCOPE.get(activity, "")
+    # Scope: rule override > activity default
+    cmd_scope = ""
+    if rule and rule.scope:
+        cmd_scope = rule.scope
+    else:
+        cmd_scope = _ACTIVITY_TO_SCOPE.get(activity, "")
 
-    # Phase
-    cmd_phase = _ACTIVITY_TO_PHASE.get(activity, Phase.IMPLEMENTATION)
+    # Phase: rule override > activity default
+    cmd_phase = ""
+    if rule and rule.phase:
+        cmd_phase = rule.phase
+    else:
+        cmd_phase = _ACTIVITY_TO_PHASE.get(activity, Phase.IMPLEMENTATION)
 
     # Capabilities
     caps: set[str] = set()
@@ -279,6 +289,9 @@ def classify_single_command(
 
     # Effect
     effect = effect_for_binary(binary, subcmd, flags)
+    # Rule effect override (if rule matched and has explicit effect)
+    if rule and rule.effect and effect is None:
+        effect = rule.effect
 
     return _CommandClassification(
         binary=binary,

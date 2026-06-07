@@ -164,7 +164,7 @@ class TestCmdClassification:
         assert _cmd_activity("del /q temp.log") == SHELL_IMPLEMENTATION
 
     def test_mkdir(self):
-        assert _cmd_activity("mkdir build") == SHELL_IMPLEMENTATION
+        assert _cmd_activity("mkdir build") == SHELL_SETUP
 
     # ── Non-builtin binaries ──
 

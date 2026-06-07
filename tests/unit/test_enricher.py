@@ -296,7 +296,7 @@ class TestPhaseDetection:
         flushed = enricher.flush()
         assert "verification" in flushed[0].metadata.phases
 
-    def test_shell_without_keywords_is_implementation(self):
+    def test_shell_read_only_is_exploration(self):
         enricher = Enricher()
         event = _make_tool_start(
             tool_name="bash",
@@ -304,7 +304,7 @@ class TestPhaseDetection:
         )
         enricher.process(event)
         flushed = enricher.flush()
-        assert "implementation" in flushed[0].metadata.phases
+        assert "exploration" in flushed[0].metadata.phases
 
     def test_git_tool_is_review(self):
         enricher = Enricher()
@@ -697,3 +697,392 @@ class TestIDStabilityAndRobustness:
         result = enricher.process(event)
         assert result is not None
 
+
+
+# =============================================================================
+# Shell Deep Classification Tests (Fix 1)
+# =============================================================================
+
+
+class TestShellDeepClassification:
+    def test_shell_tool_gets_rich_classification(self):
+        """Shell tools should get tree-sitter Classification, not static entry."""
+        enricher = Enricher()
+        event = _make_tool_start(
+            tool_name="bash",
+            arguments={"command": "pytest tests/"},
+        )
+        enricher.process(event)
+        flushed = enricher.flush()
+        cls = flushed[0].metadata.classification
+        assert cls is not None
+        assert cls.has_action("validate")
+        assert cls.has_role("validator.test_runner")
+
+    def test_shell_tool_git_gets_version_control(self):
+        enricher = Enricher()
+        event = _make_tool_start(
+            tool_name="bash",
+            arguments={"command": "git push origin main"},
+        )
+        enricher.process(event)
+        flushed = enricher.flush()
+        cls = flushed[0].metadata.classification
+        assert cls.has_role("persistence.version_control")
+        assert cls.has_action("deliver")
+
+    def test_shell_compound_classification_has_all_dimensions(self):
+        enricher = Enricher()
+        event = _make_tool_start(
+            tool_name="bash",
+            arguments={"command": "pytest tests/ && git push"},
+        )
+        enricher.process(event)
+        flushed = enricher.flush()
+        cls = flushed[0].metadata.classification
+        assert cls.has_action("validate")
+        assert cls.has_action("deliver")
+        assert cls.phase_map  # has phase_map
+
+    def test_shell_empty_command_gets_basic_classification(self):
+        enricher = Enricher()
+        event = _make_tool_start(
+            tool_name="bash",
+            arguments={"command": ""},
+        )
+        enricher.process(event)
+        flushed = enricher.flush()
+        cls = flushed[0].metadata.classification
+        assert cls.mechanism == "process.shell"
+
+
+# =============================================================================
+# New Binary Rules Tests (Fix 2)
+# =============================================================================
+
+
+class TestNewBinaryRules:
+    def test_docker_build(self):
+        from tracemill.classify import classify_shell
+        cls = classify_shell("docker build -t myapp .")
+        assert cls.has_role("executor.container_runtime")
+        assert cls.has_action("validate.build_check")
+
+    def test_docker_push(self):
+        from tracemill.classify import classify_shell
+        cls = classify_shell("docker push myapp:latest")
+        assert cls.has_action("deliver.push")
+
+    def test_kubectl_apply(self):
+        from tracemill.classify import classify_shell
+        cls = classify_shell("kubectl apply -f deployment.yaml")
+        assert cls.has_action("deliver.deploy")
+        assert cls.has_scope("state.deployment")
+
+    def test_kubectl_delete(self):
+        from tracemill.classify import classify_shell
+        cls = classify_shell("kubectl delete pod my-pod")
+        assert cls.effect == "destructive"
+
+    def test_terraform_plan(self):
+        from tracemill.classify import classify_shell
+        cls = classify_shell("terraform plan")
+        assert cls.effect == "read_only"
+        assert cls.has_scope("configuration.infrastructure")
+
+    def test_terraform_apply(self):
+        from tracemill.classify import classify_shell
+        cls = classify_shell("terraform apply")
+        assert cls.effect == "mutating"
+        assert cls.has_action("deliver.deploy")
+
+    def test_terraform_destroy(self):
+        from tracemill.classify import classify_shell
+        cls = classify_shell("terraform destroy")
+        assert cls.effect == "destructive"
+
+    def test_curl_get(self):
+        from tracemill.classify import classify_shell
+        cls = classify_shell("curl https://api.example.com")
+        assert cls.effect == "read_only"
+
+    def test_curl_post(self):
+        from tracemill.classify import classify_shell
+        cls = classify_shell("curl -X POST https://api.example.com -d '{}'")
+        assert cls.effect == "mutating"
+
+    def test_curl_data_flag(self):
+        from tracemill.classify import classify_shell
+        cls = classify_shell("curl --data 'payload' https://api.example.com")
+        assert cls.effect == "mutating"
+
+    def test_sed_inplace(self):
+        from tracemill.classify import classify_shell
+        cls = classify_shell("sed -i 's/foo/bar/g' file.txt")
+        assert cls.effect == "mutating"
+
+    def test_sed_stdout(self):
+        from tracemill.classify import classify_shell
+        cls = classify_shell("sed 's/foo/bar/g' file.txt")
+        assert cls.effect == "read_only"
+
+    def test_rm_is_destructive(self):
+        from tracemill.classify import classify_shell
+        cls = classify_shell("rm -rf temp/")
+        assert cls.effect == "destructive"
+
+    def test_cp_is_mutating(self):
+        from tracemill.classify import classify_shell
+        cls = classify_shell("cp src.txt dst.txt")
+        assert cls.effect == "mutating"
+
+    def test_cat_is_read_only(self):
+        from tracemill.classify import classify_shell
+        cls = classify_shell("cat file.txt")
+        assert cls.effect == "read_only"
+
+    def test_grep_is_investigation(self):
+        from tracemill.classify.rules import classify_binary, SHELL_INVESTIGATION
+        act = classify_binary("grep", None, [], ["grep", "pattern", "file"])
+        assert act == SHELL_INVESTIGATION
+
+    def test_bandit_security_scanner(self):
+        from tracemill.classify import classify_shell
+        cls = classify_shell("bandit -r src/")
+        assert cls.has_role("validator.security_scanner")
+        assert cls.has_action("validate.security_scan")
+
+    def test_helm_install(self):
+        from tracemill.classify import classify_shell
+        cls = classify_shell("helm install myapp ./chart")
+        assert cls.has_action("deliver.deploy")
+        assert cls.has_scope("state.deployment")
+
+    def test_gh_pr(self):
+        from tracemill.classify import classify_shell
+        cls = classify_shell("gh pr create --title 'fix'")
+        assert cls.has_role("persistence.version_control")
+
+    def test_ls_is_investigation(self):
+        from tracemill.classify.rules import classify_binary, SHELL_INVESTIGATION
+        act = classify_binary("ls", None, ["-la"], ["ls", "-la"])
+        assert act == SHELL_INVESTIGATION
+
+    def test_jq_is_read_only(self):
+        from tracemill.classify import classify_shell
+        cls = classify_shell("jq '.name' package.json")
+        assert cls.effect == "read_only"
+
+
+# =============================================================================
+# MCP Heuristics Tests (Fix 3)
+# =============================================================================
+
+
+class TestMCPHeuristics:
+    def test_mcp_filesystem_tool(self):
+        from tracemill.classify.tools import classify_tool
+        cls = classify_tool("mcp__myfs__read_file")
+        assert cls.mechanism == "filesystem"
+
+    def test_mcp_database_tool(self):
+        from tracemill.classify.tools import classify_tool
+        cls = classify_tool("mcp__database__query")
+        assert cls.mechanism.startswith("database")
+
+    def test_mcp_github_tool(self):
+        from tracemill.classify.tools import classify_tool
+        cls = classify_tool("mcp__github__list_repos")
+        assert cls.mechanism.startswith("network")
+
+    def test_mcp_unknown_namespace(self):
+        from tracemill.classify.tools import classify_tool
+        cls = classify_tool("mcp__randomserver__do_stuff")
+        # Falls back to communication but that's OK
+        assert cls.mechanism is not None
+
+    def test_verb_effect_get(self):
+        from tracemill.classify.tools import classify_tool
+        cls = classify_tool("mcp__myserver__get_items")
+        assert cls.effect == "read_only"
+
+    def test_verb_effect_delete(self):
+        from tracemill.classify.tools import classify_tool
+        cls = classify_tool("mcp__myserver__delete_item")
+        assert cls.effect == "destructive"
+
+    def test_verb_effect_create(self):
+        from tracemill.classify.tools import classify_tool
+        cls = classify_tool("mcp__myserver__create_item")
+        assert cls.effect == "mutating"
+
+    def test_mcp_redis_tool(self):
+        from tracemill.classify.tools import classify_tool
+        cls = classify_tool("mcp__redis__get_key")
+        assert cls.mechanism.startswith("database")
+
+    def test_mcp_browser_tool(self):
+        from tracemill.classify.tools import classify_tool
+        cls = classify_tool("mcp__browser__navigate")
+        assert cls.mechanism.startswith("network")
+
+
+# =============================================================================
+# Scope Inference Tests (Fix 4)
+# =============================================================================
+
+
+class TestScopeInference:
+    def test_edit_test_file(self):
+        enricher = Enricher()
+        event = _make_tool_start(
+            tool_name="edit",
+            path="tests/unit/test_foo.py",
+        )
+        enricher.process(event)
+        flushed = enricher.flush()
+        cls = flushed[0].metadata.classification
+        assert "artifact.test_code" in cls.scope
+        assert "artifact.source_code" not in cls.scope
+
+    def test_edit_source_file(self):
+        enricher = Enricher()
+        event = _make_tool_start(
+            tool_name="edit",
+            path="src/main.py",
+        )
+        enricher.process(event)
+        flushed = enricher.flush()
+        cls = flushed[0].metadata.classification
+        assert "artifact.source_code" in cls.scope
+
+    def test_edit_dockerfile(self):
+        enricher = Enricher()
+        event = _make_tool_start(
+            tool_name="edit",
+            path="Dockerfile",
+        )
+        enricher.process(event)
+        flushed = enricher.flush()
+        cls = flushed[0].metadata.classification
+        assert "artifact.container_image" in cls.scope
+
+    def test_edit_ci_config(self):
+        enricher = Enricher()
+        event = _make_tool_start(
+            tool_name="edit",
+            path=".github/workflows/ci.yml",
+        )
+        enricher.process(event)
+        flushed = enricher.flush()
+        cls = flushed[0].metadata.classification
+        assert "configuration.ci_cd" in cls.scope
+
+    def test_edit_package_json(self):
+        enricher = Enricher()
+        event = _make_tool_start(
+            tool_name="edit",
+            path="package.json",
+        )
+        enricher.process(event)
+        flushed = enricher.flush()
+        cls = flushed[0].metadata.classification
+        assert "configuration.dependency" in cls.scope
+
+    def test_edit_docs(self):
+        enricher = Enricher()
+        event = _make_tool_start(
+            tool_name="edit",
+            path="docs/guide.md",
+        )
+        enricher.process(event)
+        flushed = enricher.flush()
+        cls = flushed[0].metadata.classification
+        assert "artifact.documentation" in cls.scope
+
+    def test_edit_terraform_file(self):
+        enricher = Enricher()
+        event = _make_tool_start(
+            tool_name="edit",
+            path="infra/main.tf",
+        )
+        enricher.process(event)
+        flushed = enricher.flush()
+        cls = flushed[0].metadata.classification
+        assert "configuration.infrastructure" in cls.scope
+
+    def test_edit_env_file(self):
+        enricher = Enricher()
+        event = _make_tool_start(
+            tool_name="edit",
+            path=".env",
+        )
+        enricher.process(event)
+        flushed = enricher.flush()
+        cls = flushed[0].metadata.classification
+        assert "configuration.environment" in cls.scope
+
+    def test_no_false_positive_on_contest(self):
+        """'contest.py' should NOT be test scope."""
+        enricher = Enricher()
+        event = _make_tool_start(
+            tool_name="edit",
+            path="src/contest.py",
+        )
+        enricher.process(event)
+        flushed = enricher.flush()
+        cls = flushed[0].metadata.classification
+        assert "artifact.test_code" not in cls.scope
+
+    def test_scope_in_phase_map_consistent(self):
+        """Phase map scopes should match top-level scope."""
+        enricher = Enricher()
+        event = _make_tool_start(
+            tool_name="edit",
+            path="tests/test_bar.py",
+        )
+        enricher.process(event)
+        flushed = enricher.flush()
+        cls = flushed[0].metadata.classification
+        assert "artifact.test_code" in cls.scope
+        # Phase map should also reflect test_code
+        for seg in cls.phase_map:
+            if seg.scopes:
+                assert "artifact.test_code" in seg.scopes
+
+    def test_shell_tool_no_scope_inference(self):
+        """Shell tools use process.shell mechanism — no scope refinement."""
+        enricher = Enricher()
+        event = _make_tool_start(
+            tool_name="bash",
+            arguments={"command": "pytest tests/"},
+        )
+        enricher.process(event)
+        flushed = enricher.flush()
+        cls = flushed[0].metadata.classification
+        # Shell classification has its own scope from rules, not from path
+        assert cls.mechanism == "process.shell"
+
+    def test_path_in_arguments(self):
+        """File path may be nested in arguments dict."""
+        enricher = Enricher()
+        event = _make_tool_start(
+            tool_name="view",
+            arguments={"path": "tests/conftest.py"},
+        )
+        enricher.process(event)
+        flushed = enricher.flush()
+        cls = flushed[0].metadata.classification
+        assert "artifact.test_code" in cls.scope
+
+    def test_spec_directory(self):
+        """spec/ directory should be test scope."""
+        enricher = Enricher()
+        event = _make_tool_start(
+            tool_name="edit",
+            path="spec/models/user_spec.rb",
+        )
+        enricher.process(event)
+        flushed = enricher.flush()
+        cls = flushed[0].metadata.classification
+        assert "artifact.test_code" in cls.scope

@@ -18,20 +18,20 @@ from tracemill.classify.coding import (
 )
 
 CANONICAL_TOOLS: Final[dict[str, str]] = {
-    # Shell
-    "bash": "bash",
-    "bashtool": "bash",
-    "powershell": "bash",
-    "powershelltool": "bash",
-    "exec_command": "bash",
-    "run_shell": "bash",
-    "execute_command": "bash",
-    "terminal": "bash",
-    "shell": "bash",
-    "run_in_terminal": "bash",
-    "sh": "bash",
-    "zsh": "bash",
-    "cmd": "bash",
+    # Shell (neutral — dialect detected from command content, not tool name)
+    "bash": "shell",
+    "bashtool": "shell",
+    "powershell": "shell",
+    "powershelltool": "shell",
+    "exec_command": "shell",
+    "run_shell": "shell",
+    "execute_command": "shell",
+    "terminal": "shell",
+    "shell": "shell",
+    "run_in_terminal": "shell",
+    "sh": "shell",
+    "zsh": "shell",
+    "cmd": "shell",
     # File read
     "read": "view",
     "read_file": "view",
@@ -77,20 +77,20 @@ CANONICAL_TOOLS: Final[dict[str, str]] = {
     "git_rebase": "git_rebase",
     "git_checkout": "git_checkout",
     "git_branch": "git_branch",
-    # Internal/bookkeeping
+    # Internal bookkeeping (distinct semantics)
     "report_intent": "report_intent",
-    "todowrite": "report_intent",
-    "todoread": "report_intent",
-    "think": "report_intent",
+    "think": "think",
+    "todowrite": "state_write",
+    "todoread": "state_read",
     # Interaction
     "ask_user": "ask_user",
-    # Browser/web
+    # Web (fetch vs browse are different mechanisms)
     "webfetch": "web_fetch",
     "websearch": "web_search",
     "web_fetch": "web_fetch",
     "web_search": "web_search",
     "fetch_url": "web_fetch",
-    "browser": "web_fetch",
+    "browser": "web_browse",
     # Agent/delegation
     "task": "task",
     "agent": "task",
@@ -155,7 +155,7 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         mechanism=Mechanism.FILE,
         effect=Effect.MUTATING,
         scope=frozenset({CodingScope.SOURCE_CODE}),
-        role=frozenset(),
+        role=frozenset({CodingRole.FILE_EDITOR}),
         action=frozenset({CodingAction.EDIT}),
         capability=frozenset({"filesystem_write"}),
     ),
@@ -232,7 +232,7 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         capability=frozenset({"filesystem_write"}),
     ),
     "git_pull": Classification(
-        mechanism=Mechanism.NETWORK,
+        mechanism=CodingMechanism.PROCESS_SHELL,
         effect=Effect.MUTATING,
         scope=frozenset({CodingScope.REPOSITORY}),
         role=frozenset({CodingRole.VERSION_CONTROL}),
@@ -307,13 +307,41 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         action=frozenset(),
         capability=frozenset({"subprocess"}),
     ),
-    "bash": Classification(
+    "shell": Classification(
         mechanism=CodingMechanism.PROCESS_SHELL,
         effect=None,
         role=frozenset({CodingRole.SCRIPT_RUNNER}),
         action=frozenset({CodingAction.RUN_SCRIPT}),
         capability=frozenset({"subprocess"}),
-        shell_dialect="bash",
+    ),
+    "think": Classification(
+        mechanism=CodingMechanism.COMMUNICATION_SYSTEM,
+        effect=Effect.READ_ONLY,
+        role=frozenset({CodingRole.SYSTEM_REPORTER}),
+        action=frozenset({Action.ANALYZE}),
+        capability=frozenset(),
+    ),
+    "state_write": Classification(
+        mechanism=CodingMechanism.COMMUNICATION_SYSTEM,
+        effect=Effect.MUTATING,
+        role=frozenset({CodingRole.SYSTEM_REPORTER}),
+        action=frozenset({Action.PERSIST}),
+        capability=frozenset(),
+    ),
+    "state_read": Classification(
+        mechanism=CodingMechanism.COMMUNICATION_SYSTEM,
+        effect=Effect.READ_ONLY,
+        role=frozenset({CodingRole.SYSTEM_REPORTER}),
+        action=frozenset({Action.RETRIEVE}),
+        capability=frozenset(),
+    ),
+    "web_browse": Classification(
+        mechanism=CodingMechanism.NETWORK_HTTP,
+        effect=Effect.READ_ONLY,
+        scope=frozenset({CodingScope.DOCUMENTATION}),
+        role=frozenset({CodingRole.WEB_SCRAPER}),
+        action=frozenset({CodingAction.BROWSE}),
+        capability=frozenset({"network_outbound", "human_interaction"}),
     ),
 }
 

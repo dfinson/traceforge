@@ -8,6 +8,7 @@ from datetime import datetime
 from tracemill.classify import classify_shell, classify_tool
 from tracemill.classify.core import Classification
 from tracemill.classify.coding import CodingMechanism
+from tracemill.classify.tools import normalize_tool_name
 from tracemill.classify.workflow import Phase, Visibility
 from tracemill.types import EventKind, EventMetadata, SessionEvent
 
@@ -151,9 +152,9 @@ class Enricher:
                 return Phase.IMPLEMENTATION
             return Phase.PLANNING
 
-        # Shell executor tools (bash/powershell): classify the actual command for finer phase
+        # Shell executor tools: classify the actual command for finer phase
         tool_name = event.payload.get("tool_name", "")
-        if tool_name in ("bash", "powershell", "sh", "zsh", "cmd"):
+        if normalize_tool_name(tool_name) == "shell":
             shell_cls = self._classify_shell_event(event)
             return _phase_from_classification(shell_cls)
 

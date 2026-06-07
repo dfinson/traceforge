@@ -67,6 +67,7 @@ class Role(StrEnum):
     RETRIEVER = "retriever"
     TRANSFORMER = "transformer"
     GENERATOR = "generator"
+    MODIFIER = "modifier"
     EXECUTOR = "executor"
     COMMUNICATOR = "communicator"
     ORCHESTRATOR = "orchestrator"

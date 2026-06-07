@@ -34,27 +34,27 @@ class TestNormalizeToolName:
         assert normalize_tool_name("") == ""
 
     def test_direct_canonical(self):
-        assert normalize_tool_name("bash") == "bash"
+        assert normalize_tool_name("bash") == "shell"
         assert normalize_tool_name("edit") == "edit"
         assert normalize_tool_name("grep") == "grep"
 
     def test_alias_resolution(self):
-        assert normalize_tool_name("powershell") == "bash"
+        assert normalize_tool_name("powershell") == "shell"
         assert normalize_tool_name("read_file") == "view"
         assert normalize_tool_name("str_replace_editor") == "edit"
-        assert normalize_tool_name("execute_command") == "bash"
+        assert normalize_tool_name("execute_command") == "shell"
 
     def test_case_insensitive(self):
-        assert normalize_tool_name("Bash") == "bash"
+        assert normalize_tool_name("Bash") == "shell"
         assert normalize_tool_name("GREP") == "grep"
-        assert normalize_tool_name("PowerShell") == "bash"
+        assert normalize_tool_name("PowerShell") == "shell"
 
     def test_hyphen_normalization(self):
-        assert normalize_tool_name("exec-command") == "bash"
+        assert normalize_tool_name("exec-command") == "shell"
         assert normalize_tool_name("read-file") == "view"
 
     def test_mcp_double_underscore_prefix(self):
-        assert normalize_tool_name("mcp__server__bash") == "bash"
+        assert normalize_tool_name("mcp__server__bash") == "shell"
         assert normalize_tool_name("mcp__filesystem__read_file") == "view"
         assert normalize_tool_name("mcp__myserver__grep") == "grep"
 
@@ -63,7 +63,7 @@ class TestNormalizeToolName:
         assert normalize_tool_name("mcp__server__custom_tool") == "custom_tool"
 
     def test_namespace_dot_prefix(self):
-        assert normalize_tool_name("functions.bash") == "bash"
+        assert normalize_tool_name("functions.bash") == "shell"
         assert normalize_tool_name("tools.grep") == "grep"
 
     def test_dot_prefix_preserves_non_namespace(self):
@@ -75,7 +75,7 @@ class TestNormalizeToolName:
         assert normalize_tool_name("MyWeirdTool") == "myweirdtool"
 
     def test_whitespace_stripping(self):
-        assert normalize_tool_name("  bash  ") == "bash"
+        assert normalize_tool_name("  bash  ") == "shell"
 
 
 # =============================================================================
@@ -133,7 +133,7 @@ class TestClassifyTool:
     def test_custom_on_canonical_name(self):
         custom_cls = Classification(mechanism="custom.shell", effect="mutating")
         custom = {"bash": custom_cls}
-        # "exec_command" normalizes to "bash", custom has "bash" → custom_cls
+        # "exec_command" normalizes to "shell", custom "bash" also normalizes to "shell" → match
         assert classify_tool("exec_command", custom) is custom_cls
 
 

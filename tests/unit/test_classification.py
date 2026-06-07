@@ -312,10 +312,11 @@ class TestClassifyToolDetailed:
         assert c.mechanism == "network.http"
         assert "network_outbound" in c.capability
 
-    def test_bash_tool(self):
+    def test_shell_tool(self):
         c = classify_tool("bash")
         assert c.mechanism == "process.shell"
-        assert c.shell_dialect == "bash"
+        # Dialect is None at tool-level; determined by shell classifier from command content
+        assert c.shell_dialect is None
 
     def test_unknown_tool(self):
         c = classify_tool("totally_unknown_tool")

@@ -121,6 +121,9 @@ class CodingRole(StrEnum):
     WEB_SCRAPER = "retriever.web_scraper"
     API_CLIENT = "retriever.api_client"
 
+    # modifier.*
+    FILE_EDITOR = "modifier.file_editor"
+
     # persistence.*
     VERSION_CONTROL = "persistence.version_control"
     DATABASE = "persistence.database"

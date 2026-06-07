@@ -227,7 +227,7 @@ class TestClassifyShell:
     def test_pip_install(self):
         c = classify_shell("pip install flask")
         assert c.effect == "mutating"
-        assert c.has_role("modifier.package_manager")
+        assert c.has_role("orchestrator.package_manager")
         assert "network_outbound" in c.capability
         assert "pip" in c.binaries
 

@@ -6,49 +6,49 @@ shell_rules:
     binaries: [pip, pip3]
     subcmds: [install]
     activity: setup
-    role: modifier.package_manager
+    role: orchestrator.package_manager
     effect: mutating
 
   - id: npm-pnpm-yarn-add-ci-install
     binaries: [npm, pnpm, yarn]
     subcmds: [add, ci, install]
     activity: setup
-    role: modifier.package_manager
+    role: orchestrator.package_manager
     effect: mutating
 
   - id: cargo-add
     binaries: [cargo]
     subcmds: [add]
     activity: setup
-    role: modifier.package_manager
+    role: orchestrator.package_manager
     effect: mutating
 
   - id: apt-apt-get-brew-install
     binaries: [apt, apt-get, brew]
     subcmds: [install]
     activity: setup
-    role: modifier.package_manager
+    role: orchestrator.package_manager
     effect: mutating
 
   - id: uv-add-pip-sync
     binaries: [uv]
     subcmds: [add, pip, sync]
     activity: setup
-    role: modifier.package_manager
+    role: orchestrator.package_manager
     effect: mutating
 
   - id: poetry-add-install
     binaries: [poetry]
     subcmds: [add, install]
     activity: setup
-    role: modifier.package_manager
+    role: orchestrator.package_manager
     effect: mutating
 
   - id: choco-scoop-winget-install
     binaries: [choco, scoop, winget]
     subcmds: [install]
     activity: setup
-    role: modifier.package_manager
+    role: orchestrator.package_manager
     effect: mutating
 
   - id: bats-jest-mocha-nox-pest-phpunit-playwright-pytest-rspec-tox-vitest-test-runner
@@ -151,7 +151,7 @@ shell_rules:
     binaries: [npm, pnpm, yarn]
     subcmds: [run]
     activity: verification
-    role: executor.task_runner
+    role: orchestrator.task_runner
 
   - id: git-cherry-pick-commit-merge-push-rebase-reset-stash-tag
     binaries: [git]
@@ -176,7 +176,7 @@ shell_rules:
   - id: install-module-install-package-install-psresource-register-psrepository-update-module-package-manager
     binaries: [install-module, install-package, install-psresource, register-psrepository, update-module]
     activity: setup
-    role: modifier.package_manager
+    role: orchestrator.package_manager
     effect: mutating
 
   - id: format-list-format-table-get-childitem-get-command-get-content-get-help-get-item-get-itemproperty-get-module-get-process-get-service-get-variable-measure-object-out-string-select-object-select-string-sort-object-where-object-file-browser
@@ -321,7 +321,7 @@ shell_rules:
     binaries: [terraform, tofu]
     subcmds: [plan, validate]
     activity: verification
-    role: executor.task_runner
+    role: orchestrator.task_runner
     effect: read_only
     scope: configuration.infrastructure
     action: validate.build_check
@@ -330,7 +330,7 @@ shell_rules:
     binaries: [terraform, tofu]
     subcmds: [apply]
     activity: implementation
-    role: executor.task_runner
+    role: orchestrator.task_runner
     effect: mutating
     scope: configuration.infrastructure
     action: deliver.deploy
@@ -339,7 +339,7 @@ shell_rules:
     binaries: [terraform, tofu]
     subcmds: [destroy]
     activity: implementation
-    role: executor.task_runner
+    role: orchestrator.task_runner
     effect: destructive
     scope: configuration.infrastructure
     action: remove.teardown
@@ -348,7 +348,7 @@ shell_rules:
     binaries: [terraform, tofu]
     subcmds: [init]
     activity: setup
-    role: executor.task_runner
+    role: orchestrator.task_runner
     effect: mutating
     scope: configuration.infrastructure
     action: configure.setup
@@ -357,7 +357,7 @@ shell_rules:
     binaries: [terraform, tofu]
     subcmds: [output, show, state]
     activity: investigation
-    role: executor.task_runner
+    role: orchestrator.task_runner
     effect: read_only
     scope: configuration.infrastructure
     action: retrieve.browse
@@ -366,7 +366,7 @@ shell_rules:
     binaries: [helm]
     subcmds: [install, upgrade]
     activity: implementation
-    role: modifier.package_manager
+    role: orchestrator.package_manager
     effect: mutating
     scope: state.deployment
     action: deliver.deploy
@@ -375,7 +375,7 @@ shell_rules:
     binaries: [helm]
     subcmds: [lint, template]
     activity: verification
-    role: executor.task_runner
+    role: orchestrator.task_runner
     effect: read_only
     scope: state.deployment
     action: validate.build_check
@@ -384,7 +384,7 @@ shell_rules:
     binaries: [helm]
     subcmds: [delete, uninstall]
     activity: implementation
-    role: modifier.package_manager
+    role: orchestrator.package_manager
     effect: destructive
     scope: state.deployment
     action: remove.teardown
@@ -393,7 +393,7 @@ shell_rules:
     binaries: [helm]
     subcmds: [get, list, status]
     activity: investigation
-    role: executor.task_runner
+    role: orchestrator.task_runner
     effect: read_only
     scope: state.deployment
     action: retrieve.browse
@@ -402,7 +402,7 @@ shell_rules:
     binaries: [pulumi]
     subcmds: [preview]
     activity: verification
-    role: executor.task_runner
+    role: orchestrator.task_runner
     effect: read_only
     scope: configuration.infrastructure
     action: validate.build_check
@@ -411,7 +411,7 @@ shell_rules:
     binaries: [pulumi]
     subcmds: [up]
     activity: implementation
-    role: executor.task_runner
+    role: orchestrator.task_runner
     effect: mutating
     scope: configuration.infrastructure
     action: deliver.deploy
@@ -420,7 +420,7 @@ shell_rules:
     binaries: [pulumi]
     subcmds: [destroy]
     activity: implementation
-    role: executor.task_runner
+    role: orchestrator.task_runner
     effect: destructive
     scope: configuration.infrastructure
     action: remove.teardown
@@ -621,7 +621,7 @@ shell_rules:
     binaries: [conda]
     subcmds: [create, install, update]
     activity: setup
-    role: modifier.package_manager
+    role: orchestrator.package_manager
     effect: mutating
     scope: configuration.environment
     action: persist.install
@@ -630,7 +630,7 @@ shell_rules:
     binaries: [conda]
     subcmds: [activate, deactivate]
     activity: setup
-    role: modifier.package_manager
+    role: orchestrator.package_manager
     effect: read_only
     scope: configuration.environment
     action: configure.setup
@@ -639,7 +639,7 @@ shell_rules:
     binaries: [conda]
     subcmds: [info, list, search]
     activity: investigation
-    role: modifier.package_manager
+    role: orchestrator.package_manager
     effect: read_only
     scope: configuration.environment
     action: retrieve.browse
@@ -647,7 +647,7 @@ shell_rules:
   - id: venv-virtualenv-package-manager
     binaries: [venv, virtualenv]
     activity: setup
-    role: modifier.package_manager
+    role: orchestrator.package_manager
     effect: mutating
     scope: configuration.environment
     action: configure.setup
@@ -655,7 +655,7 @@ shell_rules:
   - id: asdf-fnm-mise-nvm-pyenv-rbenv-rtx-package-manager
     binaries: [asdf, fnm, mise, nvm, pyenv, rbenv, rtx]
     activity: setup
-    role: modifier.package_manager
+    role: orchestrator.package_manager
     effect: mutating
     scope: configuration.environment
     action: configure.setup
@@ -732,7 +732,7 @@ shell_rules:
     binaries: [twine]
     subcmds: [upload]
     activity: implementation
-    role: executor.task_runner
+    role: orchestrator.task_runner
     effect: mutating
     scope: artifact.package
     action: deliver.publish
@@ -741,7 +741,7 @@ shell_rules:
     binaries: [npm, pnpm]
     subcmds: [publish]
     activity: implementation
-    role: executor.task_runner
+    role: orchestrator.task_runner
     effect: mutating
     scope: artifact.package
     action: deliver.publish
@@ -750,7 +750,7 @@ shell_rules:
     binaries: [cargo]
     subcmds: [publish]
     activity: implementation
-    role: executor.task_runner
+    role: orchestrator.task_runner
     effect: mutating
     scope: artifact.package
     action: deliver.publish
@@ -779,37 +779,37 @@ binary_info:
   ruff: { role: validator.linter, default_effect: read_only }
   black: { role: transformer.formatter, default_effect: mutating }
   prettier: { role: transformer.formatter, default_effect: mutating }
-  pip: { role: modifier.package_manager, default_effect: mutating, network: true }
-  pip3: { role: modifier.package_manager, default_effect: mutating, network: true }
-  npm: { role: executor.task_runner, network: true }
-  pnpm: { role: executor.task_runner, network: true }
-  yarn: { role: executor.task_runner, network: true }
-  cargo: { role: executor.task_runner }
-  uv: { role: modifier.package_manager, default_effect: mutating, network: true }
-  poetry: { role: modifier.package_manager, default_effect: mutating, network: true }
-  brew: { role: modifier.package_manager, default_effect: mutating, network: true }
-  apt: { role: modifier.package_manager, default_effect: mutating, network: true }
-  apt-get: { role: modifier.package_manager, default_effect: mutating, network: true }
+  pip: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  pip3: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  npm: { role: orchestrator.task_runner, network: true }
+  pnpm: { role: orchestrator.task_runner, network: true }
+  yarn: { role: orchestrator.task_runner, network: true }
+  cargo: { role: orchestrator.task_runner }
+  uv: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  poetry: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  brew: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  apt: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  apt-get: { role: orchestrator.package_manager, default_effect: mutating, network: true }
   docker: { role: executor.container_runtime, network: true }
   podman: { role: executor.container_runtime, network: true }
   docker-compose: { role: executor.container_runtime, network: true }
   kubectl: { role: executor.container_runtime, network: true }
-  helm: { role: modifier.package_manager, network: true }
-  terraform: { role: executor.task_runner, network: true }
-  tofu: { role: executor.task_runner, network: true }
-  pulumi: { role: executor.task_runner, network: true }
+  helm: { role: orchestrator.package_manager, network: true }
+  terraform: { role: orchestrator.task_runner, network: true }
+  tofu: { role: orchestrator.task_runner, network: true }
+  pulumi: { role: orchestrator.task_runner, network: true }
   git: { role: persistence.version_control }
   gh: { role: retriever.api_client, network: true }
-  make: { role: executor.task_runner }
+  make: { role: orchestrator.task_runner }
   cmake: { role: validator.build_checker, default_effect: mutating }
   ninja: { role: validator.build_checker, default_effect: mutating }
   bazel: { role: validator.build_checker }
-  gradle: { role: executor.task_runner }
-  mvn: { role: executor.task_runner }
+  gradle: { role: orchestrator.task_runner }
+  mvn: { role: orchestrator.task_runner }
   webpack: { role: transformer.bundler, default_effect: mutating }
   vite: { role: transformer.bundler }
-  dotnet: { role: executor.task_runner }
-  go: { role: executor.task_runner }
+  dotnet: { role: orchestrator.task_runner }
+  go: { role: orchestrator.task_runner }
   python: { role: executor.script_runner }
   python3: { role: executor.script_runner }
   node: { role: executor.script_runner }
@@ -818,9 +818,9 @@ binary_info:
   rm: { role: executor.script_runner, default_effect: destructive, destructive: true }
   rmdir: { role: executor.script_runner, default_effect: destructive, destructive: true }
   sudo: { role: executor.script_runner }
-  choco: { role: modifier.package_manager, default_effect: mutating, network: true }
-  winget: { role: modifier.package_manager, default_effect: mutating, network: true }
-  scoop: { role: modifier.package_manager, default_effect: mutating, network: true }
+  choco: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  winget: { role: orchestrator.package_manager, default_effect: mutating, network: true }
+  scoop: { role: orchestrator.package_manager, default_effect: mutating, network: true }
   sed: { role: retriever.search_index, default_effect: read_only }
   awk: { role: retriever.search_index, default_effect: read_only }
   gawk: { role: retriever.search_index, default_effect: read_only }
@@ -848,11 +848,11 @@ binary_info:
   trivy: { role: validator.security_scanner, default_effect: read_only }
   snyk: { role: validator.security_scanner, default_effect: read_only, network: true }
   safety: { role: validator.security_scanner, default_effect: read_only, network: true }
-  conda: { role: modifier.package_manager, network: true }
-  virtualenv: { role: modifier.package_manager, default_effect: mutating }
-  nvm: { role: modifier.package_manager, default_effect: mutating }
-  rbenv: { role: modifier.package_manager, default_effect: mutating }
-  pyenv: { role: modifier.package_manager, default_effect: mutating }
+  conda: { role: orchestrator.package_manager, network: true }
+  virtualenv: { role: orchestrator.package_manager, default_effect: mutating }
+  nvm: { role: orchestrator.package_manager, default_effect: mutating }
+  rbenv: { role: orchestrator.package_manager, default_effect: mutating }
+  pyenv: { role: orchestrator.package_manager, default_effect: mutating }
   az: { role: retriever.api_client, network: true }
   aws: { role: retriever.api_client, network: true }
   gcloud: { role: retriever.api_client, network: true }

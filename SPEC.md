@@ -446,6 +446,12 @@ This library is extracted from [CodePlane](https://github.com/dfinson/codeplane)
 
 CodePlane then depends on tracemill instead of owning the code. Its EventProcessor (which adds diff triggering, step tracking, and domain event translation) stays in CodePlane — those are consumer-specific concerns built on top of the generic pipeline.
 
+### §8.1 — Relationship to memrelay
+
+[memrelay](https://github.com/dfinson/memrelay) is the first standalone consumer of tracemill. It implements a `GraphitiSink` (a `StorageSink` subclass) that feeds enriched events into a Graphiti knowledge graph for persistent memory. memrelay also uses tracemill's `CLIJsonlAdapter` to parse Copilot CLI session files.
+
+The boundary is clean: tracemill handles parsing, enrichment, and pipeline orchestration. memrelay handles daemon lifecycle, Graphiti integration, MCP tools, and memory retrieval.
+
 ---
 
 ## §9 — Repository Structure

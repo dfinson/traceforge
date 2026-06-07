@@ -63,14 +63,12 @@ CANONICAL_TOOLS: Final[dict[str, str]] = {
     "write_file": "create",
     "filewritetool": "create",
     # Search
+    # Search / file listing
     "grep": "grep",
     "glob": "glob",
     "greptool": "grep",
     "globtool": "glob",
-    "search": "grep",
     "ripgrep": "grep",
-    "find": "glob",
-    "search_files": "grep",
     "rg": "grep",
     # Git
     "git_commit": "git_commit",

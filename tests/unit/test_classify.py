@@ -11,7 +11,7 @@ from tracemill.classify import (
 )
 from tracemill.classify.core import Classification
 from tracemill.classify.rules import (
-    SHELL_GIT_OPS,
+    SHELL_DELIVERY,
     SHELL_IMPLEMENTATION,
     SHELL_INVESTIGATION,
     SHELL_SETUP,
@@ -210,9 +210,9 @@ class TestClassifyShellCommand:
         assert _activity("pip install pytest ruff mypy") == SHELL_SETUP
 
     def test_git_write_operations(self):
-        assert _activity("git commit -m 'fix'") == SHELL_GIT_OPS
-        assert _activity("git push origin main") == SHELL_GIT_OPS
-        assert _activity("git merge feature") == SHELL_GIT_OPS
+        assert _activity("git commit -m 'fix'") == SHELL_DELIVERY
+        assert _activity("git push origin main") == SHELL_DELIVERY
+        assert _activity("git merge feature") == SHELL_DELIVERY
 
     def test_git_read_operations(self):
         assert _activity("git diff") == SHELL_INVESTIGATION
@@ -235,7 +235,7 @@ class TestClassifyShellCommand:
         # verification > git > setup > investigation > implementation
         assert _activity("cd src && pytest") == SHELL_VERIFICATION
         assert _activity("npm install && npm test") == SHELL_VERIFICATION
-        assert _activity("echo 'starting' && git commit -m hi") == SHELL_GIT_OPS
+        assert _activity("echo 'starting' && git commit -m hi") == SHELL_DELIVERY
 
     def test_sudo_stripping(self):
         assert _activity("sudo pip install flask") == SHELL_SETUP
@@ -382,7 +382,7 @@ class TestShellClassificationQuoteAware:
         """Only the real (unquoted) pytest triggers verification."""
         assert _activity('echo "a && b" && pytest') == SHELL_VERIFICATION
 
-    def test_echo_with_quoted_git_not_git_ops(self):
+    def test_echo_with_quoted_git_not_delivery(self):
         """git inside quotes is not a real git command."""
         assert _activity("echo 'git push origin main'") == SHELL_IMPLEMENTATION
 
@@ -393,5 +393,5 @@ class TestShellClassificationQuoteAware:
     def test_wrapper_unwrapping(self):
         """sudo/env/nohup transparently unwrap to the real command."""
         assert _activity("sudo pytest") == SHELL_VERIFICATION
-        assert _activity("nohup git push &") == SHELL_GIT_OPS
+        assert _activity("nohup git push &") == SHELL_DELIVERY
 

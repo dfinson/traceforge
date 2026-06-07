@@ -24,7 +24,7 @@ from tracemill.classify.coding import (
     ShellStructure,
 )
 from tracemill.classify.rules import (
-    SHELL_GIT_OPS,
+    SHELL_DELIVERY,
     SHELL_IMPLEMENTATION,
     SHELL_INVESTIGATION,
     SHELL_SETUP,
@@ -202,7 +202,7 @@ def classify_single_command(
     cmd_action = ""
     if rule and rule.action:
         cmd_action = rule.action
-    elif activity == SHELL_GIT_OPS and binary == "git" and subcmd:
+    elif activity == SHELL_DELIVERY and binary == "git" and subcmd:
         cmd_action = git_subcmd_action.get(subcmd, CodingAction.COMMIT)
     elif activity == SHELL_VERIFICATION and cmd_role:
         cmd_action = verif_role_action.get(cmd_role, CodingAction.TEST)

@@ -18,14 +18,14 @@ class ShellActivity(StrEnum):
     """Internal: what a shell command primarily does (command-local intent)."""
 
     VERIFICATION = "verification"
-    GIT_OPS = "git_ops"
+    DELIVERY = "delivery"
     SETUP = "setup"
     INVESTIGATION = "investigation"
     IMPLEMENTATION = "implementation"
 
 
 SHELL_VERIFICATION = ShellActivity.VERIFICATION
-SHELL_GIT_OPS = ShellActivity.GIT_OPS
+SHELL_DELIVERY = ShellActivity.DELIVERY
 SHELL_SETUP = ShellActivity.SETUP
 SHELL_INVESTIGATION = ShellActivity.INVESTIGATION
 SHELL_IMPLEMENTATION = ShellActivity.IMPLEMENTATION
@@ -46,11 +46,11 @@ def activity_from_classification(cls: Classification) -> ShellActivity:
     if cls.has_action("retrieve") or cls.has_action("analyze"):
         return ShellActivity.INVESTIGATION
     if cls.has_role("persistence.version_control"):
-        return ShellActivity.GIT_OPS
+        return ShellActivity.DELIVERY
     if cls.has_action("deliver"):
-        return ShellActivity.GIT_OPS
+        return ShellActivity.DELIVERY
     if cls.has_action("persist") and cls.has_role("persistence"):
-        return ShellActivity.GIT_OPS
+        return ShellActivity.DELIVERY
     return ShellActivity.IMPLEMENTATION
 
 

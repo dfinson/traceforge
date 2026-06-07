@@ -8,7 +8,7 @@ from tracemill.classify import (
     get_default_engine,
 )
 from tracemill.classify.rules import (
-    SHELL_GIT_OPS,
+    SHELL_DELIVERY,
     SHELL_IMPLEMENTATION,
     SHELL_INVESTIGATION,
     SHELL_SETUP,
@@ -105,7 +105,7 @@ class TestPowerShellClassification:
         assert _ps_activity("dotnet build") == SHELL_VERIFICATION
 
     def test_git_commit(self):
-        assert _ps_activity("git commit -m 'msg'") == SHELL_GIT_OPS
+        assert _ps_activity("git commit -m 'msg'") == SHELL_DELIVERY
 
     def test_git_status(self):
         assert _ps_activity("git status") == SHELL_INVESTIGATION
@@ -189,7 +189,7 @@ class TestCmdClassification:
         assert _cmd_activity("cargo build") == SHELL_VERIFICATION
 
     def test_git_push(self):
-        assert _cmd_activity("git push origin main") == SHELL_GIT_OPS
+        assert _cmd_activity("git push origin main") == SHELL_DELIVERY
 
     def test_git_log(self):
         assert _cmd_activity("git log --oneline") == SHELL_INVESTIGATION

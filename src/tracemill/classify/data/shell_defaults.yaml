@@ -27,7 +27,7 @@ activity_defaults:
     action: configure.install
     scope: configuration.dependency
     phase: implementation
-  git_ops:
+  delivery:
     action: persist.commit
     scope: state.repository
     phase: review

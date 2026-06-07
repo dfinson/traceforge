@@ -156,7 +156,7 @@ shell_rules:
   - id: git-cherry-pick-commit-merge-push-rebase-reset-stash-tag
     binaries: [git]
     subcmds: [cherry-pick, commit, merge, push, rebase, reset, stash, tag]
-    activity: git_ops
+    activity: delivery
     role: persistence.version_control
     effect: mutating
 
@@ -709,7 +709,7 @@ shell_rules:
   - id: gh-issue-pr-release
     binaries: [gh]
     subcmds: [issue, pr, release]
-    activity: git_ops
+    activity: delivery
     role: persistence.version_control
     effect: mutating
     scope: artifact.repository
@@ -902,9 +902,9 @@ activity_defaults:
     action: persist.install
     scope: artifact.dependency
     phase: implementation
-  git_ops:
+  delivery:
     action: persist.commit
-    scope: artifact.repository
+    scope: state.repository
     phase: review
   investigation:
     action: retrieve.read

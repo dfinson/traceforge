@@ -174,6 +174,7 @@ class Enricher:
         enrichment["risk"] = {
             "score": risk.score,
             "level": risk.level,
+            "confidence": risk.confidence,
             "factors": list(risk.factors),
             "mitre": list(risk.mitre),
             "version": risk.version,

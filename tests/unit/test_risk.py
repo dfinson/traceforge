@@ -7,7 +7,7 @@ import pytest
 from tracemill.classify.config import ClassificationEngine, get_default_engine
 from tracemill.classify.core import Classification, Effect
 from tracemill.classify.coding import CodingMechanism, CodingScope
-from tracemill.classify.risk import RiskAssessment, assess_risk, _expand_short_flags
+from tracemill.classify.risk import Confidence, RiskAssessment, assess_risk, _expand_short_flags
 
 
 @pytest.fixture
@@ -289,14 +289,17 @@ class TestScoreLevels:
 
 class TestRiskAssessment:
     def test_immutable(self) -> None:
-        risk = RiskAssessment(score=50, level="caution", factors=("x",), mitre=("T1234",), version="v1")
+        risk = RiskAssessment(
+            score=50, level="caution", confidence=Confidence.HIGH,
+            factors=("x",), mitre=("T1234",), version="v2",
+        )
         with pytest.raises(Exception):
             risk.score = 99  # type: ignore[misc]
 
     def test_version_present(self, engine: ClassificationEngine) -> None:
         cls = Classification(mechanism=CodingMechanism.PROCESS_SHELL, effect=Effect.READ_ONLY)
         risk = assess_risk(cls, "ls", engine=engine)
-        assert risk.version == "risk-v1"
+        assert risk.version == "risk-v2"
 
     def test_factors_deduplicated(self, engine: ClassificationEngine) -> None:
         cls = Classification(mechanism=CodingMechanism.PROCESS_SHELL, effect=None)
@@ -365,3 +368,105 @@ class TestEnricherIntegration:
         assert len(flushed) == 1
         # Non-shell tool should NOT have risk enrichment
         assert "_enrichment" not in flushed[0].payload or "risk" not in flushed[0].payload.get("_enrichment", {})
+
+
+# ── Confidence levels ──
+
+
+class TestConfidence:
+    def test_high_confidence_known_binary_effect_flags(self, engine: ClassificationEngine) -> None:
+        cls = Classification(
+            mechanism=CodingMechanism.PROCESS_SHELL,
+            effect=Effect.DESTRUCTIVE,
+        )
+        risk = assess_risk(cls, "rm -rf /tmp", engine=engine, binary="rm", flags=["-rf"])
+        assert risk.confidence == Confidence.HIGH
+
+    def test_medium_confidence_known_binary_effect_no_flags(self, engine: ClassificationEngine) -> None:
+        cls = Classification(
+            mechanism=CodingMechanism.PROCESS_SHELL,
+            effect=Effect.READ_ONLY,
+        )
+        risk = assess_risk(cls, "ls", engine=engine, binary="ls", flags=[])
+        assert risk.confidence == Confidence.MEDIUM
+
+    def test_medium_confidence_effect_no_binary(self, engine: ClassificationEngine) -> None:
+        cls = Classification(
+            mechanism=CodingMechanism.PROCESS_SHELL,
+            effect=Effect.MUTATING,
+        )
+        risk = assess_risk(cls, "some command", engine=engine, binary="", flags=[])
+        assert risk.confidence == Confidence.MEDIUM
+
+    def test_low_confidence_no_binary_no_effect(self, engine: ClassificationEngine) -> None:
+        cls = Classification(
+            mechanism=CodingMechanism.PROCESS_SHELL,
+            effect=None,
+        )
+        risk = assess_risk(cls, "mystery", engine=engine, binary="", flags=[])
+        assert risk.confidence == Confidence.LOW
+
+    def test_confidence_in_enricher_output(self) -> None:
+        from tracemill.enricher import Enricher
+        from tracemill.types import EventKind, EventMetadata, SessionEvent
+        from datetime import datetime, timezone
+
+        enricher = Enricher()
+        event = SessionEvent(
+            session_id="test",
+            kind=EventKind.TOOL_START,
+            timestamp=datetime.now(tz=timezone.utc),
+            payload={
+                "tool_name": "bash",
+                "tool_call_id": "tc_conf",
+                "arguments": {"command": "echo hello"},
+            },
+            metadata=EventMetadata(),
+        )
+        enricher.process(event)
+        flushed = enricher.flush()
+        assert len(flushed) == 1
+        risk_data = flushed[0].payload["_enrichment"]["risk"]
+        assert "confidence" in risk_data
+        assert risk_data["confidence"] in ("high", "medium", "low")
+
+
+# ── Extended pattern coverage ──
+
+
+class TestExtendedPatterns:
+    def test_shell_inline_exec(self, engine: ClassificationEngine) -> None:
+        cls = Classification(mechanism=CodingMechanism.PROCESS_SHELL, effect=None)
+        risk = assess_risk(cls, "bash -c 'rm -rf /'", engine=engine)
+        assert "shell_inline_exec" in risk.factors
+
+    def test_interpreter_inline_exec(self, engine: ClassificationEngine) -> None:
+        cls = Classification(mechanism=CodingMechanism.PROCESS_SHELL, effect=None)
+        risk = assess_risk(cls, "python3 -c 'import os; os.system(\"rm -rf /\")'", engine=engine)
+        assert "interpreter_inline_exec" in risk.factors
+
+    def test_xargs_shell_exec(self, engine: ClassificationEngine) -> None:
+        cls = Classification(mechanism=CodingMechanism.PROCESS_SHELL, effect=None)
+        risk = assess_risk(cls, "find . -name '*.bak' | xargs sh -c 'rm $@'", engine=engine)
+        assert "xargs_shell_exec" in risk.factors
+
+    def test_command_substitution(self, engine: ClassificationEngine) -> None:
+        cls = Classification(mechanism=CodingMechanism.PROCESS_SHELL, effect=None)
+        risk = assess_risk(cls, "echo $(cat /etc/passwd)", engine=engine)
+        assert "command_substitution" in risk.factors
+
+    def test_permission_broadening(self, engine: ClassificationEngine) -> None:
+        cls = Classification(mechanism=CodingMechanism.PROCESS_SHELL, effect=Effect.MUTATING)
+        risk = assess_risk(cls, "chmod -R 777 /var/www", engine=engine)
+        assert "permission_broadening" in risk.factors
+
+    def test_find_delete(self, engine: ClassificationEngine) -> None:
+        cls = Classification(mechanism=CodingMechanism.PROCESS_SHELL, effect=Effect.DESTRUCTIVE)
+        risk = assess_risk(cls, "find / -name '*.log' -delete", engine=engine, binary="find", flags=["-delete"])
+        assert "find_delete" in risk.factors
+
+    def test_firewall_flush(self, engine: ClassificationEngine) -> None:
+        cls = Classification(mechanism=CodingMechanism.PROCESS_SHELL, effect=Effect.MUTATING)
+        risk = assess_risk(cls, "iptables -F", engine=engine, binary="iptables", flags=["-F"])
+        assert "firewall_mutation" in risk.factors
+        assert "T1562.004" in risk.mitre

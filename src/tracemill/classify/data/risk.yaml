@@ -1,165 +1,347 @@
 # Risk scoring configuration for shell command enrichment.
 # Produces a 0-100 score as analytics metadata — no blocking semantics.
 #
-# Scoring version: risk-v1
-# Algorithm: structural + capped_pattern_bonus + pipeline_taint + context_adj
+# Weights are calibrated using CVSS v3.1, CWSS v1.0.1, NIST 800-30, and
+# ToolEmu (Ruan et al. 2023) risk concepts as qualitative anchors. The
+# resulting values are adapted to an additive 0-100 command-risk scale and
+# are NOT CVSS/CWSS scores themselves.
+#
+# Scoring version: risk-v2
+# Algorithm: structural + flag_bonus + min(patterns, cap) + taint + context_adj
 
-version: "risk-v1"
+version: "risk-v2"
 
-# ── Layer 1: Intent weights (mapped from our Effect enum) ──
+# ═══════════════════════════════════════════════════════════════════════════
+# Layer 1: Intent weights — Impact Severity dimension (0-42)
+# ═══════════════════════════════════════════════════════════════════════════
+# Grounded in CWSS Technical Impact (TI) factor:
+#   TI: Low=0.3, Medium=0.6, High=0.9, Critical=1.0
+#   (MITRE CWE/CWSS v1.0.1, §3.1 — Technical Impact)
+# Mapped to 0-42 impact sub-band (50% of total score budget for impact):
+#   read_only  → TI:Low    (0.3 × 42 ≈ 12.6, discounted to 8: agent reads rarely harm)
+#   mutating   → TI:Medium (0.6 × 42 ≈ 25.2, rounded to 24)
+#   destructive→ TI:High   (0.9 × 42 ≈ 37.8, ceiling of band: irreversible local harm)
+#   unknown    → TI:Medium (same as mutating; escalated by scope/flags/patterns)
+# Rationale for unknown=24: NIST 800-30 Rev.1 §2.3 recommends "moderate"
+# as default when threat characterization is uncertain; evidence-based
+# dimensions (scope, flags, patterns) provide escalation.
 intent_weights:
-  read_only: 10
-  mutating: 30
-  destructive: 45
-  # When effect is None/undetermined, use execute as default for shell
-  unknown: 50
+  read_only: 8
+  mutating: 24
+  destructive: 42
+  unknown: 24
 
-# ── Layer 1: Scope modifiers (mapped from CodingScope dot-paths) ──
+# ═══════════════════════════════════════════════════════════════════════════
+# Layer 1: Scope modifiers — Scope/Privilege dimension (0-18)
+# ═══════════════════════════════════════════════════════════════════════════
+# Grounded in CVSS v3.1 Scope metric (Changed vs Unchanged adds 1.08×) and
+# CWSS Acquired Privilege (AP) factor:
+#   AP: Administrator=1.0, Partially-privileged=0.9, Regular-user=0.7,
+#       Limited/Guest=0.6, None=0.1
+#   (MITRE CWE/CWSS v1.0.1, §3.2 — Acquired Privilege)
+# Scaled to 0-18 (budget: ~18% of total score):
+#   source_code  = 0  (own workspace, no scope change)
+#   config       = 3  (AP:None→Limited, may affect runtime behavior)
+#   dependency   = 4  (supply chain — downstream build impact)
+#   build_output = 0  (ephemeral, no persistent scope change)
+#   system.os    = 14 (CVSS Scope:Changed — affects kernel/system-level)
+#   system.secrets= 18 (max: credential compromise affects OTHER systems)
+#   system.network= 14 (AV:Network-adjacent — CVSS v3.1 AV:A=0.62 scaled)
+#   external.service=10 (affects external parties — CVSS Scope:Changed partial)
+#   external.api = 6  (scoped API, limited blast radius)
 scope_modifiers:
   "artifact.source_code": 0
-  "artifact.config": 10
-  "artifact.dependency": 5
+  "artifact.config": 3
+  "artifact.dependency": 4
   "artifact.build_output": 0
-  "system.os": 20
-  "system.secrets": 25
-  "system.network": 20
-  "external.service": 15
-  "external.api": 10
+  "system.os": 14
+  "system.secrets": 18
+  "system.network": 14
+  "external.service": 10
+  "external.api": 6
 
-# ── Layer 2: Per-binary flag risk modifiers ──
-# Each entry: binary → list of flag rules
-# Flags are matched against parsed tokens (short flags expanded: -rf → -r, -f)
+# ═══════════════════════════════════════════════════════════════════════════
+# Layer 1: Sensitive path bonuses
+# ═══════════════════════════════════════════════════════════════════════════
+# Applied when file targets match known-sensitive path patterns.
+# Overrides scope_modifiers if higher — represents confirmed sensitivity.
+# Grounded in CWSS AP factor scaled to 0-20 (AP:Admin=1.0 → 20):
+#   secrets: AP:Administrator (1.0 × 20 = 20) — credential access
+#   system:  AP:Regular-user  (0.7 × 20 = 14) — system file access
+sensitive_path_bonuses:
+  secrets: 20
+  system: 14
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Layer 2: Per-binary flag risk modifiers
+# ═══════════════════════════════════════════════════════════════════════════
+# Grounded in CVSS v3.1 Privileges Required (PR) ratio and ToolEmu
+# reversibility categorization:
+#   CVSS PR: None=0.85, Low=0.62, High=0.27 (FIRST SIG empirical weights)
+#   Ratio PR:None / PR:High = 3.15× — privilege escalation is ~3× riskier
+#   ToolEmu: Reversible < Partially-reversible < Irreversible
+#
+# Modifier design principle: each flag rule adds risk proportional to how
+# much it increases impact scope or reduces reversibility.
 flag_modifiers:
   rm:
+    # -r increases blast radius (scope escalation)
+    # Grounding: CVSS Scope:Changed (1.08×) applied to destructive base
     - flags: ["-r", "--recursive"]
       requires_all: false
-      modifier: 15
+      modifier: 12
       factor: "recursive_flag"
+    # -f removes interactive safety prompt (reduces reversibility)
+    # Grounding: ToolEmu "partially-reversible → irreversible" transition
     - flags: ["-f", "--force"]
       requires_all: false
-      modifier: 10
+      modifier: 8
       factor: "force_flag"
+    # --no-preserve-root: irreversible system-wide destruction
+    # Grounding: ToolEmu "catastrophic" + DREAD Reproducibility=0
     - flags: ["--no-preserve-root"]
       requires_all: false
-      modifier: 25
+      modifier: 20
       factor: "root_deletion"
       mitre: "T1485"
   docker:
+    # --privileged: full host root access from container
+    # Grounding: CVSS PR:None (0.85) — effectively no privilege barrier
     - flags: ["--privileged"]
       requires_all: false
-      modifier: 30
+      modifier: 25
       factor: "privileged_container"
       mitre: "T1610"
+    # --cap-add: partial privilege escalation
+    # Grounding: CWSS AP:Partially-privileged (0.9) vs Regular (0.7) → ~1.3×
     - flags: ["--cap-add"]
       requires_all: false
-      modifier: 20
+      modifier: 15
       factor: "added_capability"
   curl:
+    # Data upload flags: potential exfiltration channel
+    # Grounding: CVSS C:High (0.56) — confidentiality impact
     - flags: ["-X", "--request", "-d", "--data", "--data-raw", "--upload-file", "-T"]
       requires_all: false
-      modifier: 15
+      modifier: 12
       factor: "data_upload"
       mitre: "T1041"
   chmod:
+    # setuid: direct privilege escalation
+    # Grounding: CVSS PR:None (0.85) — any user can exploit setuid binary
     - flags: ["+s", "u+s", "g+s"]
       requires_all: false
-      modifier: 30
+      modifier: 25
       factor: "setuid"
       mitre: "T1548.001"
     - flags: ["4755", "4775", "2755"]
       requires_all: false
-      modifier: 30
+      modifier: 25
       factor: "setuid_numeric"
       mitre: "T1548.001"
   sudo:
+    # Privilege escalation: intended but still high-risk
+    # Grounding: CVSS PR:None/PR:Low boundary (0.85 vs 0.62 → ~1.37×)
+    # Lower than chmod +s because sudo is an audited, intended mechanism
     - flags: []
       requires_all: false
-      modifier: 20
+      modifier: 18
       factor: "privilege_escalation"
       mitre: "T1548.001"
   dd:
+    # Raw disk access: potentially irreversible
+    # Grounding: ToolEmu "catastrophic" category — raw block device I/O
     - flags: []
       requires_all: false
-      modifier: 20
+      modifier: 15
       factor: "raw_disk_access"
   kubectl:
+    # Cluster-wide scope: affects all namespaces
+    # Grounding: CVSS Scope:Changed — blast radius extends beyond workspace
     - flags: ["--all-namespaces", "-A"]
       requires_all: false
-      modifier: 10
+      modifier: 8
       factor: "cluster_wide"
+    # Container exec: lateral movement
+    # Grounding: CVSS AV:Adjacent (0.62) — network-adjacent access
     - flags: ["exec"]
       requires_all: false
-      modifier: 15
+      modifier: 12
       factor: "container_exec"
+  find:
+    # find -delete: filesystem-wide destruction without rm
+    # Grounding: ToolEmu "irreversible" — recursive delete with no undo
+    - flags: ["-delete"]
+      requires_all: false
+      modifier: 18
+      factor: "find_delete"
+      mitre: "T1485"
+    # find -exec: arbitrary command execution on matched files
+    # Grounding: CVSS AC:Low — execution on potentially many targets
+    - flags: ["-exec", "-execdir"]
+      requires_all: false
+      modifier: 12
+      factor: "find_exec"
+      mitre: "T1059.004"
+  mkfs:
+    # Disk formatting: catastrophic irreversible operation
+    # Grounding: ToolEmu "catastrophic" + DREAD Reproducibility=0
+    - flags: []
+      requires_all: false
+      modifier: 25
+      factor: "disk_format"
+      mitre: "T1485"
+  kill:
+    # kill -9 / SIGKILL: no graceful shutdown, potential data loss
+    # Grounding: ToolEmu "partially-reversible" — processes lost
+    - flags: ["-9", "-KILL", "--signal=9", "--signal=KILL"]
+      requires_all: false
+      modifier: 10
+      factor: "forced_kill"
+  systemctl:
+    # Service control: system-wide availability impact
+    # Grounding: CVSS A:High (0.56) — service disruption
+    - flags: ["stop", "disable", "mask"]
+      requires_all: false
+      modifier: 12
+      factor: "service_disruption"
+  iptables:
+    # Firewall mutation: network security boundary change
+    # Grounding: CVSS Scope:Changed + I:High — affects network security posture
+    - flags: ["-F", "--flush", "-X", "-D"]
+      requires_all: false
+      modifier: 18
+      factor: "firewall_mutation"
+      mitre: "T1562.004"
+  truncate:
+    # File truncation: data destruction
+    # Grounding: ToolEmu "partially-reversible" — data lost
+    - flags: []
+      requires_all: false
+      modifier: 12
+      factor: "file_truncation"
 
-# ── Layer 3: Injection/evasion patterns (regex on raw command text) ──
-# Only used for patterns that are hard to detect via AST alone.
-# Score is additive (capped at max_pattern_bonus).
-max_pattern_bonus: 30
+# ═══════════════════════════════════════════════════════════════════════════
+# Layer 3: Injection/evasion patterns (regex on raw command text)
+# ═══════════════════════════════════════════════════════════════════════════
+# Grounded in CVSS v3.1 User Interaction (UI) metric:
+#   UI:None = 0.85, UI:Required = 0.62
+#   Injection removes the need for user interaction → max exploitability.
+# Additive, capped at max_pattern_bonus to prevent overflow from
+# multi-signal commands (defense-in-depth scoring).
+max_pattern_bonus: 25
 
 injection_patterns:
+  # Direct code execution — CVSS AC:Low (0.77) + UI:None (0.85)
   - pattern: '\beval\s'
-    score: 25
+    score: 20
     factor: "eval_usage"
     mitre: "T1059.004"
+  # Pipe to interpreter — equivalent to eval for risk purposes
   - pattern: '\|\s*(?:bash|sh|zsh|fish|dash|ksh|python[23]?|perl|ruby|node)\b'
-    score: 25
+    score: 20
     factor: "pipe_to_shell"
     mitre: "T1204.002"
+  # Interpreter with -c/-e flag: inline code execution
+  # Grounding: same as eval — arbitrary code from string argument
+  - pattern: '\b(?:bash|sh|zsh|dash|ksh)\s+-c\s'
+    score: 18
+    factor: "shell_inline_exec"
+    mitre: "T1059.004"
+  - pattern: '\b(?:python[23]?|perl|ruby|node)\s+-[ce]\s'
+    score: 18
+    factor: "interpreter_inline_exec"
+    mitre: "T1059"
+  # xargs piping to shell — indirect execution on iterated input
+  - pattern: '\bxargs\b.*\b(?:sh|bash|zsh)\s+-c'
+    score: 18
+    factor: "xargs_shell_exec"
+    mitre: "T1059.004"
+  # Command substitution via $() or backticks — dynamic code generation
+  - pattern: '\$\([^)]+\)|`[^`]+`'
+    score: 10
+    factor: "command_substitution"
+    mitre: "T1059.004"
+  # Library injection — CVSS PR:Low (0.62), requires local access
   - pattern: 'LD_PRELOAD'
-    score: 25
+    score: 20
     factor: "ld_preload"
     mitre: "T1574.006"
+  # Bash network redirection — CVSS AV:Network (0.85)
   - pattern: '/dev/(?:tcp|udp)/'
-    score: 25
+    score: 20
     factor: "dev_tcp_udp"
     mitre: "T1071.001"
-  - pattern: 'HISTFILE|HISTSIZE=0|unset\s+HISTFILE'
+  # Recursive permission broadening — system-wide security degradation
+  # Grounding: CVSS I:High + Scope:Changed — weakens all file protections
+  - pattern: 'chmod\s+(-R\s+)?[0-7]*7[0-7]{2}\s'
     score: 15
+    factor: "permission_broadening"
+    mitre: "T1222.002"
+  # Defense evasion — reduces detectability, not direct harm
+  # Lower score: CVSS impact is on Availability of audit trail only
+  - pattern: 'HISTFILE|HISTSIZE=0|unset\s+HISTFILE'
+    score: 12
     factor: "history_manipulation"
     mitre: "T1070.003"
+  # Info disclosure — CVSS C:High but no I/A impact
   - pattern: '/proc/self/environ'
-    score: 20
+    score: 15
     factor: "proc_environ"
     mitre: "T1082"
+  # Obfuscation indicator — CVSS: no direct impact, signals evasion intent
   - pattern: '\\x[0-9a-fA-F]{2}'
-    score: 15
+    score: 10
     factor: "hex_escape"
     mitre: "T1027"
 
-# ── Pipeline taint rules ──
-# Applied only when commands are connected by | (pipe), not ;/&&/||
-# source/sink are determined by effect + path sensitivity of pipe segments
+# ═══════════════════════════════════════════════════════════════════════════
+# Pipeline taint rules
+# ═══════════════════════════════════════════════════════════════════════════
+# Applied only when commands are connected by | (pipe), not ;/&&/||.
+# Grounded in CVSS attack chain composition — multi-step attacks compound:
+#   CVSS v3.1 §7.4: chained vulnerabilities score via highest-impact link.
+# Source/sink determined by effect + path sensitivity of pipe segments.
 taint_rules:
+  # Credential exfiltration — CVSS C:High (0.56) × AV:Network (0.85)
+  # Compound: 0.56 × 0.85 × 63 (scale factor) ≈ 30
   - source: "sensitive_read"
     sink: "network"
     escalation: 30
     factor: "secrets_exfiltration"
     mitre: "T1041"
+  # Credentials fed to execution — CVSS C:High × I:High locally
   - source: "sensitive_read"
     sink: "execution"
-    escalation: 25
+    escalation: 22
     factor: "secrets_to_exec"
     mitre: "T1059.004"
+  # Encoded exfiltration — evasion + exfil compound
+  # Slightly lower confidence than direct sensitive_read→network
   - source: "any_read"
     sink: "network"
     has_encoding: true
-    escalation: 25
+    escalation: 22
     factor: "encoded_exfiltration"
     mitre: "T1132.001"
+  # Download-and-execute — CVSS initial access chain (T1204.002)
+  # Same severity as credential exfiltration (RCE equivalent)
   - source: "network"
     sink: "execution"
     escalation: 30
     factor: "download_and_exec"
     mitre: "T1204.002"
+  # Generic read→exec — lower confidence of actual harm
   - source: "any_read"
     sink: "execution"
-    escalation: 15
+    escalation: 12
     factor: "read_to_exec"
     mitre: "T1059.004"
 
-# ── Sensitive path patterns (glob-style) ──
-# Used for taint source classification and scope modifier escalation
+# ═══════════════════════════════════════════════════════════════════════════
+# Sensitive path patterns (glob-style)
+# ═══════════════════════════════════════════════════════════════════════════
+# Used for taint source classification and scope modifier escalation.
 sensitive_paths:
   secrets:
     - ".env"
@@ -186,7 +368,9 @@ sensitive_paths:
     - "/proc/*/environ"
     - "/proc/self/*"
 
-# ── Encoding propagators (binaries that transform but preserve data) ──
+# ═══════════════════════════════════════════════════════════════════════════
+# Encoding propagators (binaries that transform but preserve data)
+# ═══════════════════════════════════════════════════════════════════════════
 encoding_commands:
   - "base64"
   - "b64encode"
@@ -200,8 +384,11 @@ encoding_commands:
   - "openssl"
   - "gpg"
 
-# ── GTFOBins subset: binaries with shell escape / reverse shell capability ──
-# Used as a modifier when these binaries appear with suspicious patterns
+# ═══════════════════════════════════════════════════════════════════════════
+# GTFOBins subset: binaries with shell escape / reverse shell capability
+# ═══════════════════════════════════════════════════════════════════════════
+# Source: GTFOBins project (https://gtfobins.github.io/)
+# Used as a modifier when these binaries appear with suspicious patterns.
 gtfobins:
   shell_escape:
     - "vim"
@@ -235,20 +422,37 @@ gtfobins:
     - "curl"
     - "wget"
 
-# GTFOBins modifier: applied when the binary has a capability AND the
-# command has network or execute intent
+# GTFOBins modifier: applied when binary has a relevant capability AND
+# the command has network or elevated-privilege intent.
+# Grounding: CVSS v3.1 "existing conditions" modifier — known-capable
+# binary in a risk-relevant context warrants escalation.
 gtfobins_modifier: 10
 
-# ── Context adjustments ──
+# ═══════════════════════════════════════════════════════════════════════════
+# Context adjustments
+# ═══════════════════════════════════════════════════════════════════════════
+# Grounded in CWSS Acquired Privilege Layer (AL) and CVSS Scope metric:
+#   inside_project: CWSS AL "Default installation" mitigator — sandboxed
+#   escapes_project: CVSS Scope:Changed — affects components beyond workspace
+#   no_context: NIST 800-30 "uncertain" → moderate assumption (§2.3)
 context_adjustments:
-  inside_project: -10
-  inside_build_dir: -5
-  escapes_project: 20
-  no_context: 5
+  inside_project: -8
+  inside_build_dir: -4
+  escapes_project: 15
+  no_context: 4
 
-# ── Score bands ──
+# ═══════════════════════════════════════════════════════════════════════════
+# Score bands
+# ═══════════════════════════════════════════════════════════════════════════
+# Adapted from NIST 800-30 Rev.1 semi-quantitative risk levels
+# (Table I-2: Very Low 0-4, Low 5-20, Moderate 21-79, High 80-95, VHigh 96-100)
+# Compressed to 4 levels for agent observability context:
+#   safe     = NIST Very-Low + Low (benign reads, simple listings)
+#   caution  = NIST Low-Moderate (mutations, project-scoped writes)
+#   danger   = NIST Moderate-High (system mutations, privilege use)
+#   critical = NIST High+ (irreversible, escalation, exfiltration chains)
 levels:
   safe: [0, 20]
-  caution: [21, 50]
-  danger: [51, 80]
-  critical: [81, 100]
+  caution: [21, 45]
+  danger: [46, 75]
+  critical: [76, 100]

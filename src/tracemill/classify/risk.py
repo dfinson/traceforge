@@ -22,12 +22,21 @@ if TYPE_CHECKING:
     from tracemill.classify.core import Classification
 
 
+class Confidence:
+    """Risk assessment confidence levels."""
+
+    HIGH = "high"  # Known binary + known flags + classified effect
+    MEDIUM = "medium"  # Known binary but unknown flags, or known effect only
+    LOW = "low"  # Unknown binary or unclassified effect
+
+
 @dataclass(frozen=True, slots=True)
 class RiskAssessment:
     """Immutable risk scoring result."""
 
     score: int  # 0-100
     level: str  # safe / caution / danger / critical
+    confidence: str  # high / medium / low
     factors: tuple[str, ...]
     mitre: tuple[str, ...]
     version: str
@@ -62,7 +71,10 @@ def assess_risk(
     """
     risk_cfg = engine.risk_config
     if risk_cfg is None:
-        return RiskAssessment(score=0, level="safe", factors=(), mitre=(), version="risk-v1")
+        return RiskAssessment(
+            score=0, level="safe", confidence=Confidence.LOW,
+            factors=(), mitre=(), version="risk-v2",
+        )
 
     factors: list[str] = []
     mitre_ids: list[str] = []
@@ -84,10 +96,13 @@ def assess_risk(
     # Also check if targets hit sensitive paths
     sensitive_paths = risk_cfg.get("sensitive_paths", {})
     path_sensitivity = _check_sensitive_paths(targets, sensitive_paths)
-    if path_sensitivity == "secrets":
-        scope_bonus = max(scope_bonus, 25)
-    elif path_sensitivity == "system":
+    sensitive_path_bonuses: dict[str, int] = risk_cfg.get("sensitive_path_bonuses", {})
+    if path_sensitivity and path_sensitivity in sensitive_path_bonuses:
+        scope_bonus = max(scope_bonus, sensitive_path_bonuses[path_sensitivity])
+    elif path_sensitivity == "secrets":
         scope_bonus = max(scope_bonus, 20)
+    elif path_sensitivity == "system":
+        scope_bonus = max(scope_bonus, 14)
 
     structural = base_score + scope_bonus
 
@@ -135,11 +150,15 @@ def assess_risk(
     levels: dict[str, list[int]] = risk_cfg.get("levels", {})
     level = _score_to_level(final_score, levels)
 
-    version: str = risk_cfg.get("version", "risk-v1")
+    # Determine confidence
+    confidence = _compute_confidence(classification, binary, flags)
+
+    version: str = risk_cfg.get("version", "risk-v2")
 
     return RiskAssessment(
         score=final_score,
         level=level,
+        confidence=confidence,
         factors=tuple(dict.fromkeys(factors)),  # dedupe preserving order
         mitre=tuple(dict.fromkeys(mitre_ids)),
         version=version,
@@ -149,11 +168,44 @@ def assess_risk(
 # ── Private helpers ──
 
 
+def _compute_confidence(
+    classification: Classification,
+    binary: str,
+    flags: list[str],
+) -> str:
+    """Determine confidence level of the risk assessment.
+
+    High: known binary with classified effect and parsed flags.
+    Medium: known binary but unclassified effect, or classified effect but no binary.
+    Low: unknown binary and unclassified effect.
+    """
+    has_binary = bool(binary)
+    has_effect = classification.effect is not None
+    has_flags = bool(flags)
+
+    if has_binary and has_effect:
+        return Confidence.HIGH if has_flags else Confidence.MEDIUM
+    if has_binary or has_effect:
+        return Confidence.MEDIUM
+    return Confidence.LOW
+
+
 def _expand_short_flags(flags: list[str]) -> list[str]:
-    """Expand combined short flags: -rf → -r, -f."""
+    """Expand combined short flags: -rf → -r, -f.
+
+    Preserves single-dash long flags (e.g., -delete, -exec) which are common
+    in GNU tools like find. Heuristic: only expand if ALL chars after '-' are
+    ASCII letters and the flag is 2-4 chars total (typical combined range).
+    """
     expanded: list[str] = []
     for flag in flags:
-        if flag.startswith("-") and not flag.startswith("--") and len(flag) > 2:
+        if (
+            flag.startswith("-")
+            and not flag.startswith("--")
+            and len(flag) > 2
+            and len(flag) <= 4
+            and all(c.isascii() and c.isalpha() for c in flag[1:])
+        ):
             for char in flag[1:]:
                 expanded.append(f"-{char}")
         else:
@@ -174,7 +226,8 @@ def _compute_flag_bonus(
         return 0
 
     expanded = _expand_short_flags(flags)
-    expanded_set = set(expanded)
+    # Union of expanded and originals for matching (handles both -rf and -delete)
+    all_flags_set = set(expanded) | set(flags)
     bonus = 0
 
     for rule in rules:
@@ -190,9 +243,9 @@ def _compute_flag_bonus(
 
         requires_all: bool = rule.get("requires_all", False)
         if requires_all:
-            matched = all(f in expanded_set for f in rule_flags)
+            matched = all(f in all_flags_set for f in rule_flags)
         else:
-            matched = any(f in expanded_set for f in rule_flags)
+            matched = any(f in all_flags_set for f in rule_flags)
 
         if matched:
             bonus += rule.get("modifier", 0)

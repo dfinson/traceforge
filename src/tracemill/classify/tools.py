@@ -4,6 +4,17 @@ from __future__ import annotations
 
 from typing import Final
 
+from tracemill.classify.core import (
+    Classification,
+    Effect,
+)
+from tracemill.classify.coding import (
+    CodingAction,
+    CodingMechanism,
+    CodingRole,
+    CodingScope,
+)
+
 CANONICAL_TOOLS: Final[dict[str, str]] = {
     # Shell
     "bash": "bash",
@@ -168,3 +179,206 @@ def classify_tool(
             return cat
 
     return TOOL_CATEGORY_MAP.get(canonical, "other")
+
+
+# ── Detailed Classification API ──
+
+# Maps canonical tool names to Classification objects
+_TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
+    "view": Classification(
+        mechanism=CodingMechanism.FILE_READ,
+        effect=Effect.READ_ONLY,
+        scope=frozenset({CodingScope.SOURCE_CODE}),
+        role=frozenset({CodingRole.FILE_BROWSER}),
+        action=frozenset({CodingAction.READ_FILE}),
+        capability=frozenset({"filesystem_read"}),
+    ),
+    "edit": Classification(
+        mechanism=CodingMechanism.FILE_WRITE,
+        effect=Effect.MUTATING,
+        scope=frozenset({CodingScope.SOURCE_CODE}),
+        role=frozenset(),
+        action=frozenset({CodingAction.WRITE_FILE}),
+        capability=frozenset({"filesystem_write"}),
+    ),
+    "create": Classification(
+        mechanism=CodingMechanism.FILE_WRITE,
+        effect=Effect.MUTATING,
+        scope=frozenset({CodingScope.SOURCE_CODE}),
+        role=frozenset(),
+        action=frozenset({CodingAction.WRITE_FILE}),
+        capability=frozenset({"filesystem_write"}),
+    ),
+    "grep": Classification(
+        mechanism=CodingMechanism.FILE_SEARCH,
+        effect=Effect.READ_ONLY,
+        scope=frozenset({CodingScope.SOURCE_CODE}),
+        role=frozenset({CodingRole.SEARCH_INDEX}),
+        action=frozenset({CodingAction.SEARCH_FILES}),
+        capability=frozenset({"filesystem_read"}),
+    ),
+    "glob": Classification(
+        mechanism=CodingMechanism.FILE_SEARCH,
+        effect=Effect.READ_ONLY,
+        scope=frozenset({CodingScope.SOURCE_CODE}),
+        role=frozenset({CodingRole.FILE_BROWSER}),
+        action=frozenset({CodingAction.BROWSE_DIR}),
+        capability=frozenset({"filesystem_read"}),
+    ),
+    "git_commit": Classification(
+        mechanism="git",
+        effect=Effect.MUTATING,
+        scope=frozenset({CodingScope.REPOSITORY}),
+        role=frozenset({CodingRole.VERSION_CONTROL}),
+        action=frozenset({CodingAction.COMMIT}),
+        capability=frozenset({"filesystem_write"}),
+    ),
+    "git_push": Classification(
+        mechanism="git",
+        effect=Effect.MUTATING,
+        scope=frozenset({CodingScope.REPOSITORY}),
+        role=frozenset({CodingRole.VERSION_CONTROL}),
+        action=frozenset({CodingAction.PUSH_VCS}),
+        capability=frozenset({"filesystem_write", "network_outbound"}),
+    ),
+    "git_diff": Classification(
+        mechanism="git",
+        effect=Effect.READ_ONLY,
+        scope=frozenset({CodingScope.REPOSITORY}),
+        role=frozenset({CodingRole.VERSION_CONTROL}),
+        action=frozenset({CodingAction.DIFF}),
+        capability=frozenset({"filesystem_read"}),
+    ),
+    "git_status": Classification(
+        mechanism="git",
+        effect=Effect.READ_ONLY,
+        scope=frozenset({CodingScope.REPOSITORY}),
+        role=frozenset({CodingRole.VERSION_CONTROL}),
+        action=frozenset({CodingAction.DIFF}),
+        capability=frozenset({"filesystem_read"}),
+    ),
+    "git_log": Classification(
+        mechanism="git",
+        effect=Effect.READ_ONLY,
+        scope=frozenset({CodingScope.REPOSITORY}),
+        role=frozenset({CodingRole.VERSION_CONTROL}),
+        action=frozenset({CodingAction.DIFF}),
+        capability=frozenset({"filesystem_read"}),
+    ),
+    "git_add": Classification(
+        mechanism="git",
+        effect=Effect.MUTATING,
+        scope=frozenset({CodingScope.REPOSITORY}),
+        role=frozenset({CodingRole.VERSION_CONTROL}),
+        action=frozenset({CodingAction.COMMIT}),
+        capability=frozenset({"filesystem_write"}),
+    ),
+    "git_pull": Classification(
+        mechanism="git",
+        effect=Effect.MUTATING,
+        scope=frozenset({CodingScope.REPOSITORY}),
+        role=frozenset({CodingRole.VERSION_CONTROL}),
+        action=frozenset({CodingAction.PUSH_VCS}),
+        capability=frozenset({"filesystem_write", "network_outbound"}),
+    ),
+    "git_merge": Classification(
+        mechanism="git",
+        effect=Effect.MUTATING,
+        scope=frozenset({CodingScope.REPOSITORY}),
+        role=frozenset({CodingRole.VERSION_CONTROL}),
+        action=frozenset({CodingAction.COMMIT}),
+        capability=frozenset({"filesystem_write"}),
+    ),
+    "git_rebase": Classification(
+        mechanism="git",
+        effect=Effect.MUTATING,
+        scope=frozenset({CodingScope.REPOSITORY}),
+        role=frozenset({CodingRole.VERSION_CONTROL}),
+        action=frozenset({CodingAction.COMMIT}),
+        capability=frozenset({"filesystem_write"}),
+    ),
+    "git_checkout": Classification(
+        mechanism="git",
+        effect=Effect.MUTATING,
+        scope=frozenset({CodingScope.REPOSITORY}),
+        role=frozenset({CodingRole.VERSION_CONTROL}),
+        action=frozenset({CodingAction.COMMIT}),
+        capability=frozenset({"filesystem_write"}),
+    ),
+    "git_branch": Classification(
+        mechanism="git",
+        effect=Effect.READ_ONLY,
+        scope=frozenset({CodingScope.REPOSITORY}),
+        role=frozenset({CodingRole.VERSION_CONTROL}),
+        action=frozenset({CodingAction.DIFF}),
+        capability=frozenset({"filesystem_read"}),
+    ),
+    "report_intent": Classification(
+        mechanism=CodingMechanism.COMMUNICATION_SYSTEM,
+        effect=Effect.READ_ONLY,
+        role=frozenset({CodingRole.SYSTEM_REPORTER}),
+        action=frozenset(),
+        capability=frozenset(),
+    ),
+    "ask_user": Classification(
+        mechanism=CodingMechanism.COMMUNICATION_USER,
+        effect=Effect.READ_ONLY,
+        role=frozenset({CodingRole.USER_PROMPT}),
+        action=frozenset(),
+        capability=frozenset({"human_interaction"}),
+    ),
+    "web_fetch": Classification(
+        mechanism=CodingMechanism.NETWORK_HTTP,
+        effect=Effect.READ_ONLY,
+        scope=frozenset({CodingScope.DOCUMENTATION}),
+        role=frozenset({CodingRole.WEB_SCRAPER}),
+        action=frozenset({CodingAction.SEARCH_WEB}),
+        capability=frozenset({"network_outbound"}),
+    ),
+    "web_search": Classification(
+        mechanism=CodingMechanism.NETWORK_SEARCH,
+        effect=Effect.READ_ONLY,
+        role=frozenset({CodingRole.SEARCH_INDEX}),
+        action=frozenset({CodingAction.SEARCH_WEB}),
+        capability=frozenset({"network_outbound"}),
+    ),
+    "task": Classification(
+        mechanism=CodingMechanism.AGENT_DELEGATE,
+        effect=Effect.UNKNOWN,
+        role=frozenset(),
+        action=frozenset(),
+        capability=frozenset({"subprocess"}),
+    ),
+    "bash": Classification(
+        mechanism=CodingMechanism.SHELL_BASH,
+        effect=Effect.UNKNOWN,
+        role=frozenset({CodingRole.SHELL_RUNTIME}),
+        action=frozenset({CodingAction.RUN_SCRIPT}),
+        capability=frozenset({"subprocess"}),
+        shell_dialect="bash",
+    ),
+}
+
+
+def classify_tool_detailed(
+    tool_name: str,
+    custom_classifications: dict[str, Classification] | None = None,
+) -> Classification:
+    """Classify a tool name into a full Classification object.
+
+    For the legacy string API, use classify_tool().
+    """
+    if not tool_name:
+        return Classification(mechanism="communication", effect=Effect.UNKNOWN)
+
+    canonical = normalize_tool_name(tool_name)
+
+    if custom_classifications:
+        cls = custom_classifications.get(tool_name) or custom_classifications.get(canonical)
+        if cls:
+            return cls
+
+    return _TOOL_CLASSIFICATIONS.get(
+        canonical,
+        Classification(mechanism="communication", effect=Effect.UNKNOWN),
+    )

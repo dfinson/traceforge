@@ -2,10 +2,14 @@
 
 from tracemill.adapters.base import Adapter
 from tracemill.classify import (
+    Classification,
     classify_cmd_command,
     classify_powershell_command,
+    classify_shell,
     classify_shell_command,
     classify_tool,
+    classify_tool_detailed,
+    get_default_registry,
     normalize_tool_name,
 )
 from tracemill.enricher import Enricher
@@ -17,6 +21,7 @@ from tracemill.types import EventKind, EventMetadata, SessionEvent, TelemetrySpa
 __all__ = [
     "Adapter",
     "CallbackSink",
+    "Classification",
     "Enricher",
     "EventKind",
     "EventMetadata",
@@ -27,7 +32,10 @@ __all__ = [
     "UsageRecord",
     "classify_cmd_command",
     "classify_powershell_command",
+    "classify_shell",
     "classify_shell_command",
     "classify_tool",
+    "classify_tool_detailed",
+    "get_default_registry",
     "normalize_tool_name",
 ]

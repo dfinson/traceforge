@@ -7,6 +7,7 @@ import os
 import tree_sitter as ts
 import tree_sitter_powershell as tsps
 
+from tracemill.classify.core import ShellActivity
 from tracemill.classify.rules import (
     ACTIVITY_PRIORITY,
     SHELL_IMPLEMENTATION,
@@ -38,7 +39,7 @@ def _extract_from_command_node(node: ts.Node) -> tuple[str, str | None, list[str
     return name, subcmd, parameters
 
 
-def classify_powershell_command(command: str) -> str:
+def classify_powershell_command(command: str) -> ShellActivity:
     """Classify a PowerShell command string into an activity category."""
     if not command or not command.strip():
         return SHELL_IMPLEMENTATION

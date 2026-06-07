@@ -12,6 +12,49 @@ from enum import StrEnum
 from typing import Any
 
 
+class ToolCategory(StrEnum):
+    """High-level category of an agent tool invocation."""
+
+    SHELL = "shell"
+    FILE_WRITE = "file_write"
+    FILE_READ = "file_read"
+    SEARCH = "search"
+    GIT = "git"
+    INTERNAL = "internal"
+    INTERACTION = "interaction"
+    BROWSER = "browser"
+    AGENT = "agent"
+    OTHER = "other"
+
+
+class ShellActivity(StrEnum):
+    """Classification of a shell command's primary activity."""
+
+    VERIFICATION = "verification"
+    GIT_OPS = "git_ops"
+    SETUP = "setup"
+    INVESTIGATION = "investigation"
+    IMPLEMENTATION = "implementation"
+
+
+class Phase(StrEnum):
+    """High-level workflow phase an event belongs to."""
+
+    PLANNING = "planning"
+    IMPLEMENTATION = "implementation"
+    VERIFICATION = "verification"
+    EXPLORATION = "exploration"
+    REVIEW = "review"
+
+
+class Visibility(StrEnum):
+    """Whether an event is shown, hidden, or collapsed in a trace view."""
+
+    VISIBLE = "visible"
+    INTERNAL = "internal"
+    COLLAPSED = "collapsed"
+
+
 class Mechanism(StrEnum):
     """How the action was physically performed — the invocation surface."""
 

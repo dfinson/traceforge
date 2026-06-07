@@ -11,6 +11,7 @@ import tree_sitter_bash as tsbash
 from tracemill.classify.core import (
     Classification,
     Effect,
+    ShellActivity,
     Structure,
     aggregate_effect,
 )
@@ -146,7 +147,7 @@ def _extract_commands_from_ast(command: str) -> list[str]:
     return commands
 
 
-def classify_shell_command(command: str) -> str:
+def classify_shell_command(command: str) -> ShellActivity:
     """Classify a shell command into an activity category (legacy API).
 
     Decomposes compound commands via tree-sitter AST, classifies each,

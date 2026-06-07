@@ -10,22 +10,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final
 
-from tracemill.classify.core import Effect
+from tracemill.classify.core import Effect, ShellActivity
 from tracemill.classify.coding import CodingRole
 
-# Legacy activity constants
-SHELL_VERIFICATION = "verification"
-SHELL_GIT_OPS = "git_ops"
-SHELL_SETUP = "setup"
-SHELL_INVESTIGATION = "investigation"
-SHELL_IMPLEMENTATION = "implementation"
+# Legacy activity constants (aliased from enum for backward compat)
+SHELL_VERIFICATION = ShellActivity.VERIFICATION
+SHELL_GIT_OPS = ShellActivity.GIT_OPS
+SHELL_SETUP = ShellActivity.SETUP
+SHELL_INVESTIGATION = ShellActivity.INVESTIGATION
+SHELL_IMPLEMENTATION = ShellActivity.IMPLEMENTATION
 
-ACTIVITY_PRIORITY: Final[dict[str, int]] = {
-    SHELL_IMPLEMENTATION: 0,
-    SHELL_INVESTIGATION: 1,
-    SHELL_SETUP: 2,
-    SHELL_GIT_OPS: 3,
-    SHELL_VERIFICATION: 4,
+ACTIVITY_PRIORITY: Final[dict[ShellActivity, int]] = {
+    ShellActivity.IMPLEMENTATION: 0,
+    ShellActivity.INVESTIGATION: 1,
+    ShellActivity.SETUP: 2,
+    ShellActivity.GIT_OPS: 3,
+    ShellActivity.VERIFICATION: 4,
 }
 
 
@@ -42,20 +42,20 @@ class Rule:
     """
 
     binaries: frozenset[str]
-    activity: str
+    activity: ShellActivity
     subcmds: frozenset[str] | None = None
     flags_require: frozenset[str] | None = None
     flags_reject: frozenset[str] | None = None
-    role: str = ""
-    effect: str = ""
+    role: CodingRole | str = ""
+    effect: Effect | str = ""
 
 
 @dataclass(frozen=True)
 class BinaryInfo:
     """Static metadata about a known binary."""
 
-    role: str
-    default_effect: str
+    role: CodingRole | str
+    default_effect: Effect
     network: bool = False
     destructive: bool = False
 
@@ -250,13 +250,10 @@ def match_rule(binary: str, subcmd: str | None, flags: list[str]) -> Rule | None
 
 def classify_binary(
     binary: str, subcmd: str | None, flags: list[str], all_words: list[str] | None = None
-) -> str:
-    """Classify a command into an activity string using the rule table + special cases.
-
-    This replaces the old _classify_from_words if-else chains.
-    """
+) -> ShellActivity:
+    """Classify a command into a ShellActivity using the rule table + special cases."""
     if not binary:
-        return SHELL_IMPLEMENTATION
+        return ShellActivity.IMPLEMENTATION
 
     rule = match_rule(binary, subcmd, flags)
     if rule:
@@ -281,7 +278,7 @@ def classify_binary(
     return SHELL_IMPLEMENTATION
 
 
-def effect_for_binary(binary: str, subcmd: str | None, flags: list[str]) -> str:
+def effect_for_binary(binary: str, subcmd: str | None, flags: list[str]) -> Effect:
     """Determine effect from binary + context, using rule table and binary info."""
     # Flag-dependent overrides
     if binary in ("ruff", "eslint", "rubocop", "clippy"):

@@ -7,6 +7,7 @@ from typing import Final
 from tracemill.classify.core import (
     Classification,
     Effect,
+    ToolCategory,
 )
 from tracemill.classify.coding import (
     CodingAction,
@@ -96,29 +97,29 @@ CANONICAL_TOOLS: Final[dict[str, str]] = {
     "skill": "task",
 }
 
-TOOL_CATEGORY_MAP: Final[dict[str, str]] = {
-    "bash": "shell",
-    "edit": "file_write",
-    "create": "file_write",
-    "view": "file_read",
-    "grep": "search",
-    "glob": "search",
-    "git_commit": "git",
-    "git_push": "git",
-    "git_diff": "git",
-    "git_status": "git",
-    "git_add": "git",
-    "git_log": "git",
-    "git_pull": "git",
-    "git_merge": "git",
-    "git_rebase": "git",
-    "git_checkout": "git",
-    "git_branch": "git",
-    "report_intent": "internal",
-    "ask_user": "interaction",
-    "web_fetch": "browser",
-    "web_search": "browser",
-    "task": "agent",
+TOOL_CATEGORY_MAP: Final[dict[str, ToolCategory]] = {
+    "bash": ToolCategory.SHELL,
+    "edit": ToolCategory.FILE_WRITE,
+    "create": ToolCategory.FILE_WRITE,
+    "view": ToolCategory.FILE_READ,
+    "grep": ToolCategory.SEARCH,
+    "glob": ToolCategory.SEARCH,
+    "git_commit": ToolCategory.GIT,
+    "git_push": ToolCategory.GIT,
+    "git_diff": ToolCategory.GIT,
+    "git_status": ToolCategory.GIT,
+    "git_add": ToolCategory.GIT,
+    "git_log": ToolCategory.GIT,
+    "git_pull": ToolCategory.GIT,
+    "git_merge": ToolCategory.GIT,
+    "git_rebase": ToolCategory.GIT,
+    "git_checkout": ToolCategory.GIT,
+    "git_branch": ToolCategory.GIT,
+    "report_intent": ToolCategory.INTERNAL,
+    "ask_user": ToolCategory.INTERACTION,
+    "web_fetch": ToolCategory.BROWSER,
+    "web_search": ToolCategory.BROWSER,
+    "task": ToolCategory.AGENT,
 }
 
 
@@ -146,13 +147,14 @@ def normalize_tool_name(raw_name: str) -> str:
 def classify_tool(
     tool_name: str,
     custom_categories: dict[str, str] | None = None,
-) -> str:
+) -> ToolCategory | str:
     """Classify a tool name into a category.
 
     Precedence: custom(raw) → custom(canonical) → default map → "other".
+    Returns a ToolCategory enum value, or a custom string from the user's map.
     """
     if not tool_name:
-        return "other"
+        return ToolCategory.OTHER
 
     if custom_categories:
         raw_lower = tool_name.lower().replace("-", "_")
@@ -178,7 +180,7 @@ def classify_tool(
         if cat:
             return cat
 
-    return TOOL_CATEGORY_MAP.get(canonical, "other")
+    return TOOL_CATEGORY_MAP.get(canonical, ToolCategory.OTHER)
 
 
 # ── Detailed Classification API ──

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 
+from tracemill.classify.core import ShellActivity
 from tracemill.classify.rules import (
     ACTIVITY_PRIORITY,
     SHELL_IMPLEMENTATION,
@@ -65,7 +66,7 @@ def _extract_binary_and_subcmd(segment: str) -> tuple[str, str | None, list[str]
     return binary, subcmd, flags
 
 
-def classify_cmd_command(command: str) -> str:
+def classify_cmd_command(command: str) -> ShellActivity:
     """Classify a cmd.exe command string into an activity category."""
     if not command or not command.strip():
         return SHELL_IMPLEMENTATION

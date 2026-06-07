@@ -6,12 +6,10 @@ import logging
 from datetime import datetime
 
 from tracemill.classify import (
-    SHELL_GIT_OPS,
-    SHELL_INVESTIGATION,
-    SHELL_VERIFICATION,
     classify_shell_command,
     classify_tool,
 )
+from tracemill.classify.core import Phase, ShellActivity, ToolCategory, Visibility
 from tracemill.types import EventKind, EventMetadata, SessionEvent
 
 logger = logging.getLogger(__name__)
@@ -100,11 +98,11 @@ class Enricher:
 
     def _set_visibility(self, event: SessionEvent) -> SessionEvent:
         """Set metadata.visibility based on event kind and tool category."""
-        visibility = "visible"
+        visibility = Visibility.VISIBLE
         if event.kind in (EventKind.SESSION_START, EventKind.SESSION_END):
-            visibility = "internal"
-        elif event.metadata.tool_category == "internal":
-            visibility = "internal"
+            visibility = Visibility.INTERNAL
+        elif event.metadata.tool_category == ToolCategory.INTERNAL:
+            visibility = Visibility.INTERNAL
 
         if visibility != event.metadata.visibility:
             new_metadata = event.metadata.model_copy(update={"visibility": visibility})
@@ -120,43 +118,43 @@ class Enricher:
         new_payload = {**event.payload, "_enrichment": new_enrichment}
         return event.model_copy(update={"payload": new_payload})
 
-    def _detect_phase(self, event: SessionEvent) -> str:
+    def _detect_phase(self, event: SessionEvent) -> Phase:
         """Determine the phase for an event."""
         if event.kind in (EventKind.USER_MESSAGE, EventKind.ASSISTANT_MESSAGE):
-            return "planning"
+            return Phase.PLANNING
 
         category = event.metadata.tool_category
 
-        # Category → phase mapping (replaces if-chain)
-        _CATEGORY_PHASE: dict[str | None, str] = {
-            "internal": "planning",
-            "git": "review",
-            "file_write": "implementation",
-            "file_read": "exploration",
-            "search": "exploration",
-            "interaction": "planning",
-            "browser": "exploration",
-            "agent": "implementation",
+        # Category → phase mapping
+        _CATEGORY_PHASE: dict[str, Phase] = {
+            ToolCategory.INTERNAL: Phase.PLANNING,
+            ToolCategory.GIT: Phase.REVIEW,
+            ToolCategory.FILE_WRITE: Phase.IMPLEMENTATION,
+            ToolCategory.FILE_READ: Phase.EXPLORATION,
+            ToolCategory.SEARCH: Phase.EXPLORATION,
+            ToolCategory.INTERACTION: Phase.PLANNING,
+            ToolCategory.BROWSER: Phase.EXPLORATION,
+            ToolCategory.AGENT: Phase.IMPLEMENTATION,
         }
 
-        if category == "shell":
+        if category == ToolCategory.SHELL:
             shell_activity = self._classify_shell_activity(event)
-            _SHELL_PHASE: dict[str, str] = {
-                SHELL_VERIFICATION: "verification",
-                SHELL_GIT_OPS: "review",
-                SHELL_INVESTIGATION: "exploration",
+            _SHELL_PHASE: dict[ShellActivity, Phase] = {
+                ShellActivity.VERIFICATION: Phase.VERIFICATION,
+                ShellActivity.GIT_OPS: Phase.REVIEW,
+                ShellActivity.INVESTIGATION: Phase.EXPLORATION,
             }
-            return _SHELL_PHASE.get(shell_activity, "implementation")
+            return _SHELL_PHASE.get(shell_activity, Phase.IMPLEMENTATION)
 
         if category in _CATEGORY_PHASE:
             return _CATEGORY_PHASE[category]
 
         if event.kind in (EventKind.TOOL_START, EventKind.TOOL_COMPLETE):
-            return "implementation"
+            return Phase.IMPLEMENTATION
 
-        return "planning"
+        return Phase.PLANNING
 
-    def _classify_shell_activity(self, event: SessionEvent) -> str:
+    def _classify_shell_activity(self, event: SessionEvent) -> ShellActivity:
         """Extract command from shell event and classify it."""
         arguments = event.payload.get("arguments", {})
         command = ""

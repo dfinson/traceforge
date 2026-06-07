@@ -121,12 +121,17 @@ class TestClassifyTool:
     def test_custom_overrides_default(self):
         custom_cls = Classification(mechanism="custom.shell", effect="mutating")
         custom = {"bash": custom_cls}
-        assert classify_tool("bash", custom) is custom_cls
+        result = classify_tool("bash", custom)
+        assert result.mechanism == "custom.shell"
+        assert result.effect == "mutating"
+        assert result.phase_map  # phase_map is added
 
     def test_custom_extends_default(self):
         custom_cls = Classification(mechanism="custom.special", effect="read_only")
         custom = {"my_tool": custom_cls}
-        assert classify_tool("my_tool", custom) is custom_cls
+        result = classify_tool("my_tool", custom)
+        assert result.mechanism == "custom.special"
+        assert result.phase_map  # phase_map is added
         # Default still works
         assert classify_tool("bash", custom).mechanism == "process.shell"
 
@@ -134,7 +139,9 @@ class TestClassifyTool:
         custom_cls = Classification(mechanism="custom.shell", effect="mutating")
         custom = {"bash": custom_cls}
         # "exec_command" normalizes to "shell", custom "bash" also normalizes to "shell" → match
-        assert classify_tool("exec_command", custom) is custom_cls
+        result = classify_tool("exec_command", custom)
+        assert result.mechanism == "custom.shell"
+        assert result.phase_map
 
 
 # =============================================================================
@@ -248,7 +255,9 @@ class TestEdgeCases:
         """Custom map works case-insensitively."""
         custom_cls = Classification(mechanism="custom.special", effect=None)
         custom = {"MyTool": custom_cls}
-        assert classify_tool("mytool", custom) is custom_cls
+        result = classify_tool("mytool", custom)
+        assert result.mechanism == "custom.special"
+        assert result.phase_map
 
     def test_classify_tool_with_none_custom(self):
         """None custom_classifications doesn't crash."""

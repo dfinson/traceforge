@@ -199,7 +199,8 @@ class TestToolClassification:
         event = _make_tool_start(tool_name="edit")
         enricher.process(event)
         flushed = enricher.flush()
-        assert flushed[0].metadata.classification is custom
+        assert flushed[0].metadata.classification.mechanism == "custom.write"
+        assert flushed[0].metadata.classification.phase_map
 
     def test_custom_classification_extends_defaults(self):
         custom = Classification(mechanism="custom.thing", effect="read_only")
@@ -214,7 +215,8 @@ class TestToolClassification:
         flushed = enricher.flush()
         classifications = {e.payload["tool_name"]: e.metadata.classification for e in flushed}
         assert classifications["edit"].mechanism == "file"
-        assert classifications["my_tool"] is custom
+        assert classifications["my_tool"].mechanism == "custom.thing"
+        assert classifications["my_tool"].phase_map
 
 
 # =============================================================================

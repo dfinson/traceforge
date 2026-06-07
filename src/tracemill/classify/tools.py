@@ -9,6 +9,7 @@ from tracemill.classify.core import (
     Classification,
     Effect,
     Mechanism,
+    PhaseSegment,
 )
 from tracemill.classify.coding import (
     CodingAction,
@@ -16,6 +17,59 @@ from tracemill.classify.coding import (
     CodingRole,
     CodingScope,
 )
+from tracemill.classify.workflow import Phase
+
+
+def _derive_phase(cls: Classification) -> str:
+    """Derive a single phase for a tool classification (used at definition time).
+
+    Same logic as _phases_from_classification fallback but returns one phase
+    for building the phase_map of single-action tools.
+    """
+    if cls.has_action("validate"):
+        return Phase.VERIFICATION
+    if cls.has_role("persistence.version_control") and (
+        cls.has_action("persist") or cls.has_action("deliver")
+    ):
+        return Phase.REVIEW
+    if cls.has_action("deliver"):
+        return Phase.REVIEW
+    if cls.has_action("retrieve") or cls.has_action("analyze"):
+        return Phase.EXPLORATION
+    if cls.has_action("modify") or cls.has_action("persist"):
+        return Phase.IMPLEMENTATION
+    if cls.has_action("configure") or cls.has_action("execute"):
+        return Phase.IMPLEMENTATION
+    if cls.mechanism.startswith("communication"):
+        return Phase.PLANNING
+    if cls.mechanism.startswith("delegation"):
+        return Phase.IMPLEMENTATION
+    if cls.mechanism == "file" and cls.effect == "read_only":
+        return Phase.EXPLORATION
+    return Phase.IMPLEMENTATION
+
+
+def _with_phase_map(cls: Classification) -> Classification:
+    """Wrap a static Classification with its derived phase_map."""
+    phase = _derive_phase(cls)
+    seg = PhaseSegment(
+        phase=phase,
+        actions=cls.action,
+        scopes=cls.scope,
+        roles=cls.role,
+    )
+    return Classification(
+        mechanism=cls.mechanism,
+        effect=cls.effect,
+        scope=cls.scope,
+        role=cls.role,
+        action=cls.action,
+        capability=cls.capability,
+        structure=cls.structure,
+        shell_dialect=cls.shell_dialect,
+        binaries=cls.binaries,
+        phase_map=(seg,),
+    )
 
 CANONICAL_TOOLS: Final[dict[str, str]] = {
     # Shell (neutral — dialect detected from command content, not tool name)
@@ -123,9 +177,14 @@ def classify_tool(
     tool_name: str,
     custom_classifications: dict[str, Classification] | None = None,
 ) -> Classification:
-    """Classify a tool name into a full Classification object."""
+    """Classify a tool name into a full Classification object.
+
+    All returned Classifications carry phase_map — same system as shell commands.
+    Unknown tools and MCP tools get a minimal classification with phase derived.
+    """
     if not tool_name:
-        return Classification(mechanism=Mechanism.COMMUNICATION, effect=None)
+        fallback = Classification(mechanism=Mechanism.COMMUNICATION, effect=None)
+        return _with_phase_map(fallback)
 
     canonical = normalize_tool_name(tool_name)
 
@@ -133,12 +192,18 @@ def classify_tool(
         lower = canonical.lower()
         for key, cls in custom_classifications.items():
             if key.lower() == lower or normalize_tool_name(key) == canonical:
+                # Ensure custom classifications also carry phase_map
+                if not cls.phase_map:
+                    return _with_phase_map(cls)
                 return cls
 
-    return _TOOL_CLASSIFICATIONS.get(
-        canonical,
-        Classification(mechanism=Mechanism.COMMUNICATION, effect=None),
-    )
+    result = _TOOL_CLASSIFICATIONS.get(canonical)
+    if result is not None:
+        return result
+
+    # Unknown/MCP tool — minimal classification with phase_map
+    fallback = Classification(mechanism=Mechanism.COMMUNICATION, effect=None)
+    return _with_phase_map(fallback)
 
 
 # Maps canonical tool names to Classification objects.
@@ -148,7 +213,7 @@ def classify_tool(
 # - network.http: tools that make HTTP requests
 # - communication.*: tools that exchange messages (user or system)
 # - delegation.*: tools that spawn sub-agents
-_TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
+_RAW_TOOL_CLASSIFICATIONS: dict[str, Classification] = {
     "view": Classification(
         mechanism=Mechanism.FILE,
         effect=Effect.READ_ONLY,
@@ -347,5 +412,11 @@ _TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
         action=frozenset({CodingAction.BROWSE}),
         capability=frozenset({"network_outbound", "human_interaction"}),
     ),
+}
+
+# Apply phase_map to all static classifications so they participate in the
+# same phase system as shell commands (uniform: every Classification has phase_map).
+_TOOL_CLASSIFICATIONS: Final[dict[str, Classification]] = {
+    name: _with_phase_map(cls) for name, cls in _RAW_TOOL_CLASSIFICATIONS.items()
 }
 

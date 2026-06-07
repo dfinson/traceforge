@@ -1,6 +1,7 @@
 """tracemill — Agent event observation pipeline with pluggable storage backends."""
 
 from tracemill.adapters.base import Adapter
+from tracemill.enricher import Enricher
 from tracemill.pipeline import EventPipeline
 from tracemill.sinks.base import StorageSink
 from tracemill.sinks.callback import CallbackSink
@@ -9,6 +10,7 @@ from tracemill.types import EventKind, EventMetadata, SessionEvent, TelemetrySpa
 __all__ = [
     "Adapter",
     "CallbackSink",
+    "Enricher",
     "EventKind",
     "EventMetadata",
     "EventPipeline",

@@ -18,8 +18,15 @@ class TestEventKind:
 
     def test_expected_members(self):
         expected = {
-            "user_message", "assistant_message", "tool_start", "tool_complete",
-            "file_change", "usage", "error", "session_start", "session_end",
+            "user_message",
+            "assistant_message",
+            "tool_start",
+            "tool_complete",
+            "file_change",
+            "usage",
+            "error",
+            "session_start",
+            "session_end",
         }
         assert {k.value for k in EventKind} == expected
 

@@ -1,0 +1,254 @@
+# Risk scoring configuration for shell command enrichment.
+# Produces a 0-100 score as analytics metadata — no blocking semantics.
+#
+# Scoring version: risk-v1
+# Algorithm: structural + capped_pattern_bonus + pipeline_taint + context_adj
+
+version: "risk-v1"
+
+# ── Layer 1: Intent weights (mapped from our Effect enum) ──
+intent_weights:
+  read_only: 10
+  mutating: 30
+  destructive: 45
+  # When effect is None/undetermined, use execute as default for shell
+  unknown: 50
+
+# ── Layer 1: Scope modifiers (mapped from CodingScope dot-paths) ──
+scope_modifiers:
+  "artifact.source_code": 0
+  "artifact.config": 10
+  "artifact.dependency": 5
+  "artifact.build_output": 0
+  "system.os": 20
+  "system.secrets": 25
+  "system.network": 20
+  "external.service": 15
+  "external.api": 10
+
+# ── Layer 2: Per-binary flag risk modifiers ──
+# Each entry: binary → list of flag rules
+# Flags are matched against parsed tokens (short flags expanded: -rf → -r, -f)
+flag_modifiers:
+  rm:
+    - flags: ["-r", "--recursive"]
+      requires_all: false
+      modifier: 15
+      factor: "recursive_flag"
+    - flags: ["-f", "--force"]
+      requires_all: false
+      modifier: 10
+      factor: "force_flag"
+    - flags: ["--no-preserve-root"]
+      requires_all: false
+      modifier: 25
+      factor: "root_deletion"
+      mitre: "T1485"
+  docker:
+    - flags: ["--privileged"]
+      requires_all: false
+      modifier: 30
+      factor: "privileged_container"
+      mitre: "T1610"
+    - flags: ["--cap-add"]
+      requires_all: false
+      modifier: 20
+      factor: "added_capability"
+  curl:
+    - flags: ["-X", "--request", "-d", "--data", "--data-raw", "--upload-file", "-T"]
+      requires_all: false
+      modifier: 15
+      factor: "data_upload"
+      mitre: "T1041"
+  chmod:
+    - flags: ["+s", "u+s", "g+s"]
+      requires_all: false
+      modifier: 30
+      factor: "setuid"
+      mitre: "T1548.001"
+    - flags: ["4755", "4775", "2755"]
+      requires_all: false
+      modifier: 30
+      factor: "setuid_numeric"
+      mitre: "T1548.001"
+  sudo:
+    - flags: []
+      requires_all: false
+      modifier: 20
+      factor: "privilege_escalation"
+      mitre: "T1548.001"
+  dd:
+    - flags: []
+      requires_all: false
+      modifier: 20
+      factor: "raw_disk_access"
+  kubectl:
+    - flags: ["--all-namespaces", "-A"]
+      requires_all: false
+      modifier: 10
+      factor: "cluster_wide"
+    - flags: ["exec"]
+      requires_all: false
+      modifier: 15
+      factor: "container_exec"
+
+# ── Layer 3: Injection/evasion patterns (regex on raw command text) ──
+# Only used for patterns that are hard to detect via AST alone.
+# Score is additive (capped at max_pattern_bonus).
+max_pattern_bonus: 30
+
+injection_patterns:
+  - pattern: '\beval\s'
+    score: 25
+    factor: "eval_usage"
+    mitre: "T1059.004"
+  - pattern: '\|\s*(?:bash|sh|zsh|fish|dash|ksh|python[23]?|perl|ruby|node)\b'
+    score: 25
+    factor: "pipe_to_shell"
+    mitre: "T1204.002"
+  - pattern: 'LD_PRELOAD'
+    score: 25
+    factor: "ld_preload"
+    mitre: "T1574.006"
+  - pattern: '/dev/(?:tcp|udp)/'
+    score: 25
+    factor: "dev_tcp_udp"
+    mitre: "T1071.001"
+  - pattern: 'HISTFILE|HISTSIZE=0|unset\s+HISTFILE'
+    score: 15
+    factor: "history_manipulation"
+    mitre: "T1070.003"
+  - pattern: '/proc/self/environ'
+    score: 20
+    factor: "proc_environ"
+    mitre: "T1082"
+  - pattern: '\\x[0-9a-fA-F]{2}'
+    score: 15
+    factor: "hex_escape"
+    mitre: "T1027"
+
+# ── Pipeline taint rules ──
+# Applied only when commands are connected by | (pipe), not ;/&&/||
+# source/sink are determined by effect + path sensitivity of pipe segments
+taint_rules:
+  - source: "sensitive_read"
+    sink: "network"
+    escalation: 30
+    factor: "secrets_exfiltration"
+    mitre: "T1041"
+  - source: "sensitive_read"
+    sink: "execution"
+    escalation: 25
+    factor: "secrets_to_exec"
+    mitre: "T1059.004"
+  - source: "any_read"
+    sink: "network"
+    has_encoding: true
+    escalation: 25
+    factor: "encoded_exfiltration"
+    mitre: "T1132.001"
+  - source: "network"
+    sink: "execution"
+    escalation: 30
+    factor: "download_and_exec"
+    mitre: "T1204.002"
+  - source: "any_read"
+    sink: "execution"
+    escalation: 15
+    factor: "read_to_exec"
+    mitre: "T1059.004"
+
+# ── Sensitive path patterns (glob-style) ──
+# Used for taint source classification and scope modifier escalation
+sensitive_paths:
+  secrets:
+    - ".env"
+    - ".env.*"
+    - "*.pem"
+    - "*.key"
+    - "*.p12"
+    - "id_rsa*"
+    - "id_ed25519*"
+    - ".ssh/*"
+    - ".aws/credentials"
+    - ".aws/config"
+    - ".kube/config"
+    - ".docker/config.json"
+    - ".gnupg/*"
+    - ".netrc"
+    - "terraform.tfstate"
+    - "*.tfvars"
+  system:
+    - "/etc/passwd"
+    - "/etc/shadow"
+    - "/etc/sudoers"
+    - "/etc/hosts"
+    - "/proc/*/environ"
+    - "/proc/self/*"
+
+# ── Encoding propagators (binaries that transform but preserve data) ──
+encoding_commands:
+  - "base64"
+  - "b64encode"
+  - "xxd"
+  - "od"
+  - "hexdump"
+  - "gzip"
+  - "gunzip"
+  - "bzip2"
+  - "xz"
+  - "openssl"
+  - "gpg"
+
+# ── GTFOBins subset: binaries with shell escape / reverse shell capability ──
+# Used as a modifier when these binaries appear with suspicious patterns
+gtfobins:
+  shell_escape:
+    - "vim"
+    - "vi"
+    - "less"
+    - "more"
+    - "man"
+    - "ftp"
+    - "gdb"
+    - "awk"
+    - "nawk"
+    - "mawk"
+  reverse_shell:
+    - "nc"
+    - "ncat"
+    - "socat"
+    - "telnet"
+    - "bash"
+    - "python"
+    - "python3"
+    - "perl"
+    - "ruby"
+    - "php"
+    - "node"
+  file_rw:
+    - "tar"
+    - "zip"
+    - "cpio"
+    - "rsync"
+    - "scp"
+    - "curl"
+    - "wget"
+
+# GTFOBins modifier: applied when the binary has a capability AND the
+# command has network or execute intent
+gtfobins_modifier: 10
+
+# ── Context adjustments ──
+context_adjustments:
+  inside_project: -10
+  inside_build_dir: -5
+  escapes_project: 20
+  no_context: 5
+
+# ── Score bands ──
+levels:
+  safe: [0, 20]
+  caution: [21, 50]
+  danger: [51, 80]
+  critical: [81, 100]

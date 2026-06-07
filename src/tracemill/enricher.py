@@ -10,6 +10,7 @@ from tracemill.classify import classify_shell, classify_tool, get_default_engine
 from tracemill.classify.config import ClassificationEngine, ClassifyConfig, load_config
 from tracemill.classify.core import Classification, PhaseSegment
 from tracemill.classify.coding import CodingMechanism, CodingScope
+from tracemill.classify.risk import RiskAssessment, assess_risk
 from tracemill.classify.tools import normalize_tool_name
 from tracemill.classify.workflow import Phase, Visibility
 from tracemill.types import EventKind, EventMetadata, SessionEvent
@@ -110,6 +111,7 @@ class Enricher:
         For shell executor tools, performs deep tree-sitter classification of the
         actual command rather than using the static shell entry.
         After classification, refines scope based on file paths in the payload.
+        Also computes risk score for shell commands.
         """
         tool_name = event.payload.get("tool_name", "")
         if not tool_name:
@@ -117,7 +119,8 @@ class Enricher:
 
         canonical = normalize_tool_name(tool_name, engine=self._engine)
 
-        if canonical == "shell":
+        is_shell = canonical == "shell"
+        if is_shell:
             cls = self._classify_shell_command(event)
         else:
             cls = classify_tool(tool_name, self._custom_classifications, engine=self._engine)
@@ -126,7 +129,13 @@ class Enricher:
         cls = _refine_scope_from_payload(cls, event.payload)
 
         new_metadata = event.metadata.model_copy(update={"classification": cls})
-        return event.model_copy(update={"metadata": new_metadata})
+        event = event.model_copy(update={"metadata": new_metadata})
+
+        # Risk scoring for shell commands
+        if is_shell and self._engine.risk_config is not None:
+            event = self._assess_risk(event, cls)
+
+        return event
 
     def _classify_shell_command(self, event: SessionEvent) -> Classification:
         """Deep-classify the actual shell command via tree-sitter AST."""
@@ -141,6 +150,36 @@ class Enricher:
             return Classification(mechanism=CodingMechanism.PROCESS_SHELL, effect=None)
 
         return classify_shell(command, engine=self._engine)
+
+    def _assess_risk(self, event: SessionEvent, cls: Classification) -> SessionEvent:
+        """Compute risk score for a shell command and store in payload._enrichment."""
+        arguments = event.payload.get("arguments", {})
+        command = ""
+        if isinstance(arguments, dict):
+            command = arguments.get("command", "") or arguments.get("cmd", "")
+        elif isinstance(arguments, str):
+            command = arguments
+
+        if not command:
+            return event
+
+        risk = assess_risk(
+            classification=cls,
+            command=command,
+            engine=self._engine,
+        )
+
+        # Store risk assessment in payload under _enrichment
+        enrichment = dict(event.payload.get("_enrichment", {}))
+        enrichment["risk"] = {
+            "score": risk.score,
+            "level": risk.level,
+            "factors": list(risk.factors),
+            "mitre": list(risk.mitre),
+            "version": risk.version,
+        }
+        new_payload = {**event.payload, "_enrichment": enrichment}
+        return event.model_copy(update={"payload": new_payload})
 
     def _set_visibility(self, event: SessionEvent) -> SessionEvent:
         """Set metadata.visibility based on event kind and classification."""

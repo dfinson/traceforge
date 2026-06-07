@@ -357,6 +357,18 @@ def load_config(
 # ── ClassificationEngine — materialized runtime data ──
 
 
+def _load_risk_config() -> dict[str, Any] | None:
+    """Load risk.yaml from built-in data directory."""
+    data_dir = importlib.resources.files("tracemill.classify") / "data"
+    resource = data_dir / "risk.yaml"
+    try:
+        text = resource.read_text(encoding="utf-8")
+        return yaml.safe_load(text) or None
+    except FileNotFoundError:
+        logger.debug("risk.yaml not found — risk scoring disabled")
+        return None
+
+
 class ClassificationEngine:
     """Immutable pre-built classification indexes from config.
 
@@ -381,6 +393,7 @@ class ClassificationEngine:
         "activity_to_action",
         "activity_to_scope",
         "activity_to_phase",
+        "risk_config",
     )
 
     def __init__(self, config: ClassifyConfig) -> None:
@@ -496,6 +509,9 @@ class ClassificationEngine:
         self.activity_to_phase: dict[str, str] = {
             k: v.get("phase", "") for k, v in ad.items() if "phase" in v
         }
+
+        # Risk scoring config (loaded separately as raw dict)
+        self.risk_config: dict[str, Any] | None = _load_risk_config()
 
 
 # ── Default engine singleton ──

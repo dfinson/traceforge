@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import os
-import shlex
 from typing import Final
 
 import tree_sitter as ts
@@ -200,15 +199,38 @@ _ACTIVITY_PRIORITY: Final[dict[str, int]] = {
     SHELL_VERIFICATION: 4,
 }
 
+# ── Query: find all top-level command nodes ──
+
+_Q_COMMANDS = ts.Query(_BASH_LANGUAGE, "(command) @cmd")
+
+
+def _inside_command_substitution(node: ts.Node) -> bool:
+    """Check if a node is inside a $(…) substitution."""
+    p = node.parent
+    while p:
+        if p.type == "command_substitution":
+            return True
+        p = p.parent
+    return False
+
 
 def _extract_commands_from_ast(command: str) -> list[str]:
-    """Parse a shell command and extract individual command texts via AST."""
-    if not command.strip():
+    """Extract individual command texts from a shell string via tree-sitter query."""
+    if not command or not command.strip():
         return []
 
     tree = _parser.parse(command.encode("utf-8"))
+    cursor = ts.QueryCursor(_Q_COMMANDS)
+    matches = cursor.matches(tree.root_node)
+
     commands: list[str] = []
-    _walk_for_commands(tree.root_node, command.encode("utf-8"), commands)
+    for _pat, captures in matches:
+        for node in captures.get("cmd", []):
+            if _inside_command_substitution(node):
+                continue
+            text = node.text.decode("utf-8").strip() if node.text else ""
+            if text:
+                commands.append(text)
 
     if not commands:
         commands.append(command.strip())
@@ -216,118 +238,26 @@ def _extract_commands_from_ast(command: str) -> list[str]:
     return commands
 
 
-def _walk_for_commands(node: ts.Node, source: bytes, out: list[str]) -> None:
-    """Walk AST collecting command nodes. Skips command_substitution children."""
-    if node.type == "command":
-        text = source[node.start_byte : node.end_byte].decode("utf-8").strip()
-        if text:
-            out.append(text)
-        return
+# ── Classification rules table ──
+# Each rule: (binaries, subcmds, activity, reject_flags)
+# - binaries: set of binary names that trigger this rule
+# - subcmds: set of subcmds required (None = any/no subcmd needed)
+# - activity: the classification result
+# - reject_flags: if ANY of these flags present, skip this rule (None = no rejection)
 
-    if node.type == "command_substitution":
-        return
+_Rule = tuple[frozenset[str], frozenset[str] | None, str, frozenset[str] | None]
 
-    for child in node.children:
-        _walk_for_commands(child, source, out)
+_SETUP_RULES: list[_Rule] = [
+    (frozenset({"pip", "pip3"}), frozenset({"install"}), SHELL_SETUP, None),
+    (frozenset({"npm", "pnpm", "yarn"}), frozenset({"install", "add", "ci"}), SHELL_SETUP, None),
+    (frozenset({"cargo"}), frozenset({"add"}), SHELL_SETUP, None),
+    (frozenset({"brew", "apt", "apt-get"}), frozenset({"install"}), SHELL_SETUP, None),
+    (frozenset({"uv"}), frozenset({"sync", "pip"}), SHELL_SETUP, None),
+    (frozenset({"poetry"}), frozenset({"install"}), SHELL_SETUP, None),
+]
 
-
-def _shlex_split(command: str) -> list[str]:
-    try:
-        return shlex.split(command, posix=True)
-    except ValueError:
-        return command.split()
-
-
-def _extract_binary(command: str) -> tuple[str, str | None]:
-    """Extract the binary name (lowercased, no path/ext) and first subcommand."""
-    parts = _shlex_split(command)
-
-    while parts and "=" in parts[0] and parts[0].split("=", 1)[0].replace("_", "").isalnum():
-        parts = parts[1:]
-
-    if not parts:
-        return "", None
-
-    limit = 5
-    while limit > 0 and parts:
-        binary = os.path.basename(parts[0]).lower()
-        for suffix in (".exe", ".cmd", ".bat", ".ps1", ".sh"):
-            if binary.endswith(suffix):
-                binary = binary[: -len(suffix)]
-
-        if binary in _TRANSPARENT_WRAPPERS:
-            parts = parts[1:]
-            while parts and "=" in parts[0] and parts[0][0] != "-":
-                parts = parts[1:]
-            while parts and parts[0].startswith("-"):
-                parts = parts[1:]
-                if parts and not parts[0].startswith("-") and not _looks_like_command(parts[0]):
-                    parts = parts[1:]
-            limit -= 1
-            continue
-        break
-
-    if not parts:
-        return "", None
-
-    binary = os.path.basename(parts[0]).lower()
-    for suffix in (".exe", ".cmd", ".bat", ".ps1", ".sh"):
-        if binary.endswith(suffix):
-            binary = binary[: -len(suffix)]
-
-    subcmd = parts[1] if len(parts) > 1 and not parts[1].startswith("-") else None
-    return binary, subcmd
-
-
-def _looks_like_command(token: str) -> bool:
-    return bool(token) and not token[0].isdigit() and "/" not in token
-
-
-def classify_shell_command(command: str) -> str:
-    """Classify a shell command into an activity category.
-
-    Decomposes compound commands via AST, classifies each sub-command,
-    returns the highest-priority activity.
-    """
-    if not command:
-        return SHELL_IMPLEMENTATION
-
-    segments = _extract_commands_from_ast(command)
-    best_activity = SHELL_IMPLEMENTATION
-    best_priority = -1
-
-    for segment in segments:
-        activity = _classify_segment(segment)
-        priority = _ACTIVITY_PRIORITY.get(activity, 0)
-        if priority > best_priority:
-            best_priority = priority
-            best_activity = activity
-
-    return best_activity
-
-
-def _classify_segment(cmd: str) -> str:
-    """Classify a single command by extracting the binary and subcommand."""
-    binary, subcmd = _extract_binary(cmd)
-
-    if not binary:
-        return SHELL_IMPLEMENTATION
-
-    # Setup detection (binary-level)
-    if binary in ("pip", "pip3") and subcmd == "install":
-        return SHELL_SETUP
-    if binary in ("npm", "pnpm", "yarn") and subcmd in ("install", "add", "ci"):
-        return SHELL_SETUP
-    if binary == "cargo" and subcmd == "add":
-        return SHELL_SETUP
-    if binary in ("brew", "apt", "apt-get") and subcmd == "install":
-        return SHELL_SETUP
-    if binary == "uv" and subcmd in ("sync", "pip"):
-        return SHELL_SETUP
-    if binary == "poetry" and subcmd == "install":
-        return SHELL_SETUP
-
-    if binary in (
+_TEST_RUNNER_BINARIES: Final[frozenset[str]] = frozenset(
+    {
         "pytest",
         "jest",
         "vitest",
@@ -339,91 +269,209 @@ def _classify_segment(cmd: str) -> str:
         "tox",
         "nox",
         "playwright",
+    }
+)
+
+_TEST_SUBCMD_BINARIES: Final[frozenset[str]] = frozenset(
+    {"cargo", "go", "swift", "dart", "dotnet", "mvn", "gradle", "npm", "pnpm", "yarn", "make"}
+)
+
+_LINTER_BINARIES: Final[frozenset[str]] = frozenset({"mypy", "pyright", "flake8", "pylint"})
+
+_GIT_WRITE_SUBCMDS: Final[frozenset[str]] = frozenset(
+    {"commit", "push", "merge", "rebase", "cherry-pick", "tag", "reset", "stash"}
+)
+
+_GIT_READ_SUBCMDS: Final[frozenset[str]] = frozenset(
+    {"diff", "log", "status", "show", "blame", "branch"}
+)
+
+_NPM_VERIFY_SCRIPTS: Final[frozenset[str]] = frozenset(
+    {"test", "tests", "lint", "check", "typecheck", "build"}
+)
+
+_INTERPRETER_VERIFY_MODULES: Final[frozenset[str]] = frozenset(
+    {"pytest", "unittest", "mypy", "pyright", "ruff"}
+)
+
+
+def _words_from_command_node(node: ts.Node) -> list[str]:
+    """Extract word tokens from a command AST node (replaces shlex)."""
+    words: list[str] = []
+    for child in node.children:
+        if child.type == "command_name":
+            for sub in child.children:
+                if sub.type == "word" and sub.text:
+                    words.append(sub.text.decode("utf-8"))
+        elif child.type == "word" and child.text:
+            words.append(child.text.decode("utf-8"))
+    return words
+
+
+def _unwrap_binary(words: list[str]) -> tuple[str, str | None, list[str]]:
+    """Extract binary, subcmd, and flags from a word list, unwrapping wrappers."""
+    idx = 0
+
+    # Skip env var assignments (parsed as words like VAR=val in some contexts)
+    while (
+        idx < len(words)
+        and "=" in words[idx]
+        and words[idx].split("=", 1)[0].replace("_", "").isalnum()
     ):
+        idx += 1
+
+    limit = 5
+    while limit > 0 and idx < len(words):
+        binary = os.path.basename(words[idx]).lower()
+        for suffix in (".exe", ".cmd", ".bat", ".ps1", ".sh"):
+            if binary.endswith(suffix):
+                binary = binary[: -len(suffix)]
+
+        if binary not in _TRANSPARENT_WRAPPERS:
+            break
+
+        idx += 1
+        # Skip VAR=val after wrapper
+        while idx < len(words) and "=" in words[idx] and not words[idx].startswith("-"):
+            idx += 1
+        # Skip flags (and their values)
+        while idx < len(words) and words[idx].startswith("-"):
+            idx += 1
+            if (
+                idx < len(words)
+                and not words[idx].startswith("-")
+                and not _looks_like_command(words[idx])
+            ):
+                idx += 1
+        limit -= 1
+
+    if idx >= len(words):
+        return "", None, []
+
+    binary = os.path.basename(words[idx]).lower()
+    for suffix in (".exe", ".cmd", ".bat", ".ps1", ".sh"):
+        if binary.endswith(suffix):
+            binary = binary[: -len(suffix)]
+
+    remaining = words[idx + 1 :]
+    subcmd = remaining[0] if remaining and not remaining[0].startswith("-") else None
+    flags = [w for w in remaining if w.startswith("-")]
+    return binary, subcmd, flags
+
+
+def _looks_like_command(token: str) -> bool:
+    return bool(token) and not token[0].isdigit() and "/" not in token
+
+
+def _classify_from_words(
+    binary: str, subcmd: str | None, flags: list[str], all_words: list[str]
+) -> str:
+    """Classify a command given its extracted binary, subcmd, and flags."""
+    if not binary:
+        return SHELL_IMPLEMENTATION
+
+    # Setup rules (table-driven)
+    for binaries, subcmds, activity, reject_flags in _SETUP_RULES:
+        if binary in binaries and (subcmds is None or subcmd in subcmds):
+            if reject_flags is None or not any(f in flags for f in reject_flags):
+                return activity
+
+    # Test runners (binary alone is sufficient)
+    if binary in _TEST_RUNNER_BINARIES:
         return SHELL_VERIFICATION
 
-    if subcmd == "test" or subcmd == "tests":
-        if binary in (
-            "cargo",
-            "go",
-            "swift",
-            "dart",
-            "dotnet",
-            "mvn",
-            "gradle",
-            "npm",
-            "pnpm",
-            "yarn",
-            "make",
-        ):
-            return SHELL_VERIFICATION
+    # "X test" pattern
+    if subcmd in ("test", "tests") and binary in _TEST_SUBCMD_BINARIES:
+        return SHELL_VERIFICATION
 
-    if binary in ("mypy", "pyright", "flake8", "pylint"):
+    # Linters / type checkers
+    if binary in _LINTER_BINARIES:
         return SHELL_VERIFICATION
     if binary == "ruff":
-        if subcmd == "check" and "--fix" not in cmd:
+        if subcmd == "check" and "--fix" not in flags:
             return SHELL_VERIFICATION
         if subcmd == "format":
-            if "--check" in cmd:
-                return SHELL_VERIFICATION
-            return SHELL_IMPLEMENTATION
-    if binary == "eslint" and "--fix" not in cmd:
+            return SHELL_VERIFICATION if "--check" in flags else SHELL_IMPLEMENTATION
+    if binary == "eslint" and "--fix" not in flags:
         return SHELL_VERIFICATION
     if binary == "tsc":
         return SHELL_VERIFICATION
-    if binary in ("rubocop", "clippy") and "--fix" not in cmd:
+    if binary in ("rubocop", "clippy") and "--fix" not in flags:
         return SHELL_VERIFICATION
     if binary == "golangci-lint" and subcmd == "run":
         return SHELL_VERIFICATION
     if binary in ("black", "prettier"):
-        if "--check" in cmd:
-            return SHELL_VERIFICATION
-        return SHELL_IMPLEMENTATION
+        return SHELL_VERIFICATION if "--check" in flags else SHELL_IMPLEMENTATION
     if binary == "cargo" and subcmd == "clippy":
         return SHELL_VERIFICATION
 
-    if binary == "cargo" and subcmd == "build":
-        return SHELL_VERIFICATION
-    if binary == "go" and subcmd == "build":
-        return SHELL_VERIFICATION
-    if binary == "make" and subcmd == "build":
-        return SHELL_VERIFICATION
-    if binary == "dotnet" and subcmd == "build":
+    # Build tools
+    if binary in ("cargo", "go", "make", "dotnet") and subcmd == "build":
         return SHELL_VERIFICATION
     if binary == "webpack" or (binary == "vite" and subcmd == "build"):
         return SHELL_VERIFICATION
-    if binary == "npm" and subcmd == "run":
-        tokens = _shlex_split(cmd)
-        if len(tokens) >= 3:
-            run_script = tokens[2].lower()
-            if run_script == "build":
-                return SHELL_VERIFICATION
-            if run_script in ("test", "tests", "lint", "check", "typecheck"):
-                return SHELL_VERIFICATION
+    if binary == "npm" and subcmd == "run" and len(all_words) >= 3:
+        script = all_words[2].lower() if len(all_words) > 2 else ""
+        if script in _NPM_VERIFY_SCRIPTS:
+            return SHELL_VERIFICATION
         return SHELL_IMPLEMENTATION
 
-    if binary in ("python", "python3", "node"):
-        tokens = _shlex_split(cmd)
-        if "-m" in tokens:
-            m_idx = tokens.index("-m")
-            if m_idx + 1 < len(tokens):
-                module = tokens[m_idx + 1].lower()
-                if module in ("pytest", "unittest", "mypy", "pyright", "ruff"):
-                    return SHELL_VERIFICATION
+    # Interpreters with -m module
+    if binary in ("python", "python3", "node") and "-m" in all_words:
+        try:
+            m_idx = all_words.index("-m")
+            if (
+                m_idx + 1 < len(all_words)
+                and all_words[m_idx + 1].lower() in _INTERPRETER_VERIFY_MODULES
+            ):
+                return SHELL_VERIFICATION
+        except ValueError:
+            pass
         return SHELL_IMPLEMENTATION
 
-    if binary == "git" and subcmd in (
-        "commit",
-        "push",
-        "merge",
-        "rebase",
-        "cherry-pick",
-        "tag",
-        "reset",
-        "stash",
-    ):
-        return SHELL_GIT_OPS
-    if binary == "git" and subcmd in ("diff", "log", "status", "show", "blame", "branch"):
-        return SHELL_INVESTIGATION
+    # Git operations
+    if binary == "git":
+        if subcmd in _GIT_WRITE_SUBCMDS:
+            return SHELL_GIT_OPS
+        if subcmd in _GIT_READ_SUBCMDS:
+            return SHELL_INVESTIGATION
 
     return SHELL_IMPLEMENTATION
+
+
+def classify_shell_command(command: str) -> str:
+    """Classify a shell command into an activity category.
+
+    Decomposes compound commands via tree-sitter AST, classifies each,
+    returns the highest-priority activity.
+    """
+    if not command or not command.strip():
+        return SHELL_IMPLEMENTATION
+
+    tree = _parser.parse(command.encode("utf-8"))
+    cursor = ts.QueryCursor(_Q_COMMANDS)
+    matches = cursor.matches(tree.root_node)
+
+    if not matches:
+        return SHELL_IMPLEMENTATION
+
+    best_activity = SHELL_IMPLEMENTATION
+    best_priority = -1
+
+    for _pattern_idx, captures in matches:
+        for node in captures.get("cmd", []):
+            if _inside_command_substitution(node):
+                continue
+
+            words = _words_from_command_node(node)
+            if not words:
+                continue
+
+            binary, subcmd, flags = _unwrap_binary(words)
+            activity = _classify_from_words(binary, subcmd, flags, words)
+            priority = _ACTIVITY_PRIORITY.get(activity, 0)
+            if priority > best_priority:
+                best_priority = priority
+                best_activity = activity
+
+    return best_activity

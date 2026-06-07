@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -43,6 +44,9 @@ _BASH_LANGUAGE = ts.Language(tsbash.language())
 _parser = ts.Parser(_BASH_LANGUAGE)
 _Q_COMMANDS = ts.Query(_BASH_LANGUAGE, "(command) @cmd")
 
+_IS_ENV_VAR = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*=")
+_STRIP_BINARY_EXT = re.compile(r"\.(exe|cmd|bat|ps1|sh)$", re.IGNORECASE)
+
 
 # ── AST helpers ──
 
@@ -81,19 +85,12 @@ def _unwrap_binary(
     transparent = engine.transparent_wrappers
     idx = 0
 
-    while (
-        idx < len(words)
-        and "=" in words[idx]
-        and words[idx].split("=", 1)[0].replace("_", "").isalnum()
-    ):
+    while idx < len(words) and _IS_ENV_VAR.match(words[idx]):
         idx += 1
 
     limit = 5
     while limit > 0 and idx < len(words):
-        binary = os.path.basename(words[idx]).lower()
-        for suffix in (".exe", ".cmd", ".bat", ".ps1", ".sh"):
-            if binary.endswith(suffix):
-                binary = binary[: -len(suffix)]
+        binary = _STRIP_BINARY_EXT.sub("", os.path.basename(words[idx]).lower())
 
         if binary not in transparent:
             break
@@ -114,10 +111,7 @@ def _unwrap_binary(
     if idx >= len(words):
         return "", None, []
 
-    binary = os.path.basename(words[idx]).lower()
-    for suffix in (".exe", ".cmd", ".bat", ".ps1", ".sh"):
-        if binary.endswith(suffix):
-            binary = binary[: -len(suffix)]
+    binary = _STRIP_BINARY_EXT.sub("", os.path.basename(words[idx]).lower())
 
     remaining = words[idx + 1 :]
     subcmd = remaining[0] if remaining and not remaining[0].startswith("-") else None

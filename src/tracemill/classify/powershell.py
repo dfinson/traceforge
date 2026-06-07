@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import TYPE_CHECKING
 
 import tree_sitter as ts
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
 _PS_LANGUAGE = ts.Language(tsps.language())
 _parser = ts.Parser(_PS_LANGUAGE)
 _Q_COMMANDS = ts.Query(_PS_LANGUAGE, "(command) @cmd")
+_STRIP_BINARY_EXT = re.compile(r"\.(exe|cmd|bat|ps1|sh)$", re.IGNORECASE)
 
 
 def _extract_from_command_node(node: ts.Node) -> tuple[str, str | None, list[str]]:
@@ -76,10 +78,7 @@ def classify_powershell_command(
                 continue
 
             # Normalize: strip path/extension for non-cmdlet binaries
-            binary = os.path.basename(name).lower()
-            for suffix in (".exe", ".cmd", ".bat", ".ps1", ".sh"):
-                if binary.endswith(suffix):
-                    binary = binary[: -len(suffix)]
+            binary = _STRIP_BINARY_EXT.sub("", os.path.basename(name).lower())
 
             cmd_cls = classify_single_command(binary, subcmd, parameters, engine=engine)
             command_results.append(cmd_cls)

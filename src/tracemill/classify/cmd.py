@@ -8,6 +8,7 @@ the shared rule table for binary-level classification.
 from __future__ import annotations
 
 import os
+import re
 from typing import TYPE_CHECKING
 
 from tracemill.classify.core import Classification
@@ -19,6 +20,8 @@ from tracemill.classify.shell import (
 
 if TYPE_CHECKING:
     from tracemill.classify.config import ClassificationEngine
+
+_STRIP_BINARY_EXT = re.compile(r"\.(exe|cmd|bat|ps1|sh|com)$", re.IGNORECASE)
 
 
 def _split_cmd_commands(command: str) -> list[str]:
@@ -54,10 +57,7 @@ def _extract_binary_and_subcmd(segment: str) -> tuple[str, str | None, list[str]
     if not parts:
         return "", None, []
 
-    binary = os.path.basename(parts[0]).lower()
-    for suffix in (".exe", ".cmd", ".bat", ".ps1", ".sh", ".com"):
-        if binary.endswith(suffix):
-            binary = binary[: -len(suffix)]
+    binary = _STRIP_BINARY_EXT.sub("", os.path.basename(parts[0]).lower())
 
     subcmd = None
     flags: list[str] = []

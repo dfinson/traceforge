@@ -72,7 +72,8 @@ def _extract_binary_and_subcmd(segment: str) -> tuple[str, str | None, list[str]
 
 def classify_cmd_command(
     command: str,
-    engine: ClassificationEngine | None = None,
+    *,
+    engine: ClassificationEngine,
 ) -> Classification:
     """Classify a cmd.exe command string into a full Classification."""
     if not command or not command.strip():

@@ -5,9 +5,31 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from tracemill import Enricher, EventKind, EventPipeline, SessionEvent
+from tracemill.classify import get_default_engine
 from tracemill.classify.core import Classification
 
 from tests.conftest import RecordingSink
+
+
+ENGINE = get_default_engine()
+
+
+def _classify_shell(command: str):
+    from tracemill.classify import classify_shell
+
+    return classify_shell(command, engine=ENGINE)
+
+
+def _classify_tool(tool_name: str, custom_classifications=None):
+    from tracemill.classify.tools import classify_tool
+
+    return classify_tool(tool_name, custom_classifications, engine=ENGINE)
+
+
+def _classify_binary(binary: str, subcmd, flags: list[str], all_words=None):
+    from tracemill.classify.rules import classify_binary
+
+    return classify_binary(binary, subcmd, flags, all_words, engine=ENGINE)
 
 
 # --- Helpers ---
@@ -337,7 +359,7 @@ class TestPhaseDetection:
         """phase_map preserves which actions belong to which phase."""
         from tracemill.classify import classify_shell
 
-        cls = classify_shell("pytest tests/ && git push origin main")
+        cls = _classify_shell("pytest tests/ && git push origin main")
         # Both actions present in aggregate
         assert cls.has_action("validate")
         assert cls.has_action("deliver")
@@ -764,113 +786,113 @@ class TestShellDeepClassification:
 class TestNewBinaryRules:
     def test_docker_build(self):
         from tracemill.classify import classify_shell
-        cls = classify_shell("docker build -t myapp .")
+        cls = _classify_shell("docker build -t myapp .")
         assert cls.has_role("executor.container_runtime")
         assert cls.has_action("validate.build_check")
 
     def test_docker_push(self):
         from tracemill.classify import classify_shell
-        cls = classify_shell("docker push myapp:latest")
+        cls = _classify_shell("docker push myapp:latest")
         assert cls.has_action("deliver.push")
 
     def test_kubectl_apply(self):
         from tracemill.classify import classify_shell
-        cls = classify_shell("kubectl apply -f deployment.yaml")
+        cls = _classify_shell("kubectl apply -f deployment.yaml")
         assert cls.has_action("deliver.deploy")
         assert cls.has_scope("state.deployment")
 
     def test_kubectl_delete(self):
         from tracemill.classify import classify_shell
-        cls = classify_shell("kubectl delete pod my-pod")
+        cls = _classify_shell("kubectl delete pod my-pod")
         assert cls.effect == "destructive"
 
     def test_terraform_plan(self):
         from tracemill.classify import classify_shell
-        cls = classify_shell("terraform plan")
+        cls = _classify_shell("terraform plan")
         assert cls.effect == "read_only"
         assert cls.has_scope("configuration.infrastructure")
 
     def test_terraform_apply(self):
         from tracemill.classify import classify_shell
-        cls = classify_shell("terraform apply")
+        cls = _classify_shell("terraform apply")
         assert cls.effect == "mutating"
         assert cls.has_action("deliver.deploy")
 
     def test_terraform_destroy(self):
         from tracemill.classify import classify_shell
-        cls = classify_shell("terraform destroy")
+        cls = _classify_shell("terraform destroy")
         assert cls.effect == "destructive"
 
     def test_curl_get(self):
         from tracemill.classify import classify_shell
-        cls = classify_shell("curl https://api.example.com")
+        cls = _classify_shell("curl https://api.example.com")
         assert cls.effect == "read_only"
 
     def test_curl_post(self):
         from tracemill.classify import classify_shell
-        cls = classify_shell("curl -X POST https://api.example.com -d '{}'")
+        cls = _classify_shell("curl -X POST https://api.example.com -d '{}'")
         assert cls.effect == "mutating"
 
     def test_curl_data_flag(self):
         from tracemill.classify import classify_shell
-        cls = classify_shell("curl --data 'payload' https://api.example.com")
+        cls = _classify_shell("curl --data 'payload' https://api.example.com")
         assert cls.effect == "mutating"
 
     def test_sed_inplace(self):
         from tracemill.classify import classify_shell
-        cls = classify_shell("sed -i 's/foo/bar/g' file.txt")
+        cls = _classify_shell("sed -i 's/foo/bar/g' file.txt")
         assert cls.effect == "mutating"
 
     def test_sed_stdout(self):
         from tracemill.classify import classify_shell
-        cls = classify_shell("sed 's/foo/bar/g' file.txt")
+        cls = _classify_shell("sed 's/foo/bar/g' file.txt")
         assert cls.effect == "read_only"
 
     def test_rm_is_destructive(self):
         from tracemill.classify import classify_shell
-        cls = classify_shell("rm -rf temp/")
+        cls = _classify_shell("rm -rf temp/")
         assert cls.effect == "destructive"
 
     def test_cp_is_mutating(self):
         from tracemill.classify import classify_shell
-        cls = classify_shell("cp src.txt dst.txt")
+        cls = _classify_shell("cp src.txt dst.txt")
         assert cls.effect == "mutating"
 
     def test_cat_is_read_only(self):
         from tracemill.classify import classify_shell
-        cls = classify_shell("cat file.txt")
+        cls = _classify_shell("cat file.txt")
         assert cls.effect == "read_only"
 
     def test_grep_is_investigation(self):
         from tracemill.classify.rules import classify_binary, SHELL_INVESTIGATION
-        act = classify_binary("grep", None, [], ["grep", "pattern", "file"])
+        act = _classify_binary("grep", None, [], ["grep", "pattern", "file"])
         assert act == SHELL_INVESTIGATION
 
     def test_bandit_security_scanner(self):
         from tracemill.classify import classify_shell
-        cls = classify_shell("bandit -r src/")
+        cls = _classify_shell("bandit -r src/")
         assert cls.has_role("validator.security_scanner")
         assert cls.has_action("validate.security_scan")
 
     def test_helm_install(self):
         from tracemill.classify import classify_shell
-        cls = classify_shell("helm install myapp ./chart")
+        cls = _classify_shell("helm install myapp ./chart")
         assert cls.has_action("deliver.deploy")
         assert cls.has_scope("state.deployment")
 
     def test_gh_pr(self):
         from tracemill.classify import classify_shell
-        cls = classify_shell("gh pr create --title 'fix'")
+        cls = _classify_shell("gh pr create --title 'fix'")
         assert cls.has_role("persistence.version_control")
 
     def test_ls_is_investigation(self):
         from tracemill.classify.rules import classify_binary, SHELL_INVESTIGATION
-        act = classify_binary("ls", None, ["-la"], ["ls", "-la"])
+        act = _classify_binary("ls", None, ["-la"], ["ls", "-la"])
         assert act == SHELL_INVESTIGATION
 
     def test_jq_is_read_only(self):
         from tracemill.classify import classify_shell
-        cls = classify_shell("jq '.name' package.json")
+        cls = _classify_shell("jq '.name' package.json")
         assert cls.effect == "read_only"
 
 
@@ -882,48 +904,48 @@ class TestNewBinaryRules:
 class TestMCPHeuristics:
     def test_mcp_filesystem_tool(self):
         from tracemill.classify.tools import classify_tool
-        cls = classify_tool("mcp__myfs__read_file")
+        cls = _classify_tool("mcp__myfs__read_file")
         assert cls.mechanism == "filesystem"
 
     def test_mcp_database_tool(self):
         from tracemill.classify.tools import classify_tool
-        cls = classify_tool("mcp__database__query")
+        cls = _classify_tool("mcp__database__query")
         assert cls.mechanism.startswith("database")
 
     def test_mcp_github_tool(self):
         from tracemill.classify.tools import classify_tool
-        cls = classify_tool("mcp__github__list_repos")
+        cls = _classify_tool("mcp__github__list_repos")
         assert cls.mechanism.startswith("network")
 
     def test_mcp_unknown_namespace(self):
         from tracemill.classify.tools import classify_tool
-        cls = classify_tool("mcp__randomserver__do_stuff")
+        cls = _classify_tool("mcp__randomserver__do_stuff")
         # Falls back to communication but that's OK
         assert cls.mechanism is not None
 
     def test_verb_effect_get(self):
         from tracemill.classify.tools import classify_tool
-        cls = classify_tool("mcp__myserver__get_items")
+        cls = _classify_tool("mcp__myserver__get_items")
         assert cls.effect == "read_only"
 
     def test_verb_effect_delete(self):
         from tracemill.classify.tools import classify_tool
-        cls = classify_tool("mcp__myserver__delete_item")
+        cls = _classify_tool("mcp__myserver__delete_item")
         assert cls.effect == "destructive"
 
     def test_verb_effect_create(self):
         from tracemill.classify.tools import classify_tool
-        cls = classify_tool("mcp__myserver__create_item")
+        cls = _classify_tool("mcp__myserver__create_item")
         assert cls.effect == "mutating"
 
     def test_mcp_redis_tool(self):
         from tracemill.classify.tools import classify_tool
-        cls = classify_tool("mcp__redis__get_key")
+        cls = _classify_tool("mcp__redis__get_key")
         assert cls.mechanism.startswith("database")
 
     def test_mcp_browser_tool(self):
         from tracemill.classify.tools import classify_tool
-        cls = classify_tool("mcp__browser__navigate")
+        cls = _classify_tool("mcp__browser__navigate")
         assert cls.mechanism.startswith("network")
 
 

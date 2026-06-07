@@ -1,8 +1,11 @@
+from functools import partial
+
 """Tests for PowerShell and cmd.exe classifiers."""
 
 from tracemill.classify import (
     classify_cmd_command,
     classify_powershell_command,
+    get_default_engine,
 )
 from tracemill.classify.rules import (
     SHELL_GIT_OPS,
@@ -12,6 +15,11 @@ from tracemill.classify.rules import (
     SHELL_VERIFICATION,
     activity_from_classification,
 )
+
+
+ENGINE = get_default_engine()
+classify_powershell_command = partial(classify_powershell_command, engine=ENGINE)
+classify_cmd_command = partial(classify_cmd_command, engine=ENGINE)
 
 
 def _ps_activity(cmd: str):

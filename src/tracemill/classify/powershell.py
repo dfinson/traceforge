@@ -46,7 +46,8 @@ def _extract_from_command_node(node: ts.Node) -> tuple[str, str | None, list[str
 
 def classify_powershell_command(
     command: str,
-    engine: ClassificationEngine | None = None,
+    *,
+    engine: ClassificationEngine,
 ) -> Classification:
     """Classify a PowerShell command string into a full Classification."""
     if not command or not command.strip():

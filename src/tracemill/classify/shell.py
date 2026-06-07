@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
 import tree_sitter as ts
 import tree_sitter_bash as tsbash
@@ -24,7 +24,6 @@ from tracemill.classify.coding import (
     ShellStructure,
 )
 from tracemill.classify.rules import (
-    BINARY_INFO,
     SHELL_GIT_OPS,
     SHELL_IMPLEMENTATION,
     SHELL_INVESTIGATION,
@@ -43,10 +42,6 @@ if TYPE_CHECKING:
 _BASH_LANGUAGE = ts.Language(tsbash.language())
 _parser = ts.Parser(_BASH_LANGUAGE)
 _Q_COMMANDS = ts.Query(_BASH_LANGUAGE, "(command) @cmd")
-
-_TRANSPARENT_WRAPPERS: Final[frozenset[str]] = frozenset(
-    {"env", "nice", "timeout", "stdbuf", "nohup", "command", "sudo", "exec"}
-)
 
 
 # ── AST helpers ──
@@ -80,10 +75,10 @@ def _looks_like_command(token: str) -> bool:
 
 def _unwrap_binary(
     words: list[str],
-    engine: ClassificationEngine | None = None,
+    engine: ClassificationEngine,
 ) -> tuple[str, str | None, list[str]]:
     """Extract binary, subcmd, and flags from a word list, unwrapping wrappers."""
-    transparent = engine.transparent_wrappers if engine is not None else _TRANSPARENT_WRAPPERS
+    transparent = engine.transparent_wrappers
     idx = 0
 
     while (
@@ -157,68 +152,6 @@ def _extract_commands_from_ast(command: str) -> list[str]:
     return commands
 
 
-# ── Per-command dimension mappings ──
-
-_ACTIVITY_TO_ACTION: Final[dict[ShellActivity, str]] = {
-    SHELL_VERIFICATION: CodingAction.TEST,
-    SHELL_SETUP: CodingAction.INSTALL,
-    SHELL_GIT_OPS: CodingAction.COMMIT,
-    SHELL_INVESTIGATION: CodingAction.READ,
-    SHELL_IMPLEMENTATION: CodingAction.RUN_SCRIPT,
-}
-
-_ACTIVITY_TO_SCOPE: Final[dict[ShellActivity, str]] = {
-    SHELL_VERIFICATION: CodingScope.TEST_CODE,
-    SHELL_SETUP: CodingScope.DEPENDENCY,
-    SHELL_GIT_OPS: CodingScope.REPOSITORY,
-    SHELL_INVESTIGATION: CodingScope.SOURCE_CODE,
-    SHELL_IMPLEMENTATION: CodingScope.SOURCE_CODE,
-}
-
-_ACTIVITY_TO_PHASE: Final[dict[ShellActivity, str]] = {
-    SHELL_VERIFICATION: Phase.VERIFICATION,
-    SHELL_GIT_OPS: Phase.REVIEW,
-    SHELL_SETUP: Phase.IMPLEMENTATION,
-    SHELL_INVESTIGATION: Phase.EXPLORATION,
-    SHELL_IMPLEMENTATION: Phase.IMPLEMENTATION,
-}
-
-# Per-git-subcommand action (instead of mapping all git ops to one action)
-_GIT_SUBCMD_ACTION: Final[dict[str, str]] = {
-    "commit": CodingAction.COMMIT,
-    "push": CodingAction.PUSH,
-    "merge": CodingAction.MERGE,
-    "rebase": CodingAction.REBASE,
-    "cherry-pick": CodingAction.MERGE,
-    "tag": CodingAction.STAGE,
-    "reset": CodingAction.EDIT,
-    "stash": CodingAction.STAGE,
-    "diff": CodingAction.DIFF,
-    "log": CodingAction.BROWSE,
-    "status": CodingAction.BROWSE,
-    "show": CodingAction.READ,
-    "blame": CodingAction.READ,
-    "branch": CodingAction.BROWSE,
-    "checkout": CodingAction.RUN_SCRIPT,
-    "switch": CodingAction.RUN_SCRIPT,
-    "fetch": CodingAction.READ,
-    "pull": CodingAction.READ,
-    "clone": CodingAction.READ,
-    "add": CodingAction.STAGE,
-}
-
-# Per-verification-role action (maps to validate.* subtypes)
-_VERIFICATION_ROLE_ACTION: Final[dict[str, str]] = {
-    "validator.linter": CodingAction.LINT,
-    "validator.test_runner": CodingAction.TEST,
-    "validator.type_checker": CodingAction.TYPECHECK,
-    "validator.security_scanner": CodingAction.SECURITY_SCAN,
-    "validator.build_checker": CodingAction.BUILD_CHECK,
-    "transformer.formatter": CodingAction.LINT,  # formatter in check mode = linting
-    "transformer.bundler": CodingAction.BUILD_CHECK,  # bundler build = build check
-}
-
-
 @dataclass(frozen=True)
 class _CommandClassification:
     """Per-command classification result (internal helper)."""
@@ -238,7 +171,8 @@ def classify_single_command(
     subcmd: str | None,
     flags: list[str],
     words: list[str] | None = None,
-    engine: ClassificationEngine | None = None,
+    *,
+    engine: ClassificationEngine,
 ) -> _CommandClassification:
     """Classify a single binary invocation into its dimensions.
 
@@ -248,14 +182,12 @@ def classify_single_command(
     activity = classify_binary(binary, subcmd, flags, words, engine=engine)
     rule = match_rule(binary, subcmd, flags, engine=engine)
 
-    bi = engine.binary_info if engine is not None else BINARY_INFO
-    act_to_action = engine.activity_to_action if engine is not None else _ACTIVITY_TO_ACTION
-    act_to_scope = engine.activity_to_scope if engine is not None else _ACTIVITY_TO_SCOPE
-    act_to_phase = engine.activity_to_phase if engine is not None else _ACTIVITY_TO_PHASE
-    git_subcmd_action = engine.git_subcmd_actions if engine is not None else _GIT_SUBCMD_ACTION
-    verif_role_action = (
-        engine.verification_role_actions if engine is not None else _VERIFICATION_ROLE_ACTION
-    )
+    bi = engine.binary_info
+    act_to_action = engine.activity_to_action
+    act_to_scope = engine.activity_to_scope
+    act_to_phase = engine.activity_to_phase
+    git_subcmd_action = engine.git_subcmd_actions
+    verif_role_action = engine.verification_role_actions
 
     # Role (rule-based, fallback to binary info)
     cmd_role = ""
@@ -427,7 +359,8 @@ def _check_tree_structure(node: ts.Node, structures: set[str]) -> None:
 
 def classify_shell(
     command: str,
-    engine: ClassificationEngine | None = None,
+    *,
+    engine: ClassificationEngine,
 ) -> Classification:
     """Classify a bash shell command into a Classification object.
 

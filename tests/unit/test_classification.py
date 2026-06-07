@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import partial
+
 import pytest
 
 from tracemill.classify.core import (
@@ -19,9 +21,15 @@ from tracemill.classify.coding import (
     CodingRole,
     CodingScope,
 )
+from tracemill.classify import get_default_engine
 from tracemill.classify.registry import DimensionRegistry, get_default_registry
 from tracemill.classify.shell import classify_shell
 from tracemill.classify.tools import classify_tool
+
+
+ENGINE = get_default_engine()
+classify_shell = partial(classify_shell, engine=ENGINE)
+classify_tool = partial(classify_tool, engine=ENGINE)
 
 
 # ── Classification dataclass tests ──
@@ -219,7 +227,7 @@ class TestClassifyShell:
     def test_pip_install(self):
         c = classify_shell("pip install flask")
         assert c.effect == "mutating"
-        assert c.has_role("orchestrator.package_manager")
+        assert c.has_role("modifier.package_manager")
         assert "network_outbound" in c.capability
         assert "pip" in c.binaries
 

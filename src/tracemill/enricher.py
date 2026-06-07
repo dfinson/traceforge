@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from tracemill.classify import classify_shell, classify_tool
+from tracemill.classify import classify_shell, classify_tool, get_default_engine
 from tracemill.classify.config import ClassificationEngine, ClassifyConfig, load_config
 from tracemill.classify.core import Classification, PhaseSegment
 from tracemill.classify.coding import CodingMechanism, CodingScope
@@ -39,11 +39,11 @@ class Enricher:
 
         # Build engine eagerly so config errors surface at construction time
         if config is not None:
-            self._engine = ClassificationEngine(config)
+            self._engine: ClassificationEngine = ClassificationEngine(config)
         elif config_path is not None:
             self._engine = ClassificationEngine(load_config(Path(config_path)))
         else:
-            self._engine: ClassificationEngine | None = None
+            self._engine = get_default_engine()
 
     def process(self, event: SessionEvent) -> SessionEvent | list[SessionEvent] | None:
         """Enrich a single event. Returns None if event is buffered (tool_start waiting

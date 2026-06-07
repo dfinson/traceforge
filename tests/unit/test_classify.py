@@ -1,9 +1,12 @@
+from functools import partial
+
 """Tests for tracemill.classify — tool normalization, classification, shell command parsing."""
 
 from tracemill.classify import (
     _extract_commands_from_ast,
     classify_shell,
     classify_tool,
+    get_default_engine,
     normalize_tool_name,
 )
 from tracemill.classify.core import Classification
@@ -15,6 +18,12 @@ from tracemill.classify.rules import (
     SHELL_VERIFICATION,
     activity_from_classification,
 )
+
+
+ENGINE = get_default_engine()
+normalize_tool_name = partial(normalize_tool_name, engine=ENGINE)
+classify_tool = partial(classify_tool, engine=ENGINE)
+classify_shell = partial(classify_shell, engine=ENGINE)
 
 
 def _activity(cmd: str):

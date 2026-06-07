@@ -41,11 +41,7 @@ from tracemill.classify.shell import (
     _extract_commands_from_ast,
     classify_shell,
 )
-from tracemill.classify.tools import (
-    CANONICAL_TOOLS,
-    classify_tool,
-    normalize_tool_name,
-)
+from tracemill.classify.tools import classify_tool, normalize_tool_name
 from tracemill.classify.workflow import Phase, Visibility
 
 __all__ = [
@@ -89,6 +85,5 @@ __all__ = [
     "extract_mcp_namespace",
     "McpServerProfile",
     "McpToolOverride",
-    "CANONICAL_TOOLS",
     "normalize_tool_name",
 ]

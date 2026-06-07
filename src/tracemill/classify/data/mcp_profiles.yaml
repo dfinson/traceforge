@@ -381,3 +381,211 @@ mcp_profiles:
     role: [communicator.system_reporter]
     default_effect: read_only
     action: [retrieve]
+
+  # ─── Code intelligence / agent supervision ─────────────────────────────
+
+  - id: coderecon
+    namespace_aliases: [coderecon, code_recon]
+    mechanism: process
+    role: [retriever.search_index]
+    default_effect: read_only
+    scope: [artifact.source_code]
+    capability: [subprocess]
+    tool_overrides:
+      refactor_commit:
+        effect: mutating
+        role: [modifier.file_editor]
+        capability: [filesystem_write]
+      checkpoint:
+        effect: mutating
+        role: [persistence.version_control]
+        capability: [filesystem_write, subprocess]
+      refactor_rename:
+        effect: read_only
+      refactor_move:
+        effect: read_only
+      blast_radius:
+        scope: [artifact.test_code]
+      covering_tests:
+        scope: [artifact.test_code]
+      recon_line_coverage:
+        scope: [artifact.test_code]
+
+  - id: codeplane
+    namespace_aliases: [codeplane, cpl]
+    mechanism: network.http
+    role: [orchestrator.task_runner]
+    scope: [artifact.source_code]
+    capability: [network_outbound, uses_credentials]
+    tool_overrides:
+      codeplane_job:
+        role: [orchestrator.task_runner]
+      codeplane_approval:
+        effect: mutating
+      codeplane_workspace:
+        effect: read_only
+        role: [retriever.file_browser]
+      codeplane_artifact:
+        effect: read_only
+        role: [retriever.file_browser]
+      codeplane_repo:
+        role: [orchestrator.task_runner]
+      codeplane_settings:
+        effect: mutating
+      codeplane_health:
+        effect: read_only
+
+  # ─── Project management / issue tracking ────────────────────────────────
+
+  - id: linear
+    namespace_aliases: [linear, mcp_server_linear]
+    mechanism: network.http
+    role: [retriever.api_client]
+    scope: [artifact.documentation]
+    capability: [network_outbound, uses_credentials]
+    tool_overrides:
+      create_issue:
+        effect: mutating
+      update_issue:
+        effect: mutating
+      delete_issue:
+        effect: destructive
+
+  - id: jira
+    namespace_aliases: [jira, atlassian]
+    mechanism: network.http
+    role: [retriever.api_client]
+    scope: [artifact.documentation]
+    capability: [network_outbound, uses_credentials]
+    tool_overrides:
+      create_issue:
+        effect: mutating
+      transition_issue:
+        effect: mutating
+      delete_issue:
+        effect: destructive
+
+  - id: todoist
+    namespace_aliases: [todoist]
+    mechanism: network.http
+    role: [retriever.api_client]
+    default_effect: read_only
+    capability: [network_outbound, uses_credentials]
+    tool_overrides:
+      create_task:
+        effect: mutating
+      complete_task:
+        effect: mutating
+      delete_task:
+        effect: destructive
+
+  # ─── Design tools ──────────────────────────────────────────────────────
+
+  - id: figma
+    namespace_aliases: [figma, cursor_talk_to_figma]
+    mechanism: network.http
+    role: [retriever.api_client]
+    scope: [artifact.documentation]
+    default_effect: read_only
+    capability: [network_outbound, uses_credentials]
+    tool_overrides:
+      modify_layers:
+        effect: mutating
+      delete_node:
+        effect: destructive
+
+  # ─── Payments / SaaS APIs ──────────────────────────────────────────────
+
+  - id: stripe
+    namespace_aliases: [stripe]
+    mechanism: network.http
+    role: [retriever.api_client]
+    capability: [network_outbound, uses_credentials]
+    tool_overrides:
+      create_charge:
+        effect: mutating
+      create_refund:
+        effect: mutating
+      delete_customer:
+        effect: destructive
+
+  # ─── Deployment / infrastructure ───────────────────────────────────────
+
+  - id: vercel
+    namespace_aliases: [vercel]
+    mechanism: network.http
+    role: [orchestrator.task_runner]
+    scope: [state.deployment]
+    capability: [network_outbound, uses_credentials]
+    tool_overrides:
+      deploy_project:
+        effect: mutating
+      delete_deployment:
+        effect: destructive
+
+  - id: supabase
+    namespace_aliases: [supabase]
+    mechanism: network.http
+    role: [persistence.database]
+    capability: [network_outbound, uses_credentials]
+    tool_overrides:
+      query_database:
+        mechanism: database.sql
+      upload_file:
+        effect: mutating
+      delete_record:
+        effect: destructive
+
+  - id: cloudflare
+    namespace_aliases: [cloudflare]
+    mechanism: network.http
+    role: [retriever.api_client]
+    scope: [configuration.infrastructure]
+    capability: [network_outbound, uses_credentials]
+    tool_overrides:
+      manage_dns:
+        effect: mutating
+      delete_worker:
+        effect: destructive
+      kv_put:
+        effect: mutating
+      kv_delete:
+        effect: destructive
+
+  # ─── CI/CD ─────────────────────────────────────────────────────────────
+
+  - id: jenkins
+    namespace_aliases: [jenkins]
+    mechanism: network.http
+    role: [orchestrator.ci_cd]
+    scope: [configuration.ci_cd]
+    capability: [network_outbound, uses_credentials]
+
+  - id: github_actions
+    namespace_aliases: [github_actions]
+    mechanism: network.http
+    role: [orchestrator.ci_cd]
+    scope: [configuration.ci_cd]
+    capability: [network_outbound, uses_credentials]
+
+  # ─── Web scraping / search ─────────────────────────────────────────────
+
+  - id: firecrawl
+    namespace_aliases: [firecrawl]
+    mechanism: network.http
+    role: [retriever.web_scraper]
+    default_effect: read_only
+    capability: [network_outbound, uses_credentials]
+
+  # ─── Data warehouses ───────────────────────────────────────────────────
+
+  - id: snowflake
+    namespace_aliases: [snowflake]
+    mechanism: database.sql
+    role: [persistence.database]
+    capability: [network_outbound, uses_credentials]
+    tool_overrides:
+      drop_table:
+        effect: destructive
+      truncate_table:
+        effect: destructive

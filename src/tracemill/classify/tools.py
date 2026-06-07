@@ -234,9 +234,9 @@ def _infer_unknown_tool(raw_name: str, canonical: str) -> Classification:
     """Infer classification for an unknown tool from naming patterns.
 
     Conservative: only matches clear namespace/verb tokens. Falls back to
-    communication mechanism if no patterns match (better than guessing wrong).
+    unknown mechanism if no patterns match — we don't fabricate a domain.
     """
-    mechanism: str = Mechanism.COMMUNICATION
+    mechanism: str = Mechanism.UNKNOWN
     role: str = ""
     effect: str | None = None
 
@@ -276,7 +276,7 @@ def classify_tool(
     Unknown tools and MCP tools get heuristic classification from name patterns.
     """
     if not tool_name:
-        fallback = Classification(mechanism=Mechanism.COMMUNICATION, effect=None)
+        fallback = Classification(mechanism=Mechanism.UNKNOWN, effect=None)
         return _with_phase_map(fallback)
 
     canonical = normalize_tool_name(tool_name)

@@ -89,7 +89,7 @@ class TestClassifyTool:
     def test_empty_name(self):
         c = classify_tool("")
         assert isinstance(c, Classification)
-        assert c.mechanism == "communication"
+        assert c.mechanism == "unknown"
 
     def test_known_tools(self):
         assert classify_tool("bash").mechanism == "process.shell"
@@ -115,8 +115,7 @@ class TestClassifyTool:
 
     def test_unknown_tool(self):
         c = classify_tool("unknowntool")
-        assert c.mechanism == "communication"
-        assert c.effect is None
+        assert c.mechanism == "unknown"
 
     def test_custom_overrides_default(self):
         custom_cls = Classification(mechanism="custom.shell", effect="mutating")

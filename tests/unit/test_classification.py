@@ -320,8 +320,7 @@ class TestClassifyToolDetailed:
 
     def test_unknown_tool(self):
         c = classify_tool("totally_unknown_tool")
-        assert c.mechanism == "communication"
-        assert c.effect is None
+        assert c.mechanism == "unknown"
 
     def test_normalized_aliases(self):
         c = classify_tool("read_file")

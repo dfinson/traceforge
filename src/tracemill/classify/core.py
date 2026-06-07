@@ -29,6 +29,7 @@ class Mechanism(StrEnum):
     DATABASE = "database"  # Queries or mutates a database
     DELEGATION = "delegation"  # Delegates work to another agent or system
     COMMUNICATION = "communication"  # Exchanges messages (user or system)
+    UNKNOWN = "unknown"  # Tool mechanism could not be determined
 
 
 class Effect(StrEnum):

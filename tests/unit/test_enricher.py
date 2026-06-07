@@ -191,7 +191,7 @@ class TestToolClassification:
         flushed = enricher.flush()
         cls = flushed[0].metadata.classification
         assert cls is not None
-        assert cls.mechanism == "communication"
+        assert cls.mechanism == "unknown"
 
     def test_custom_classification_overrides_defaults(self):
         custom = Classification(mechanism="custom.write", effect="mutating")

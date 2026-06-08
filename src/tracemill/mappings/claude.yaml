@@ -67,7 +67,7 @@ events:
 
   # ── Thinking ───────────────────────────────────────────────────────────────
   assistant.thinking:
-    kind: llm.thinking_chunk
+    kind: llm.thinking.chunk
     payload:
       content: thinking
 

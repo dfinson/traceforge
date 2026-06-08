@@ -85,15 +85,9 @@ class CopilotAdapter(JsonLineAdapter):
     by the ``ingestion_mode`` constructor parameter.
     """
 
-    SOURCE_FRAMEWORK = "copilot"
-
-    def __init__(self, ingestion_mode: str = "file_watch") -> None:
+    def __init__(self, ingestion_mode: str) -> None:
         self._session_id: str | None = None
         self._ingestion_mode = ingestion_mode
-
-    @property
-    def source_adapter(self) -> str:
-        return "copilot_sdk" if self._ingestion_mode == "stream" else "cli_jsonl"
 
     def parse_dict(self, obj: dict[str, Any]) -> Iterator[SessionEvent]:
         """Deserialize via the SDK and emit canonical events."""
@@ -118,8 +112,8 @@ class CopilotAdapter(JsonLineAdapter):
         timestamp = sdk_event.timestamp if sdk_event.timestamp else datetime.now(timezone.utc)
         payload = self._extract_payload(sdk_event.data, sdk_event.type, kind)
         metadata = EventMetadata(
-            source_framework=self.SOURCE_FRAMEWORK,
-            source_adapter=self.source_adapter,
+            source_framework="copilot",
+            source_adapter="copilot",
             ingestion_mode=self._ingestion_mode,
             raw_kind=sdk_event.type.value,
         )

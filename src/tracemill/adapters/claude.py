@@ -37,15 +37,9 @@ class ClaudeAdapter(JsonLineAdapter):
     by the ``ingestion_mode`` constructor parameter.
     """
 
-    SOURCE_FRAMEWORK = "claude"
-
-    def __init__(self, ingestion_mode: str = "file_watch", session_id: str | None = None) -> None:
+    def __init__(self, ingestion_mode: str, session_id: str | None = None) -> None:
         self._session_id = session_id
         self._ingestion_mode = ingestion_mode
-
-    @property
-    def source_adapter(self) -> str:
-        return "claude_sdk" if self._ingestion_mode == "stream" else "claude_jsonl"
 
     def parse_dict(self, obj: dict[str, Any]) -> Iterator[SessionEvent]:
         """Deserialize via the SDK and emit canonical events."""
@@ -75,8 +69,8 @@ class ClaudeAdapter(JsonLineAdapter):
 
     def _make_metadata(self, raw_kind: str) -> EventMetadata:
         return EventMetadata(
-            source_framework=self.SOURCE_FRAMEWORK,
-            source_adapter=self.source_adapter,
+            source_framework="claude",
+            source_adapter="claude",
             ingestion_mode=self._ingestion_mode,
             raw_kind=raw_kind,
         )

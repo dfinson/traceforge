@@ -400,10 +400,10 @@ class TestClaudeJsonlAdapter:
 class TestCopilotAdapterModes:
     def test_default_is_file_watch(self):
         from tracemill.adapters.copilot import CopilotAdapter
-        adapter = CopilotAdapter()
+        adapter = CopilotAdapter(ingestion_mode="file_watch")
         line = _copilot_event("user.message", {"content": "test"})
         events = list(adapter.parse(line))
-        assert events[0].metadata.source_adapter == "cli_jsonl"
+        assert events[0].metadata.source_adapter == "copilot"
         assert events[0].metadata.ingestion_mode == "file_watch"
 
     def test_stream_mode(self):
@@ -411,7 +411,7 @@ class TestCopilotAdapterModes:
         adapter = CopilotAdapter(ingestion_mode="stream")
         line = _copilot_event("user.message", {"content": "hi"})
         events = list(adapter.parse(line))
-        assert events[0].metadata.source_adapter == "copilot_sdk"
+        assert events[0].metadata.source_adapter == "copilot"
         assert events[0].metadata.ingestion_mode == "stream"
 
     def test_parse_sdk_event_typed_interface(self):
@@ -425,7 +425,7 @@ class TestCopilotAdapterModes:
         events = list(adapter.parse_sdk_event(sdk_event))
         assert len(events) == 1
         assert events[0].payload["content"] == "typed"
-        assert events[0].metadata.source_adapter == "copilot_sdk"
+        assert events[0].metadata.source_adapter == "copilot"
 
 
 # ─── ClaudeAdapter ingestion modes ──────────────────────────────────────────
@@ -434,11 +434,11 @@ class TestCopilotAdapterModes:
 class TestClaudeAdapterModes:
     def test_default_is_file_watch(self):
         from tracemill.adapters.claude import ClaudeAdapter
-        adapter = ClaudeAdapter()
+        adapter = ClaudeAdapter(ingestion_mode="file_watch")
         line = json.dumps({"type": "user", "message": {"content": "test"}})
         events = list(adapter.parse(line))
         assert len(events) == 1
-        assert events[0].metadata.source_adapter == "claude_jsonl"
+        assert events[0].metadata.source_adapter == "claude"
         assert events[0].metadata.ingestion_mode == "file_watch"
 
     def test_stream_mode(self):
@@ -446,7 +446,7 @@ class TestClaudeAdapterModes:
         adapter = ClaudeAdapter(ingestion_mode="stream")
         line = json.dumps({"type": "user", "message": {"content": "hi"}})
         events = list(adapter.parse(line))
-        assert events[0].metadata.source_adapter == "claude_sdk"
+        assert events[0].metadata.source_adapter == "claude"
         assert events[0].metadata.ingestion_mode == "stream"
 
     def test_parse_message_typed_interface(self):
@@ -459,7 +459,7 @@ class TestClaudeAdapterModes:
         events = list(adapter.parse_message(msg))
         assert len(events) == 1
         assert events[0].payload["content"] == "typed hello"
-        assert events[0].metadata.source_adapter == "claude_sdk"
+        assert events[0].metadata.source_adapter == "claude"
 
 
 # ─── Malformed Input ─────────────────────────────────────────────────────────

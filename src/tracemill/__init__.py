@@ -33,11 +33,13 @@ from tracemill.types import (
     is_known_kind,
 )
 
-# Backward-compat aliases (deprecated)
-CLIJsonlAdapter = CopilotAdapter
-CopilotSDKAdapter = CopilotAdapter
-ClaudeJsonlAdapter = ClaudeAdapter
-ClaudeSDKAdapter = ClaudeAdapter
+# Backward-compat factories (deprecated)
+from tracemill.adapters import (
+    CLIJsonlAdapter,
+    CopilotSDKAdapter,
+    ClaudeJsonlAdapter,
+    ClaudeSDKAdapter,
+)
 
 __all__ = [
     "Adapter",

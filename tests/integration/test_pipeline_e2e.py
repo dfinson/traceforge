@@ -79,7 +79,7 @@ class TestCopilotFullPipeline:
         # All events have metadata
         for ev in enriched:
             assert ev.metadata.source_framework == "copilot"
-            assert ev.metadata.source_adapter in ("cli_jsonl", "copilot_sdk")
+            assert ev.metadata.source_adapter == "copilot"
 
     def test_raw_event_preserved(self):
         """Every event carries the original JSON verbatim in raw_event."""
@@ -97,7 +97,7 @@ class TestCopilotFullPipeline:
         """CopilotAdapter(ingestion_mode='stream') sets correct metadata."""
         from tracemill.adapters.copilot import CopilotAdapter
 
-        file_adapter = CopilotAdapter()  # default: file_watch
+        file_adapter = CopilotAdapter(ingestion_mode="file_watch")
         stream_adapter = CopilotAdapter(ingestion_mode="stream")
         fixture = FIXTURES / "copilot_session.jsonl"
 
@@ -113,9 +113,9 @@ class TestCopilotFullPipeline:
             assert f.payload == s.payload
             assert f.session_id == s.session_id
             # Metadata differs by ingestion mode
-            assert f.metadata.source_adapter == "cli_jsonl"
+            assert f.metadata.source_adapter == "copilot"
             assert f.metadata.ingestion_mode == "file_watch"
-            assert s.metadata.source_adapter == "copilot_sdk"
+            assert s.metadata.source_adapter == "copilot"
             assert s.metadata.ingestion_mode == "stream"
 
 
@@ -144,7 +144,7 @@ class TestClaudeFullPipeline:
         """ClaudeAdapter(ingestion_mode='stream') sets correct metadata."""
         from tracemill.adapters.claude import ClaudeAdapter
 
-        file_adapter = ClaudeAdapter()
+        file_adapter = ClaudeAdapter(ingestion_mode="file_watch")
         stream_adapter = ClaudeAdapter(ingestion_mode="stream")
         fixture = FIXTURES / "claude_session.jsonl"
 
@@ -158,8 +158,8 @@ class TestClaudeFullPipeline:
         for f, s in zip(file_events, stream_events):
             assert f.kind == s.kind
             assert f.payload == s.payload
-            assert f.metadata.source_adapter == "claude_jsonl"
-            assert s.metadata.source_adapter == "claude_sdk"
+            assert f.metadata.source_adapter == "claude"
+            assert s.metadata.source_adapter == "claude"
             assert s.metadata.ingestion_mode == "stream"
 
 

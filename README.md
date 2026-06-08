@@ -28,7 +28,7 @@ pip install tracemill[all]               # everything
 
 ```python
 from tracemill import EventPipeline, Enricher
-from tracemill.adapters import CLIJsonlAdapter
+from tracemill.adapters import CopilotAdapter
 from tracemill.sinks import SQLiteSink
 
 # Create pipeline
@@ -37,7 +37,7 @@ enricher = Enricher()
 pipeline = EventPipeline(enricher=enricher, sinks=[sink])
 
 # Parse and process events
-adapter = CLIJsonlAdapter()
+adapter = CopilotAdapter(ingestion_mode="file_watch")
 for line in session_lines:
     event = adapter.parse(line)
     if event:
@@ -84,25 +84,27 @@ Adapters parse raw agent output formats into `SessionEvent`:
 
 | Adapter | Input format | Agent |
 | --- | --- | --- |
-| `CLIJsonlAdapter` | JSONL session files | Copilot CLI |
-| `CopilotSDKAdapter` | SDK event stream | Copilot extensions |
+| `CopilotAdapter` | JSONL / SDK stream | GitHub Copilot |
+| `ClaudeAdapter` | JSONL / SDK stream | Claude Code |
+| `MappedJsonAdapter` | YAML-driven JSON | Any (CrewAI, OpenHands, etc.) |
 
 Adapters are stateless parsers. They don't manage files or processes — consumers handle I/O.
 
 ### Writing a custom adapter
 
 ```python
-from tracemill.adapters import AdapterInterface
+from tracemill.adapters import JsonLineAdapter
 from tracemill.types import SessionEvent
 
-class MyAdapter(AdapterInterface):
-    @property
-    def source_id(self) -> str:
-        return "my-agent"
-
-    def parse(self, raw: dict | str) -> SessionEvent | None:
-        # Parse your agent's event format into SessionEvent
-        ...
+class MyAdapter(JsonLineAdapter):
+    def parse_dict(self, obj: dict) -> Iterator[SessionEvent]:
+        # Parse your agent's JSON event format into SessionEvents
+        yield SessionEvent(
+            kind="message.assistant",
+            session_id=obj.get("session_id", "unknown"),
+            timestamp=datetime.now(timezone.utc),
+            payload={"content": obj.get("text", "")},
+        )
 ```
 
 ## Enricher

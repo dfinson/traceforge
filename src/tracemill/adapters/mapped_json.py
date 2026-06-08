@@ -63,7 +63,7 @@ class FrameworkMapping(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     framework: str  # e.g. "crewai", "openhands"
-    ingestion_mode: IngestionMode = "file_watch"
+    ingestion_mode: IngestionMode  # must be explicit in YAML
     type_field: str = "type"  # dot-path to event type in raw JSON
     timestamp_field: str | None = None  # dot-path to timestamp
     session_field: str | None = None  # dot-path to session ID

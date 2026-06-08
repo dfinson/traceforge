@@ -12,10 +12,8 @@ from pathlib import Path
 import pytest
 
 from tracemill import (
-    CLIJsonlAdapter,
-    ClaudeJsonlAdapter,
-    ClaudeSDKAdapter,
-    CopilotSDKAdapter,
+    ClaudeAdapter,
+    CopilotAdapter,
     Enricher,
     EventKind,
     EventPipeline,
@@ -53,7 +51,7 @@ class TestCopilotFullPipeline:
     """End-to-end: Copilot JSONL fixture → adapter → enricher → sink."""
 
     def test_fixture_through_enricher(self):
-        adapter = CLIJsonlAdapter()
+        adapter = CopilotAdapter(ingestion_mode="file_watch")
         enricher = Enricher()
         fixture = FIXTURES / "copilot_session.jsonl"
 
@@ -83,7 +81,7 @@ class TestCopilotFullPipeline:
 
     def test_raw_event_preserved(self):
         """Every event carries the original JSON verbatim in raw_event."""
-        adapter = CLIJsonlAdapter()
+        adapter = CopilotAdapter(ingestion_mode="file_watch")
         fixture = FIXTURES / "copilot_session.jsonl"
 
         for line in fixture.read_text().splitlines():
@@ -123,7 +121,7 @@ class TestClaudeFullPipeline:
     """End-to-end: Claude JSONL fixture → adapter → enricher → sink."""
 
     def test_fixture_through_enricher(self):
-        adapter = ClaudeJsonlAdapter()
+        adapter = ClaudeAdapter(ingestion_mode="file_watch")
         enricher = Enricher()
         fixture = FIXTURES / "claude_session.jsonl"
 
@@ -350,12 +348,12 @@ class TestCrossAdapterConsistency:
         events = []
 
         # Copilot
-        copilot = CLIJsonlAdapter()
+        copilot = CopilotAdapter(ingestion_mode="file_watch")
         for line in (FIXTURES / "copilot_session.jsonl").read_text().splitlines():
             events.extend(copilot.parse(line))
 
         # Claude
-        claude = ClaudeJsonlAdapter()
+        claude = ClaudeAdapter(ingestion_mode="file_watch")
         for line in (FIXTURES / "claude_session.jsonl").read_text().splitlines():
             events.extend(claude.parse(line))
 
@@ -426,7 +424,7 @@ class TestEnricherIntegration:
 
     def test_tool_pairing_copilot(self):
         """Enricher pairs Copilot tool start/complete and computes duration."""
-        adapter = CLIJsonlAdapter()
+        adapter = CopilotAdapter(ingestion_mode="file_watch")
         enricher = Enricher()
 
         start = json.dumps({
@@ -464,7 +462,7 @@ class TestEnricherIntegration:
 
     def test_flush_emits_unpaired(self):
         """Unpaired tool starts are emitted on flush."""
-        adapter = CLIJsonlAdapter()
+        adapter = CopilotAdapter(ingestion_mode="file_watch")
         enricher = Enricher()
 
         session_start = json.dumps({
@@ -497,29 +495,38 @@ class TestEnricherIntegration:
 class TestAdapterRobustness:
     """Test error handling and edge cases across all adapters."""
 
-    @pytest.mark.parametrize("adapter_cls", [CLIJsonlAdapter, ClaudeJsonlAdapter])
-    def test_empty_input(self, adapter_cls):
-        adapter = adapter_cls()
+    @pytest.mark.parametrize("make_adapter", [
+        lambda: CopilotAdapter(ingestion_mode="file_watch"),
+        lambda: ClaudeAdapter(ingestion_mode="file_watch"),
+    ])
+    def test_empty_input(self, make_adapter):
+        adapter = make_adapter()
         assert list(adapter.parse("")) == []
         assert list(adapter.parse(b"")) == []
         assert list(adapter.parse("   ")) == []
 
-    @pytest.mark.parametrize("adapter_cls", [CLIJsonlAdapter, ClaudeJsonlAdapter])
-    def test_garbage_input(self, adapter_cls):
-        adapter = adapter_cls()
+    @pytest.mark.parametrize("make_adapter", [
+        lambda: CopilotAdapter(ingestion_mode="file_watch"),
+        lambda: ClaudeAdapter(ingestion_mode="file_watch"),
+    ])
+    def test_garbage_input(self, make_adapter):
+        adapter = make_adapter()
         assert list(adapter.parse("not json at all {{{")) == []
         assert list(adapter.parse(b"\x00\xff\xfe")) == []
 
-    @pytest.mark.parametrize("adapter_cls", [CLIJsonlAdapter, ClaudeJsonlAdapter])
-    def test_non_dict_json(self, adapter_cls):
-        adapter = adapter_cls()
+    @pytest.mark.parametrize("make_adapter", [
+        lambda: CopilotAdapter(ingestion_mode="file_watch"),
+        lambda: ClaudeAdapter(ingestion_mode="file_watch"),
+    ])
+    def test_non_dict_json(self, make_adapter):
+        adapter = make_adapter()
         assert list(adapter.parse("[1,2,3]")) == []
         assert list(adapter.parse('"just a string"')) == []
         assert list(adapter.parse("42")) == []
         assert list(adapter.parse("null")) == []
 
     def test_mapped_json_missing_type_field(self):
-        mapping = FrameworkMapping(framework="test", events={})
+        mapping = FrameworkMapping(framework="test", ingestion_mode="file_watch", events={})
         adapter = MappedJsonAdapter(mapping)
         # No "type" field in the JSON — should still produce RAW event
         events = list(adapter.parse(json.dumps({"data": "hello"})))
@@ -531,6 +538,7 @@ class TestAdapterRobustness:
         """Large payloads don't crash the adapter."""
         mapping = FrameworkMapping(
             framework="test",
+            ingestion_mode="file_watch",
             events={"big": EventMapping(kind="message.user", payload={"content": "data"})},
         )
         adapter = MappedJsonAdapter(mapping)
@@ -540,7 +548,7 @@ class TestAdapterRobustness:
 
     def test_copilot_unknown_event_type(self):
         """Unknown Copilot event types emit as RAW."""
-        adapter = CLIJsonlAdapter()
+        adapter = CopilotAdapter(ingestion_mode="file_watch")
         line = json.dumps({
             "type": "future.new_feature",
             "id": _uid(),
@@ -553,7 +561,7 @@ class TestAdapterRobustness:
 
     def test_claude_system_message_handling(self):
         """Claude system messages are handled gracefully."""
-        adapter = ClaudeJsonlAdapter()
+        adapter = ClaudeAdapter(ingestion_mode="file_watch")
         line = json.dumps({"type": "system", "message": {"content": "System prompt here"}})
         events = list(adapter.parse(line))
         # System messages may be skipped or emitted as system
@@ -564,6 +572,7 @@ class TestAdapterRobustness:
         """Missing payload paths produce None (not crash)."""
         mapping = FrameworkMapping(
             framework="test",
+            ingestion_mode="file_watch",
             events={
                 "evt": EventMapping(
                     kind="tool.call.started",

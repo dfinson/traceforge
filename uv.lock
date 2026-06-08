@@ -1776,14 +1776,10 @@ name = "tracemill"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "autogen-agentchat" },
     { name = "claude-agent-sdk" },
     { name = "github-copilot-sdk" },
-    { name = "langgraph" },
     { name = "pydantic" },
-    { name = "pydantic-ai-slim" },
     { name = "pyyaml" },
-    { name = "smolagents" },
     { name = "tree-sitter" },
     { name = "tree-sitter-bash" },
     { name = "tree-sitter-powershell" },
@@ -1792,17 +1788,33 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "aiosqlite" },
+    { name = "autogen-agentchat" },
+    { name = "langgraph" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-sdk" },
+    { name = "pydantic-ai-slim" },
+    { name = "smolagents" },
+]
+autogen = [
+    { name = "autogen-agentchat" },
 ]
 dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
 ]
+langgraph = [
+    { name = "langgraph" },
+]
 otel = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-sdk" },
+]
+pydantic-ai = [
+    { name = "pydantic-ai-slim" },
+]
+smolagents = [
+    { name = "smolagents" },
 ]
 sqlite = [
     { name = "aiosqlite" },
@@ -1811,26 +1823,30 @@ sqlite = [
 [package.metadata]
 requires-dist = [
     { name = "aiosqlite", marker = "extra == 'sqlite'", specifier = ">=0.19" },
-    { name = "autogen-agentchat", specifier = ">=0.7.5,<1" },
+    { name = "autogen-agentchat", marker = "extra == 'autogen'", specifier = ">=0.7.5,<1" },
     { name = "claude-agent-sdk", specifier = ">=0.2.93,<1" },
     { name = "github-copilot-sdk", specifier = ">=1.0.0,<2" },
-    { name = "langgraph", specifier = ">=1.2.4,<2" },
+    { name = "langgraph", marker = "extra == 'langgraph'", specifier = ">=1.2.4,<2" },
     { name = "opentelemetry-api", marker = "extra == 'otel'", specifier = ">=1.20" },
     { name = "opentelemetry-sdk", marker = "extra == 'otel'", specifier = ">=1.20" },
     { name = "pydantic", specifier = ">=2.0" },
-    { name = "pydantic-ai-slim", specifier = ">=1.106.0,<2" },
+    { name = "pydantic-ai-slim", marker = "extra == 'pydantic-ai'", specifier = ">=1.106.0,<2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
-    { name = "smolagents", specifier = ">=1.26.0,<2" },
+    { name = "smolagents", marker = "extra == 'smolagents'", specifier = ">=1.26.0,<2" },
+    { name = "tracemill", extras = ["autogen"], marker = "extra == 'all'" },
+    { name = "tracemill", extras = ["langgraph"], marker = "extra == 'all'" },
     { name = "tracemill", extras = ["otel"], marker = "extra == 'all'" },
+    { name = "tracemill", extras = ["pydantic-ai"], marker = "extra == 'all'" },
+    { name = "tracemill", extras = ["smolagents"], marker = "extra == 'all'" },
     { name = "tracemill", extras = ["sqlite"], marker = "extra == 'all'" },
     { name = "tree-sitter", specifier = ">=0.23" },
     { name = "tree-sitter-bash", specifier = ">=0.23" },
     { name = "tree-sitter-powershell", specifier = ">=0.23" },
 ]
-provides-extras = ["sqlite", "otel", "all", "dev"]
+provides-extras = ["langgraph", "pydantic-ai", "smolagents", "autogen", "sqlite", "otel", "all", "dev"]
 
 [[package]]
 name = "tree-sitter"

@@ -179,7 +179,7 @@ def _uuid4_str() -> str:
 class EventMetadata(BaseModel):
     """Contextual information attached to every event."""
 
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+    model_config = ConfigDict(frozen=True)
 
     # --- Source provenance ---
     source_framework: str | None = None  # "copilot", "claude", "aider", "cline", etc.

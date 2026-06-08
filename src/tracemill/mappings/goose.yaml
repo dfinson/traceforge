@@ -28,7 +28,6 @@ events:
     payload:
       tool_call_id: tool_use_id
       result: content
-      success: is_error
   system:
     kind: message.system
     payload:

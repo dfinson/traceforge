@@ -33,26 +33,13 @@ from tracemill.types import (
     is_known_kind,
 )
 
-# Backward-compat factories (deprecated)
-from tracemill.adapters import (
-    CLIJsonlAdapter,
-    CopilotSDKAdapter,
-    ClaudeJsonlAdapter,
-    ClaudeSDKAdapter,
-)
-
 __all__ = [
     "Adapter",
     "JsonLineAdapter",
     "CopilotAdapter",
     "ClaudeAdapter",
     "MappedJsonAdapter",
-    # Deprecated aliases
-    "CLIJsonlAdapter",
-    "CopilotSDKAdapter",
-    "ClaudeJsonlAdapter",
-    "ClaudeSDKAdapter",
-    # Rest
+    # Classification
     "CallbackSink",
     "Classification",
     "ClassificationEngine",

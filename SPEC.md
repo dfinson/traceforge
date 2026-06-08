@@ -31,7 +31,7 @@ The library doesn't decide what to do with agent events. It parses them, enriche
 ┌─────────────────────────────────────────────────────────────┐
 │                    INPUT ADAPTERS                            │
 │                                                             │
-│  CopilotSDKAdapter   ClaudeSDKAdapter   CLIJsonlAdapter     │
+│  CopilotAdapter      ClaudeAdapter      MappedJsonAdapter   │
 │                                                             │
 │  Each adapter: raw bytes/files → SessionEvent stream        │
 │  Defensive parsing. Unknown fields ignored. Never crash.    │
@@ -271,10 +271,11 @@ Each adapter handles one agent SDK's output format. Adapters leverage their resp
 
 | Adapter | Input | SDK Entry Point | Interface |
 | --- | --- | --- | --- |
-| `CLIJsonlAdapter` | Copilot `events.jsonl` (raw lines) | `SessionEvent.from_dict()` | `parse(raw)` |
-| `ClaudeJsonlAdapter` | Claude session JSONL (raw lines) | `parse_message()` | `parse(raw)` |
-| `CopilotSDKAdapter` | Live Copilot SDK stream | Inherits from CLIJsonlAdapter | `parse(raw)` + `parse_event(sdk_event)` |
-| `ClaudeSDKAdapter` | Live Claude SDK stream | Inherits from ClaudeJsonlAdapter | `parse(raw)` + `parse_message(sdk_msg)` |
+| `CopilotAdapter(ingestion_mode="file_watch")` | Copilot `events.jsonl` (raw lines) | `SessionEvent.from_dict()` | `parse(raw)` |
+| `CopilotAdapter(ingestion_mode="stream")` | Live Copilot SDK stream | `SessionEvent.from_dict()` | `parse(raw)` + `parse_sdk_event(sdk_event)` |
+| `ClaudeAdapter(ingestion_mode="file_watch")` | Claude session JSONL (raw lines) | `parse_message()` | `parse(raw)` |
+| `ClaudeAdapter(ingestion_mode="stream")` | Live Claude SDK stream | `parse_message()` | `parse(raw)` + `parse_message(sdk_msg)` |
+| `MappedJsonAdapter` | YAML-driven JSON parsing | N/A | `parse(raw)` |
 
 ### Dual Interface
 
@@ -595,8 +596,8 @@ This library is extracted from [CodePlane](https://github.com/dfinson/codeplane)
 | `Enricher` | `backend/services/events/event_enricher.py` | None — already a pure stateful class |
 | `EventPipeline` | `backend/services/events/event_pipeline.py` | Remove `_db_*` methods, inject `StorageSink` list |
 | `density.py` | `backend/services/events/story/review.py` | None — pure functions |
-| `CopilotSDKAdapter` | `backend/services/adapters/copilot_adapter.py` `.stream_events()` parsing | Decouple from subprocess management |
-| `CLIJsonlAdapter` | `backend/services/watcher/copilot.py` `._process_new_events()` | Decouple from file tailing |
+| `CopilotAdapter(ingestion_mode="stream")` | `backend/services/adapters/copilot_adapter.py` `.stream_events()` parsing | Decouple from subprocess management |
+| `CopilotAdapter(ingestion_mode="file_watch")` | `backend/services/watcher/copilot.py` `._process_new_events()` | Decouple from file tailing |
 | `EventBus` | `backend/services/events/event_bus.py` | None — already fully generic |
 | OTEL instruments | `backend/services/analytics/telemetry.py` | None — already standard OTEL |
 | `SQLiteSink` | `backend/persistence/telemetry_*_repo.py` | Consolidate into single sink, remove SQLAlchemy |
@@ -607,7 +608,7 @@ CodePlane then depends on tracemill instead of owning the code. Its EventProcess
 
 ### §8.1 — Relationship to memrelay
 
-[memrelay](https://github.com/dfinson/memrelay) is the first standalone consumer of tracemill. It implements a `GraphitiSink` (a `StorageSink` subclass) that feeds enriched events into a Graphiti knowledge graph for persistent memory. memrelay also uses tracemill's `CLIJsonlAdapter` to parse Copilot CLI session files.
+[memrelay](https://github.com/dfinson/memrelay) is the first standalone consumer of tracemill. It implements a `GraphitiSink` (a `StorageSink` subclass) that feeds enriched events into a Graphiti knowledge graph for persistent memory. memrelay also uses tracemill's `CopilotAdapter(ingestion_mode="file_watch")` to parse Copilot CLI session files.
 
 The boundary is clean: tracemill handles parsing, enrichment, and pipeline orchestration. memrelay handles daemon lifecycle, Graphiti integration, MCP tools, and memory retrieval.
 
@@ -911,10 +912,10 @@ steps:
 
 ### Step 3: Adapters
 
-- `CLIJsonlAdapter` — extract from CodePlane's `SessionStateWatcher._process_new_events()`
-- `CopilotSDKAdapter` — extract from CodePlane's `CopilotAdapter.stream_events()` parsing
-- `ClaudeSDKAdapter` — extract from CodePlane's `ClaudeAdapter` parsing
-- `ClaudeJsonlAdapter` — extract from CodePlane's `ClaudeSessionStateWatcher`
+- `CopilotAdapter(ingestion_mode="file_watch")` — extract from CodePlane's `SessionStateWatcher._process_new_events()`
+- `CopilotAdapter(ingestion_mode="stream")` — extract from CodePlane's `CopilotAdapter.stream_events()` parsing
+- `ClaudeAdapter(ingestion_mode="stream")` — extract from CodePlane's `ClaudeAdapter` parsing
+- `ClaudeAdapter(ingestion_mode="file_watch")` — extract from CodePlane's `ClaudeSessionStateWatcher`
 - Capture real session fixtures for each format
 - Defensive parsing tests (malformed input)
 

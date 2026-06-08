@@ -113,10 +113,14 @@ events:
       content: part.content
       part_kind: part.part_kind
   # PartDeltaEvent has .delta with content_delta
+  # PartDeltaEvent: TextPartDelta has .content_delta; ToolCallPartDelta has .args_delta
+  # Discriminator: delta.part_delta_kind ("text" vs "tool_call")
   stream.part_delta:
     kind: llm.output.chunk
     payload:
       content: delta.content_delta
+      args_delta: delta.args_delta
+      part_delta_kind: delta.part_delta_kind
   stream.part_end:
     kind: message.assistant
     payload:

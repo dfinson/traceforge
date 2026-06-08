@@ -110,6 +110,18 @@ events:
     payload:
       summary: args.summary
       source: source
+  change_agent_state:
+    kind: agent.state_changed
+    payload:
+      agent_state: args.agent_state
+      thought: args.thought
+      source: source
+  system:
+    kind: message.system
+    payload:
+      content: args.content
+      agent_class: args.agent_class
+      source: source
 
   # ── Observation events (preprocessor synthesizes action: "observation.<value>") ──
   observation.run:

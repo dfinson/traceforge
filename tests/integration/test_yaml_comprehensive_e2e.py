@@ -741,6 +741,30 @@ class TestOpenHandsMappings:
             {"content": "Tool result: found 5 results", "source": "agent"},
             id="observation.mcp",
         ),
+        pytest.param(
+            {
+                "id": 38,
+                "timestamp": "2024-06-15T10:01:14Z",
+                "source": "agent",
+                "action": "change_agent_state",
+                "args": {"agent_state": "running", "thought": "Resuming execution"},
+            },
+            "agent.state_changed",
+            {"agent_state": "running", "thought": "Resuming execution", "source": "agent"},
+            id="change_agent_state",
+        ),
+        pytest.param(
+            {
+                "id": 1,
+                "timestamp": "2024-06-15T10:00:00Z",
+                "source": "user",
+                "action": "system",
+                "args": {"content": "You are a helpful assistant.", "agent_class": "CodeActAgent", "tools": [], "openhands_version": "0.39.0"},
+            },
+            "message.system",
+            {"content": "You are a helpful assistant.", "agent_class": "CodeActAgent", "source": "user"},
+            id="system",
+        ),
     ]
 
     @pytest.mark.parametrize(("event", "expected_kind", "expected_payload"), CASES)

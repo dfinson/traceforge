@@ -87,10 +87,16 @@ def preprocess_goose(obj: dict[str, Any]) -> list[dict[str, Any]]:
             })
         elif item_type == "actionRequired":
             data = item.get("data", {}) if isinstance(item.get("data"), dict) else {}
+            # ActionRequiredData sub-variants:
+            #   Elicitation: {actionType, id, message, requestedSchema}
+            #   ToolConfirmation: {actionType, id, toolName, arguments, prompt}
+            #   ElicitationResponse: {actionType, id, userData}
+            content = data.get("message") or data.get("prompt") or str(data.get("userData", ""))
             results.append({
                 "role": "action_required",
                 "created_at": ts,
-                "content": data.get("message", item.get("message", "")),
+                "content": content,
+                "action_type": data.get("actionType", ""),
             })
         elif item_type == "frontendToolRequest":
             tool_call = item.get("toolCall", {})

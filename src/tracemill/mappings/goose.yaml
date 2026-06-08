@@ -1,6 +1,6 @@
 # Goose event mapping for MappedJsonAdapter
 # Targets: goose >= 1.0 (SQLite messages table, JSON-serialized rows)
-# Source: aaif-goose/goose crates/goose/src/session_manager.rs, message.rs
+# Source: block/goose crates/goose-providers/src/conversation/message.rs
 #
 # IMPORTANT: Real Goose only has TWO role values: "user" and "assistant".
 # Tool calls are NESTED inside content_json as {"type": "toolRequest", ...}
@@ -17,10 +17,18 @@
 #   accumulated_total_tokens, accumulated_input_tokens, accumulated_output_tokens,
 #   accumulated_cost
 #
-# MessageContent variants (all in content_json array):
+# MessageContent variants (all in content_json array, serde tag="type" camelCase):
 #   text, image, toolRequest, toolResponse, toolConfirmationRequest,
 #   actionRequired, frontendToolRequest, thinking, redactedThinking,
 #   systemNotification
+#
+# Struct field serialization:
+#   ToolRequest: {type, id, toolCall: {status, value: {name, arguments}}}
+#   ToolResponse: {type, id, toolResult: {status, value: {content: [...]}}}
+#   ToolConfirmationRequest: {type, id, toolName, arguments, prompt}
+#   FrontendToolRequest: {type, id, toolCall: {status, value: {name, arguments}}}
+#   ActionRequired: {type, data: {actionType: "elicitation"|"toolConfirmation"|"elicitationResponse", ...}}
+#   SystemNotification: {type, notificationType, msg, data}
 
 framework: goose
 framework_version: ">=1.0"
@@ -72,6 +80,7 @@ events:
     kind: input.requested
     payload:
       content: content
+      action_type: action_type
   frontend_tool_request:
     kind: tool.call.started
     payload:

@@ -39,6 +39,7 @@ events:
       message_type: message_type
       is_demo: is_demo
       tags: tags
+      cache_control: cache_control
 
   # ── Tool responses (role: tool — OpenAI function-calling responses) ──
   tool:
@@ -50,6 +51,7 @@ events:
       message_type: message_type
       is_demo: is_demo
       tags: tags
+      cache_control: cache_control
 
   # ── System prompt (role: system, message_type="system_prompt") ──
   system:
@@ -58,6 +60,7 @@ events:
       content: content
       agent: agent
       message_type: message_type
+      cache_control: cache_control
 
   # ── User messages (task setup, observations in non-FC mode, demos) ──
   user:
@@ -68,3 +71,4 @@ events:
       agent: agent
       is_demo: is_demo
       tags: tags
+      cache_control: cache_control

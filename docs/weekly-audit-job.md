@@ -26,82 +26,47 @@ New frameworks added to the mappings folder are automatically picked up and audi
 | OpenHands | `All-Hands-AI/OpenHands` | `openhands/events/action/*.py`, `observation/*.py`, `serialization/` | Action/Observation types, field names, serialization logic |
 | SWE-agent | `SWE-agent/SWE-agent` | `sweagent/types.py`, `sweagent/agent/agents.py` | HistoryItem TypedDict, role values, message_type literals |
 
-## Audit Steps (Per YAML file discovered)
+## Audit Process
 
 ### 0. Discovery
 - List all `*.yaml` files in `src/tracemill/mappings/`
 - Parse each YAML's header comments to extract: source repo, source files, version constraint
 - If a YAML has no identifiable source repo in its comments, flag it for manual review
 
-### 1. Version Check
-- Fetch latest stable release tag/version from PyPI (Python) or GitHub releases (Rust/TS)
-- Compare against `framework_version` constraint in the YAML
-- **ALERT** if latest version exceeds an upper bound (e.g. OpenHands `<1.0` and 1.x released)
-- **ALERT** if a new MAJOR version was released (potential breaking changes)
+### 1. Per-Framework Verification (parallel)
+For each discovered YAML, launch a research agent that:
 
-### 2. Type Discriminator Audit
-- Fetch the source file containing event type definitions
-- Extract all `Literal["..."]` values (Python) or `type` string variants (Rust/TS)
-- Compare against our YAML `events:` keys
-- **ALERT** on:
-  - Values in source NOT in our YAML (missing events)
-  - Values in our YAML NOT in source (phantom/dead events)
-  - Renamed values (old name gone, new name appeared)
+1. **Fetches the actual source code** from the upstream repo at the latest stable tag (or pinned tag if the YAML has an upper-bound constraint like `<1.0`)
+2. **Extracts all type discriminator values** — `Literal["..."]` (Python), serde tag variants (Rust), TypeScript union members
+3. **Compares against YAML `events:` keys** — identifies missing events (in source, not in YAML) and dead events (in YAML, not in source)
+4. **Verifies every payload field path** — for each mapped event, confirms the field name exists on the source struct/class/TypedDict and resolves correctly through serialization (serde rename, camelCase, .dict(), .model_dump(), extras hoisting, etc.)
+5. **Verifies preprocessor assumptions** — for frameworks with preprocessors (`preprocessor:` field in YAML), confirms the raw data shape the preprocessor expects still matches reality (discriminator patterns, nesting structure, field presence rules)
 
-### 3. Field Path Audit
-- For each event type in our YAML, verify the `payload:` field paths exist
-- Check field names on the source dataclass/struct/interface
-- Check serialization attributes (serde rename, camelCase, etc.)
-- **ALERT** on:
-  - Field paths referencing nonexistent fields
-  - Fields that were renamed (deprecation + new name)
-  - Fields that changed type in a way that breaks dot-path resolution
+### 2. Verdict Per Framework
+Each agent produces one of:
+- ✅ **PASS** — no changes detected, all mappings verified correct
+- ⚠️ **NEW** — non-breaking additions available (new events/fields in source not yet mapped)
+- 🔴 **BREAKING** — mapped event types removed/renamed, field paths broken, or serialization shape changed
 
-### 4. Serialization Shape Audit
-- For frameworks with custom serialization (Goose, OpenHands, smolagents):
-  - Verify .dict() / .model_dump() / serde output shape matches what preprocessor expects
-  - Check for new serialization logic that changes output structure
-- **ALERT** on shape changes that would cause preprocessor misextraction
+### 3. Action on Findings
+- **🔴 BREAKING**: Fix the YAML and/or preprocessor immediately. Update affected tests in `tests/integration/test_yaml_comprehensive_e2e.py`. Run full test suite. Commit.
+- **⚠️ NEW**: Add the new events to the YAML with correct field mappings. Add corresponding test cases. Commit.
+- **✅ PASS**: No action needed.
 
-### 5. Preprocessor Contract Audit
-- Verify each preprocessor's assumptions still hold:
-  - Cline: type is still "ask"|"say", subtype still in corresponding field
-  - Goose: content_json is still JSON array, toolRequest/toolResponse shapes unchanged
-  - OpenHands: action/observation discriminator pattern unchanged, extras serialization unchanged
-  - PydanticAI: event_kind/kind discriminators unchanged, parts array structure unchanged
-  - smolagents: field-presence inference rules still valid (no new fields that cause misclassification)
-
-## Output Format
-
-```markdown
-# Audit Report — YYYY-MM-DD
-
-## Summary
-- ✅ N frameworks: no changes detected
-- ⚠️ N frameworks: non-breaking additions (new events available)
-- 🔴 N frameworks: BREAKING CHANGES detected
-
-## Per-Framework Results
-
-### [Framework Name]
-- **Latest version**: X.Y.Z (our floor: >=A.B)
-- **Status**: ✅ | ⚠️ | 🔴
-- **New events** (not in YAML): [list]
-- **Dead events** (in YAML, not in source): [list]
-- **Field changes**: [list]
-- **Action required**: [none | update YAML | update preprocessor | update tests]
-```
+After all fixes: create GitHub issues for visibility:
+- 🔴 findings → one issue per framework: "🔴 YAML Drift Detected: [framework]"
+- ⚠️ findings → single issue: "⚠️ New upstream events available"
 
 ## Severity Classification
 
 | Severity | Condition | Action |
 |----------|-----------|--------|
-| 🔴 CRITICAL | Mapped event type removed from source | Immediate fix required — events silently dropping |
-| 🔴 CRITICAL | Mapped field path broken (rename/removal) | Immediate fix — payload extraction returning null |
-| 🔴 CRITICAL | Serialization shape changed | Immediate fix — preprocessor misextraction |
-| ⚠️ WARNING | New event types added to source | Schedule addition to YAML (coverage gap) |
-| ⚠️ WARNING | New fields added to existing events | Consider mapping for richer data |
-| ⚠️ WARNING | Major version bump released | Review changelog for breaking changes |
+| 🔴 CRITICAL | Mapped event type removed from source | Fix immediately — events silently dropping to `raw` kind |
+| 🔴 CRITICAL | Mapped field path broken (rename/removal) | Fix immediately — payload extraction returning null |
+| 🔴 CRITICAL | Serialization shape changed | Fix immediately — preprocessor misextraction |
+| ⚠️ WARNING | New event types added to source | Add to YAML with correct mappings |
+| ⚠️ WARNING | New fields added to existing events | Add to payload mappings |
+| ⚠️ WARNING | Major version bump released | Verify all mappings against new version |
 | ✅ OK | No changes affecting mapped surfaces | No action needed |
 
 ## Scheduling
@@ -109,21 +74,12 @@ New frameworks added to the mappings folder are automatically picked up and audi
 - **Frequency**: Weekly (Sunday 02:00 UTC)
 - **Mode**: Autopilot (Copilot workflow, runs autonomously)
 - **Scope**: Dynamically discovers all `src/tracemill/mappings/*.yaml` files
-- **Timeout**: 15 minutes per framework, 30 minutes total
-- **On 🔴 BREAKING**: Create GitHub issue per framework with title "🔴 YAML Drift Detected: [framework]"
-- **On ⚠️ NEW**: Create single GitHub issue "⚠️ New upstream events available" listing all additions
-
-## Test Integration
-
-When the audit detects changes, it should:
-1. Update `tests/integration/test_yaml_drift.py` with new assertions
-2. Run the test suite — if tests PASS despite source changes, the drift test is too loose
-3. If tests FAIL, the change is already caught (good)
-4. If tests PASS but source changed, tighten the drift test
+- **Execution**: Parallel research agents, one per framework
+- **On findings**: Fixes applied directly, tests updated, committed, issues created
 
 ## Files Touched by This Job
 
-- `src/tracemill/mappings/*.yaml` — read (never auto-modified)
-- `tests/integration/test_yaml_drift.py` — may add new assertions
-- `docs/audit-reports/` — stores weekly JSON reports for trend analysis
+- `src/tracemill/mappings/*.yaml` — verified; updated on ⚠️/🔴 findings
+- `src/tracemill/preprocessors/*.py` — verified; updated if serialization shape changed
+- `tests/integration/test_yaml_comprehensive_e2e.py` — updated with new/fixed test cases
 - This file (`docs/weekly-audit-job.md`) — updated if scope changes

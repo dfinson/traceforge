@@ -49,6 +49,7 @@ framework_version: ">=1.2,<2.0"
 ingestion_mode: stream
 type_field: type
 timestamp_field: properties.timestamp
+default_kind: ""
 
 events:
   # ── Session lifecycle ──

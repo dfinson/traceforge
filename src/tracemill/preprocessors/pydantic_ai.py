@@ -38,7 +38,11 @@ def preprocess_pydantic_ai(obj: dict[str, Any]) -> list[dict[str, Any]]:
         normalized["type"] = "model_response"
         # Extract text from parts for convenience
         parts = normalized.get("parts", [])
-        text_parts = [p.get("content", "") for p in parts if isinstance(p, dict) and p.get("part_kind") == "text"]
+        text_parts = [
+            p.get("content", "")
+            for p in parts
+            if isinstance(p, dict) and p.get("part_kind") == "text"
+        ]
         if text_parts:
             normalized["content"] = "\n".join(text_parts)
         return [normalized]
@@ -46,7 +50,11 @@ def preprocess_pydantic_ai(obj: dict[str, Any]) -> list[dict[str, Any]]:
         normalized = dict(obj)
         normalized["type"] = "model_request"
         parts = normalized.get("parts", [])
-        user_parts = [p.get("content", "") for p in parts if isinstance(p, dict) and p.get("part_kind") == "user-prompt"]
+        user_parts = [
+            p.get("content", "")
+            for p in parts
+            if isinstance(p, dict) and p.get("part_kind") == "user-prompt"
+        ]
         if user_parts:
             normalized["content"] = "\n".join(user_parts)
         return [normalized]

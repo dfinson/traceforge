@@ -205,4 +205,3 @@ class CodingAction(StrEnum):
     PROFILE = "analyze.profile"
     MEASURE = "analyze.measure"
     DIFF = "analyze.diff"
-

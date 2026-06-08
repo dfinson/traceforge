@@ -32,13 +32,17 @@ def preprocess_smolagents(obj: dict[str, Any]) -> list[dict[str, Any]]:
                 for tc in tool_calls:
                     if isinstance(tc, dict):
                         fn = tc.get("function", {})
-                        results.append({
-                            "step_type": "ToolCall",
-                            "timestamp": normalized.get("timestamp"),
-                            "tool_name": fn.get("name", "") if isinstance(fn, dict) else "",
-                            "call_id": tc.get("id", ""),
-                            "tool_input": fn.get("arguments", "") if isinstance(fn, dict) else "",
-                        })
+                        results.append(
+                            {
+                                "step_type": "ToolCall",
+                                "timestamp": normalized.get("timestamp"),
+                                "tool_name": fn.get("name", "") if isinstance(fn, dict) else "",
+                                "call_id": tc.get("id", ""),
+                                "tool_input": fn.get("arguments", "")
+                                if isinstance(fn, dict)
+                                else "",
+                            }
+                        )
                 return results
         return [normalized]
 
@@ -58,13 +62,15 @@ def preprocess_smolagents(obj: dict[str, Any]) -> list[dict[str, Any]]:
             for tc in tool_calls:
                 if isinstance(tc, dict):
                     fn = tc.get("function", {})
-                    results.append({
-                        "step_type": "ToolCall",
-                        "timestamp": normalized.get("timestamp"),
-                        "tool_name": fn.get("name", "") if isinstance(fn, dict) else "",
-                        "call_id": tc.get("id", ""),
-                        "tool_input": fn.get("arguments", "") if isinstance(fn, dict) else "",
-                    })
+                    results.append(
+                        {
+                            "step_type": "ToolCall",
+                            "timestamp": normalized.get("timestamp"),
+                            "tool_name": fn.get("name", "") if isinstance(fn, dict) else "",
+                            "call_id": tc.get("id", ""),
+                            "tool_input": fn.get("arguments", "") if isinstance(fn, dict) else "",
+                        }
+                    )
             return results
     elif "plan" in normalized:
         normalized["step_type"] = "PlanningStep"
@@ -72,7 +78,10 @@ def preprocess_smolagents(obj: dict[str, Any]) -> list[dict[str, Any]]:
         normalized["step_type"] = "SystemPromptStep"
     elif "task" in normalized:
         normalized["step_type"] = "TaskStep"
-    elif "output" in normalized and len(set(normalized.keys()) - {"output", "timestamp", "step_type"}) == 0:
+    elif (
+        "output" in normalized
+        and len(set(normalized.keys()) - {"output", "timestamp", "step_type"}) == 0
+    ):
         # Bare FinalAnswerStep: only has "output" (+ maybe timestamp)
         normalized["step_type"] = "FinalAnswer"
     else:

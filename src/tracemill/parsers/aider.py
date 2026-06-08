@@ -90,12 +90,32 @@ class ToolOutputResult:
 
 _TOOL_PATTERNS: list[tuple[re.Pattern[str], ToolOutputKind, list[str]]] = [
     (re.compile(r"^Aider v([\d.]+)"), ToolOutputKind.VERSION, ["version"]),
-    (re.compile(r"^Model:\s+(.+?)(?:\s+with\s+(.+)\s+edit format)?$"), ToolOutputKind.MODEL, ["model", "edit_format"]),
-    (re.compile(r"^Git repo:\s+(.+?)\s+with\s+(\d+)\s+files"), ToolOutputKind.REPO_INFO, ["repo_path", "file_count"]),
-    (re.compile(r"^Tokens:\s+(.+?)\s+sent,\s+(.+?)\s+received"), ToolOutputKind.USAGE, ["tokens_sent", "tokens_received"]),
+    (
+        re.compile(r"^Model:\s+(.+?)(?:\s+with\s+(.+)\s+edit format)?$"),
+        ToolOutputKind.MODEL,
+        ["model", "edit_format"],
+    ),
+    (
+        re.compile(r"^Git repo:\s+(.+?)\s+with\s+(\d+)\s+files"),
+        ToolOutputKind.REPO_INFO,
+        ["repo_path", "file_count"],
+    ),
+    (
+        re.compile(r"^Tokens:\s+(.+?)\s+sent,\s+(.+?)\s+received"),
+        ToolOutputKind.USAGE,
+        ["tokens_sent", "tokens_received"],
+    ),
     (re.compile(r"^Applied edit to\s+(.+)$"), ToolOutputKind.FILE_EDIT_APPLIED, ["file_path"]),
-    (re.compile(r"^Commit\s+([a-f0-9]+)\s+(.+)$"), ToolOutputKind.GIT_COMMIT, ["commit_sha", "commit_message"]),
-    (re.compile(r"^(.+)\s+Add (?:file|these files) to the chat\?"), ToolOutputKind.FILE_ADD_PROMPT, ["file_path"]),
+    (
+        re.compile(r"^Commit\s+([a-f0-9]+)\s+(.+)$"),
+        ToolOutputKind.GIT_COMMIT,
+        ["commit_sha", "commit_message"],
+    ),
+    (
+        re.compile(r"^(.+)\s+Add (?:file|these files) to the chat\?"),
+        ToolOutputKind.FILE_ADD_PROMPT,
+        ["file_path"],
+    ),
     (re.compile(r"^Add\s+(.+?)\s+to the chat\?"), ToolOutputKind.FILE_ADD_PROMPT, ["file_path"]),
     (re.compile(r"(?:Error|Exception|Traceback|litellm\.)"), ToolOutputKind.ERROR, []),
     (re.compile(r"^Repo-map:\s+(.+)$"), ToolOutputKind.REPO_MAP, ["repo_map_info"]),
@@ -144,11 +164,13 @@ def extract_edits(ai_text: str) -> list[FileEdit]:
         # Skip if it looks like a code fence marker rather than a filename
         if file_path.startswith("```"):
             continue
-        edits.append(FileEdit(
-            file_path=file_path,
-            search=m.group(2),
-            replace=m.group(3),
-        ))
+        edits.append(
+            FileEdit(
+                file_path=file_path,
+                search=m.group(2),
+                replace=m.group(3),
+            )
+        )
     return edits
 
 
@@ -158,6 +180,7 @@ def extract_edits(ai_text: str) -> list[FileEdit]:
 @dataclass
 class _SessionState:
     """Tracks state within a single aider session."""
+
     session_id: str
     start_time: datetime
     sequence: int = 0
@@ -276,10 +299,13 @@ class AiderPreParser:
         session_id = f"aider-{dt.strftime('%Y%m%dT%H%M%S')}"
         self._state = _SessionState(session_id=session_id, start_time=dt)
 
-        yield self._make_event("session_start", {
-            "session_id": session_id,
-            "started_at": dt.isoformat(),
-        })
+        yield self._make_event(
+            "session_start",
+            {
+                "session_id": session_id,
+                "started_at": dt.isoformat(),
+            },
+        )
 
     def _emit_user_input(self, lines: list[str]) -> Iterator[dict[str, Any]]:
         """Emit user message or slash command event(s)."""
@@ -288,10 +314,13 @@ class AiderPreParser:
         if content.startswith("/"):
             # Slash command
             parts = content.split(None, 1)
-            yield self._make_event("slash_command", {
-                "command": parts[0],
-                "args": parts[1] if len(parts) > 1 else "",
-            })
+            yield self._make_event(
+                "slash_command",
+                {
+                    "command": parts[0],
+                    "args": parts[1] if len(parts) > 1 else "",
+                },
+            )
         else:
             yield self._make_event("user_message", {"content": content})
 
@@ -343,11 +372,14 @@ class AiderPreParser:
         # Extract file edits from SEARCH/REPLACE blocks
         edits = extract_edits(content)
         for edit in edits:
-            yield self._make_event("file_edit", {
-                "file_path": edit.file_path,
-                "search": edit.search,
-                "replace": edit.replace,
-            })
+            yield self._make_event(
+                "file_edit",
+                {
+                    "file_path": edit.file_path,
+                    "search": edit.search,
+                    "replace": edit.replace,
+                },
+            )
 
     def _make_event(self, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Construct a standard event dict."""

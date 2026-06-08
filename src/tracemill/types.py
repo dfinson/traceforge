@@ -159,7 +159,6 @@ KNOWN_KINDS: frozenset[str] = frozenset(
 )
 
 
-
 def is_known_kind(kind: str) -> bool:
     """Check if a kind string is in the canonical registry."""
     return kind in KNOWN_KINDS

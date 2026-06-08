@@ -142,7 +142,7 @@ class MappedJsonAdapter(JsonLineAdapter):
             for field_name, dot_path in event_mapping.payload.items():
                 if dot_path.startswith("literal:"):
                     # Explicit literal value (not a path resolution)
-                    value = dot_path[len("literal:"):]
+                    value = dot_path[len("literal:") :]
                 else:
                     value = _resolve_path(obj, dot_path)
                 if value is not None:

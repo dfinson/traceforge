@@ -289,7 +289,9 @@ class TestEdgeCases:
             "git_merge",
         ]
         for tool in git_tools:
-            assert classify_tool(tool).has_role("persistence.version_control"), f"{tool} should have version_control role"
+            assert classify_tool(tool).has_role("persistence.version_control"), (
+                f"{tool} should have version_control role"
+            )
 
 
 # =============================================================================
@@ -394,4 +396,3 @@ class TestShellClassificationQuoteAware:
         """sudo/env/nohup transparently unwrap to the real command."""
         assert _activity("sudo pytest") == SHELL_VERIFICATION
         assert _activity("nohup git push &") == SHELL_DELIVERY
-

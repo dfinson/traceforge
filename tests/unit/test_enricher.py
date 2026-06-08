@@ -719,7 +719,6 @@ class TestIDStabilityAndRobustness:
         assert result is not None
 
 
-
 # =============================================================================
 # Shell Deep Classification Tests (Fix 1)
 # =============================================================================
@@ -849,6 +848,7 @@ class TestNewBinaryRules:
 
     def test_grep_is_investigation(self):
         from tracemill.classify.rules import SHELL_INVESTIGATION
+
         act = _classify_binary("grep", None, [], ["grep", "pattern", "file"])
         assert act == SHELL_INVESTIGATION
 
@@ -868,6 +868,7 @@ class TestNewBinaryRules:
 
     def test_ls_is_investigation(self):
         from tracemill.classify.rules import SHELL_INVESTIGATION
+
         act = _classify_binary("ls", None, ["-la"], ["ls", "-la"])
         assert act == SHELL_INVESTIGATION
 
@@ -1135,10 +1136,10 @@ class TestPayloadMergePreservesEnrichment:
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         t2 = t1 + timedelta(seconds=2)
 
-        start = _make_tool_start(tool_call_id="merge1", tool_name="bash", ts=t1,
-                                  arguments={"command": "pytest"})
-        complete = _make_tool_complete(tool_call_id="merge1", tool_name="bash", ts=t2,
-                                       result="ok")
+        start = _make_tool_start(
+            tool_call_id="merge1", tool_name="bash", ts=t1, arguments={"command": "pytest"}
+        )
+        complete = _make_tool_complete(tool_call_id="merge1", tool_name="bash", ts=t2, result="ok")
 
         assert enricher.process(start) is None
         result = enricher.process(complete)

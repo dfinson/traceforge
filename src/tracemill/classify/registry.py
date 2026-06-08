@@ -52,9 +52,7 @@ class DimensionRegistry:
 
     def roots(self, dimension: str) -> frozenset[str]:
         """Get root (non-dotted) values for a dimension."""
-        return frozenset(
-            v for v in self._dimensions.get(dimension, set()) if "." not in v
-        )
+        return frozenset(v for v in self._dimensions.get(dimension, set()) if "." not in v)
 
     def children(self, dimension: str, parent: str) -> frozenset[str]:
         """Get direct children of a value in a dimension."""
@@ -62,15 +60,13 @@ class DimensionRegistry:
         return frozenset(
             v
             for v in self._dimensions.get(dimension, set())
-            if v.startswith(prefix) and "." not in v[len(prefix):]
+            if v.startswith(prefix) and "." not in v[len(prefix) :]
         )
 
     def descendants(self, dimension: str, ancestor: str) -> frozenset[str]:
         """Get all descendants (any depth) of a value."""
         prefix = ancestor + "."
-        return frozenset(
-            v for v in self._dimensions.get(dimension, set()) if v.startswith(prefix)
-        )
+        return frozenset(v for v in self._dimensions.get(dimension, set()) if v.startswith(prefix))
 
     def is_descendant(self, dimension: str, value: str, ancestor: str) -> bool:
         """Check if value descends from ancestor in the hierarchy."""

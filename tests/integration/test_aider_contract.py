@@ -66,8 +66,10 @@ class TestGoldenFixture:
         assert "src/app.py" in paths
 
     def test_search_replace_content_preserved(self, events):
-        auth_edit = next(e for e in events if e["type"] == "file_edit" and e["file_path"] == "src/auth.py")
-        assert "username == \"admin\"" in auth_edit["search"]
+        auth_edit = next(
+            e for e in events if e["type"] == "file_edit" and e["file_path"] == "src/auth.py"
+        )
+        assert 'username == "admin"' in auth_edit["search"]
         assert "verify_password" in auth_edit["replace"]
 
     def test_git_commits_detected(self, events):
@@ -205,9 +207,7 @@ class TestEndToEndPipeline:
         for event_dict in parser_events:
             line = json.dumps(event_dict)
             for se in adapter.parse(line):
-                assert se.raw_event is not None, (
-                    f"raw_event is None for type={event_dict['type']}"
-                )
+                assert se.raw_event is not None, f"raw_event is None for type={event_dict['type']}"
                 assert se.raw_event.get("type") == event_dict["type"]
 
 

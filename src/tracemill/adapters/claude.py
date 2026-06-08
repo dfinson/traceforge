@@ -170,7 +170,9 @@ class ClaudeAdapter(JsonLineAdapter):
             metadata=self._make_metadata(f"{context}.tool_use"),
         )
 
-    def _handle_tool_result_block(self, block: ToolResultBlock, context: str) -> Iterator[SessionEvent]:
+    def _handle_tool_result_block(
+        self, block: ToolResultBlock, context: str
+    ) -> Iterator[SessionEvent]:
         yield SessionEvent(
             kind=EventKind.TOOL_CALL_COMPLETED,
             session_id=self._session_id,

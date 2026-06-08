@@ -11,9 +11,11 @@ _PREPROCESSORS: dict[str, PreprocessorFn] = {}
 
 def register_preprocessor(name: str) -> Callable[[PreprocessorFn], PreprocessorFn]:
     """Decorator to register a preprocessor function."""
+
     def decorator(fn: PreprocessorFn) -> PreprocessorFn:
         _PREPROCESSORS[name] = fn
         return fn
+
     return decorator
 
 

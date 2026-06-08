@@ -64,22 +64,13 @@ class TestPowerShellClassification:
         assert _ps_activity("Get-Content ./file.txt") == SHELL_INVESTIGATION
 
     def test_select_string(self):
-        assert (
-            _ps_activity("Select-String -Pattern 'error' -Path log.txt")
-            == SHELL_INVESTIGATION
-        )
+        assert _ps_activity("Select-String -Pattern 'error' -Path log.txt") == SHELL_INVESTIGATION
 
     def test_set_content(self):
-        assert (
-            _ps_activity("Set-Content -Path out.txt -Value 'hello'")
-            == SHELL_IMPLEMENTATION
-        )
+        assert _ps_activity("Set-Content -Path out.txt -Value 'hello'") == SHELL_IMPLEMENTATION
 
     def test_new_item(self):
-        assert (
-            _ps_activity("New-Item -Path ./dir -ItemType Directory")
-            == SHELL_IMPLEMENTATION
-        )
+        assert _ps_activity("New-Item -Path ./dir -ItemType Directory") == SHELL_IMPLEMENTATION
 
     # ── Case insensitivity ──
 
@@ -116,9 +107,7 @@ class TestPowerShellClassification:
     # ── Compound commands ──
 
     def test_semicolon_split(self):
-        assert (
-            _ps_activity("pip install pytest; Invoke-Pester") == SHELL_VERIFICATION
-        )
+        assert _ps_activity("pip install pytest; Invoke-Pester") == SHELL_VERIFICATION
 
     def test_pipeline_highest_priority(self):
         # Pipeline: Get-Process | Sort-Object → both investigation
@@ -126,10 +115,7 @@ class TestPowerShellClassification:
 
     def test_mixed_priority(self):
         # Setup + verification → verification wins
-        assert (
-            _ps_activity("Install-Module Pester; Invoke-Pester")
-            == SHELL_VERIFICATION
-        )
+        assert _ps_activity("Install-Module Pester; Invoke-Pester") == SHELL_VERIFICATION
 
     # ── Windows-specific package managers ──
 
@@ -241,6 +227,7 @@ class TestCmdClassification:
 
 def _classify_bash(cmd: str):
     from tracemill.classify import classify_shell
+
     return classify_shell(cmd, engine=ENGINE)
 
 
@@ -276,4 +263,3 @@ class TestWrapperUnwrapping:
     def test_sudo_with_flag(self):
         cls = _classify_bash("sudo -u deploy pytest")
         assert cls is not None
-

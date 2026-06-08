@@ -34,7 +34,9 @@ def _assert_event(
         assert result.payload.get(key) == value
 
 
-def _goose_row(role: str, *items: dict, created_timestamp: int = 1718400000, **extra: object) -> dict:
+def _goose_row(
+    role: str, *items: dict, created_timestamp: int = 1718400000, **extra: object
+) -> dict:
     row = {
         "role": role,
         "content_json": json.dumps(list(items)),
@@ -182,7 +184,10 @@ class TestGooseMappings:
                 {
                     "type": "frontendToolRequest",
                     "id": "ftr-1",
-                    "toolCall": {"status": "success", "value": {"name": "showFile", "arguments": {"path": "main.py"}}},
+                    "toolCall": {
+                        "status": "success",
+                        "value": {"name": "showFile", "arguments": {"path": "main.py"}},
+                    },
                 },
             ),
             EventKind.TOOL_CALL_STARTED,
@@ -354,7 +359,9 @@ class TestSWEAgentMappings:
     ]
 
     @pytest.mark.parametrize(("event", "expected_kind", "expected_payload"), CASES)
-    def test_sweagent_mapping(self, event: dict, expected_kind: str, expected_payload: dict) -> None:
+    def test_sweagent_mapping(
+        self, event: dict, expected_kind: str, expected_payload: dict
+    ) -> None:
         _assert_event("sweagent.yaml", event, expected_kind, expected_payload)
 
 
@@ -759,16 +766,27 @@ class TestOpenHandsMappings:
                 "timestamp": "2024-06-15T10:00:00Z",
                 "source": "user",
                 "action": "system",
-                "args": {"content": "You are a helpful assistant.", "agent_class": "CodeActAgent", "tools": [], "openhands_version": "0.39.0"},
+                "args": {
+                    "content": "You are a helpful assistant.",
+                    "agent_class": "CodeActAgent",
+                    "tools": [],
+                    "openhands_version": "0.39.0",
+                },
             },
             "message.system",
-            {"content": "You are a helpful assistant.", "agent_class": "CodeActAgent", "source": "user"},
+            {
+                "content": "You are a helpful assistant.",
+                "agent_class": "CodeActAgent",
+                "source": "user",
+            },
             id="system",
         ),
     ]
 
     @pytest.mark.parametrize(("event", "expected_kind", "expected_payload"), CASES)
-    def test_openhands_mapping(self, event: dict, expected_kind: str, expected_payload: dict) -> None:
+    def test_openhands_mapping(
+        self, event: dict, expected_kind: str, expected_payload: dict
+    ) -> None:
         _assert_event("openhands.yaml", event, expected_kind, expected_payload)
 
 
@@ -825,7 +843,9 @@ class TestLangGraphMappings:
                 "metadata": {"ls_model_name": "gpt-4o"},
                 "data": {
                     "output": {
-                        "generations": [[{"text": "Hi there!", "generation_info": None, "type": "Generation"}]],
+                        "generations": [
+                            [{"text": "Hi there!", "generation_info": None, "type": "Generation"}]
+                        ],
                         "llm_output": None,
                     }
                 },
@@ -836,7 +856,9 @@ class TestLangGraphMappings:
                 "model": "gpt-4o",
                 "run_id": "r2",
                 "output": {
-                    "generations": [[{"text": "Hi there!", "generation_info": None, "type": "Generation"}]],
+                    "generations": [
+                        [{"text": "Hi there!", "generation_info": None, "type": "Generation"}]
+                    ],
                     "llm_output": None,
                 },
             },
@@ -849,7 +871,9 @@ class TestLangGraphMappings:
                 "name": "gpt-4o",
                 "tags": [],
                 "metadata": {"ls_model_name": "gpt-4o"},
-                "data": {"chunk": {"text": "Hi", "generation_info": None, "type": "GenerationChunk"}},
+                "data": {
+                    "chunk": {"text": "Hi", "generation_info": None, "type": "GenerationChunk"}
+                },
                 "parent_ids": ["r1"],
             },
             EventKind.LLM_OUTPUT_CHUNK,
@@ -881,7 +905,11 @@ class TestLangGraphMappings:
                     "output": {
                         "content": "Hello! How can I help?",
                         "type": "ai",
-                        "usage_metadata": {"input_tokens": 10, "output_tokens": 15, "total_tokens": 25},
+                        "usage_metadata": {
+                            "input_tokens": 10,
+                            "output_tokens": 15,
+                            "total_tokens": 25,
+                        },
                     }
                 },
                 "parent_ids": ["r1"],
@@ -1110,7 +1138,9 @@ class TestLangGraphMappings:
     ]
 
     @pytest.mark.parametrize(("event", "expected_kind", "expected_payload"), CASES)
-    def test_langgraph_mapping(self, event: dict, expected_kind: str, expected_payload: dict) -> None:
+    def test_langgraph_mapping(
+        self, event: dict, expected_kind: str, expected_payload: dict
+    ) -> None:
         _assert_event("langgraph.yaml", event, expected_kind, expected_payload)
 
 
@@ -1148,7 +1178,12 @@ class TestSmolagentsMappings:
                 "token_usage": {"input_tokens": 300, "output_tokens": 50, "total_tokens": 350},
             },
             EventKind.PLANNING_STARTED,
-            {"content": "1. Create endpoints\n2. Add auth", "input_tokens": 300, "output_tokens": 50, "duration": 1.2},
+            {
+                "content": "1. Create endpoints\n2. Add auth",
+                "input_tokens": 300,
+                "output_tokens": 50,
+                "duration": 1.2,
+            },
             1,
             0,
             id="PlanningStep",
@@ -1202,7 +1237,11 @@ class TestSmolagentsMappings:
                 "token_usage": {"input_tokens": 500, "output_tokens": 100, "total_tokens": 600},
             },
             EventKind.TOOL_CALL_STARTED,
-            {"tool_name": "web_search", "tool_call_id": "tc1", "arguments": '{"query": "python auth"}'},
+            {
+                "tool_name": "web_search",
+                "tool_call_id": "tc1",
+                "arguments": '{"query": "python auth"}',
+            },
             2,
             1,
             id="ToolCall",
@@ -1233,16 +1272,37 @@ class TestSmolagentsMappings:
 
 class TestClineMappings:
     SAY_CASES = [
-        pytest.param(_cline_say("task", "Start a new task"), EventKind.SESSION_STARTED, {"content": "Start a new task"}, id="say.task"),
-        pytest.param(_cline_say("text", "Assistant response"), EventKind.MESSAGE_ASSISTANT, {"content": "Assistant response"}, id="say.text"),
         pytest.param(
-            _cline_say("tool", json.dumps({"tool": "write_to_file", "path": "main.py", "content": "print('hi')"})),
+            _cline_say("task", "Start a new task"),
+            EventKind.SESSION_STARTED,
+            {"content": "Start a new task"},
+            id="say.task",
+        ),
+        pytest.param(
+            _cline_say("text", "Assistant response"),
+            EventKind.MESSAGE_ASSISTANT,
+            {"content": "Assistant response"},
+            id="say.text",
+        ),
+        pytest.param(
+            _cline_say(
+                "tool",
+                json.dumps({"tool": "write_to_file", "path": "main.py", "content": "print('hi')"}),
+            ),
             EventKind.TOOL_CALL_COMPLETED,
-            {"tool_name": "write_to_file", "result": json.dumps({"tool": "write_to_file", "path": "main.py", "content": "print('hi')"}), "path": "main.py"},
+            {
+                "tool_name": "write_to_file",
+                "result": json.dumps(
+                    {"tool": "write_to_file", "path": "main.py", "content": "print('hi')"}
+                ),
+                "path": "main.py",
+            },
             id="say.tool",
         ),
         pytest.param(
-            _cline_say("api_req_started", json.dumps({"request": "POST /v1/chat", "tokensIn": 500})),
+            _cline_say(
+                "api_req_started", json.dumps({"request": "POST /v1/chat", "tokensIn": 500})
+            ),
             EventKind.LLM_CALL_STARTED,
             {"input_tokens": 500},
             id="say.api_req_started",
@@ -1250,73 +1310,350 @@ class TestClineMappings:
         pytest.param(
             _cline_say(
                 "api_req_finished",
-                json.dumps({"tokensIn": 500, "tokensOut": 125, "cost": 0.02, "cacheReads": 4, "cacheWrites": 3}),
+                json.dumps(
+                    {
+                        "tokensIn": 500,
+                        "tokensOut": 125,
+                        "cost": 0.02,
+                        "cacheReads": 4,
+                        "cacheWrites": 3,
+                    }
+                ),
             ),
             EventKind.LLM_CALL_COMPLETED,
-            {"input_tokens": 500, "output_tokens": 125, "cost_usd": 0.02, "cache_read_tokens": 4, "cache_write_tokens": 3},
+            {
+                "input_tokens": 500,
+                "output_tokens": 125,
+                "cost_usd": 0.02,
+                "cache_read_tokens": 4,
+                "cache_write_tokens": 3,
+            },
             id="say.api_req_finished",
         ),
-        pytest.param(_cline_say("api_req_retried", "Retrying request"), "llm.call.retried", {"content": "Retrying request"}, id="say.api_req_retried"),
-        pytest.param(_cline_say("error", "Something broke"), EventKind.ERROR, {"message": "Something broke"}, id="say.error"),
-        pytest.param(_cline_say("error_retry", "Retry after error"), "llm.call.retried", {"content": "Retry after error"}, id="say.error_retry"),
-        pytest.param(_cline_say("reasoning", "Thinking through solution"), EventKind.REASONING_STARTED, {"content": "Thinking through solution"}, id="say.reasoning"),
-        pytest.param(_cline_say("completion_result", "All done"), EventKind.SESSION_ENDED, {"output": "All done"}, id="say.completion_result"),
-        pytest.param(_cline_say("user_feedback", "Please also add tests"), EventKind.MESSAGE_USER, {"content": "Please also add tests"}, id="say.user_feedback"),
-        pytest.param(_cline_say("user_feedback_diff", "Apply this diff"), EventKind.MESSAGE_USER, {"content": "Apply this diff"}, id="say.user_feedback_diff"),
-        pytest.param(_cline_say("command", "pytest -q"), EventKind.COMMAND_STARTED, {"command": "pytest -q"}, id="say.command"),
-        pytest.param(_cline_say("command_output", "15 passed"), EventKind.COMMAND_COMPLETED, {"content": "15 passed"}, id="say.command_output"),
-        pytest.param(_cline_say("shell_integration_warning", "Shell not integrated"), EventKind.SESSION_WARNING, {"message": "Shell not integrated"}, id="say.shell_integration_warning"),
-        pytest.param(_cline_say("shell_integration_warning_with_suggestion", "Enable shell integration"), EventKind.SESSION_WARNING, {"message": "Enable shell integration"}, id="say.shell_integration_warning_with_suggestion"),
-        pytest.param(_cline_say("browser_action_launch", "Launching browser"), EventKind.BROWSER_ACTION, {"content": "Launching browser"}, id="say.browser_action_launch"),
-        pytest.param(_cline_say("browser_action", "click(42)"), EventKind.BROWSER_ACTION, {"content": "click(42)"}, id="say.browser_action"),
-        pytest.param(_cline_say("browser_action_result", "Page opened"), EventKind.BROWSER_RESULT, {"content": "Page opened"}, id="say.browser_action_result"),
-        pytest.param(_cline_say("mcp_server_request_started", "Connecting to MCP server"), "mcp.connection.started", {"content": "Connecting to MCP server"}, id="say.mcp_server_request_started"),
-        pytest.param(_cline_say("mcp_server_response", "MCP response received"), "mcp.tool.completed", {"content": "MCP response received"}, id="say.mcp_server_response"),
-        pytest.param(_cline_say("mcp_notification", "MCP notification"), "mcp.info", {"content": "MCP notification"}, id="say.mcp_notification"),
-        pytest.param(_cline_say("use_mcp_server", "Use MCP tool"), "mcp.tool.started", {"content": "Use MCP tool"}, id="say.use_mcp_server"),
-        pytest.param(_cline_say("load_mcp_documentation", "Load MCP docs"), "mcp.info", {"content": "Load MCP docs"}, id="say.load_mcp_documentation"),
-        pytest.param(_cline_say("diff_error", "Patch failed"), EventKind.ERROR, {"message": "Patch failed"}, id="say.diff_error"),
-        pytest.param(_cline_say("deleted_api_reqs", "Deleted old API requests"), EventKind.SESSION_INFO, {"content": "Deleted old API requests"}, id="say.deleted_api_reqs"),
-        pytest.param(_cline_say("clineignore_error", "Invalid .clineignore"), EventKind.ERROR, {"message": "Invalid .clineignore"}, id="say.clineignore_error"),
-        pytest.param(_cline_say("command_permission_denied", "Command denied"), EventKind.PERMISSION_DENIED, {"content": "Command denied"}, id="say.command_permission_denied"),
-        pytest.param(_cline_say("checkpoint_created", "Checkpoint saved"), EventKind.CHECKPOINT_CREATED, {"content": "Checkpoint saved"}, id="say.checkpoint_created"),
-        pytest.param(_cline_say("generate_explanation", "Explaining changes"), EventKind.REASONING_STARTED, {"content": "Explaining changes"}, id="say.generate_explanation"),
-        pytest.param(_cline_say("info", "General info"), EventKind.SESSION_INFO, {"content": "General info"}, id="say.info"),
-        pytest.param(_cline_say("task_progress", "Halfway done"), EventKind.SESSION_INFO, {"content": "Halfway done"}, id="say.task_progress"),
-        pytest.param(_cline_say("hook_status", "Hook completed"), EventKind.COMMAND_COMPLETED, {"content": "Hook completed"}, id="say.hook_status"),
-        pytest.param(_cline_say("hook_output_stream", "Streaming hook output"), EventKind.COMMAND_COMPLETED, {"content": "Streaming hook output"}, id="say.hook_output_stream"),
-        pytest.param(_cline_say("subagent", "Subagent is running"), "agent.status", {"content": "Subagent is running"}, id="say.subagent"),
-        pytest.param(_cline_say("use_subagents", "Spawn subagent"), EventKind.AGENT_SPAWNED, {"content": "Spawn subagent"}, id="say.use_subagents"),
-        pytest.param(_cline_say("subagent_usage", "Subagent finished"), EventKind.AGENT_COMPLETED, {"content": "Subagent finished"}, id="say.subagent_usage"),
-        pytest.param(_cline_say("conditional_rules_applied", "Rules were applied"), EventKind.SESSION_INFO, {"content": "Rules were applied"}, id="say.conditional_rules_applied"),
-        pytest.param(_cline_say(None, "Fallback assistant text"), EventKind.MESSAGE_ASSISTANT, {"content": "Fallback assistant text"}, id="say"),
+        pytest.param(
+            _cline_say("api_req_retried", "Retrying request"),
+            "llm.call.retried",
+            {"content": "Retrying request"},
+            id="say.api_req_retried",
+        ),
+        pytest.param(
+            _cline_say("error", "Something broke"),
+            EventKind.ERROR,
+            {"message": "Something broke"},
+            id="say.error",
+        ),
+        pytest.param(
+            _cline_say("error_retry", "Retry after error"),
+            "llm.call.retried",
+            {"content": "Retry after error"},
+            id="say.error_retry",
+        ),
+        pytest.param(
+            _cline_say("reasoning", "Thinking through solution"),
+            EventKind.REASONING_STARTED,
+            {"content": "Thinking through solution"},
+            id="say.reasoning",
+        ),
+        pytest.param(
+            _cline_say("completion_result", "All done"),
+            EventKind.SESSION_ENDED,
+            {"output": "All done"},
+            id="say.completion_result",
+        ),
+        pytest.param(
+            _cline_say("user_feedback", "Please also add tests"),
+            EventKind.MESSAGE_USER,
+            {"content": "Please also add tests"},
+            id="say.user_feedback",
+        ),
+        pytest.param(
+            _cline_say("user_feedback_diff", "Apply this diff"),
+            EventKind.MESSAGE_USER,
+            {"content": "Apply this diff"},
+            id="say.user_feedback_diff",
+        ),
+        pytest.param(
+            _cline_say("command", "pytest -q"),
+            EventKind.COMMAND_STARTED,
+            {"command": "pytest -q"},
+            id="say.command",
+        ),
+        pytest.param(
+            _cline_say("command_output", "15 passed"),
+            EventKind.COMMAND_COMPLETED,
+            {"content": "15 passed"},
+            id="say.command_output",
+        ),
+        pytest.param(
+            _cline_say("shell_integration_warning", "Shell not integrated"),
+            EventKind.SESSION_WARNING,
+            {"message": "Shell not integrated"},
+            id="say.shell_integration_warning",
+        ),
+        pytest.param(
+            _cline_say("shell_integration_warning_with_suggestion", "Enable shell integration"),
+            EventKind.SESSION_WARNING,
+            {"message": "Enable shell integration"},
+            id="say.shell_integration_warning_with_suggestion",
+        ),
+        pytest.param(
+            _cline_say("browser_action_launch", "Launching browser"),
+            EventKind.BROWSER_ACTION,
+            {"content": "Launching browser"},
+            id="say.browser_action_launch",
+        ),
+        pytest.param(
+            _cline_say("browser_action", "click(42)"),
+            EventKind.BROWSER_ACTION,
+            {"content": "click(42)"},
+            id="say.browser_action",
+        ),
+        pytest.param(
+            _cline_say("browser_action_result", "Page opened"),
+            EventKind.BROWSER_RESULT,
+            {"content": "Page opened"},
+            id="say.browser_action_result",
+        ),
+        pytest.param(
+            _cline_say("mcp_server_request_started", "Connecting to MCP server"),
+            "mcp.connection.started",
+            {"content": "Connecting to MCP server"},
+            id="say.mcp_server_request_started",
+        ),
+        pytest.param(
+            _cline_say("mcp_server_response", "MCP response received"),
+            "mcp.tool.completed",
+            {"content": "MCP response received"},
+            id="say.mcp_server_response",
+        ),
+        pytest.param(
+            _cline_say("mcp_notification", "MCP notification"),
+            "mcp.info",
+            {"content": "MCP notification"},
+            id="say.mcp_notification",
+        ),
+        pytest.param(
+            _cline_say("use_mcp_server", "Use MCP tool"),
+            "mcp.tool.started",
+            {"content": "Use MCP tool"},
+            id="say.use_mcp_server",
+        ),
+        pytest.param(
+            _cline_say("load_mcp_documentation", "Load MCP docs"),
+            "mcp.info",
+            {"content": "Load MCP docs"},
+            id="say.load_mcp_documentation",
+        ),
+        pytest.param(
+            _cline_say("diff_error", "Patch failed"),
+            EventKind.ERROR,
+            {"message": "Patch failed"},
+            id="say.diff_error",
+        ),
+        pytest.param(
+            _cline_say("deleted_api_reqs", "Deleted old API requests"),
+            EventKind.SESSION_INFO,
+            {"content": "Deleted old API requests"},
+            id="say.deleted_api_reqs",
+        ),
+        pytest.param(
+            _cline_say("clineignore_error", "Invalid .clineignore"),
+            EventKind.ERROR,
+            {"message": "Invalid .clineignore"},
+            id="say.clineignore_error",
+        ),
+        pytest.param(
+            _cline_say("command_permission_denied", "Command denied"),
+            EventKind.PERMISSION_DENIED,
+            {"content": "Command denied"},
+            id="say.command_permission_denied",
+        ),
+        pytest.param(
+            _cline_say("checkpoint_created", "Checkpoint saved"),
+            EventKind.CHECKPOINT_CREATED,
+            {"content": "Checkpoint saved"},
+            id="say.checkpoint_created",
+        ),
+        pytest.param(
+            _cline_say("generate_explanation", "Explaining changes"),
+            EventKind.REASONING_STARTED,
+            {"content": "Explaining changes"},
+            id="say.generate_explanation",
+        ),
+        pytest.param(
+            _cline_say("info", "General info"),
+            EventKind.SESSION_INFO,
+            {"content": "General info"},
+            id="say.info",
+        ),
+        pytest.param(
+            _cline_say("task_progress", "Halfway done"),
+            EventKind.SESSION_INFO,
+            {"content": "Halfway done"},
+            id="say.task_progress",
+        ),
+        pytest.param(
+            _cline_say("hook_status", "Hook completed"),
+            EventKind.COMMAND_COMPLETED,
+            {"content": "Hook completed"},
+            id="say.hook_status",
+        ),
+        pytest.param(
+            _cline_say("hook_output_stream", "Streaming hook output"),
+            EventKind.COMMAND_COMPLETED,
+            {"content": "Streaming hook output"},
+            id="say.hook_output_stream",
+        ),
+        pytest.param(
+            _cline_say("subagent", "Subagent is running"),
+            "agent.status",
+            {"content": "Subagent is running"},
+            id="say.subagent",
+        ),
+        pytest.param(
+            _cline_say("use_subagents", "Spawn subagent"),
+            EventKind.AGENT_SPAWNED,
+            {"content": "Spawn subagent"},
+            id="say.use_subagents",
+        ),
+        pytest.param(
+            _cline_say("subagent_usage", "Subagent finished"),
+            EventKind.AGENT_COMPLETED,
+            {"content": "Subagent finished"},
+            id="say.subagent_usage",
+        ),
+        pytest.param(
+            _cline_say("conditional_rules_applied", "Rules were applied"),
+            EventKind.SESSION_INFO,
+            {"content": "Rules were applied"},
+            id="say.conditional_rules_applied",
+        ),
+        pytest.param(
+            _cline_say(None, "Fallback assistant text"),
+            EventKind.MESSAGE_ASSISTANT,
+            {"content": "Fallback assistant text"},
+            id="say",
+        ),
     ]
 
     ASK_CASES = [
-        pytest.param(_cline_ask("followup", "Need more info"), EventKind.INPUT_REQUESTED, {"content": "Need more info"}, id="ask.followup"),
+        pytest.param(
+            _cline_ask("followup", "Need more info"),
+            EventKind.INPUT_REQUESTED,
+            {"content": "Need more info"},
+            id="ask.followup",
+        ),
         pytest.param(
             _cline_ask("tool", json.dumps({"tool": "read_file", "path": "main.py"})),
             EventKind.PERMISSION_REQUESTED,
-            {"tool_name": "read_file", "content": json.dumps({"tool": "read_file", "path": "main.py"})},
+            {
+                "tool_name": "read_file",
+                "content": json.dumps({"tool": "read_file", "path": "main.py"}),
+            },
             id="ask.tool",
         ),
-        pytest.param(_cline_ask("command", "rm -rf build"), EventKind.PERMISSION_REQUESTED, {"command": "rm -rf build"}, id="ask.command"),
-        pytest.param(_cline_ask("command_output", "Approve command output?"), EventKind.PERMISSION_REQUESTED, {"content": "Approve command output?"}, id="ask.command_output"),
-        pytest.param(_cline_ask("completion_result", "Accept this completion?"), EventKind.INPUT_REQUESTED, {"content": "Accept this completion?"}, id="ask.completion_result"),
-        pytest.param(_cline_ask("resume_task", "Resume task?"), EventKind.INPUT_REQUESTED, {"content": "Resume task?"}, id="ask.resume_task"),
-        pytest.param(_cline_ask("resume_completed_task", "Resume completed task?"), EventKind.INPUT_REQUESTED, {"content": "Resume completed task?"}, id="ask.resume_completed_task"),
-        pytest.param(_cline_ask("plan_mode_respond", "Respond in plan mode"), EventKind.INPUT_REQUESTED, {"content": "Respond in plan mode"}, id="ask.plan_mode_respond"),
-        pytest.param(_cline_ask("act_mode_respond", "Respond in act mode"), EventKind.INPUT_REQUESTED, {"content": "Respond in act mode"}, id="ask.act_mode_respond"),
-        pytest.param(_cline_ask("api_req_failed", "API request failed"), EventKind.LLM_CALL_FAILED, {"content": "API request failed"}, id="ask.api_req_failed"),
-        pytest.param(_cline_ask("mistake_limit_reached", "Mistake limit reached"), EventKind.INPUT_REQUESTED, {"content": "Mistake limit reached"}, id="ask.mistake_limit_reached"),
-        pytest.param(_cline_ask("browser_action_launch", "Launch browser?"), EventKind.PERMISSION_REQUESTED, {"content": "Launch browser?"}, id="ask.browser_action_launch"),
-        pytest.param(_cline_ask("use_mcp_server", "Use MCP server?"), EventKind.PERMISSION_REQUESTED, {"content": "Use MCP server?"}, id="ask.use_mcp_server"),
-        pytest.param(_cline_ask("new_task", "Create new task?"), EventKind.INPUT_REQUESTED, {"content": "Create new task?"}, id="ask.new_task"),
-        pytest.param(_cline_ask("condense", "Condense the conversation?"), EventKind.INPUT_REQUESTED, {"content": "Condense the conversation?"}, id="ask.condense"),
-        pytest.param(_cline_ask("summarize_task", "Summarize the task?"), EventKind.INPUT_REQUESTED, {"content": "Summarize the task?"}, id="ask.summarize_task"),
-        pytest.param(_cline_ask("report_bug", "Report a bug?"), EventKind.INPUT_REQUESTED, {"content": "Report a bug?"}, id="ask.report_bug"),
-        pytest.param(_cline_ask("use_subagents", "Allow subagents?"), EventKind.PERMISSION_REQUESTED, {"content": "Allow subagents?"}, id="ask.use_subagents"),
-        pytest.param(_cline_ask(None, "Fallback ask message"), EventKind.INPUT_REQUESTED, {"content": "Fallback ask message"}, id="ask"),
+        pytest.param(
+            _cline_ask("command", "rm -rf build"),
+            EventKind.PERMISSION_REQUESTED,
+            {"command": "rm -rf build"},
+            id="ask.command",
+        ),
+        pytest.param(
+            _cline_ask("command_output", "Approve command output?"),
+            EventKind.PERMISSION_REQUESTED,
+            {"content": "Approve command output?"},
+            id="ask.command_output",
+        ),
+        pytest.param(
+            _cline_ask("completion_result", "Accept this completion?"),
+            EventKind.INPUT_REQUESTED,
+            {"content": "Accept this completion?"},
+            id="ask.completion_result",
+        ),
+        pytest.param(
+            _cline_ask("resume_task", "Resume task?"),
+            EventKind.INPUT_REQUESTED,
+            {"content": "Resume task?"},
+            id="ask.resume_task",
+        ),
+        pytest.param(
+            _cline_ask("resume_completed_task", "Resume completed task?"),
+            EventKind.INPUT_REQUESTED,
+            {"content": "Resume completed task?"},
+            id="ask.resume_completed_task",
+        ),
+        pytest.param(
+            _cline_ask("plan_mode_respond", "Respond in plan mode"),
+            EventKind.INPUT_REQUESTED,
+            {"content": "Respond in plan mode"},
+            id="ask.plan_mode_respond",
+        ),
+        pytest.param(
+            _cline_ask("act_mode_respond", "Respond in act mode"),
+            EventKind.INPUT_REQUESTED,
+            {"content": "Respond in act mode"},
+            id="ask.act_mode_respond",
+        ),
+        pytest.param(
+            _cline_ask("api_req_failed", "API request failed"),
+            EventKind.LLM_CALL_FAILED,
+            {"content": "API request failed"},
+            id="ask.api_req_failed",
+        ),
+        pytest.param(
+            _cline_ask("mistake_limit_reached", "Mistake limit reached"),
+            EventKind.INPUT_REQUESTED,
+            {"content": "Mistake limit reached"},
+            id="ask.mistake_limit_reached",
+        ),
+        pytest.param(
+            _cline_ask("browser_action_launch", "Launch browser?"),
+            EventKind.PERMISSION_REQUESTED,
+            {"content": "Launch browser?"},
+            id="ask.browser_action_launch",
+        ),
+        pytest.param(
+            _cline_ask("use_mcp_server", "Use MCP server?"),
+            EventKind.PERMISSION_REQUESTED,
+            {"content": "Use MCP server?"},
+            id="ask.use_mcp_server",
+        ),
+        pytest.param(
+            _cline_ask("new_task", "Create new task?"),
+            EventKind.INPUT_REQUESTED,
+            {"content": "Create new task?"},
+            id="ask.new_task",
+        ),
+        pytest.param(
+            _cline_ask("condense", "Condense the conversation?"),
+            EventKind.INPUT_REQUESTED,
+            {"content": "Condense the conversation?"},
+            id="ask.condense",
+        ),
+        pytest.param(
+            _cline_ask("summarize_task", "Summarize the task?"),
+            EventKind.INPUT_REQUESTED,
+            {"content": "Summarize the task?"},
+            id="ask.summarize_task",
+        ),
+        pytest.param(
+            _cline_ask("report_bug", "Report a bug?"),
+            EventKind.INPUT_REQUESTED,
+            {"content": "Report a bug?"},
+            id="ask.report_bug",
+        ),
+        pytest.param(
+            _cline_ask("use_subagents", "Allow subagents?"),
+            EventKind.PERMISSION_REQUESTED,
+            {"content": "Allow subagents?"},
+            id="ask.use_subagents",
+        ),
+        pytest.param(
+            _cline_ask(None, "Fallback ask message"),
+            EventKind.INPUT_REQUESTED,
+            {"content": "Fallback ask message"},
+            id="ask",
+        ),
     ]
 
     @pytest.mark.parametrize(("event", "expected_kind", "expected_payload"), SAY_CASES + ASK_CASES)
@@ -1327,25 +1664,45 @@ class TestClineMappings:
 class TestPydanticAIMappings:
     CASES = [
         pytest.param(
-            {"type": "agent_run_start", "agent_name": "support-agent", "model_name": "gpt-4o", "timestamp": "2024-06-15T10:00:00Z"},
+            {
+                "type": "agent_run_start",
+                "agent_name": "support-agent",
+                "model_name": "gpt-4o",
+                "timestamp": "2024-06-15T10:00:00Z",
+            },
             EventKind.SESSION_STARTED,
             {"agent_name": "support-agent", "model": "gpt-4o"},
             id="agent_run_start",
         ),
         pytest.param(
-            {"type": "agent_run_end", "agent_name": "support-agent", "result": "done", "timestamp": "2024-06-15T10:00:01Z"},
+            {
+                "type": "agent_run_end",
+                "agent_name": "support-agent",
+                "result": "done",
+                "timestamp": "2024-06-15T10:00:01Z",
+            },
             EventKind.SESSION_ENDED,
             {"agent_name": "support-agent", "result": "done"},
             id="agent_run_end",
         ),
         pytest.param(
-            {"type": "agent_run_error", "agent_name": "support-agent", "error": "boom", "timestamp": "2024-06-15T10:00:02Z"},
+            {
+                "type": "agent_run_error",
+                "agent_name": "support-agent",
+                "error": "boom",
+                "timestamp": "2024-06-15T10:00:02Z",
+            },
             EventKind.ERROR,
             {"agent_name": "support-agent", "message": "boom"},
             id="agent_run_error",
         ),
         pytest.param(
-            {"type": "model_request_start", "model_name": "gpt-4o", "request_id": "req-1", "timestamp": "2024-06-15T10:00:03Z"},
+            {
+                "type": "model_request_start",
+                "model_name": "gpt-4o",
+                "request_id": "req-1",
+                "timestamp": "2024-06-15T10:00:03Z",
+            },
             EventKind.LLM_CALL_STARTED,
             {"model": "gpt-4o", "request_id": "req-1"},
             id="model_request_start",
@@ -1367,16 +1724,33 @@ class TestPydanticAIMappings:
             {
                 "kind": "response",
                 "parts": [{"part_kind": "text", "content": "Hi there!"}],
-                "usage": {"input_tokens": 10, "output_tokens": 15, "cache_read_tokens": 1, "cache_write_tokens": 2},
+                "usage": {
+                    "input_tokens": 10,
+                    "output_tokens": 15,
+                    "cache_read_tokens": 1,
+                    "cache_write_tokens": 2,
+                },
                 "model_name": "gpt-4o",
                 "timestamp": "2024-06-15T10:00:05Z",
             },
             EventKind.LLM_CALL_COMPLETED,
-            {"model": "gpt-4o", "input_tokens": 10, "output_tokens": 15, "cache_read_tokens": 1, "cache_write_tokens": 2, "content": "Hi there!"},
+            {
+                "model": "gpt-4o",
+                "input_tokens": 10,
+                "output_tokens": 15,
+                "cache_read_tokens": 1,
+                "cache_write_tokens": 2,
+                "content": "Hi there!",
+            },
             id="model_response",
         ),
         pytest.param(
-            {"type": "model_request_error", "model_name": "gpt-4o", "error": "Timeout", "timestamp": "2024-06-15T10:00:06Z"},
+            {
+                "type": "model_request_error",
+                "model_name": "gpt-4o",
+                "error": "Timeout",
+                "timestamp": "2024-06-15T10:00:06Z",
+            },
             EventKind.LLM_CALL_FAILED,
             {"model": "gpt-4o", "error": "Timeout"},
             id="model_request_error",
@@ -1404,25 +1778,43 @@ class TestPydanticAIMappings:
             id="tool_call_end",
         ),
         pytest.param(
-            {"type": "tool_call_error", "tool_call_id": "tc-1", "tool_name": "search", "error": "Failed", "timestamp": "2024-06-15T10:00:09Z"},
+            {
+                "type": "tool_call_error",
+                "tool_call_id": "tc-1",
+                "tool_name": "search",
+                "error": "Failed",
+                "timestamp": "2024-06-15T10:00:09Z",
+            },
             EventKind.TOOL_CALL_FAILED,
             {"tool_call_id": "tc-1", "tool_name": "search", "error": "Failed"},
             id="tool_call_error",
         ),
         pytest.param(
-            {"type": "user_message", "content": "User asked a question", "timestamp": "2024-06-15T10:00:10Z"},
+            {
+                "type": "user_message",
+                "content": "User asked a question",
+                "timestamp": "2024-06-15T10:00:10Z",
+            },
             EventKind.MESSAGE_USER,
             {"content": "User asked a question"},
             id="user_message",
         ),
         pytest.param(
-            {"type": "model_text_response", "content": "Plain text answer", "timestamp": "2024-06-15T10:00:11Z"},
+            {
+                "type": "model_text_response",
+                "content": "Plain text answer",
+                "timestamp": "2024-06-15T10:00:11Z",
+            },
             EventKind.MESSAGE_ASSISTANT,
             {"content": "Plain text answer"},
             id="model_text_response",
         ),
         pytest.param(
-            {"type": "model_structured_response", "data": {"answer": 42}, "timestamp": "2024-06-15T10:00:12Z"},
+            {
+                "type": "model_structured_response",
+                "data": {"answer": 42},
+                "timestamp": "2024-06-15T10:00:12Z",
+            },
             EventKind.MESSAGE_ASSISTANT,
             {"content": {"answer": 42}},
             id="model_structured_response",
@@ -1448,7 +1840,11 @@ class TestPydanticAIMappings:
             id="stream.part_delta",
         ),
         pytest.param(
-            {"event_kind": "part_end", "content": "Hello world", "timestamp": "2024-06-15T10:00:15Z"},
+            {
+                "event_kind": "part_end",
+                "content": "Hello world",
+                "timestamp": "2024-06-15T10:00:15Z",
+            },
             EventKind.MESSAGE_ASSISTANT,
             {"content": "Hello world"},
             id="stream.part_end",
@@ -1476,37 +1872,66 @@ class TestPydanticAIMappings:
             id="model_response_chunk",
         ),
         pytest.param(
-            {"type": "validation_error", "tool_name": "search", "error": "invalid args", "retry_count": 2, "timestamp": "2024-06-15T10:00:18Z"},
+            {
+                "type": "validation_error",
+                "tool_name": "search",
+                "error": "invalid args",
+                "retry_count": 2,
+                "timestamp": "2024-06-15T10:00:18Z",
+            },
             EventKind.TOOL_VALIDATION_FAILED,
             {"tool_name": "search", "error": "invalid args", "retry_count": 2},
             id="validation_error",
         ),
         pytest.param(
-            {"type": "retry", "reason": "try again", "attempt": 3, "timestamp": "2024-06-15T10:00:19Z"},
+            {
+                "type": "retry",
+                "reason": "try again",
+                "attempt": 3,
+                "timestamp": "2024-06-15T10:00:19Z",
+            },
             EventKind.ERROR,
             {"message": "try again", "attempt": 3},
             id="retry",
         ),
         pytest.param(
-            {"type": "token_usage", "usage": {"input_tokens": 100, "output_tokens": 25}, "model_name": "gpt-4o", "timestamp": "2024-06-15T10:00:20Z"},
+            {
+                "type": "token_usage",
+                "usage": {"input_tokens": 100, "output_tokens": 25},
+                "model_name": "gpt-4o",
+                "timestamp": "2024-06-15T10:00:20Z",
+            },
             EventKind.USAGE,
             {"input_tokens": 100, "output_tokens": 25, "model": "gpt-4o"},
             id="token_usage",
         ),
         pytest.param(
-            {"type": "output_validation_start", "validator_name": "schema", "timestamp": "2024-06-15T10:00:21Z"},
+            {
+                "type": "output_validation_start",
+                "validator_name": "schema",
+                "timestamp": "2024-06-15T10:00:21Z",
+            },
             EventKind.GUARDRAIL_STARTED,
             {"validator": "schema"},
             id="output_validation_start",
         ),
         pytest.param(
-            {"type": "output_validation_pass", "validator_name": "schema", "timestamp": "2024-06-15T10:00:22Z"},
+            {
+                "type": "output_validation_pass",
+                "validator_name": "schema",
+                "timestamp": "2024-06-15T10:00:22Z",
+            },
             EventKind.GUARDRAIL_PASSED,
             {"validator": "schema"},
             id="output_validation_pass",
         ),
         pytest.param(
-            {"type": "output_validation_fail", "validator_name": "schema", "error": "bad shape", "timestamp": "2024-06-15T10:00:23Z"},
+            {
+                "type": "output_validation_fail",
+                "validator_name": "schema",
+                "error": "bad shape",
+                "timestamp": "2024-06-15T10:00:23Z",
+            },
             EventKind.GUARDRAIL_FAILED,
             {"validator": "schema", "reason": "bad shape"},
             id="output_validation_fail",
@@ -1514,5 +1939,7 @@ class TestPydanticAIMappings:
     ]
 
     @pytest.mark.parametrize(("event", "expected_kind", "expected_payload"), CASES)
-    def test_pydantic_ai_mapping(self, event: dict, expected_kind: str, expected_payload: dict) -> None:
+    def test_pydantic_ai_mapping(
+        self, event: dict, expected_kind: str, expected_payload: dict
+    ) -> None:
         _assert_event("pydantic_ai.yaml", event, expected_kind, expected_payload)

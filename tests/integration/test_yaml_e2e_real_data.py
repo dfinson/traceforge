@@ -224,9 +224,9 @@ class TestGooseRealData:
         Goose YAML: type_field "role", payload content: content_json."""
         event = {
             "role": "user",
-            "content_json": json.dumps([
-                {"type": "text", "text": "List the files in the current directory"}
-            ]),
+            "content_json": json.dumps(
+                [{"type": "text", "text": "List the files in the current directory"}]
+            ),
             "created_at": "2025-02-21T18:19:26Z",
         }
         results = _parse_event("goose.yaml", event)
@@ -240,17 +240,19 @@ class TestGooseRealData:
         The tool call info is NESTED inside content_json — YAML can't extract it."""
         event = {
             "role": "assistant",
-            "content_json": json.dumps([
-                {"type": "text", "text": "I'll help you with that."},
-                {
-                    "type": "toolRequest",
-                    "id": "toolu_01XyzAbc",
-                    "toolCall": {
-                        "status": "success",
-                        "value": {"name": "bash", "arguments": {"command": "ls -la"}},
+            "content_json": json.dumps(
+                [
+                    {"type": "text", "text": "I'll help you with that."},
+                    {
+                        "type": "toolRequest",
+                        "id": "toolu_01XyzAbc",
+                        "toolCall": {
+                            "status": "success",
+                            "value": {"name": "bash", "arguments": {"command": "ls -la"}},
+                        },
                     },
-                },
-            ]),
+                ]
+            ),
             "created_at": "2025-02-21T18:19:27Z",
         }
         results = _parse_event("goose.yaml", event)
@@ -328,7 +330,7 @@ class TestSWEAgentRealData:
         results = _parse_event("sweagent.yaml", event)
         assert len(results) == 1
         assert results[0].kind == EventKind.TOOL_OUTPUT
-        assert 'Found 1 matches' in results[0].payload["content"]
+        assert "Found 1 matches" in results[0].payload["content"]
 
     def test_system_prompt(self):
         """Real system prompt entry."""
@@ -388,7 +390,10 @@ class TestClineRealData:
         # Preprocessor synthesizes "say.task" → maps to session.started
         assert len(results) == 1
         assert results[0].kind == EventKind.SESSION_STARTED
-        assert results[0].payload["content"] == "Create a Python script that reads a CSV and outputs a summary"
+        assert (
+            results[0].payload["content"]
+            == "Create a Python script that reads a CSV and outputs a summary"
+        )
 
     def test_say_api_req_started(self):
         """Real API request event — metrics are JSON-encoded in text field."""
@@ -396,14 +401,16 @@ class TestClineRealData:
             "ts": 1718123460500,
             "type": "say",
             "say": "api_req_started",
-            "text": json.dumps({
-                "request": "...",
-                "tokensIn": 1842,
-                "tokensOut": 312,
-                "cacheWrites": 0,
-                "cacheReads": 0,
-                "cost": 0.00712,
-            }),
+            "text": json.dumps(
+                {
+                    "request": "...",
+                    "tokensIn": 1842,
+                    "tokensOut": 312,
+                    "cacheWrites": 0,
+                    "cacheReads": 0,
+                    "cost": 0.00712,
+                }
+            ),
             "modelInfo": {
                 "modelId": "claude-sonnet-4-5",
                 "providerId": "anthropic",
@@ -421,11 +428,13 @@ class TestClineRealData:
             "ts": 1718123461000,
             "type": "say",
             "say": "tool",
-            "text": json.dumps({
-                "tool": "newFileCreated",
-                "path": "summarize_csv.py",
-                "content": "import pandas as pd\n...",
-            }),
+            "text": json.dumps(
+                {
+                    "tool": "newFileCreated",
+                    "path": "summarize_csv.py",
+                    "content": "import pandas as pd\n...",
+                }
+            ),
         }
         results = _parse_event("cline.yaml", event)
         # Preprocessor synthesizes "say.tool" → maps to tool.call.completed
@@ -650,7 +659,9 @@ class TestLangGraphRealData:
             "name": "CompletionLLM",
             "tags": [],
             "metadata": {},
-            "data": {"chunk": {"text": "token", "generation_info": None, "type": "GenerationChunk"}},
+            "data": {
+                "chunk": {"text": "token", "generation_info": None, "type": "GenerationChunk"}
+            },
             "parent_ids": [],
         }
         results = _parse_event("langgraph.yaml", event)
@@ -913,16 +924,16 @@ class TestCompatibilityMatrix:
     @pytest.mark.parametrize(
         "yaml_name,status",
         [
-            ("langgraph.yaml", "works"),        # event field matches real astream_events
-            ("aider.yaml", "aspirational"),      # event names are plausible but unverified
-            ("aider_markdown.yaml", "works"),    # parser output is controlled by us
-            ("sweagent.yaml", "works"),          # role field matches all 4 real roles
-            ("goose.yaml", "partial"),           # user/assistant match, tools need preprocessor
-            ("cline.yaml", "partial"),           # ask/say match, subtypes need preprocessor
-            ("crewai.yaml", "partial"),          # 4 real flow events + aspirational future events
-            ("openhands.yaml", "partial"),       # action events work, observations need preprocessor
+            ("langgraph.yaml", "works"),  # event field matches real astream_events
+            ("aider.yaml", "aspirational"),  # event names are plausible but unverified
+            ("aider_markdown.yaml", "works"),  # parser output is controlled by us
+            ("sweagent.yaml", "works"),  # role field matches all 4 real roles
+            ("goose.yaml", "partial"),  # user/assistant match, tools need preprocessor
+            ("cline.yaml", "partial"),  # ask/say match, subtypes need preprocessor
+            ("crewai.yaml", "partial"),  # 4 real flow events + aspirational future events
+            ("openhands.yaml", "partial"),  # action events work, observations need preprocessor
             ("pydantic_ai.yaml", "needs_preprocessor"),  # native format uses kind/event_kind
-            ("smolagents.yaml", "needs_preprocessor"),    # no discriminator field at all
+            ("smolagents.yaml", "needs_preprocessor"),  # no discriminator field at all
         ],
     )
     def test_status_documented(self, yaml_name: str, status: str):

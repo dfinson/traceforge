@@ -94,7 +94,9 @@ class OtelSpanAdapter(Adapter):
         kind = _SPAN_KIND_MAP.get(span_name, EventKind.RAW)
         attributes = _normalize_attributes(span.get("attributes", {}))
         status = span.get("status", {})
-        status_code = status.get("status_code", _STATUS_OK) if isinstance(status, dict) else _STATUS_OK
+        status_code = (
+            status.get("status_code", _STATUS_OK) if isinstance(status, dict) else _STATUS_OK
+        )
 
         # Timestamps — support both snake_case and camelCase keys, coerce strings
         start_ns = (
@@ -103,9 +105,7 @@ class OtelSpanAdapter(Adapter):
             or span.get("start_time")
         )
         end_ns = (
-            span.get("end_time_unix_nano")
-            or span.get("endTimeUnixNano")
-            or span.get("end_time")
+            span.get("end_time_unix_nano") or span.get("endTimeUnixNano") or span.get("end_time")
         )
         if start_ns is not None:
             start_ns = int(start_ns)

@@ -43,48 +43,64 @@ def preprocess_goose(obj: dict[str, Any]) -> list[dict[str, Any]]:
         elif item_type == "toolRequest":
             tool_call = item.get("toolCall", {})
             value = tool_call.get("value", {}) if isinstance(tool_call, dict) else {}
-            results.append({
-                "role": "tool_use",
-                "created_at": ts,
-                "name": value.get("name", ""),
-                "id": item.get("id", ""),
-                "input": value.get("arguments", {}),
-            })
+            results.append(
+                {
+                    "role": "tool_use",
+                    "created_at": ts,
+                    "name": value.get("name", ""),
+                    "id": item.get("id", ""),
+                    "input": value.get("arguments", {}),
+                }
+            )
         elif item_type == "toolResponse":
             tool_result = item.get("toolResult", {})
-            results.append({
-                "role": "tool_result",
-                "created_at": ts,
-                "tool_use_id": item.get("id", ""),
-                "content": tool_result.get("value", {}).get("content", "") if isinstance(tool_result, dict) else "",
-                "is_success": tool_result.get("status") == "success" if isinstance(tool_result, dict) else False,
-            })
+            results.append(
+                {
+                    "role": "tool_result",
+                    "created_at": ts,
+                    "tool_use_id": item.get("id", ""),
+                    "content": tool_result.get("value", {}).get("content", "")
+                    if isinstance(tool_result, dict)
+                    else "",
+                    "is_success": tool_result.get("status") == "success"
+                    if isinstance(tool_result, dict)
+                    else False,
+                }
+            )
         elif item_type == "thinking":
-            results.append({
-                "role": "thinking",
-                "created_at": ts,
-                "thinking": item.get("thinking", ""),
-            })
+            results.append(
+                {
+                    "role": "thinking",
+                    "created_at": ts,
+                    "thinking": item.get("thinking", ""),
+                }
+            )
         elif item_type == "redactedThinking":
-            results.append({
-                "role": "redacted_thinking",
-                "created_at": ts,
-                "data": item.get("data", ""),
-            })
+            results.append(
+                {
+                    "role": "redacted_thinking",
+                    "created_at": ts,
+                    "data": item.get("data", ""),
+                }
+            )
         elif item_type == "image":
-            results.append({
-                "role": "image",
-                "created_at": ts,
-                "data": item.get("data", ""),
-            })
+            results.append(
+                {
+                    "role": "image",
+                    "created_at": ts,
+                    "data": item.get("data", ""),
+                }
+            )
         elif item_type == "toolConfirmationRequest":
-            results.append({
-                "role": "tool_confirmation_request",
-                "created_at": ts,
-                "content": item.get("prompt", ""),
-                "name": item.get("toolName", ""),
-                "id": item.get("id", ""),
-            })
+            results.append(
+                {
+                    "role": "tool_confirmation_request",
+                    "created_at": ts,
+                    "content": item.get("prompt", ""),
+                    "name": item.get("toolName", ""),
+                    "id": item.get("id", ""),
+                }
+            )
         elif item_type == "actionRequired":
             data = item.get("data", {}) if isinstance(item.get("data"), dict) else {}
             # ActionRequiredData sub-variants:
@@ -92,36 +108,49 @@ def preprocess_goose(obj: dict[str, Any]) -> list[dict[str, Any]]:
             #   ToolConfirmation: {actionType, id, toolName, arguments, prompt}
             #   ElicitationResponse: {actionType, id, userData}
             content = data.get("message") or data.get("prompt") or str(data.get("userData", ""))
-            results.append({
-                "role": "action_required",
-                "created_at": ts,
-                "content": content,
-                "action_type": data.get("actionType", ""),
-            })
+            results.append(
+                {
+                    "role": "action_required",
+                    "created_at": ts,
+                    "content": content,
+                    "action_type": data.get("actionType", ""),
+                }
+            )
         elif item_type == "frontendToolRequest":
             tool_call = item.get("toolCall", {})
             value = tool_call.get("value", {}) if isinstance(tool_call, dict) else {}
-            results.append({
-                "role": "frontend_tool_request",
-                "created_at": ts,
-                "name": value.get("name", ""),
-                "id": item.get("id", ""),
-                "input": value.get("arguments", {}),
-            })
+            results.append(
+                {
+                    "role": "frontend_tool_request",
+                    "created_at": ts,
+                    "name": value.get("name", ""),
+                    "id": item.get("id", ""),
+                    "input": value.get("arguments", {}),
+                }
+            )
         elif item_type == "systemNotification":
-            results.append({
-                "role": "system_notification",
-                "created_at": ts,
-                "content": item.get("msg", ""),
-            })
+            results.append(
+                {
+                    "role": "system_notification",
+                    "created_at": ts,
+                    "content": item.get("msg", ""),
+                }
+            )
 
     # Always emit the message itself (with role)
     if has_text or not results:
-        text_parts = [i.get("text", "") for i in content_items if isinstance(i, dict) and i.get("type") == "text"]
-        results.insert(0, {
-            "role": role,
-            "created_at": ts,
-            "content": "\n".join(text_parts) if text_parts else content_json_raw,
-        })
+        text_parts = [
+            i.get("text", "")
+            for i in content_items
+            if isinstance(i, dict) and i.get("type") == "text"
+        ]
+        results.insert(
+            0,
+            {
+                "role": role,
+                "created_at": ts,
+                "content": "\n".join(text_parts) if text_parts else content_json_raw,
+            },
+        )
 
     return results

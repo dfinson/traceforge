@@ -161,7 +161,14 @@ class TestMappedJsonFullPipeline:
     @pytest.fixture
     def crewai_adapter(self):
         return MappedJsonAdapter.from_yaml(
-            str(Path(__file__).resolve().parents[1] / ".." / "src" / "tracemill" / "mappings" / "crewai.yaml"),
+            str(
+                Path(__file__).resolve().parents[1]
+                / ".."
+                / "src"
+                / "tracemill"
+                / "mappings"
+                / "crewai.yaml"
+            ),
             session_id="test-session",
         )
 
@@ -169,14 +176,65 @@ class TestMappedJsonFullPipeline:
         """Simulate a full CrewAI 1.x session using real snake_case event type literals."""
         enricher = Enricher()
         events_raw = [
-            {"type": "crew_kickoff_started", "timestamp": "2024-06-01T10:00:00Z", "event_id": "crew-1", "crew_name": "Research Crew"},
-            {"type": "task_started", "timestamp": "2024-06-01T10:00:01Z", "event_id": "task-1", "task_id": "t1", "task_name": "Research", "agent_role": "Researcher"},
-            {"type": "agent_execution_started", "timestamp": "2024-06-01T10:00:02Z", "event_id": "agent-1", "agent_id": "a1", "agent_role": "Researcher", "task_name": "Research"},
-            {"type": "tool_usage_started", "timestamp": "2024-06-01T10:00:03Z", "event_id": "tool-1", "tool_name": "web_search", "tool_args": {"query": "AI agents"}},
-            {"type": "tool_usage_finished", "timestamp": "2024-06-01T10:00:04Z", "event_id": "tool-2", "tool_name": "web_search", "output": "results..."},
-            {"type": "agent_execution_completed", "timestamp": "2024-06-01T10:00:05Z", "event_id": "agent-2", "agent_id": "a1", "agent_role": "Researcher", "output": "Found relevant info"},
-            {"type": "task_completed", "timestamp": "2024-06-01T10:00:06Z", "event_id": "task-2", "task_id": "t1", "task_name": "Research", "output": "Complete"},
-            {"type": "crew_kickoff_completed", "timestamp": "2024-06-01T10:00:07Z", "event_id": "crew-2", "crew_name": "Research Crew", "output": "All tasks done"},
+            {
+                "type": "crew_kickoff_started",
+                "timestamp": "2024-06-01T10:00:00Z",
+                "event_id": "crew-1",
+                "crew_name": "Research Crew",
+            },
+            {
+                "type": "task_started",
+                "timestamp": "2024-06-01T10:00:01Z",
+                "event_id": "task-1",
+                "task_id": "t1",
+                "task_name": "Research",
+                "agent_role": "Researcher",
+            },
+            {
+                "type": "agent_execution_started",
+                "timestamp": "2024-06-01T10:00:02Z",
+                "event_id": "agent-1",
+                "agent_id": "a1",
+                "agent_role": "Researcher",
+                "task_name": "Research",
+            },
+            {
+                "type": "tool_usage_started",
+                "timestamp": "2024-06-01T10:00:03Z",
+                "event_id": "tool-1",
+                "tool_name": "web_search",
+                "tool_args": {"query": "AI agents"},
+            },
+            {
+                "type": "tool_usage_finished",
+                "timestamp": "2024-06-01T10:00:04Z",
+                "event_id": "tool-2",
+                "tool_name": "web_search",
+                "output": "results...",
+            },
+            {
+                "type": "agent_execution_completed",
+                "timestamp": "2024-06-01T10:00:05Z",
+                "event_id": "agent-2",
+                "agent_id": "a1",
+                "agent_role": "Researcher",
+                "output": "Found relevant info",
+            },
+            {
+                "type": "task_completed",
+                "timestamp": "2024-06-01T10:00:06Z",
+                "event_id": "task-2",
+                "task_id": "t1",
+                "task_name": "Research",
+                "output": "Complete",
+            },
+            {
+                "type": "crew_kickoff_completed",
+                "timestamp": "2024-06-01T10:00:07Z",
+                "event_id": "crew-2",
+                "crew_name": "Research Crew",
+                "output": "All tasks done",
+            },
         ]
 
         parsed = []
@@ -203,16 +261,53 @@ class TestMappedJsonFullPipeline:
     def test_openhands_session(self):
         """Simulate an OpenHands session using REAL format: action field discriminator."""
         adapter = MappedJsonAdapter.from_yaml(
-            str(Path(__file__).resolve().parents[1] / ".." / "src" / "tracemill" / "mappings" / "openhands.yaml"),
+            str(
+                Path(__file__).resolve().parents[1]
+                / ".."
+                / "src"
+                / "tracemill"
+                / "mappings"
+                / "openhands.yaml"
+            ),
             session_id="test-session",
         )
         events_raw = [
-            {"action": "message", "timestamp": 1717232400, "source": "user", "args": {"content": "Fix the bug in main.py", "wait_for_response": True}},
-            {"action": "think", "timestamp": 1717232401, "source": "agent", "args": {"thought": "I need to read main.py first"}},
-            {"action": "read", "timestamp": 1717232402, "source": "agent", "args": {"path": "/workspace/main.py"}},
-            {"action": "run", "timestamp": 1717232403, "source": "agent", "args": {"command": "python -m pytest"}},
-            {"action": "write", "timestamp": 1717232405, "source": "agent", "args": {"path": "/workspace/main.py", "content": "fixed code"}},
-            {"action": "finish", "timestamp": 1717232406, "source": "agent", "args": {"outputs": {"content": "Bug fixed"}}},
+            {
+                "action": "message",
+                "timestamp": 1717232400,
+                "source": "user",
+                "args": {"content": "Fix the bug in main.py", "wait_for_response": True},
+            },
+            {
+                "action": "think",
+                "timestamp": 1717232401,
+                "source": "agent",
+                "args": {"thought": "I need to read main.py first"},
+            },
+            {
+                "action": "read",
+                "timestamp": 1717232402,
+                "source": "agent",
+                "args": {"path": "/workspace/main.py"},
+            },
+            {
+                "action": "run",
+                "timestamp": 1717232403,
+                "source": "agent",
+                "args": {"command": "python -m pytest"},
+            },
+            {
+                "action": "write",
+                "timestamp": 1717232405,
+                "source": "agent",
+                "args": {"path": "/workspace/main.py", "content": "fixed code"},
+            },
+            {
+                "action": "finish",
+                "timestamp": 1717232406,
+                "source": "agent",
+                "args": {"outputs": {"content": "Bug fixed"}},
+            },
         ]
 
         all_events = []
@@ -236,16 +331,52 @@ class TestMappedJsonFullPipeline:
     def test_cline_session(self):
         """Simulate a Cline/Roo Code session."""
         adapter = MappedJsonAdapter.from_yaml(
-            str(Path(__file__).resolve().parents[1] / ".." / "src" / "tracemill" / "mappings" / "cline.yaml"),
+            str(
+                Path(__file__).resolve().parents[1]
+                / ".."
+                / "src"
+                / "tracemill"
+                / "mappings"
+                / "cline.yaml"
+            ),
             session_id="test-session",
         )
         events_raw = [
-            {"type": "say", "say": "text", "ts": "2024-06-01T10:00:00Z", "text": "I'll fix that for you"},
-            {"type": "say", "say": "api_req_started", "ts": "2024-06-01T10:00:01Z", "text": json.dumps({"model": "claude-sonnet", "tokensIn": 500})},
-            {"type": "say", "say": "api_req_finished", "ts": "2024-06-01T10:00:03Z", "text": json.dumps({"model": "claude-sonnet", "tokensIn": 500, "tokensOut": 200, "cost": 0.003})},
-            {"type": "say", "say": "tool", "ts": "2024-06-01T10:00:04Z", "text": json.dumps({"tool": "write_to_file", "path": "src/main.ts", "content": "fixed"})},
+            {
+                "type": "say",
+                "say": "text",
+                "ts": "2024-06-01T10:00:00Z",
+                "text": "I'll fix that for you",
+            },
+            {
+                "type": "say",
+                "say": "api_req_started",
+                "ts": "2024-06-01T10:00:01Z",
+                "text": json.dumps({"model": "claude-sonnet", "tokensIn": 500}),
+            },
+            {
+                "type": "say",
+                "say": "api_req_finished",
+                "ts": "2024-06-01T10:00:03Z",
+                "text": json.dumps(
+                    {"model": "claude-sonnet", "tokensIn": 500, "tokensOut": 200, "cost": 0.003}
+                ),
+            },
+            {
+                "type": "say",
+                "say": "tool",
+                "ts": "2024-06-01T10:00:04Z",
+                "text": json.dumps(
+                    {"tool": "write_to_file", "path": "src/main.ts", "content": "fixed"}
+                ),
+            },
             {"type": "say", "say": "command", "ts": "2024-06-01T10:00:05Z", "text": "npm test"},
-            {"type": "say", "say": "command_output", "ts": "2024-06-01T10:00:06Z", "text": "All tests pass"},
+            {
+                "type": "say",
+                "say": "command_output",
+                "ts": "2024-06-01T10:00:06Z",
+                "text": "All tests pass",
+            },
         ]
 
         all_events = []
@@ -271,16 +402,60 @@ class TestMappedJsonFullPipeline:
     def test_aider_session(self):
         """Simulate an Aider session."""
         adapter = MappedJsonAdapter.from_yaml(
-            str(Path(__file__).resolve().parents[1] / ".." / "src" / "tracemill" / "mappings" / "aider.yaml"),
+            str(
+                Path(__file__).resolve().parents[1]
+                / ".."
+                / "src"
+                / "tracemill"
+                / "mappings"
+                / "aider.yaml"
+            ),
             session_id="test-session",
         )
         events_raw = [
-            {"event": "session_start", "timestamp": "2024-06-01T10:00:00Z", "session_id": "aid-1", "main_model": "gpt-4", "cwd": "/project"},
-            {"event": "message_send", "timestamp": "2024-06-01T10:00:01Z", "session_id": "aid-1", "content": "Add tests", "role": "user"},
-            {"event": "llm_start", "timestamp": "2024-06-01T10:00:02Z", "session_id": "aid-1", "model": "gpt-4", "input_tokens": 800},
-            {"event": "llm_completion", "timestamp": "2024-06-01T10:00:05Z", "session_id": "aid-1", "model": "gpt-4", "input_tokens": 800, "output_tokens": 400, "cost": 0.05},
-            {"event": "file_edit", "timestamp": "2024-06-01T10:00:06Z", "session_id": "aid-1", "fname": "tests/test_new.py", "content": "def test_hello(): ..."},
-            {"event": "command_run", "timestamp": "2024-06-01T10:00:07Z", "session_id": "aid-1", "command": "pytest tests/"},
+            {
+                "event": "session_start",
+                "timestamp": "2024-06-01T10:00:00Z",
+                "session_id": "aid-1",
+                "main_model": "gpt-4",
+                "cwd": "/project",
+            },
+            {
+                "event": "message_send",
+                "timestamp": "2024-06-01T10:00:01Z",
+                "session_id": "aid-1",
+                "content": "Add tests",
+                "role": "user",
+            },
+            {
+                "event": "llm_start",
+                "timestamp": "2024-06-01T10:00:02Z",
+                "session_id": "aid-1",
+                "model": "gpt-4",
+                "input_tokens": 800,
+            },
+            {
+                "event": "llm_completion",
+                "timestamp": "2024-06-01T10:00:05Z",
+                "session_id": "aid-1",
+                "model": "gpt-4",
+                "input_tokens": 800,
+                "output_tokens": 400,
+                "cost": 0.05,
+            },
+            {
+                "event": "file_edit",
+                "timestamp": "2024-06-01T10:00:06Z",
+                "session_id": "aid-1",
+                "fname": "tests/test_new.py",
+                "content": "def test_hello(): ...",
+            },
+            {
+                "event": "command_run",
+                "timestamp": "2024-06-01T10:00:07Z",
+                "session_id": "aid-1",
+                "command": "pytest tests/",
+            },
             {"event": "session_end", "timestamp": "2024-06-01T10:00:10Z", "session_id": "aid-1"},
         ]
 
@@ -306,14 +481,45 @@ class TestMappedJsonFullPipeline:
     def test_goose_session(self):
         """Simulate Goose events from SQLite rows."""
         adapter = MappedJsonAdapter.from_yaml(
-            str(Path(__file__).resolve().parents[1] / ".." / "src" / "tracemill" / "mappings" / "goose.yaml"),
+            str(
+                Path(__file__).resolve().parents[1]
+                / ".."
+                / "src"
+                / "tracemill"
+                / "mappings"
+                / "goose.yaml"
+            ),
             session_id="test-session",
         )
         events_raw = [
-            {"role": "user", "created_at": 1717232400, "session_id": "goose-1", "content": "Help me refactor"},
-            {"role": "tool_use", "created_at": 1717232401, "session_id": "goose-1", "id": "tu-1", "name": "shell", "input": {"command": "ls"}},
-            {"role": "tool_result", "created_at": 1717232402, "session_id": "goose-1", "tool_use_id": "tu-1", "content": "file1.py file2.py", "is_error": False},
-            {"role": "assistant", "created_at": 1717232403, "session_id": "goose-1", "content": "I see two files. Let me read them."},
+            {
+                "role": "user",
+                "created_at": 1717232400,
+                "session_id": "goose-1",
+                "content": "Help me refactor",
+            },
+            {
+                "role": "tool_use",
+                "created_at": 1717232401,
+                "session_id": "goose-1",
+                "id": "tu-1",
+                "name": "shell",
+                "input": {"command": "ls"},
+            },
+            {
+                "role": "tool_result",
+                "created_at": 1717232402,
+                "session_id": "goose-1",
+                "tool_use_id": "tu-1",
+                "content": "file1.py file2.py",
+                "is_error": False,
+            },
+            {
+                "role": "assistant",
+                "created_at": 1717232403,
+                "session_id": "goose-1",
+                "content": "I see two files. Let me read them.",
+            },
         ]
 
         all_events = []
@@ -355,14 +561,30 @@ class TestCrossAdapterConsistency:
 
         # MappedJson (CrewAI)
         crewai = MappedJsonAdapter.from_yaml(
-            str(Path(__file__).resolve().parents[1] / ".." / "src" / "tracemill" / "mappings" / "crewai.yaml"),
+            str(
+                Path(__file__).resolve().parents[1]
+                / ".."
+                / "src"
+                / "tracemill"
+                / "mappings"
+                / "crewai.yaml"
+            ),
             session_id="test-session",
         )
-        events.extend(crewai.parse(json.dumps({
-            "type": "TaskStartedEvent", "timestamp": "2024-06-01T10:00:00Z",
-            "event_id": "t1", "task_id": "t1", "task_name": "Test",
-            "agent_role": "Worker",
-        })))
+        events.extend(
+            crewai.parse(
+                json.dumps(
+                    {
+                        "type": "TaskStartedEvent",
+                        "timestamp": "2024-06-01T10:00:00Z",
+                        "event_id": "t1",
+                        "task_id": "t1",
+                        "task_name": "Test",
+                        "agent_role": "Worker",
+                    }
+                )
+            )
+        )
 
         return events
 
@@ -424,25 +646,48 @@ class TestEnricherIntegration:
         adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
         enricher = Enricher()
 
-        start = json.dumps({
-            "type": "tool.execution_start", "id": _uid(),
-            "timestamp": "2024-06-01T10:00:00Z",
-            "data": {"toolCallId": "tc-pair-1", "toolName": "grep", "arguments": {"pattern": "x"}},
-        })
-        complete = json.dumps({
-            "type": "tool.execution_complete", "id": _uid(),
-            "timestamp": "2024-06-01T10:00:02Z",
-            "data": {"toolCallId": "tc-pair-1", "success": True, "result": {"content": "found", "detailedContent": None}},
-        })
+        start = json.dumps(
+            {
+                "type": "tool.execution_start",
+                "id": _uid(),
+                "timestamp": "2024-06-01T10:00:00Z",
+                "data": {
+                    "toolCallId": "tc-pair-1",
+                    "toolName": "grep",
+                    "arguments": {"pattern": "x"},
+                },
+            }
+        )
+        complete = json.dumps(
+            {
+                "type": "tool.execution_complete",
+                "id": _uid(),
+                "timestamp": "2024-06-01T10:00:02Z",
+                "data": {
+                    "toolCallId": "tc-pair-1",
+                    "success": True,
+                    "result": {"content": "found", "detailedContent": None},
+                },
+            }
+        )
 
         # First: need to set session context
-        session_start = json.dumps({
-            "type": "session.start", "id": _uid(),
-            "timestamp": "2024-06-01T09:59:59Z",
-            "data": {"sessionId": _uid(), "selectedModel": "gpt-4", "copilotVersion": "1.0.0",
-                     "startTime": "2024-06-01T09:59:59Z", "version": 1, "producer": "copilot-cli",
-                     "context": {"cwd": "/tmp"}},
-        })
+        session_start = json.dumps(
+            {
+                "type": "session.start",
+                "id": _uid(),
+                "timestamp": "2024-06-01T09:59:59Z",
+                "data": {
+                    "sessionId": _uid(),
+                    "selectedModel": "gpt-4",
+                    "copilotVersion": "1.0.0",
+                    "startTime": "2024-06-01T09:59:59Z",
+                    "version": 1,
+                    "producer": "copilot-cli",
+                    "context": {"cwd": "/tmp"},
+                },
+            }
+        )
         list(adapter.parse(session_start))
 
         start_events = list(adapter.parse(start))
@@ -462,20 +707,36 @@ class TestEnricherIntegration:
         adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
         enricher = Enricher()
 
-        session_start = json.dumps({
-            "type": "session.start", "id": _uid(),
-            "timestamp": "2024-06-01T09:59:59Z",
-            "data": {"sessionId": _uid(), "selectedModel": "gpt-4", "copilotVersion": "1.0.0",
-                     "startTime": "2024-06-01T09:59:59Z", "version": 1, "producer": "copilot-cli",
-                     "context": {"cwd": "/tmp"}},
-        })
+        session_start = json.dumps(
+            {
+                "type": "session.start",
+                "id": _uid(),
+                "timestamp": "2024-06-01T09:59:59Z",
+                "data": {
+                    "sessionId": _uid(),
+                    "selectedModel": "gpt-4",
+                    "copilotVersion": "1.0.0",
+                    "startTime": "2024-06-01T09:59:59Z",
+                    "version": 1,
+                    "producer": "copilot-cli",
+                    "context": {"cwd": "/tmp"},
+                },
+            }
+        )
         list(adapter.parse(session_start))
 
-        start = json.dumps({
-            "type": "tool.execution_start", "id": _uid(),
-            "timestamp": "2024-06-01T10:00:00Z",
-            "data": {"toolCallId": "tc-orphan", "toolName": "read", "arguments": {"path": "/x"}},
-        })
+        start = json.dumps(
+            {
+                "type": "tool.execution_start",
+                "id": _uid(),
+                "timestamp": "2024-06-01T10:00:00Z",
+                "data": {
+                    "toolCallId": "tc-orphan",
+                    "toolName": "read",
+                    "arguments": {"path": "/x"},
+                },
+            }
+        )
 
         start_events = list(adapter.parse(start))
         results = _enrich_all(enricher, start_events)
@@ -492,29 +753,38 @@ class TestEnricherIntegration:
 class TestAdapterRobustness:
     """Test error handling and edge cases across all adapters."""
 
-    @pytest.mark.parametrize("make_adapter", [
-        lambda: CopilotAdapter(ingestion_mode="file_watch", session_id="test-session"),
-        lambda: ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session"),
-    ])
+    @pytest.mark.parametrize(
+        "make_adapter",
+        [
+            lambda: CopilotAdapter(ingestion_mode="file_watch", session_id="test-session"),
+            lambda: ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session"),
+        ],
+    )
     def test_empty_input(self, make_adapter):
         adapter = make_adapter()
         assert list(adapter.parse("")) == []
         assert list(adapter.parse(b"")) == []
         assert list(adapter.parse("   ")) == []
 
-    @pytest.mark.parametrize("make_adapter", [
-        lambda: CopilotAdapter(ingestion_mode="file_watch", session_id="test-session"),
-        lambda: ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session"),
-    ])
+    @pytest.mark.parametrize(
+        "make_adapter",
+        [
+            lambda: CopilotAdapter(ingestion_mode="file_watch", session_id="test-session"),
+            lambda: ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session"),
+        ],
+    )
     def test_garbage_input(self, make_adapter):
         adapter = make_adapter()
         assert list(adapter.parse("not json at all {{{")) == []
         assert list(adapter.parse(b"\x00\xff\xfe")) == []
 
-    @pytest.mark.parametrize("make_adapter", [
-        lambda: CopilotAdapter(ingestion_mode="file_watch", session_id="test-session"),
-        lambda: ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session"),
-    ])
+    @pytest.mark.parametrize(
+        "make_adapter",
+        [
+            lambda: CopilotAdapter(ingestion_mode="file_watch", session_id="test-session"),
+            lambda: ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session"),
+        ],
+    )
     def test_non_dict_json(self, make_adapter):
         adapter = make_adapter()
         assert list(adapter.parse("[1,2,3]")) == []
@@ -523,7 +793,9 @@ class TestAdapterRobustness:
         assert list(adapter.parse("null")) == []
 
     def test_mapped_json_missing_type_field(self):
-        mapping = FrameworkMapping(framework="test", framework_version=">=1.0", ingestion_mode="file_watch", events={})
+        mapping = FrameworkMapping(
+            framework="test", framework_version=">=1.0", ingestion_mode="file_watch", events={}
+        )
         adapter = MappedJsonAdapter(mapping, session_id="test-session")
         # No "type" field in the JSON — should still produce RAW event
         events = list(adapter.parse(json.dumps({"data": "hello"})))
@@ -547,12 +819,14 @@ class TestAdapterRobustness:
     def test_copilot_unknown_event_type(self):
         """Unknown Copilot event types emit as RAW."""
         adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
-        line = json.dumps({
-            "type": "future.new_feature",
-            "id": _uid(),
-            "timestamp": "2024-01-01T00:00:00Z",
-            "data": {"something": "new"},
-        })
+        line = json.dumps(
+            {
+                "type": "future.new_feature",
+                "id": _uid(),
+                "timestamp": "2024-01-01T00:00:00Z",
+                "data": {"something": "new"},
+            }
+        )
         events = list(adapter.parse(line))
         assert len(events) == 1
         assert events[0].kind == EventKind.RAW
@@ -591,7 +865,13 @@ class TestAdapterRobustness:
 # ─── All YAML Mappings E2E ───────────────────────────────────────────────────
 
 
-MAPPING_FILES = [p for p in (Path(__file__).resolve().parents[1] / ".." / "src" / "tracemill" / "mappings").glob("*.yaml") if p.stem != "maf"]
+MAPPING_FILES = [
+    p
+    for p in (Path(__file__).resolve().parents[1] / ".." / "src" / "tracemill" / "mappings").glob(
+        "*.yaml"
+    )
+    if p.stem != "maf"
+]
 
 
 class TestAllMappingsE2E:

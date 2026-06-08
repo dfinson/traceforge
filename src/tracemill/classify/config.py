@@ -421,8 +421,7 @@ class ClassificationEngine:
 
         # Verb inference
         self.verb_inference: dict[str, tuple[str, str]] = {
-            verb: (entry.effect, entry.action)
-            for verb, entry in config.verb_inference.items()
+            verb: (entry.effect, entry.action) for verb, entry in config.verb_inference.items()
         }
 
         # Effect overrides (flag/subcmd-based effect determination)
@@ -494,9 +493,7 @@ class ClassificationEngine:
             )
         self.mcp_profiles: tuple[McpServerProfile, ...] = tuple(profiles)
         self.mcp_alias_index: dict[str, McpServerProfile] = {
-            alias: profile
-            for profile in self.mcp_profiles
-            for alias in profile.namespace_aliases
+            alias: profile for profile in self.mcp_profiles for alias in profile.namespace_aliases
         }
 
         # Small lookup tables

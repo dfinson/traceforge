@@ -399,6 +399,7 @@ class TestClaudeFileWatch:
 class TestCopilotAdapterModes:
     def test_default_is_file_watch(self):
         from tracemill.adapters.copilot import CopilotAdapter
+
         adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
         line = _copilot_event("user.message", {"content": "test"})
         events = list(adapter.parse(line))
@@ -406,6 +407,7 @@ class TestCopilotAdapterModes:
 
     def test_stream_mode(self):
         from tracemill.adapters.copilot import CopilotAdapter
+
         adapter = CopilotAdapter(ingestion_mode="stream", session_id="test-session")
         line = _copilot_event("user.message", {"content": "hi"})
         events = list(adapter.parse(line))
@@ -430,6 +432,7 @@ class TestCopilotAdapterModes:
 class TestClaudeAdapterModes:
     def test_default_is_file_watch(self):
         from tracemill.adapters.claude import ClaudeAdapter
+
         adapter = ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session")
         line = json.dumps({"type": "user", "message": {"content": "test"}})
         events = list(adapter.parse(line))
@@ -438,6 +441,7 @@ class TestClaudeAdapterModes:
 
     def test_stream_mode(self):
         from tracemill.adapters.claude import ClaudeAdapter
+
         adapter = ClaudeAdapter(ingestion_mode="stream", session_id="test-session")
         line = json.dumps({"type": "user", "message": {"content": "hi"}})
         events = list(adapter.parse(line))

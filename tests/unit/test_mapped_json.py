@@ -51,13 +51,20 @@ class TestResolvePath:
 
 class TestFrameworkMapping:
     def test_minimal(self):
-        m = FrameworkMapping(framework="test", framework_version=">=1.0", ingestion_mode="file_watch")
+        m = FrameworkMapping(
+            framework="test", framework_version=">=1.0", ingestion_mode="file_watch"
+        )
         assert m.type_field == "type"
         assert m.default_kind == EventKind.RAW
 
     def test_extra_field_rejected(self):
         with pytest.raises(Exception):  # pydantic ValidationError
-            FrameworkMapping(framework="test", framework_version=">=1.0", ingestion_mode="file_watch", bogus_field="x")
+            FrameworkMapping(
+                framework="test",
+                framework_version=">=1.0",
+                ingestion_mode="file_watch",
+                bogus_field="x",
+            )
 
     def test_full_config(self):
         m = FrameworkMapping(
@@ -106,13 +113,15 @@ class TestMappedJsonAdapter:
         return MappedJsonAdapter(mapping, session_id="test-session")
 
     def test_mapped_event(self, crewai_adapter):
-        line = json.dumps({
-            "type": "TaskStartedEvent",
-            "timestamp": "2024-06-01T10:00:00Z",
-            "event_id": "evt-123",
-            "task_id": "t1",
-            "task_name": "Research topic",
-        })
+        line = json.dumps(
+            {
+                "type": "TaskStartedEvent",
+                "timestamp": "2024-06-01T10:00:00Z",
+                "event_id": "evt-123",
+                "task_id": "t1",
+                "task_name": "Research topic",
+            }
+        )
         events = list(crewai_adapter.parse(line))
         assert len(events) == 1
         ev = events[0]
@@ -161,11 +170,13 @@ class TestMappedJsonAdapter:
             },
         )
         adapter = MappedJsonAdapter(mapping, session_id="test-session")
-        line = json.dumps({
-            "event_type": "llm.done",
-            "usage": {"prompt_tokens": 100, "completion_tokens": 50},
-            "metadata": {"model": "gpt-4"},
-        })
+        line = json.dumps(
+            {
+                "event_type": "llm.done",
+                "usage": {"prompt_tokens": 100, "completion_tokens": 50},
+                "metadata": {"model": "gpt-4"},
+            }
+        )
         events = list(adapter.parse(line))
         assert events[0].payload["input_tokens"] == 100
         assert events[0].payload["output_tokens"] == 50
@@ -225,7 +236,9 @@ class TestMappedJsonAdapter:
 class TestYAMLMappings:
     """Validate all YAML mapping files parse into valid FrameworkMapping objects."""
 
-    @pytest.fixture(params=[p for p in MAPPINGS_DIR.glob("*.yaml") if p.stem != "maf"], ids=lambda p: p.stem)
+    @pytest.fixture(
+        params=[p for p in MAPPINGS_DIR.glob("*.yaml") if p.stem != "maf"], ids=lambda p: p.stem
+    )
     def mapping_file(self, request):
         return request.param
 

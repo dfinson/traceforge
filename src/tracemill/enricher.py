@@ -317,23 +317,47 @@ def _phases_from_classification(cls: Classification) -> frozenset[str]:
 _TEST_SEGMENTS = frozenset({"tests", "test", "spec", "specs", "__tests__", "__test__"})
 _TEST_FILE_PATTERNS = ("_test.", "test_", ".test.", ".spec.")
 _DOC_SEGMENTS = frozenset({"docs", "doc", "documentation"})
-_CI_FILES = frozenset({
-    "jenkinsfile", ".travis.yml", ".circleci", "azure-pipelines.yml",
-    "bitbucket-pipelines.yml", "cloudbuild.yaml",
-})
+_CI_FILES = frozenset(
+    {
+        "jenkinsfile",
+        ".travis.yml",
+        ".circleci",
+        "azure-pipelines.yml",
+        "bitbucket-pipelines.yml",
+        "cloudbuild.yaml",
+    }
+)
 
-_DEP_FILES = frozenset({
-    "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
-    "requirements.txt", "setup.py", "setup.cfg", "pyproject.toml", "poetry.lock",
-    "cargo.toml", "cargo.lock", "go.mod", "go.sum", "gemfile", "gemfile.lock",
-    "composer.json", "composer.lock", "pom.xml", "build.gradle",
-})
+_DEP_FILES = frozenset(
+    {
+        "package.json",
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "requirements.txt",
+        "setup.py",
+        "setup.cfg",
+        "pyproject.toml",
+        "poetry.lock",
+        "cargo.toml",
+        "cargo.lock",
+        "go.mod",
+        "go.sum",
+        "gemfile",
+        "gemfile.lock",
+        "composer.json",
+        "composer.lock",
+        "pom.xml",
+        "build.gradle",
+    }
+)
 _ENV_FILES = frozenset({".env", ".envrc", ".env.local", ".env.development", ".env.production"})
 _INFRA_EXTENSIONS = (".tf", ".tfvars", ".hcl")
 _INFRA_DIRS = frozenset({"helm", "charts", "k8s", "kubernetes", "terraform", "infra"})
 _CONTAINER_FILES = frozenset({"docker-compose.yml", "docker-compose.yaml", ".dockerignore"})
 _DOC_FILES = frozenset({"readme.md", "contributing.md", "changelog.md", "license.md"})
 _PAYLOAD_PATH_KEYS = ("path", "file_path", "file", "filename")
+
 
 def _infer_scope_from_path(path: str) -> str | None:
     """Infer a CodingScope from a file path. Returns None if no pattern matches."""
@@ -425,7 +449,8 @@ def _refine_scope_from_payload(cls: Classification, payload: dict) -> Classifica
             phase=seg.phase,
             actions=seg.actions,
             scopes=(seg.scopes - {CodingScope.SOURCE_CODE}) | {inferred}
-                   if CodingScope.SOURCE_CODE in seg.scopes else seg.scopes | {inferred},
+            if CodingScope.SOURCE_CODE in seg.scopes
+            else seg.scopes | {inferred},
             roles=seg.roles,
         )
         for seg in cls.phase_map

@@ -67,7 +67,9 @@ class JsonLineAdapter(Adapter):
             return
 
         if not isinstance(obj, dict):
-            logger.warning("%s: expected JSON object, got %s", self.__class__.__name__, type(obj).__name__)
+            logger.warning(
+                "%s: expected JSON object, got %s", self.__class__.__name__, type(obj).__name__
+            )
             return
 
         try:

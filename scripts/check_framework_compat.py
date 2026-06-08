@@ -40,9 +40,15 @@ def check_copilot() -> list[str]:
 
     # Verify SessionEventType has expected values
     expected_types = [
-        "SESSION_START", "SESSION_SHUTDOWN", "USER_MESSAGE",
-        "ASSISTANT_MESSAGE", "TOOL_EXECUTION_START", "TOOL_EXECUTION_COMPLETE",
-        "ASSISTANT_USAGE", "ASSISTANT_TURN_START", "ASSISTANT_TURN_END",
+        "SESSION_START",
+        "SESSION_SHUTDOWN",
+        "USER_MESSAGE",
+        "ASSISTANT_MESSAGE",
+        "TOOL_EXECUTION_START",
+        "TOOL_EXECUTION_COMPLETE",
+        "ASSISTANT_USAGE",
+        "ASSISTANT_TURN_START",
+        "ASSISTANT_TURN_END",
     ]
     for t in expected_types:
         if not hasattr(SessionEventType, t):
@@ -85,13 +91,18 @@ def check_langgraph() -> list[str]:
         return errors
 
     # Validate our mapping can parse a representative event
-    errors.extend(_validate_mapping_with_sample("langgraph", {
-        "event": "on_chain_start",
-        "metadata": {"timestamp": "2024-01-01T00:00:00Z"},
-        "run_id": "run-1",
-        "name": "agent_graph",
-        "data": {"input": {"query": "test"}},
-    }))
+    errors.extend(
+        _validate_mapping_with_sample(
+            "langgraph",
+            {
+                "event": "on_chain_start",
+                "metadata": {"timestamp": "2024-01-01T00:00:00Z"},
+                "run_id": "run-1",
+                "name": "agent_graph",
+                "data": {"input": {"query": "test"}},
+            },
+        )
+    )
     return errors
 
 
@@ -104,12 +115,17 @@ def check_pydantic_ai() -> list[str]:
         errors.append(f"pydantic_ai not importable: {e}")
         return errors
 
-    errors.extend(_validate_mapping_with_sample("pydantic_ai", {
-        "event_type": "agent_run_start",
-        "timestamp": "2024-01-01T00:00:00Z",
-        "agent_name": "test_agent",
-        "model_name": "gpt-4o",
-    }))
+    errors.extend(
+        _validate_mapping_with_sample(
+            "pydantic_ai",
+            {
+                "event_type": "agent_run_start",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "agent_name": "test_agent",
+                "model_name": "gpt-4o",
+            },
+        )
+    )
     return errors
 
 
@@ -122,12 +138,17 @@ def check_smolagents() -> list[str]:
         errors.append(f"smolagents not importable: {e}")
         return errors
 
-    errors.extend(_validate_mapping_with_sample("smolagents", {
-        "step_type": "AgentStep",
-        "timestamp": "2024-01-01T00:00:00Z",
-        "agent_name": "ToolCallingAgent",
-        "thought": "I should search for this",
-    }))
+    errors.extend(
+        _validate_mapping_with_sample(
+            "smolagents",
+            {
+                "step_type": "AgentStep",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "agent_name": "ToolCallingAgent",
+                "thought": "I should search for this",
+            },
+        )
+    )
     return errors
 
 
@@ -192,9 +213,17 @@ def check_aider() -> list[str]:
 
         # Must produce all expected event types
         types = {e["type"] for e in events}
-        expected = {"session_start", "version_info", "model_info", "user_message",
-                    "assistant_message", "file_edit", "token_usage",
-                    "file_edit_applied", "git_commit"}
+        expected = {
+            "session_start",
+            "version_info",
+            "model_info",
+            "user_message",
+            "assistant_message",
+            "file_edit",
+            "token_usage",
+            "file_edit_applied",
+            "git_commit",
+        }
         missing = expected - types
         if missing:
             errors.append(f"AiderPreParser missing event types: {missing}")
@@ -204,7 +233,13 @@ def check_aider() -> list[str]:
         from tracemill.adapters.mapped_json import MappedJsonAdapter
         from pathlib import Path
 
-        yaml_path = Path(__file__).resolve().parent.parent / "src" / "tracemill" / "mappings" / "aider_markdown.yaml"
+        yaml_path = (
+            Path(__file__).resolve().parent.parent
+            / "src"
+            / "tracemill"
+            / "mappings"
+            / "aider_markdown.yaml"
+        )
         adapter = MappedJsonAdapter.from_yaml(str(yaml_path), session_id="compat-test")
         unmapped = []
         for event_dict in events:
@@ -226,7 +261,13 @@ def _validate_mapping_with_sample(framework: str, sample_event: dict) -> list[st
     from pathlib import Path
 
     errors: list[str] = []
-    yaml_path = Path(__file__).resolve().parent.parent / "src" / "tracemill" / "mappings" / f"{framework}.yaml"
+    yaml_path = (
+        Path(__file__).resolve().parent.parent
+        / "src"
+        / "tracemill"
+        / "mappings"
+        / f"{framework}.yaml"
+    )
     if not yaml_path.exists():
         errors.append(f"Mapping file {framework}.yaml not found")
         return errors
@@ -238,11 +279,15 @@ def _validate_mapping_with_sample(framework: str, sample_event: dict) -> list[st
         line = json.dumps(sample_event)
         events = list(adapter.parse(line))
         if not events:
-            errors.append(f"{framework}.yaml: sample event produced no output (mapping may be stale)")
+            errors.append(
+                f"{framework}.yaml: sample event produced no output (mapping may be stale)"
+            )
         else:
             event = events[0]
             if event.kind == "raw":
-                errors.append(f"{framework}.yaml: sample event mapped to 'raw' (type_field mismatch?)")
+                errors.append(
+                    f"{framework}.yaml: sample event mapped to 'raw' (type_field mismatch?)"
+                )
     except Exception as e:
         errors.append(f"{framework}.yaml: failed to parse sample event: {e}")
     return errors

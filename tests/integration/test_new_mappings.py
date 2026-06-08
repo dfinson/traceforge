@@ -29,8 +29,20 @@ class TestLangGraphMapping:
     def test_chain_lifecycle(self, adapter):
         """Graph start → end lifecycle."""
         events_raw = [
-            {"event": "on_chain_start", "run_id": "run-1", "name": "agent_graph", "data": {"input": {"query": "hello"}}, "metadata": {"timestamp": 1717232400}},
-            {"event": "on_chain_end", "run_id": "run-1", "name": "agent_graph", "data": {"output": {"answer": "hi"}}, "metadata": {"timestamp": 1717232401}},
+            {
+                "event": "on_chain_start",
+                "run_id": "run-1",
+                "name": "agent_graph",
+                "data": {"input": {"query": "hello"}},
+                "metadata": {"timestamp": 1717232400},
+            },
+            {
+                "event": "on_chain_end",
+                "run_id": "run-1",
+                "name": "agent_graph",
+                "data": {"output": {"answer": "hi"}},
+                "metadata": {"timestamp": 1717232401},
+            },
         ]
         all_events = []
         for raw in events_raw:
@@ -44,8 +56,33 @@ class TestLangGraphMapping:
     def test_llm_calls(self, adapter):
         """Chat model start → end with token counts via usage_metadata."""
         events_raw = [
-            {"event": "on_chat_model_start", "run_id": "llm-1", "name": "ChatOpenAI", "metadata": {"ls_model_name": "gpt-4", "timestamp": 1717232400}, "data": {}, "tags": [], "parent_ids": []},
-            {"event": "on_chat_model_end", "run_id": "llm-1", "name": "ChatOpenAI", "data": {"output": {"content": "response", "usage_metadata": {"input_tokens": 100, "output_tokens": 50, "total_tokens": 150}}}, "metadata": {"ls_model_name": "gpt-4", "timestamp": 1717232401}, "tags": [], "parent_ids": []},
+            {
+                "event": "on_chat_model_start",
+                "run_id": "llm-1",
+                "name": "ChatOpenAI",
+                "metadata": {"ls_model_name": "gpt-4", "timestamp": 1717232400},
+                "data": {},
+                "tags": [],
+                "parent_ids": [],
+            },
+            {
+                "event": "on_chat_model_end",
+                "run_id": "llm-1",
+                "name": "ChatOpenAI",
+                "data": {
+                    "output": {
+                        "content": "response",
+                        "usage_metadata": {
+                            "input_tokens": 100,
+                            "output_tokens": 50,
+                            "total_tokens": 150,
+                        },
+                    }
+                },
+                "metadata": {"ls_model_name": "gpt-4", "timestamp": 1717232401},
+                "tags": [],
+                "parent_ids": [],
+            },
         ]
         all_events = []
         for raw in events_raw:
@@ -59,8 +96,20 @@ class TestLangGraphMapping:
     def test_tool_calls(self, adapter):
         """Tool start → end."""
         events_raw = [
-            {"event": "on_tool_start", "run_id": "tool-1", "name": "search", "data": {"input": {"q": "weather"}}, "metadata": {"timestamp": 1717232400}},
-            {"event": "on_tool_end", "run_id": "tool-1", "name": "search", "data": {"output": "sunny"}, "metadata": {"timestamp": 1717232401}},
+            {
+                "event": "on_tool_start",
+                "run_id": "tool-1",
+                "name": "search",
+                "data": {"input": {"q": "weather"}},
+                "metadata": {"timestamp": 1717232400},
+            },
+            {
+                "event": "on_tool_end",
+                "run_id": "tool-1",
+                "name": "search",
+                "data": {"output": "sunny"},
+                "metadata": {"timestamp": 1717232401},
+            },
         ]
         all_events = []
         for raw in events_raw:
@@ -73,7 +122,15 @@ class TestLangGraphMapping:
     def test_error_propagation(self, adapter):
         """Tool errors map correctly. Note: on_chain_error/on_llm_error are NOT
         emitted by astream_events v2 (handler doesn't override them)."""
-        raw = {"event": "on_tool_error", "run_id": "run-err", "name": "calculator", "data": {"error": "timeout"}, "metadata": {"timestamp": 1717232400}, "tags": [], "parent_ids": []}
+        raw = {
+            "event": "on_tool_error",
+            "run_id": "run-err",
+            "name": "calculator",
+            "data": {"error": "timeout"},
+            "metadata": {"timestamp": 1717232400},
+            "tags": [],
+            "parent_ids": [],
+        }
         events = list(adapter.parse(json.dumps(raw)))
         assert events[0].kind == EventKind.TOOL_CALL_FAILED
         assert events[0].payload["error"] == "timeout"
@@ -82,8 +139,16 @@ class TestLangGraphMapping:
     def test_retriever_events(self, adapter):
         """RAG retriever start/end."""
         events_raw = [
-            {"event": "on_retriever_start", "data": {"input": {"query": "docs about auth"}}, "metadata": {"timestamp": 1717232400}},
-            {"event": "on_retriever_end", "data": {"output": [{"page_content": "Auth docs..."}]}, "metadata": {"timestamp": 1717232401}},
+            {
+                "event": "on_retriever_start",
+                "data": {"input": {"query": "docs about auth"}},
+                "metadata": {"timestamp": 1717232400},
+            },
+            {
+                "event": "on_retriever_end",
+                "data": {"output": [{"page_content": "Auth docs..."}]},
+                "metadata": {"timestamp": 1717232401},
+            },
         ]
         all_events = []
         for raw in events_raw:
@@ -93,7 +158,13 @@ class TestLangGraphMapping:
 
     def test_session_id_from_constructor(self, adapter):
         """Session ID always from constructor."""
-        raw = {"event": "on_chain_start", "run_id": "r", "name": "g", "data": {}, "metadata": {"timestamp": 1717232400}}
+        raw = {
+            "event": "on_chain_start",
+            "run_id": "r",
+            "name": "g",
+            "data": {},
+            "metadata": {"timestamp": 1717232400},
+        }
         events = list(adapter.parse(json.dumps(raw)))
         assert events[0].session_id == "lg-session"
 
@@ -110,8 +181,18 @@ class TestPydanticAIMapping:
     def test_agent_lifecycle(self, adapter):
         """Agent run start → end."""
         events_raw = [
-            {"type": "agent_run_start", "timestamp": "2024-06-01T10:00:00Z", "agent_name": "my_agent", "model_name": "gpt-4o"},
-            {"type": "agent_run_end", "timestamp": "2024-06-01T10:00:05Z", "agent_name": "my_agent", "result": "done"},
+            {
+                "type": "agent_run_start",
+                "timestamp": "2024-06-01T10:00:00Z",
+                "agent_name": "my_agent",
+                "model_name": "gpt-4o",
+            },
+            {
+                "type": "agent_run_end",
+                "timestamp": "2024-06-01T10:00:05Z",
+                "agent_name": "my_agent",
+                "result": "done",
+            },
         ]
         all_events = []
         for raw in events_raw:
@@ -124,8 +205,19 @@ class TestPydanticAIMapping:
     def test_model_request(self, adapter):
         """Model request start → response with usage."""
         events_raw = [
-            {"type": "model_request_start", "timestamp": "2024-06-01T10:00:01Z", "model_name": "claude-3", "request_id": "req-1"},
-            {"type": "model_response", "timestamp": "2024-06-01T10:00:02Z", "model_name": "claude-3", "request_id": "req-1", "usage": {"input_tokens": 200, "output_tokens": 100}},
+            {
+                "type": "model_request_start",
+                "timestamp": "2024-06-01T10:00:01Z",
+                "model_name": "claude-3",
+                "request_id": "req-1",
+            },
+            {
+                "type": "model_response",
+                "timestamp": "2024-06-01T10:00:02Z",
+                "model_name": "claude-3",
+                "request_id": "req-1",
+                "usage": {"input_tokens": 200, "output_tokens": 100},
+            },
         ]
         all_events = []
         for raw in events_raw:
@@ -138,8 +230,20 @@ class TestPydanticAIMapping:
     def test_tool_calls(self, adapter):
         """Tool call lifecycle."""
         events_raw = [
-            {"type": "tool_call_start", "timestamp": "2024-06-01T10:00:01Z", "tool_name": "search_db", "call_id": "tc-1", "args": {"query": "users"}},
-            {"type": "tool_call_end", "timestamp": "2024-06-01T10:00:02Z", "tool_name": "search_db", "call_id": "tc-1", "result": "[{\"name\": \"alice\"}]"},
+            {
+                "type": "tool_call_start",
+                "timestamp": "2024-06-01T10:00:01Z",
+                "tool_name": "search_db",
+                "call_id": "tc-1",
+                "args": {"query": "users"},
+            },
+            {
+                "type": "tool_call_end",
+                "timestamp": "2024-06-01T10:00:02Z",
+                "tool_name": "search_db",
+                "call_id": "tc-1",
+                "result": '[{"name": "alice"}]',
+            },
         ]
         all_events = []
         for raw in events_raw:
@@ -151,7 +255,13 @@ class TestPydanticAIMapping:
 
     def test_validation_error(self, adapter):
         """Validation failures map to tool.validation.failed."""
-        raw = {"type": "validation_error", "timestamp": "2024-06-01T10:00:01Z", "tool_name": "calculator", "error": "invalid input", "retry_count": 2}
+        raw = {
+            "type": "validation_error",
+            "timestamp": "2024-06-01T10:00:01Z",
+            "tool_name": "calculator",
+            "error": "invalid input",
+            "retry_count": 2,
+        }
         events = list(adapter.parse(json.dumps(raw)))
         assert events[0].kind == EventKind.TOOL_VALIDATION_FAILED
         assert events[0].payload["retry_count"] == 2
@@ -159,8 +269,17 @@ class TestPydanticAIMapping:
     def test_guardrail_events(self, adapter):
         """Result validation → guardrail events."""
         events_raw = [
-            {"type": "output_validation_start", "timestamp": "2024-06-01T10:00:01Z", "validator_name": "output_check"},
-            {"type": "output_validation_fail", "timestamp": "2024-06-01T10:00:01Z", "validator_name": "output_check", "error": "profanity detected"},
+            {
+                "type": "output_validation_start",
+                "timestamp": "2024-06-01T10:00:01Z",
+                "validator_name": "output_check",
+            },
+            {
+                "type": "output_validation_fail",
+                "timestamp": "2024-06-01T10:00:01Z",
+                "validator_name": "output_check",
+                "error": "profanity detected",
+            },
         ]
         all_events = []
         for raw in events_raw:
@@ -202,7 +321,13 @@ class TestSmolagentsMapping:
 
     def test_tool_calls(self, adapter):
         """ToolCall extracted from ActionStep.tool_calls by preprocessor."""
-        raw = {"step_type": "ToolCall", "timestamp": "2024-06-01T10:00:03Z", "tool_name": "python_interpreter", "call_id": "c1", "tool_input": "print('hello')"}
+        raw = {
+            "step_type": "ToolCall",
+            "timestamp": "2024-06-01T10:00:03Z",
+            "tool_name": "python_interpreter",
+            "call_id": "c1",
+            "tool_input": "print('hello')",
+        }
         events = list(adapter.parse(json.dumps(raw)))
         assert events[0].kind == EventKind.TOOL_CALL_STARTED
         assert events[0].payload["tool_name"] == "python_interpreter"
@@ -216,7 +341,13 @@ class TestSmolagentsMapping:
             "observations": "Found 3 results",
             "code_action": "search('docs')",
             "token_usage": {"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
-            "tool_calls": [{"id": "tc-1", "type": "function", "function": {"name": "web_search", "arguments": "{\"query\": \"docs\"}"}}],
+            "tool_calls": [
+                {
+                    "id": "tc-1",
+                    "type": "function",
+                    "function": {"name": "web_search", "arguments": '{"query": "docs"}'},
+                }
+            ],
             "is_final_answer": False,
         }
         events = list(adapter.parse(json.dumps(raw)))
@@ -262,7 +393,10 @@ class TestSmolagentsMapping:
 class TestAllYAMLMappingsLoadable:
     """Every YAML in mappings/ must load without error and have framework_version."""
 
-    @pytest.fixture(params=sorted(p for p in MAPPINGS_DIR.glob("*.yaml") if p.stem != "maf"), ids=lambda p: p.stem)
+    @pytest.fixture(
+        params=sorted(p for p in MAPPINGS_DIR.glob("*.yaml") if p.stem != "maf"),
+        ids=lambda p: p.stem,
+    )
     def mapping_file(self, request):
         return request.param
 

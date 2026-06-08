@@ -84,57 +84,58 @@ The library doesn't decide what to do with agent events. It parses them, enriche
 ```python
 # --- Events ---
 
-@dataclass
-class SessionEvent:
+class SessionEvent(BaseModel):
     """The universal event type. Every adapter produces these."""
-    kind: EventKind              # message, tool_start, tool_complete, usage, file_change, ...
+    id: str                      # UUID4
+    kind: str                    # open string — use EventKind.* constants
     session_id: str
     timestamp: datetime
-    payload: dict[str, Any]      # kind-specific data
-    metadata: EventMetadata      # repo, agent_sdk, turn_id, visibility
+    payload: dict[str, Any]      # kind-specific data (see §3.1)
+    metadata: EventMetadata
 
-class EventKind(str, Enum):
-    """All recognized event types."""
-    USER_MESSAGE = "user_message"
-    ASSISTANT_MESSAGE = "assistant_message"
-    TOOL_START = "tool_start"
-    TOOL_COMPLETE = "tool_complete"
-    FILE_CHANGE = "file_change"
+class EventKind:
+    """Open string registry with canonical constants.
+    Grammar: <domain>[.<object>].<phase>
+    Any string is valid — adapters may emit custom kinds."""
+
+    SESSION_STARTED = "session.started"
+    SESSION_ENDED = "session.ended"
+    MESSAGE_USER = "message.user"
+    MESSAGE_ASSISTANT = "message.assistant"
+    TOOL_CALL_STARTED = "tool.call.started"
+    TOOL_CALL_COMPLETED = "tool.call.completed"
     USAGE = "usage"
     ERROR = "error"
-    SESSION_START = "session_start"
-    SESSION_END = "session_end"
+    RAW = "raw"
+    # ... 50+ canonical kinds (see §3.2)
 
-@dataclass
-class EventMetadata:
+class EventMetadata(BaseModel):
     """Contextual information attached to every event."""
-    repo: str | None = None
-    agent_sdk: str | None = None     # "copilot", "claude", etc.
-    turn_id: str | None = None
-    visibility: str = "visible"      # "visible", "internal", "collapsed"
-    tool_category: str | None = None # "file_write", "shell", "git", "search", etc.
-    tool_display: str | None = None  # Human-readable tool name
-    tool_intent: str | None = None   # What the tool call is trying to do
-    duration_ms: float | None = None # For completed tool calls
 
-@dataclass
-class TelemetrySpan:
-    """A measured span of work (e.g., one tool execution, one LLM call)."""
-    name: str
-    session_id: str
-    start_time: datetime
-    end_time: datetime
-    attributes: dict[str, Any]
+    # Provenance
+    source_framework: str | None     # "copilot", "claude", "aider", "cline", etc.
+    source_adapter: str | None       # adapter class that produced this event
+    ingestion_mode: IngestionMode    # "stream" | "file_watch" | "poll" | "replay"
+    raw_kind: str | None             # original framework event type
 
-@dataclass
-class UsageRecord:
-    """Token usage from an LLM call."""
-    session_id: str
-    timestamp: datetime
-    model: str
-    input_tokens: int
-    output_tokens: int
-    cost_usd: float | None = None
+    # Correlation
+    span_id: str | None              # unique ID for this lifecycle span
+    parent_id: str | None            # links child events to parent
+    correlation_id: str | None       # groups related events
+    run_id: str | None               # top-level run/session identifier
+
+    # Ordering
+    sequence: int | None             # monotonic ordering within a stream
+    namespace: tuple[str, ...] | None  # scope path (subgraph, subagent)
+    partial: bool = False            # True if streaming chunk
+
+    # Classification (populated by Enricher)
+    visibility: str = "visible"      # "visible", "system", "collapsed"
+    phases: frozenset[str] | None
+    classification: Classification | None
+    tool_display: str | None
+    tool_intent: str | None
+    duration_ms: float | None
 
 # --- Adapters ---
 
@@ -192,6 +193,63 @@ class EventBus:
     async def publish(self, event: SessionEvent) -> None: ...
 ```
 
+### §3.1 — Event Kind Taxonomy
+
+Event kinds use dot-notation: `<domain>[.<object>].<phase>`. Any string is valid (forward-compatible), but canonical kinds are registered in `KNOWN_KINDS`.
+
+| Domain | Canonical Kinds |
+|---|---|
+| **session** | `session.started`, `session.ended`, `session.paused`, `session.resumed`, `session.idle`, `session.info`, `session.warning` |
+| **turn** | `turn.started`, `turn.ended`, `turn.skipped` |
+| **message** | `message.user`, `message.assistant`, `message.system`, `message.assistant.chunk` |
+| **tool** | `tool.call.started`, `tool.call.completed`, `tool.call.failed`, `tool.result.chunk`, `tool.progress`, `tool.validation.failed` |
+| **llm** | `llm.call.started`, `llm.call.completed`, `llm.call.failed`, `llm.output.chunk`, `llm.thinking.chunk` |
+| **planning** | `planning.started`, `planning.completed`, `planning.failed`, `reasoning.started`, `reasoning.completed` |
+| **agent** | `agent.spawned`, `agent.completed`, `agent.failed`, `agent.handoff` |
+| **file** | `file.created`, `file.edited`, `file.deleted`, `file.read` |
+| **command** | `command.started`, `command.output`, `command.completed`, `command.failed` |
+| **mcp** | `mcp.connection.started`, `mcp.connection.completed`, `mcp.connection.failed` |
+| **hook** | `hook.started`, `hook.completed`, `hook.failed` |
+| **permission** | `permission.requested`, `permission.granted`, `permission.denied` |
+| **input** | `input.requested`, `input.received` |
+| **checkpoint** | `checkpoint.created`, `checkpoint.restored` |
+| **memory** | `memory.query.started`, `memory.query.completed`, `memory.save.started`, `memory.save.completed` |
+| **knowledge** | `knowledge.query.started`, `knowledge.query.completed` |
+| **browser** | `browser.launched`, `browser.action`, `browser.result` |
+| **guardrail** | `guardrail.started`, `guardrail.passed`, `guardrail.failed` |
+| **skill** | `skill.invoked` |
+| **workflow** | `workflow.started`, `workflow.completed`, `workflow.failed`, `task.started`, `task.completed`, `task.failed` |
+| **telemetry** | `usage`, `error`, `abort` |
+| **catch-all** | `raw` (unmapped events with `payload["original_type"]`) |
+
+Legacy flat names (e.g., `"user_message"`, `"tool_start"`) are resolved via `normalize_kind()`.
+
+### §3.2 — Payload Contracts
+
+Each event family has minimum expected payload keys:
+
+| Kind Family | Required Payload Keys |
+|---|---|
+| `tool.call.started` | `tool_call_id`, `tool_name`, `arguments` |
+| `tool.call.completed` | `tool_call_id`, `success`, `result` |
+| `message.*` | `content` |
+| `usage` | `input_tokens`, `output_tokens` |
+| `session.started` | `model` |
+| `error` | `message` |
+| `agent.spawned` | `agent_id` or `extras` |
+| `raw` | `original_type`, `extras` |
+
+Additional keys are optional and framework-specific. Sinks must handle missing keys gracefully.
+
+### §3.3 — Ingestion Modes
+
+| Mode | Description | Guarantees |
+|---|---|---|
+| `stream` | Live SDK callback/async stream | Real-time timestamps, strong ordering |
+| `file_watch` | Tailing JSONL/SQLite on disk | File-provided timestamps, per-file ordering |
+| `poll` | Periodic API/DB checks | Possible gaps, need dedup watermarks |
+| `replay` | Historical playback of recorded events | Original timestamps preserved |
+
 ---
 
 ## §4 — Adapters
@@ -234,31 +292,54 @@ New adapters (Gemini, custom agents) are added by implementing `Adapter.parse()`
 
 ```python
 _KIND_MAP = {
-    SessionEventType.SESSION_START: EventKind.SESSION_START,
-    SessionEventType.USER_MESSAGE: EventKind.USER_MESSAGE,
-    SessionEventType.ASSISTANT_MESSAGE: EventKind.ASSISTANT_MESSAGE,
-    SessionEventType.TOOL_EXECUTION_START: EventKind.TOOL_START,
-    SessionEventType.TOOL_EXECUTION_COMPLETE: EventKind.TOOL_COMPLETE,
+    SessionEventType.SESSION_START: EventKind.SESSION_STARTED,
+    SessionEventType.SESSION_SHUTDOWN: EventKind.SESSION_ENDED,
+    SessionEventType.USER_MESSAGE: EventKind.MESSAGE_USER,
+    SessionEventType.ASSISTANT_MESSAGE: EventKind.MESSAGE_ASSISTANT,
+    SessionEventType.TOOL_EXECUTION_START: EventKind.TOOL_CALL_STARTED,
+    SessionEventType.TOOL_EXECUTION_COMPLETE: EventKind.TOOL_CALL_COMPLETED,
     SessionEventType.ASSISTANT_USAGE: EventKind.USAGE,
-    SessionEventType.SESSION_SHUTDOWN: EventKind.SESSION_END,
     SessionEventType.SESSION_ERROR: EventKind.ERROR,
+    # ... 30+ additional mappings for turn, hook, agent, permission events
 }
 ```
 
-Skipped types (noise): `turn_start`, `turn_end`, `hook_start`, `hook_end`, `session_info`, `abort`, `system_message`, `external_tool_requested`, `external_tool_completed`.
+All event types are preserved — nothing is skipped. Unmapped types emit as `EventKind.RAW`.
 
 ### Claude Message Type Mapping
 
 | SDK Type | Yields |
 | --- | --- |
-| `UserMessage` (str content) | `USER_MESSAGE` |
-| `UserMessage` (list with `ToolResultBlock`) | `TOOL_COMPLETE` |
-| `AssistantMessage` → `TextBlock` | `ASSISTANT_MESSAGE` |
-| `AssistantMessage` → `ToolUseBlock` | `TOOL_START` |
-| `AssistantMessage` → `ToolResultBlock` | `TOOL_COMPLETE` |
-| `ResultMessage` | `USAGE` (+ `ERROR` if `is_error`) |
-| `SystemMessage` | Skipped |
-| `ThinkingBlock` | Skipped |
+| `UserMessage` (str content) | `message.user` |
+| `UserMessage` (list with `ToolResultBlock`) | `tool.call.completed` |
+| `AssistantMessage` → `TextBlock` | `message.assistant` |
+| `AssistantMessage` → `ToolUseBlock` | `tool.call.started` |
+| `AssistantMessage` → `ToolResultBlock` | `tool.call.completed` |
+| `AssistantMessage` → `ThinkingBlock` | `llm.thinking.chunk` |
+| `ResultMessage` | `usage` (+ `error` if `is_error`) |
+| `SystemMessage` | Skipped (logged at debug level) |
+
+### §4.1 — Target Framework Coverage
+
+The event taxonomy is designed to accommodate all major agent frameworks:
+
+| Framework | Ingestion Mode | Status |
+|---|---|---|
+| **GitHub Copilot** | `stream` (SDK), `file_watch` (events.jsonl) | ✅ Implemented |
+| **Claude Code** | `stream` (SDK), `file_watch` (session JSONL) | ✅ Implemented |
+| **Aider** | `file_watch` (markdown logs), `poll` (PostHog) | 🔲 Planned |
+| **OpenHands** | `poll` (REST API), `file_watch` (JSON per event) | 🔲 Planned |
+| **SWE-agent** | `file_watch` (trajectory JSON) | 🔲 Planned |
+| **Codex CLI** | `stream` (Rust protocol) | 🔲 Planned |
+| **Cline / Roo Code** | `stream` (gRPC), `file_watch` (VS Code storage) | 🔲 Planned |
+| **CrewAI** | `stream` (event bus listener) | 🔲 Planned |
+| **LangGraph** | `stream` (StreamChannel) | 🔲 Planned |
+| **MS Agent Framework** | `stream` (in-memory events) | 🔲 Planned |
+| **Pydantic AI** | `stream` (AgentEventStream) | 🔲 Planned |
+| **Goose** | `poll` (SQLite), `stream` (hooks) | 🔲 Planned |
+| **Smolagents** | `stream` (callback registry) | 🔲 Planned |
+
+New adapters implement `Adapter.parse()` and map framework events → canonical `EventKind` strings.
 
 ---
 

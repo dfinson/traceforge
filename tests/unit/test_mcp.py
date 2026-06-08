@@ -1,6 +1,6 @@
-from functools import partial
-
 """Tests for MCP tool classification module."""
+
+from functools import partial
 
 from tracemill.classify import get_default_engine
 from tracemill.classify.mcp import (

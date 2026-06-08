@@ -1,6 +1,6 @@
-from functools import partial
-
 """Tests for PowerShell and cmd.exe classifiers."""
+
+from functools import partial
 
 from tracemill.classify import (
     classify_cmd_command,

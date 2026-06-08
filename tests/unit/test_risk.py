@@ -6,7 +6,7 @@ import pytest
 
 from tracemill.classify.config import ClassificationEngine, get_default_engine
 from tracemill.classify.core import Classification, Capability, Effect, Mechanism
-from tracemill.classify.coding import CodingMechanism, CodingScope
+from tracemill.classify.coding import CodingMechanism
 from tracemill.classify.risk import Confidence, RiskAssessment, assess_risk, assess_tool_risk, _expand_short_flags
 
 

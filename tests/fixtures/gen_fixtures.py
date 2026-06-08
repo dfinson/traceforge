@@ -50,7 +50,7 @@ with open("tests/fixtures/claude_session.jsonl", "w") as f:
         f.write(json.dumps(line) + "\n")
 
 # --- Verify ---
-from copilot.generated.session_events import SessionEvent as CSE
+from copilot.generated.session_events import SessionEvent as CSE  # noqa: E402
 
 print("Verifying copilot fixture...")
 with open("tests/fixtures/copilot_session.jsonl") as f:
@@ -62,7 +62,7 @@ with open("tests/fixtures/copilot_session.jsonl") as f:
             print(f"  Line {i} FAIL: {e}")
 print("  Copilot fixture OK")
 
-from claude_agent_sdk._internal.message_parser import parse_message
+from claude_agent_sdk._internal.message_parser import parse_message  # noqa: E402
 
 print("Verifying claude fixture...")
 with open("tests/fixtures/claude_session.jsonl") as f:

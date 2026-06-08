@@ -11,7 +11,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import importlib
 import sys
 from importlib.metadata import version as pkg_version
 
@@ -20,7 +19,7 @@ def check_copilot() -> list[str]:
     """Verify Copilot SDK exports the types we use."""
     errors: list[str] = []
     try:
-        from copilot.generated.session_events import (
+        from copilot.generated.session_events import (  # noqa: F401
             AssistantMessageData,
             AssistantUsageData,
             SessionEventType,
@@ -56,20 +55,20 @@ def check_claude() -> list[str]:
     """Verify Claude SDK exports the types we use."""
     errors: list[str] = []
     try:
-        from claude_agent_sdk import (
+        from claude_agent_sdk import (  # noqa: F401
             AssistantMessage,
             Message,
             ResultMessage,
             SystemMessage,
             UserMessage,
         )
-        from claude_agent_sdk.types import TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock
+        from claude_agent_sdk.types import TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock  # noqa: F401
     except ImportError as e:
         errors.append(f"Missing import: {e}")
         return errors
 
     try:
-        from claude_agent_sdk._internal.message_parser import MessageParseError, parse_message
+        from claude_agent_sdk._internal.message_parser import MessageParseError, parse_message  # noqa: F401
     except ImportError as e:
         errors.append(f"Internal parser missing: {e}")
 

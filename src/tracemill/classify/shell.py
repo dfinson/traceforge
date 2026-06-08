@@ -21,13 +21,10 @@ from tracemill.classify.core import (
 from tracemill.classify.coding import (
     CodingAction,
     CodingMechanism,
-    CodingScope,
     ShellStructure,
 )
 from tracemill.classify.rules import (
     SHELL_DELIVERY,
-    SHELL_IMPLEMENTATION,
-    SHELL_INVESTIGATION,
     SHELL_SETUP,
     SHELL_VERIFICATION,
     ShellActivity,

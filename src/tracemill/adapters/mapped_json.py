@@ -11,7 +11,6 @@ Preprocessors live in the tracemill.preprocessors package.
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Iterator
 from datetime import datetime, timezone

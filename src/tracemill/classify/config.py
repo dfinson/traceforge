@@ -24,8 +24,8 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 
-from tracemill.classify.core import Classification, PhaseSegment
-from tracemill.classify.phases import derive_phase, with_phase_map
+from tracemill.classify.core import Classification
+from tracemill.classify.phases import with_phase_map
 
 logger = logging.getLogger(__name__)
 

@@ -6,7 +6,7 @@ end-to-end correctness, metadata propagation, and cross-adapter consistency.
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -16,11 +16,9 @@ from tracemill import (
     CopilotAdapter,
     Enricher,
     EventKind,
-    EventPipeline,
     SessionEvent,
 )
 from tracemill.adapters.mapped_json import FrameworkMapping, EventMapping, MappedJsonAdapter
-from tests.conftest import RecordingSink
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 

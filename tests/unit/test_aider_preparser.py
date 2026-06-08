@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 
 import pytest
 
 from tracemill.parsers.aider import (
-    FileEdit,
     LineType,
     AiderPreParser,
     ToolOutputKind,
@@ -339,7 +337,7 @@ Hi there!
         assert events1[0]["type"] == "session_start"
 
         chunk2 = "#### fix the bug\n"
-        events2 = list(parser.parse_chunk(chunk2))
+        events2 = list(parser.parse_chunk(chunk2))  # noqa: F841
         # May not flush yet (waiting for type change)
         # But offset should advance
         assert parser.current_offset > 0

@@ -12,7 +12,7 @@ from tracemill.classify.config import ClassificationEngine, ClassifyConfig, load
 from tracemill.classify.core import Classification, PhaseSegment
 from tracemill.classify.coding import CodingMechanism, CodingScope
 from tracemill.classify.powershell import classify_powershell_command
-from tracemill.classify.risk import RiskAssessment, assess_risk, assess_tool_risk
+from tracemill.classify.risk import assess_risk, assess_tool_risk
 from tracemill.classify.tools import normalize_tool_name
 from tracemill.classify.workflow import Phase, Visibility
 from tracemill.types import EventKind, EventMetadata, SessionEvent

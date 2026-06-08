@@ -22,7 +22,6 @@ import yaml
 
 from tracemill.adapters.mapped_json import MappedJsonAdapter
 from tracemill.parsers.aider import AiderPreParser
-from tracemill.types import SessionEvent
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures"
 MAPPINGS_DIR = Path(__file__).resolve().parent.parent.parent / "src" / "tracemill" / "mappings"

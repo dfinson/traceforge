@@ -1,6 +1,6 @@
-from functools import partial
-
 """Tests for tracemill.classify — tool normalization, classification, shell command parsing."""
+
+from functools import partial
 
 from tracemill.classify import (
     _extract_commands_from_ast,

@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from tracemill.adapters.mapped_json import MappedJsonAdapter
-from tracemill.types import EventKind, SessionEvent
+from tracemill.types import EventKind
 
 MAPPINGS_DIR = Path(__file__).resolve().parents[2] / "src" / "tracemill" / "mappings"
 

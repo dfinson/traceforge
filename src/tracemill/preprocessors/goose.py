@@ -82,7 +82,7 @@ def preprocess_goose(obj: dict[str, Any]) -> list[dict[str, Any]]:
             results.append({
                 "role": "tool_confirmation_request",
                 "created_at": ts,
-                "content": item.get("message", ""),
+                "content": data.get("prompt", item.get("message", "")),
                 "name": data.get("toolName", ""),
             })
         elif item_type == "actionRequired":

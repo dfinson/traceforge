@@ -14,10 +14,21 @@ def preprocess_pydantic_ai(obj: dict[str, Any]) -> list[dict[str, Any]]:
     Preserves nested structure for _resolve_path; only synthesizes the "type"
     discriminator and extracts text content from parts arrays.
     """
-    # Stream events have event_kind
+    # Stream and callback events have event_kind
     if "event_kind" in obj:
         normalized = dict(obj)
-        normalized["type"] = f"stream.{normalized['event_kind']}"
+        event_kind = normalized["event_kind"]
+
+        if event_kind == "function_tool_call":
+            normalized["type"] = "tool_call_start"
+        elif event_kind == "function_tool_result":
+            normalized["type"] = "tool_call_end"
+        elif event_kind == "model_response_stream":
+            normalized["type"] = "model_response_chunk"
+            if "chunk" not in normalized:
+                normalized["chunk"] = normalized.get("part", {}).get("content", "")
+        else:
+            normalized["type"] = f"stream.{event_kind}"
         return [normalized]
 
     # Messages have kind (request/response)

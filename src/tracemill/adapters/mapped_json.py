@@ -6,19 +6,21 @@ and payload fields — no custom Python code needed per framework.
 
 Frameworks with non-flat event schemas use a preprocessor that normalizes
 raw dicts into a flat {type_field: value, ...} shape before YAML mapping.
+Preprocessors live in the tracemill.preprocessors package.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from tracemill.adapters.base import JsonLineAdapter
+from tracemill.preprocessors import get_preprocessor
 from tracemill.types import EventKind, EventMetadata, IngestionMode, SessionEvent
 
 logger = logging.getLogger(__name__)
@@ -76,244 +78,6 @@ class FrameworkMapping(BaseModel):
     events: dict[str, EventMapping] = Field(default_factory=dict)  # raw_type → mapping
 
 
-# ─── Preprocessor Registry ───────────────────────────────────────────────────
-
-# Preprocessors normalize raw dicts into one or more flat dicts suitable for
-# type_field lookup. They handle compound discriminators, nested structures,
-# and field-presence-based typing.
-
-PreprocessorFn = Callable[[dict[str, Any]], list[dict[str, Any]]]
-_PREPROCESSORS: dict[str, PreprocessorFn] = {}
-
-
-def register_preprocessor(name: str) -> Callable[[PreprocessorFn], PreprocessorFn]:
-    """Decorator to register a preprocessor function."""
-    def decorator(fn: PreprocessorFn) -> PreprocessorFn:
-        _PREPROCESSORS[name] = fn
-        return fn
-    return decorator
-
-
-@register_preprocessor("openhands")
-def _preprocess_openhands(obj: dict[str, Any]) -> list[dict[str, Any]]:
-    """Normalize OpenHands compound discriminator (action OR observation).
-
-    Action events already have an "action" field — pass through unchanged.
-    Observation events have "observation" field — synthesize "action" as
-    "observation.<value>" so the YAML type_field lookup works uniformly.
-    The nested structure (args, extras) is preserved for _resolve_path.
-    """
-    if "action" in obj:
-        return [obj]
-    elif "observation" in obj:
-        normalized = dict(obj)
-        normalized["action"] = f"observation.{normalized['observation']}"
-        return [normalized]
-    return [obj]
-
-
-@register_preprocessor("goose")
-def _preprocess_goose(obj: dict[str, Any]) -> list[dict[str, Any]]:
-    """Flatten Goose nested content_json into separate typed events."""
-    results = []
-    role = obj.get("role")
-    content_json_raw = obj.get("content_json")
-    ts = obj.get("created_at") or obj.get("created_timestamp")
-
-    if not content_json_raw:
-        return [obj]
-
-    # Parse content_json if it's a string
-    if isinstance(content_json_raw, str):
-        try:
-            content_items = json.loads(content_json_raw)
-        except (json.JSONDecodeError, ValueError):
-            return [obj]
-    else:
-        content_items = content_json_raw
-
-    if not isinstance(content_items, list):
-        return [obj]
-
-    # Extract nested events from content array
-    has_text = False
-    for item in content_items:
-        if not isinstance(item, dict):
-            continue
-        item_type = item.get("type", "")
-
-        if item_type == "text":
-            has_text = True
-        elif item_type == "toolRequest":
-            tool_call = item.get("toolCall", {})
-            value = tool_call.get("value", {}) if isinstance(tool_call, dict) else {}
-            results.append({
-                "role": "tool_use",
-                "created_at": ts,
-                "name": value.get("name", ""),
-                "id": item.get("id", ""),
-                "input": value.get("arguments", {}),
-            })
-        elif item_type == "toolResponse":
-            tool_result = item.get("toolResult", {})
-            results.append({
-                "role": "tool_result",
-                "created_at": ts,
-                "tool_use_id": item.get("id", ""),
-                "content": tool_result.get("value", {}).get("content", "") if isinstance(tool_result, dict) else "",
-                "is_success": tool_result.get("status") == "success" if isinstance(tool_result, dict) else False,
-            })
-
-    # Always emit the message itself (with role)
-    if has_text or not results:
-        text_parts = [i.get("text", "") for i in content_items if isinstance(i, dict) and i.get("type") == "text"]
-        results.insert(0, {
-            "role": role,
-            "created_at": ts,
-            "content": "\n".join(text_parts) if text_parts else content_json_raw,
-        })
-
-    return results
-
-
-@register_preprocessor("cline")
-def _preprocess_cline(obj: dict[str, Any]) -> list[dict[str, Any]]:
-    """Synthesize compound type from Cline's type + say/ask subtype.
-
-    Cline events have type="ask"|"say" with the subtype in the
-    corresponding field. Synthesizes "say.api_req_started" etc.
-    Parses JSON text field for structured subtypes into top-level fields.
-    """
-    msg_type = obj.get("type")  # "ask" or "say"
-    subtype = obj.get(msg_type) if msg_type in ("ask", "say") else None
-
-    if subtype:
-        normalized = dict(obj)
-        normalized["type"] = f"{msg_type}.{subtype}"
-
-        # Parse JSON text field for known subtypes that embed structured data
-        text = normalized.get("text")
-        if text and subtype in ("api_req_started", "api_req_finished", "tool"):
-            try:
-                parsed = json.loads(text)
-                if isinstance(parsed, dict):
-                    normalized["parsed"] = parsed
-            except (json.JSONDecodeError, ValueError):
-                pass
-        return [normalized]
-    return [obj]
-
-
-@register_preprocessor("pydantic_ai")
-def _preprocess_pydantic_ai(obj: dict[str, Any]) -> list[dict[str, Any]]:
-    """Normalize PydanticAI multi-level discrimination to flat type field.
-
-    Preserves nested structure for _resolve_path; only synthesizes the "type"
-    discriminator and extracts text content from parts arrays.
-    """
-    # Stream events have event_kind
-    if "event_kind" in obj:
-        normalized = dict(obj)
-        normalized["type"] = f"stream.{normalized['event_kind']}"
-        return [normalized]
-
-    # Messages have kind (request/response)
-    kind = obj.get("kind")
-    if kind == "response":
-        normalized = dict(obj)
-        normalized["type"] = "model_response"
-        # Extract text from parts for convenience
-        parts = normalized.get("parts", [])
-        text_parts = [p.get("content", "") for p in parts if isinstance(p, dict) and p.get("part_kind") == "text"]
-        if text_parts:
-            normalized["content"] = "\n".join(text_parts)
-        return [normalized]
-    elif kind == "request":
-        normalized = dict(obj)
-        normalized["type"] = "model_request"
-        parts = normalized.get("parts", [])
-        user_parts = [p.get("content", "") for p in parts if isinstance(p, dict) and p.get("part_kind") == "user-prompt"]
-        if user_parts:
-            normalized["content"] = "\n".join(user_parts)
-        return [normalized]
-
-    return [obj]
-
-
-@register_preprocessor("smolagents")
-def _preprocess_smolagents(obj: dict[str, Any]) -> list[dict[str, Any]]:
-    """Infer step type from field presence (smolagents has no discriminator).
-
-    Only synthesizes the step_type field and extracts timestamps from timing.
-    If step_type is already present, trusts the existing value.
-    Nested structures (token_usage, tool_calls) preserved for _resolve_path.
-    """
-    normalized = dict(obj)
-
-    # Extract timestamp from timing dict if present
-    timing = normalized.get("timing", {})
-    if isinstance(timing, dict) and "start_time" in timing:
-        normalized["timestamp"] = timing["start_time"]
-
-    # If step_type already present (e.g., from callback wrappers), trust it
-    if "step_type" in normalized:
-        # Still handle tool_calls splitting for ActionStep
-        if normalized["step_type"] == "ActionStep":
-            tool_calls = normalized.get("tool_calls", [])
-            if tool_calls and isinstance(tool_calls, list):
-                results: list[dict[str, Any]] = [normalized]
-                for tc in tool_calls:
-                    if isinstance(tc, dict):
-                        fn = tc.get("function", {})
-                        results.append({
-                            "step_type": "ToolCall",
-                            "timestamp": normalized.get("timestamp"),
-                            "tool_name": fn.get("name", "") if isinstance(fn, dict) else "",
-                            "call_id": tc.get("id", ""),
-                            "tool_input": fn.get("arguments", "") if isinstance(fn, dict) else "",
-                        })
-                return results
-        return [normalized]
-
-    # Determine step type from field presence
-    # Order matters: check most specific first
-    if "step_number" in normalized:
-        # ActionStep — but check if it's the final answer
-        if normalized.get("is_final_answer"):
-            # ActionStep with is_final_answer=true: action_output IS the answer
-            normalized["step_type"] = "FinalAnswer"
-            normalized["output"] = normalized.get("action_output", "")
-        else:
-            normalized["step_type"] = "ActionStep"
-        tool_calls = normalized.get("tool_calls", [])
-        if tool_calls and isinstance(tool_calls, list):
-            results = [normalized]
-            for tc in tool_calls:
-                if isinstance(tc, dict):
-                    fn = tc.get("function", {})
-                    results.append({
-                        "step_type": "ToolCall",
-                        "timestamp": normalized.get("timestamp"),
-                        "tool_name": fn.get("name", "") if isinstance(fn, dict) else "",
-                        "call_id": tc.get("id", ""),
-                        "tool_input": fn.get("arguments", "") if isinstance(fn, dict) else "",
-                    })
-            return results
-    elif "plan" in normalized:
-        normalized["step_type"] = "PlanningStep"
-    elif "system_prompt" in normalized:
-        normalized["step_type"] = "SystemPromptStep"
-    elif "task" in normalized:
-        normalized["step_type"] = "TaskStep"
-    elif "output" in normalized and len(set(normalized.keys()) - {"output", "timestamp", "step_type"}) == 0:
-        # Bare FinalAnswerStep: only has "output" (+ maybe timestamp)
-        normalized["step_type"] = "FinalAnswer"
-    else:
-        normalized["step_type"] = "unknown"
-
-    return [normalized]
-
-
 # ─── Adapter ─────────────────────────────────────────────────────────────────
 
 
@@ -340,8 +104,12 @@ class MappedJsonAdapter(JsonLineAdapter):
         """
         # Apply preprocessor if configured
         preprocessor_name = self._mapping.preprocessor
-        if preprocessor_name and preprocessor_name in _PREPROCESSORS:
-            normalized_dicts = _PREPROCESSORS[preprocessor_name](obj)
+        if preprocessor_name:
+            preprocessor = get_preprocessor(preprocessor_name)
+            if preprocessor:
+                normalized_dicts = preprocessor(obj)
+            else:
+                normalized_dicts = [obj]
         else:
             normalized_dicts = [obj]
 

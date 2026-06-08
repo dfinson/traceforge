@@ -13,7 +13,7 @@ Automated weekly job that detects breaking changes in upstream framework SDKs be
 | Cline | `cline/cline` | `apps/vscode/src/shared/ExtensionMessage.ts` | `ClineSay`/`ClineAsk` union values, `ClineApiReqInfo` fields |
 | smolagents | `huggingface/smolagents` | `src/smolagents/memory.py`, `monitoring.py` | Step dataclass fields, Timing/TokenUsage shapes, ToolCall.dict() |
 | PydanticAI | `pydantic/pydantic-ai` | `pydantic_ai_slim/pydantic_ai/messages.py`, `usage.py` | Stream event types, Part/Delta shapes, Usage fields |
-| Goose | `aaif-goose/goose` | `crates/goose-providers/src/conversation/message.rs` | MessageContent enum variants, serde attributes, DDL schema |
+| Goose | `block/goose` | `crates/goose-providers/src/conversation/message.rs` | MessageContent enum variants, serde attributes, DDL schema |
 | OpenHands | `All-Hands-AI/OpenHands` | `openhands/events/action/*.py`, `observation/*.py`, `serialization/` | Action/Observation types, field names, serialization logic |
 | SWE-agent | `SWE-agent/SWE-agent` | `sweagent/types.py`, `sweagent/agent/agents.py` | HistoryItem TypedDict, role values, message_type literals |
 

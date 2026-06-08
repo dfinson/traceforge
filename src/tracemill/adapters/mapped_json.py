@@ -15,7 +15,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from tracemill.adapters.base import JsonLineAdapter
-from tracemill.types import EventKind, EventMetadata, SessionEvent
+from tracemill.types import EventKind, EventMetadata, IngestionMode, SessionEvent
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ class FrameworkMapping(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     framework: str  # e.g. "crewai", "openhands"
-    ingestion_mode: str = "file_watch"  # default for file-based frameworks
+    ingestion_mode: IngestionMode = "file_watch"
     type_field: str = "type"  # dot-path to event type in raw JSON
     timestamp_field: str | None = None  # dot-path to timestamp
     session_field: str | None = None  # dot-path to session ID
@@ -130,7 +130,7 @@ class MappedJsonAdapter(JsonLineAdapter):
         metadata = EventMetadata(
             source_framework=self._mapping.framework,
             source_adapter="mapped_json",
-            ingestion_mode=self._mapping.ingestion_mode,  # type: ignore[arg-type]
+            ingestion_mode=self._mapping.ingestion_mode,
             raw_kind=raw_type,
         )
 

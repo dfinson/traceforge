@@ -199,7 +199,7 @@ class EventMetadata(BaseModel):
     turn_id: str | None = None
     visibility: Literal["visible", "system", "collapsed"] = "visible"
     phases: frozenset[str] | None = None
-    classification: Any = None  # Classification | None (avoid circular import)
+    classification: Any = None
     tool_display: str | None = None
     tool_intent: str | None = None
     duration_ms: float | None = None

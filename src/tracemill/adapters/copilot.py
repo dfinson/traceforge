@@ -24,7 +24,7 @@ from copilot.generated.session_events import (
 from copilot.generated.session_events import SessionEvent as CopilotSessionEvent
 
 from tracemill.adapters.base import JsonLineAdapter
-from tracemill.types import EventKind, EventMetadata, SessionEvent
+from tracemill.types import EventKind, EventMetadata, IngestionMode, SessionEvent
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ class CopilotAdapter(JsonLineAdapter):
     by the ``ingestion_mode`` constructor parameter.
     """
 
-    def __init__(self, ingestion_mode: str) -> None:
+    def __init__(self, ingestion_mode: IngestionMode) -> None:
         self._session_id: str | None = None
         self._ingestion_mode = ingestion_mode
 

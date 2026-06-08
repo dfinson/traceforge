@@ -25,7 +25,7 @@ from claude_agent_sdk._internal.message_parser import (
 from claude_agent_sdk.types import TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock
 
 from tracemill.adapters.base import JsonLineAdapter
-from tracemill.types import EventKind, EventMetadata, SessionEvent
+from tracemill.types import EventKind, EventMetadata, IngestionMode, SessionEvent
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ class ClaudeAdapter(JsonLineAdapter):
     by the ``ingestion_mode`` constructor parameter.
     """
 
-    def __init__(self, ingestion_mode: str, session_id: str | None = None) -> None:
+    def __init__(self, ingestion_mode: IngestionMode, session_id: str | None = None) -> None:
         self._session_id = session_id
         self._ingestion_mode = ingestion_mode
 
@@ -192,7 +192,7 @@ class ClaudeAdapter(JsonLineAdapter):
             )
 
     @staticmethod
-    def _extract_result_text(content: Any) -> str | None:
+    def _extract_result_text(content: str | list[Any] | None) -> str | None:
         if isinstance(content, str):
             return content
         if isinstance(content, list):

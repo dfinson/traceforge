@@ -259,7 +259,7 @@ class TestSmolagentsMapping:
 class TestAllYAMLMappingsLoadable:
     """Every YAML in mappings/ must load without error and have framework_version."""
 
-    @pytest.fixture(params=sorted(MAPPINGS_DIR.glob("*.yaml")), ids=lambda p: p.stem)
+    @pytest.fixture(params=sorted(p for p in MAPPINGS_DIR.glob("*.yaml") if p.stem != "maf"), ids=lambda p: p.stem)
     def mapping_file(self, request):
         return request.param
 

@@ -1,0 +1,90 @@
+# Microsoft 365 Agents SDK (MAF) span mapping for OtelSpanAdapter
+# Targets: microsoft-agents-hosting-core >= 1.0.0
+# Source: OpenTelemetry spans emitted by the MAF ActivityHandler pipeline.
+# Ingestion: OTel span dicts (from InMemorySpanExporter or OTLP collector)
+#
+# Unlike JSON-line mappings, this maps OTel span names to canonical kinds
+# and specifies which span attributes to extract into the event payload.
+
+framework: maf
+framework_version: ">=1.0.0"
+ingestion_mode: stream
+
+# Map span names to canonical event kinds.
+# Key = OTel span name, value = {kind, attributes?}
+# attributes maps payload_field_name → OTel attribute key.
+spans:
+  # ── Adapter layer (inbound/outbound message processing) ──
+  agents.adapter.process:
+    kind: message.user
+    attributes:
+      activity_type: activity.type
+      channel_id: activity.channel_id
+      activity_id: activity.id
+      conversation_id: activity.conversation.id
+      delivery_mode: activity.delivery_mode
+
+  agents.adapter.send_activities:
+    kind: message.assistant
+    attributes:
+      count: activities.count
+
+  agents.adapter.update_activity:
+    kind: message.assistant
+
+  agents.adapter.delete_activity:
+    kind: message.assistant
+
+  agents.adapter.continue_conversation:
+    kind: session.resumed
+
+  agents.adapter.create_connector_client:
+    kind: mcp.connection.started
+
+  agents.adapter.create_user_token_client:
+    kind: mcp.connection.started
+
+  agents.adapter.write_response:
+    kind: message.assistant
+
+  # ── App layer (request routing and turn lifecycle) ──
+  agents.app.run:
+    kind: turn.started
+    attributes:
+      activity_type: activity.type
+      is_agentic: activity.is_agentic_request
+
+  agents.app.route_handler:
+    kind: hook.started
+    attributes:
+      route_matched: route.matched
+      is_invoke: route.is_invoke
+
+  agents.app.before_turn:
+    kind: hook.started
+
+  agents.app.after_turn:
+    kind: hook.completed
+
+  agents.app.download_files:
+    kind: file.read
+
+  # ── Storage layer (state persistence) ──
+  agents.storage.read:
+    kind: memory.query.started
+    attributes:
+      key_count: storage.keys.count
+
+  agents.storage.write:
+    kind: memory.save.started
+    attributes:
+      key_count: storage.keys.count
+
+  agents.storage.delete:
+    kind: file.deleted
+    attributes:
+      key_count: storage.keys.count
+
+  # ── Turn context ──
+  agents.turn.send_activities:
+    kind: message.assistant

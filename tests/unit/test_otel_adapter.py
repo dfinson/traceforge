@@ -287,3 +287,39 @@ class TestOtelSpanAdapter:
         for ev in all_events:
             assert ev.session_id == "maf-session-1"
             assert ev.metadata.source_framework == "maf"
+
+
+class TestMafYamlMapping:
+    """Validate that maf.yaml loads correctly and drives the OTel adapter."""
+
+    def test_yaml_loads_with_all_span_kinds(self):
+        """maf.yaml should define all expected span names."""
+        from tracemill.adapters.otel import _SPAN_KIND_MAP
+
+        expected_spans = [
+            "agents.adapter.process",
+            "agents.app.run",
+            "agents.storage.read",
+            "agents.storage.write",
+            "agents.turn.send_activities",
+        ]
+        for span_name in expected_spans:
+            assert span_name in _SPAN_KIND_MAP, f"Missing span: {span_name}"
+
+    def test_yaml_attribute_extractors_loaded(self):
+        """maf.yaml should populate attribute extractors for key spans."""
+        from tracemill.adapters.otel import _ATTRIBUTE_EXTRACTORS
+
+        assert "agents.adapter.process" in _ATTRIBUTE_EXTRACTORS
+        attrs = _ATTRIBUTE_EXTRACTORS["agents.adapter.process"]
+        assert "activity_type" in attrs
+        assert attrs["activity_type"] == "activity.type"
+
+    def test_yaml_kinds_follow_dot_notation(self):
+        """All maf.yaml kinds must follow the dot-notation grammar."""
+        from tracemill.adapters.otel import _SPAN_KIND_MAP
+
+        for span_name, kind in _SPAN_KIND_MAP.items():
+            assert "." in kind or kind == "raw", (
+                f"Span '{span_name}' maps to non-dotted kind '{kind}'"
+            )

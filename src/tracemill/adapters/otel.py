@@ -4,6 +4,9 @@ The Microsoft 365 Agents SDK emits OpenTelemetry spans, not JSON lines.
 This adapter ingests exported OTLP span data (as JSON dicts) and maps
 MAF span names to canonical tracemill event kinds.
 
+Span-to-kind mapping and attribute extraction rules are loaded from
+``mappings/maf.yaml`` — no hardcoded dispatch tables.
+
 Ingestion mode is always "stream" — spans are received from an OTel
 exporter (e.g., InMemorySpanExporter or OTLP collector).
 """
@@ -13,39 +16,40 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
+
+import yaml
 
 from tracemill.adapters.base import Adapter
 from tracemill.types import EventKind, EventMetadata, IngestionMode, SessionEvent
 
 logger = logging.getLogger(__name__)
 
+# ─── Load span mapping from YAML ─────────────────────────────────────────────
 
-# ─── MAF span name → canonical event kind ────────────────────────────────────
+_MAPPINGS_DIR = Path(__file__).resolve().parent.parent / "mappings"
 
-_SPAN_KIND_MAP: dict[str, str] = {
-    # Adapter layer
-    "agents.adapter.process": EventKind.MESSAGE_USER,
-    "agents.adapter.send_activities": EventKind.MESSAGE_ASSISTANT,
-    "agents.adapter.update_activity": EventKind.MESSAGE_ASSISTANT,
-    "agents.adapter.delete_activity": EventKind.MESSAGE_ASSISTANT,
-    "agents.adapter.continue_conversation": EventKind.SESSION_RESUMED,
-    "agents.adapter.create_connector_client": EventKind.MCP_CONNECTION_STARTED,
-    "agents.adapter.create_user_token_client": EventKind.MCP_CONNECTION_STARTED,
-    "agents.adapter.write_response": EventKind.MESSAGE_ASSISTANT,
-    # App layer
-    "agents.app.run": EventKind.TURN_STARTED,
-    "agents.app.route_handler": EventKind.HOOK_STARTED,
-    "agents.app.before_turn": EventKind.HOOK_STARTED,
-    "agents.app.after_turn": EventKind.HOOK_COMPLETED,
-    "agents.app.download_files": EventKind.FILE_READ,
-    # Storage layer
-    "agents.storage.read": EventKind.MEMORY_QUERY_STARTED,
-    "agents.storage.write": EventKind.MEMORY_SAVE_STARTED,
-    "agents.storage.delete": EventKind.FILE_DELETED,
-    # Turn context
-    "agents.turn.send_activities": EventKind.MESSAGE_ASSISTANT,
-}
+
+def _load_maf_mapping() -> tuple[dict[str, str], dict[str, dict[str, str]]]:
+    """Load span kind map and attribute extractors from maf.yaml."""
+    yaml_path = _MAPPINGS_DIR / "maf.yaml"
+    with open(yaml_path) as f:
+        data = yaml.safe_load(f)
+
+    span_kind_map: dict[str, str] = {}
+    attribute_extractors: dict[str, dict[str, str]] = {}
+
+    for span_name, config in data.get("spans", {}).items():
+        span_kind_map[span_name] = config["kind"]
+        attrs = config.get("attributes")
+        if attrs:
+            attribute_extractors[span_name] = attrs
+
+    return span_kind_map, attribute_extractors
+
+
+_SPAN_KIND_MAP, _ATTRIBUTE_EXTRACTORS = _load_maf_mapping()
 
 # OTel status codes
 _STATUS_OK = 1
@@ -186,39 +190,6 @@ class OtelSpanAdapter(Adapter):
             payload["original_type"] = span_name
 
         return payload
-
-
-# ─── Attribute extraction tables ─────────────────────────────────────────────
-
-_ATTRIBUTE_EXTRACTORS: dict[str, dict[str, str]] = {
-    "agents.adapter.process": {
-        "activity_type": "activity.type",
-        "channel_id": "activity.channel_id",
-        "activity_id": "activity.id",
-        "conversation_id": "activity.conversation.id",
-        "delivery_mode": "activity.delivery_mode",
-    },
-    "agents.adapter.send_activities": {
-        "count": "activities.count",
-    },
-    "agents.app.run": {
-        "activity_type": "activity.type",
-        "is_agentic": "activity.is_agentic_request",
-    },
-    "agents.app.route_handler": {
-        "route_matched": "route.matched",
-        "is_invoke": "route.is_invoke",
-    },
-    "agents.storage.read": {
-        "key_count": "storage.keys.count",
-    },
-    "agents.storage.write": {
-        "key_count": "storage.keys.count",
-    },
-    "agents.storage.delete": {
-        "key_count": "storage.keys.count",
-    },
-}
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────

@@ -225,7 +225,7 @@ class TestMappedJsonAdapter:
 class TestYAMLMappings:
     """Validate all YAML mapping files parse into valid FrameworkMapping objects."""
 
-    @pytest.fixture(params=list(MAPPINGS_DIR.glob("*.yaml")), ids=lambda p: p.stem)
+    @pytest.fixture(params=[p for p in MAPPINGS_DIR.glob("*.yaml") if p.stem != "maf"], ids=lambda p: p.stem)
     def mapping_file(self, request):
         return request.param
 

@@ -595,7 +595,7 @@ class TestAdapterRobustness:
 # ─── All YAML Mappings E2E ───────────────────────────────────────────────────
 
 
-MAPPING_FILES = list((Path(__file__).resolve().parents[1] / ".." / "src" / "tracemill" / "mappings").glob("*.yaml"))
+MAPPING_FILES = [p for p in (Path(__file__).resolve().parents[1] / ".." / "src" / "tracemill" / "mappings").glob("*.yaml") if p.stem != "maf"]
 
 
 class TestAllMappingsE2E:

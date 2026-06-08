@@ -86,6 +86,7 @@ class FileWatchSource(Source):
         self._handler: _FileHandler | None = None
         self._inode: int | None = None
         self._last_size: int = 0
+        self._iterating = False
 
     async def __aenter__(self) -> "FileWatchSource":
         self._open_file(start_at=self.start_at)
@@ -94,6 +95,9 @@ class FileWatchSource(Source):
         self._observer = Observer()
         self._observer.schedule(self._handler, str(self.path.parent), recursive=False)
         self._observer.start()
+        # Signal immediately so _iter_records drains any pre-existing content
+        if self.start_at == "beginning" and self._file is not None:
+            self._handler.changed.set()
         return self
 
     async def __aexit__(
@@ -113,34 +117,41 @@ class FileWatchSource(Source):
             self._file = None
         self._buffer = ""
         self._handler = None
+        self._iterating = False
 
     async def _iter_records(self) -> AsyncIterator[RawRecord]:
         if self._handler is None:
             raise RuntimeError("FileWatchSource must be entered before iteration")
-        while True:
-            await self._handler.changed.wait()
-            self._handler.changed.clear()
+        if self._iterating:
+            raise RuntimeError("FileWatchSource does not support concurrent iteration")
+        self._iterating = True
+        try:
+            while True:
+                await self._handler.changed.wait()
+                self._handler.changed.clear()
 
-            self._check_rotation()
+                self._check_rotation()
 
-            if self._file is None:
-                self._open_file(start_at="beginning")
                 if self._file is None:
+                    self._open_file(start_at="beginning")
+                    if self._file is None:
+                        continue
+
+                chunk = self._file.read()
+                if not chunk:
                     continue
 
-            chunk = self._file.read()
-            if not chunk:
-                continue
+                self._buffer += chunk
+                lines = self._buffer.splitlines(keepends=True)
+                if lines and not lines[-1].endswith(("\n", "\r")):
+                    self._buffer = lines.pop()
+                else:
+                    self._buffer = ""
 
-            self._buffer += chunk
-            lines = self._buffer.splitlines(keepends=True)
-            if lines and not lines[-1].endswith(("\n", "\r")):
-                self._buffer = lines.pop()
-            else:
-                self._buffer = ""
-
-            for line in lines:
-                yield self._make_record(line.rstrip("\r\n"))
+                for line in lines:
+                    yield self._make_record(line.rstrip("\r\n"))
+        finally:
+            self._iterating = False
 
     def __aiter__(self) -> AsyncIterator[RawRecord]:
         return self._iter_records()
@@ -193,8 +204,10 @@ class FileWatchSource(Source):
 
     @staticmethod
     def _get_inode(stat: os.stat_result) -> int:
-        """Get file identity. On Windows st_ino may be 0; fall back to file_index."""
-        return stat.st_ino if stat.st_ino != 0 else hash((stat.st_dev, stat.st_size))
+        """Get file identity. On Windows st_ino may be 0; fall back to creation time."""
+        if stat.st_ino != 0:
+            return stat.st_ino
+        return hash((stat.st_dev, stat.st_ctime_ns))
 
     def _make_record(self, payload: str) -> RawRecord:
         record = RawRecord(

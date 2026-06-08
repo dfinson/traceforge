@@ -3,20 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import TracebackType
 
+import httpx
+
 from tracemill.sources.base import RawRecord, Source
-
-
-def _load_httpx():
-    try:
-        return importlib.import_module("httpx")
-    except ImportError as exc:
-        raise ImportError("SSESource requires httpx. Install it with: pip install httpx") from exc
 
 
 @dataclass(slots=True)
@@ -51,13 +45,13 @@ class SSESource(Source):
         self.headers = dict(headers or {})
         self.reconnect_delay = reconnect_delay
         self.max_reconnects = max_reconnects
-        self._client = None
+        self._client: httpx.AsyncClient | None = None
         self._sequence = 0
         self._last_event_id: str = ""
-        self._httpx = _load_httpx()
+        self._iterating = False
 
     async def __aenter__(self) -> "SSESource":
-        self._client = self._httpx.AsyncClient(timeout=None)
+        self._client = httpx.AsyncClient(timeout=None)
         return self
 
     async def __aexit__(
@@ -69,31 +63,38 @@ class SSESource(Source):
         if self._client is not None:
             await self._client.aclose()
             self._client = None
+        self._iterating = False
 
     async def _iter_records(self) -> AsyncIterator[RawRecord]:
         if self._client is None:
             raise RuntimeError("SSESource must be entered before iteration")
-        reconnects = 0
-        while True:
-            if self.max_reconnects is not None and reconnects > self.max_reconnects:
-                raise RuntimeError(f"Exceeded maximum reconnects for SSE source {self.name}")
-            try:
-                async for sse_event in self._stream_once():
-                    reconnects = 0
-                    yield self._make_record(sse_event)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
+        if self._iterating:
+            raise RuntimeError("SSESource does not support concurrent iteration")
+        self._iterating = True
+        try:
+            reconnects = 0
+            while True:
+                if self.max_reconnects is not None and reconnects > self.max_reconnects:
+                    raise RuntimeError(f"Exceeded maximum reconnects for SSE source {self.name}")
+                try:
+                    async for sse_event in self._stream_once():
+                        reconnects = 0
+                        yield self._make_record(sse_event)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    reconnects += 1
+                    if self.max_reconnects is not None and reconnects > self.max_reconnects:
+                        raise
+                    await asyncio.sleep(self._backoff_delay(reconnects))
+                    continue
+
                 reconnects += 1
                 if self.max_reconnects is not None and reconnects > self.max_reconnects:
-                    raise
+                    return
                 await asyncio.sleep(self._backoff_delay(reconnects))
-                continue
-
-            reconnects += 1
-            if self.max_reconnects is not None and reconnects > self.max_reconnects:
-                return
-            await asyncio.sleep(self._backoff_delay(reconnects))
+        finally:
+            self._iterating = False
 
     def __aiter__(self) -> AsyncIterator[RawRecord]:
         return self._iter_records()
@@ -118,14 +119,14 @@ class SSESource(Source):
 
             data_buf: list[str] = []
             event_type = ""
-            last_id = ""
+            last_id: str | None = None
 
             async for line in response.aiter_lines():
                 if line == "":
                     # Dispatch event
                     if data_buf:
                         data = "\n".join(data_buf)
-                        if last_id:
+                        if last_id is not None:
                             self._last_event_id = last_id
                         yield SSEEvent(
                             data=data,
@@ -135,7 +136,7 @@ class SSESource(Source):
                     # Reset per-event state
                     data_buf = []
                     event_type = ""
-                    last_id = ""
+                    last_id = None
                     continue
 
                 if line.startswith(":"):
@@ -150,6 +151,7 @@ class SSESource(Source):
                 elif field == "event":
                     event_type = value
                 elif field == "id":
+                    # Per spec: empty id resets; id with NUL is ignored
                     if "\x00" not in value:
                         last_id = value
                 elif field == "retry":

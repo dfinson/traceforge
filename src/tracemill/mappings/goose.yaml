@@ -77,6 +77,10 @@ events:
     payload:
       tool_name: name
       content: content
+  redacted_thinking:
+    kind: reasoning.redacted
+    payload:
+      data: data
   system_notification:
     kind: session.info
     payload:

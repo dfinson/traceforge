@@ -10,7 +10,8 @@
 #
 # IMPORTANT: history entries have NO per-entry timestamps.
 # Each entry has: role, content, agent, message_type, and optionally
-# tool_calls (OpenAI format), tool_call_ids, thinking_blocks.
+# tool_calls (OpenAI format), tool_call_ids.
+# NOTE: thinking_blocks exists in unreleased HEAD but NOT in v1.1.0 stable.
 #
 # message_type values: "action" (assistant), "observation" (user/tool),
 #   "system_prompt" (system), "demonstration" (user)
@@ -44,6 +45,7 @@ events:
       content: content
       tool_call_ids: tool_call_ids
       agent: agent
+      message_type: message_type
 
   # ── System prompt (role: system, message_type="system_prompt") ──
   system:
@@ -51,6 +53,7 @@ events:
     payload:
       content: content
       agent: agent
+      message_type: message_type
 
   # ── User messages (task setup, observations in non-FC mode, demos) ──
   user:

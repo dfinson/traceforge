@@ -59,6 +59,52 @@ def preprocess_goose(obj: dict[str, Any]) -> list[dict[str, Any]]:
                 "content": tool_result.get("value", {}).get("content", "") if isinstance(tool_result, dict) else "",
                 "is_success": tool_result.get("status") == "success" if isinstance(tool_result, dict) else False,
             })
+        elif item_type == "thinking":
+            results.append({
+                "role": "thinking",
+                "created_at": ts,
+                "thinking": item.get("thinking", ""),
+            })
+        elif item_type == "redactedThinking":
+            results.append({
+                "role": "redacted_thinking",
+                "created_at": ts,
+                "data": item.get("data", ""),
+            })
+        elif item_type == "image":
+            results.append({
+                "role": "image",
+                "created_at": ts,
+                "data": item.get("data", ""),
+            })
+        elif item_type == "toolConfirmationRequest":
+            data = item.get("data", {}) if isinstance(item.get("data"), dict) else {}
+            results.append({
+                "role": "tool_confirmation_request",
+                "created_at": ts,
+                "content": item.get("message", ""),
+                "name": data.get("toolName", ""),
+            })
+        elif item_type == "actionRequired":
+            data = item.get("data", {}) if isinstance(item.get("data"), dict) else {}
+            results.append({
+                "role": "action_required",
+                "created_at": ts,
+                "content": data.get("message", item.get("message", "")),
+            })
+        elif item_type == "frontendToolRequest":
+            results.append({
+                "role": "frontend_tool_request",
+                "created_at": ts,
+                "name": item.get("name", ""),
+                "content": item.get("content", ""),
+            })
+        elif item_type == "systemNotification":
+            results.append({
+                "role": "system_notification",
+                "created_at": ts,
+                "content": item.get("msg", ""),
+            })
 
     # Always emit the message itself (with role)
     if has_text or not results:

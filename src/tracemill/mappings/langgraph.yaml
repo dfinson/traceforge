@@ -8,7 +8,8 @@
 # Events confirmed emitted by _AstreamEventsCallbackHandler:
 #   on_chain_start/end/stream, on_chat_model_start/stream/end,
 #   on_llm_start/end/stream, on_tool_start/end/error,
-#   on_retriever_start/end, on_custom_event
+#   on_retriever_start/end, on_custom_event,
+#   on_prompt_start/end/stream, on_parser_start/end/stream
 #
 # NOT emitted (callback methods exist but handler does NOT override them):
 #   on_chain_error, on_llm_error, on_retriever_error
@@ -113,6 +114,44 @@ events:
 
   # ── Node transitions (intermediate stream chunks) ──
   on_chain_stream:
+    kind: workflow.stream
+    payload:
+      node: name
+      data: data.chunk
+
+  # ── Prompt template events (same shape as chain, run_type="prompt") ──
+  on_prompt_start:
+    kind: workflow.started
+    payload:
+      run_id: run_id
+      name: name
+      inputs: data.input
+  on_prompt_end:
+    kind: workflow.completed
+    payload:
+      run_id: run_id
+      name: name
+      output: data.output
+  on_prompt_stream:
+    kind: workflow.stream
+    payload:
+      node: name
+      data: data.chunk
+
+  # ── Parser events (same shape as chain, run_type="parser") ──
+  on_parser_start:
+    kind: workflow.started
+    payload:
+      run_id: run_id
+      name: name
+      inputs: data.input
+  on_parser_end:
+    kind: workflow.completed
+    payload:
+      run_id: run_id
+      name: name
+      output: data.output
+  on_parser_stream:
     kind: workflow.stream
     payload:
       node: name

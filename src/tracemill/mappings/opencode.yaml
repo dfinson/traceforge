@@ -1,0 +1,301 @@
+# OpenCode event mapping for MappedJsonAdapter
+# Targets: opencode >= 1.2 (SSE event stream from /event/subscribe)
+# Source: anomalyco/opencode packages/core/src/session/event.ts (tag github-v1.2.24)
+#         anomalyco/opencode packages/sdk/js/src/v2/gen/types.gen.ts
+#
+# OpenCode uses an EventV2 event-sourced architecture. Events are transported
+# via SSE (text/event-stream) as JSON payloads with shape:
+#   {id, type, data: {...}, seq?, version?, location?, metadata?, replay?}
+#
+# The "type" field is the sole discriminator — dot-separated namespaced strings.
+# Session-scoped events are prefixed "session.next.*".
+# Global events use shorter names (session.created, session.deleted, etc.)
+#
+# All session.next.* events carry in data:
+#   {timestamp: number, sessionID: string, ...event-specific fields}
+#
+# Ephemeral events (*.delta) are live-stream-only and NOT persisted to SQLite.
+# Durable events have sync.version (v1 or v2).
+#
+# Token usage: session.next.step.ended → data.tokens =
+#   {input, output, reasoning, cache: {read, write}}
+# Cost: session.next.step.ended → data.cost (number, USD)
+# Model: session.next.step.started → data.model = {id, providerID, variant?}
+
+framework: opencode
+framework_version: ">=1.2"
+ingestion_mode: stream
+type_field: type
+timestamp_field: data.timestamp
+
+events:
+  # ── Session lifecycle ──
+  session.next.prompted:
+    kind: message.user
+    payload:
+      session_id: data.sessionID
+      message_id: data.messageID
+      prompt: data.prompt
+      delivery: data.delivery
+
+  session.next.prompt.admitted:
+    kind: message.user
+    payload:
+      session_id: data.sessionID
+      message_id: data.messageID
+      prompt: data.prompt
+      delivery: data.delivery
+
+  session.next.prompt.promoted:
+    kind: message.user
+    payload:
+      session_id: data.sessionID
+      message_id: data.messageID
+      prompt: data.prompt
+      time_created: data.timeCreated
+
+  session.next.interrupt.requested:
+    kind: workflow.interrupted
+    payload:
+      session_id: data.sessionID
+
+  session.next.agent.switched:
+    kind: workflow.agent_switched
+    payload:
+      session_id: data.sessionID
+      message_id: data.messageID
+      agent: data.agent
+
+  session.next.model.switched:
+    kind: workflow.model_switched
+    payload:
+      session_id: data.sessionID
+      message_id: data.messageID
+      model_id: data.model.id
+      provider_id: data.model.providerID
+      variant: data.model.variant
+
+  session.next.moved:
+    kind: workflow.moved
+    payload:
+      session_id: data.sessionID
+      location: data.location
+      subdirectory: data.subdirectory
+
+  session.next.context.updated:
+    kind: workflow.context_updated
+    payload:
+      session_id: data.sessionID
+      message_id: data.messageID
+      text: data.text
+
+  session.next.synthetic:
+    kind: message.system
+    payload:
+      session_id: data.sessionID
+      message_id: data.messageID
+      text: data.text
+
+  session.next.retried:
+    kind: workflow.retried
+    payload:
+      session_id: data.sessionID
+      attempt: data.attempt
+      error_message: data.error.message
+      status_code: data.error.statusCode
+      is_retryable: data.error.isRetryable
+
+  # ── Step events (LLM turn lifecycle) ──
+  session.next.step.started:
+    kind: llm.call.started
+    payload:
+      session_id: data.sessionID
+      assistant_message_id: data.assistantMessageID
+      agent: data.agent
+      model_id: data.model.id
+      provider_id: data.model.providerID
+      variant: data.model.variant
+      snapshot: data.snapshot
+
+  session.next.step.ended:
+    kind: llm.call.completed
+    payload:
+      session_id: data.sessionID
+      assistant_message_id: data.assistantMessageID
+      finish: data.finish
+      cost: data.cost
+      input_tokens: data.tokens.input
+      output_tokens: data.tokens.output
+      reasoning_tokens: data.tokens.reasoning
+      cache_read_tokens: data.tokens.cache.read
+      cache_write_tokens: data.tokens.cache.write
+      snapshot: data.snapshot
+
+  session.next.step.failed:
+    kind: llm.call.failed
+    payload:
+      session_id: data.sessionID
+      assistant_message_id: data.assistantMessageID
+      error_type: data.error.type
+      error_message: data.error.message
+
+  # ── Text streaming ──
+  session.next.text.started:
+    kind: message.assistant.started
+    payload:
+      session_id: data.sessionID
+      assistant_message_id: data.assistantMessageID
+      text_id: data.textID
+
+  session.next.text.delta:
+    kind: message.assistant.chunk
+    payload:
+      session_id: data.sessionID
+      assistant_message_id: data.assistantMessageID
+      text_id: data.textID
+      delta: data.delta
+
+  session.next.text.ended:
+    kind: message.assistant
+    payload:
+      session_id: data.sessionID
+      assistant_message_id: data.assistantMessageID
+      text_id: data.textID
+      text: data.text
+
+  # ── Reasoning streaming ──
+  session.next.reasoning.started:
+    kind: llm.reasoning.started
+    payload:
+      session_id: data.sessionID
+      assistant_message_id: data.assistantMessageID
+      reasoning_id: data.reasoningID
+      provider_metadata: data.providerMetadata
+
+  session.next.reasoning.delta:
+    kind: llm.reasoning.chunk
+    payload:
+      session_id: data.sessionID
+      assistant_message_id: data.assistantMessageID
+      reasoning_id: data.reasoningID
+      delta: data.delta
+
+  session.next.reasoning.ended:
+    kind: llm.reasoning.completed
+    payload:
+      session_id: data.sessionID
+      assistant_message_id: data.assistantMessageID
+      reasoning_id: data.reasoningID
+      text: data.text
+      provider_metadata: data.providerMetadata
+
+  # ── Tool events ──
+  session.next.tool.input.started:
+    kind: tool.input.started
+    payload:
+      session_id: data.sessionID
+      assistant_message_id: data.assistantMessageID
+      call_id: data.callID
+      name: data.name
+
+  session.next.tool.input.delta:
+    kind: tool.input.chunk
+    payload:
+      session_id: data.sessionID
+      assistant_message_id: data.assistantMessageID
+      call_id: data.callID
+      delta: data.delta
+
+  session.next.tool.input.ended:
+    kind: tool.input.completed
+    payload:
+      session_id: data.sessionID
+      assistant_message_id: data.assistantMessageID
+      call_id: data.callID
+      text: data.text
+
+  session.next.tool.called:
+    kind: tool.call.started
+    payload:
+      session_id: data.sessionID
+      assistant_message_id: data.assistantMessageID
+      call_id: data.callID
+      tool: data.tool
+      input: data.input
+      provider_executed: data.provider.executed
+      provider_metadata: data.provider.metadata
+
+  session.next.tool.progress:
+    kind: tool.call.progress
+    payload:
+      session_id: data.sessionID
+      assistant_message_id: data.assistantMessageID
+      call_id: data.callID
+      structured: data.structured
+      content: data.content
+
+  session.next.tool.success:
+    kind: tool.call.completed
+    payload:
+      session_id: data.sessionID
+      assistant_message_id: data.assistantMessageID
+      call_id: data.callID
+      structured: data.structured
+      content: data.content
+      output_paths: data.outputPaths
+      result: data.result
+      provider_executed: data.provider.executed
+      provider_metadata: data.provider.metadata
+
+  session.next.tool.failed:
+    kind: tool.call.failed
+    payload:
+      session_id: data.sessionID
+      assistant_message_id: data.assistantMessageID
+      call_id: data.callID
+      error_type: data.error.type
+      error_message: data.error.message
+      result: data.result
+      provider_executed: data.provider.executed
+      provider_metadata: data.provider.metadata
+
+  # ── Shell events ──
+  session.next.shell.started:
+    kind: tool.call.started
+    payload:
+      session_id: data.sessionID
+      message_id: data.messageID
+      call_id: data.callID
+      tool: shell
+      input: data.command
+
+  session.next.shell.ended:
+    kind: tool.call.completed
+    payload:
+      session_id: data.sessionID
+      call_id: data.callID
+      result: data.output
+
+  # ── Compaction events ──
+  session.next.compaction.started:
+    kind: workflow.compaction.started
+    payload:
+      session_id: data.sessionID
+      message_id: data.messageID
+      reason: data.reason
+
+  session.next.compaction.delta:
+    kind: workflow.compaction.chunk
+    payload:
+      session_id: data.sessionID
+      message_id: data.messageID
+      text: data.text
+
+  session.next.compaction.ended:
+    kind: workflow.compaction.completed
+    payload:
+      session_id: data.sessionID
+      message_id: data.messageID
+      reason: data.reason
+      text: data.text
+      recent: data.recent

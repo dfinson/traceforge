@@ -25,6 +25,7 @@ New frameworks added to the mappings folder are automatically picked up and audi
 | Goose | `block/goose` | `crates/goose-providers/src/conversation/message.rs` | MessageContent enum variants, serde attributes, struct fields |
 | OpenHands | `All-Hands-AI/OpenHands` | `openhands/events/action/*.py`, `observation/*.py`, `serialization/` | Action/Observation types, field names, serialization logic |
 | SWE-agent | `SWE-agent/SWE-agent` | `sweagent/types.py`, `sweagent/agent/agents.py` | HistoryItem TypedDict, role values, message_type literals |
+| OpenCode | `anomalyco/opencode` | `packages/core/src/session/event.ts`, `packages/sdk/js/src/v2/gen/types.gen.ts` | session.next.* event types, data shapes, EventV2 payload structure |
 
 ## Audit Process
 

@@ -1,312 +1,243 @@
 # OpenCode event mapping for MappedJsonAdapter
-# Targets: opencode >= 1.3 (SSE event stream from /event/subscribe)
-# Source: anomalyco/opencode packages/core/src/session/event.ts (dev branch, post github-v1.2.24)
-#         anomalyco/opencode packages/sdk/js/src/v2/gen/types.gen.ts
+# Targets: opencode >= 1.2, < 2.0 (SSE event stream from GET /event/subscribe)
+# Source: anomalyco/opencode packages/core/src/session-event.ts (tag github-v1.2.24)
+#         anomalyco/opencode packages/opencode/src/server/routes/instance/httpapi/handlers/event.ts
+#         anomalyco/opencode packages/opencode/src/event-v2-bridge.ts
 #
-# IMPORTANT VERSION NOTE:
-# - At github-v1.2.24 (May 2026), the source file was packages/core/src/session-event.ts
-#   and the SSE wire format used {id, type, properties: {...}} (Bus-based transport).
-# - Post-v1.2.24 (dev branch, 500+ commits ahead), the SSE handler was refactored to
-#   deliver EventV2.Payload directly: {id, type, data: {...}, seq?, version?, location?}
-# - This YAML targets the POST-v1.2.24 architecture (data.* paths).
-# - 5 events (prompt.admitted, prompt.promoted, interrupt.requested, context.updated,
-#   moved) and 30+ fields (assistantMessageID, messageID, textID, providerMetadata,
-#   outputPaths, result) were added post-v1.2.24.
-# - If consuming v1.2.x, use properties.* instead of data.* for all paths.
+# Wire format: SSE text/event-stream, each message is event: "message", data: JSON.
+# The JSON shape on the wire (Bus transport via EventV2Bridge):
+#   {id: string, type: string, properties: {...event data fields...}}
 #
-# OpenCode uses an EventV2 event-sourced architecture. Events are transported
-# via SSE (text/event-stream) as JSON payloads with shape:
-#   {id, type, data: {...}, seq?, version?, location?, metadata?, replay?}
+# The EventV2Bridge translates core EventV2 events to Bus events:
+#   EventV2.Payload {id, type, data: {...}} → Bus {id, type, properties: data}
+# So all field paths are properties.* on the wire.
 #
 # The "type" field is the sole discriminator — dot-separated namespaced strings.
-# Session-scoped events are prefixed "session.next.*".
-# Global events use shorter names (session.created, session.deleted, etc.)
+# All session.next.* events carry in properties:
+#   {timestamp: number (ms UTC), sessionID: string, ...event-specific fields}
 #
-# All session.next.* events carry in data:
-#   {timestamp: number, sessionID: string, ...event-specific fields}
+# Base schema: {timestamp: DateTimeUtcFromMillis, sessionID: Session.ID}
+# All events use aggregate: "sessionID", version: 1.
 #
-# Ephemeral events (*.delta) are live-stream-only and NOT persisted to SQLite.
-# Durable events have sync.version (v1 or v2).
-#
-# Token usage: session.next.step.ended → data.tokens =
+# Token usage: session.next.step.ended → properties.tokens =
 #   {input, output, reasoning, cache: {read, write}}
-# Cost: session.next.step.ended → data.cost (number, USD)
-# Model: session.next.step.started → data.model = {id, providerID, variant?}
+# Cost: session.next.step.ended → properties.cost (number, USD)
+# Model: session.next.step.started → properties.model = {id, providerID, variant?}
+#
+# Prompt shape: {text: string, files?: FileAttachment[], agents?: AgentAttachment[],
+#   references?: ReferenceAttachment[]}
+#
+# 26 total events defined in All union at v1.2.24.
 
 framework: opencode
-framework_version: ">=1.3"
+framework_version: ">=1.2,<2.0"
 ingestion_mode: stream
 type_field: type
-timestamp_field: data.timestamp
+timestamp_field: properties.timestamp
 
 events:
   # ── Session lifecycle ──
   session.next.prompted:
     kind: message.user
     payload:
-      session_id: data.sessionID
-      message_id: data.messageID
-      prompt: data.prompt
-      delivery: data.delivery
-
-  session.next.prompt.admitted:
-    kind: message.user
-    payload:
-      session_id: data.sessionID
-      message_id: data.messageID
-      prompt: data.prompt
-      delivery: data.delivery
-
-  session.next.prompt.promoted:
-    kind: message.user
-    payload:
-      session_id: data.sessionID
-      message_id: data.messageID
-      prompt: data.prompt
-      time_created: data.timeCreated
-
-  session.next.interrupt.requested:
-    kind: workflow.interrupted
-    payload:
-      session_id: data.sessionID
+      session_id: properties.sessionID
+      prompt_text: properties.prompt.text
+      prompt_files: properties.prompt.files
+      prompt_agents: properties.prompt.agents
+      prompt_references: properties.prompt.references
 
   session.next.agent.switched:
     kind: workflow.agent_switched
     payload:
-      session_id: data.sessionID
-      message_id: data.messageID
-      agent: data.agent
+      session_id: properties.sessionID
+      agent: properties.agent
 
   session.next.model.switched:
     kind: workflow.model_switched
     payload:
-      session_id: data.sessionID
-      message_id: data.messageID
-      model_id: data.model.id
-      provider_id: data.model.providerID
-      variant: data.model.variant
-
-  session.next.moved:
-    kind: workflow.moved
-    payload:
-      session_id: data.sessionID
-      location: data.location
-      subdirectory: data.subdirectory
-
-  session.next.context.updated:
-    kind: workflow.context_updated
-    payload:
-      session_id: data.sessionID
-      message_id: data.messageID
-      text: data.text
+      session_id: properties.sessionID
+      model_id: properties.model.id
+      provider_id: properties.model.providerID
+      variant: properties.model.variant
 
   session.next.synthetic:
     kind: message.system
     payload:
-      session_id: data.sessionID
-      message_id: data.messageID
-      text: data.text
+      session_id: properties.sessionID
+      text: properties.text
 
   session.next.retried:
     kind: workflow.retried
     payload:
-      session_id: data.sessionID
-      attempt: data.attempt
-      error_message: data.error.message
-      status_code: data.error.statusCode
-      is_retryable: data.error.isRetryable
+      session_id: properties.sessionID
+      attempt: properties.attempt
+      error_message: properties.error.message
+      status_code: properties.error.statusCode
+      is_retryable: properties.error.isRetryable
 
   # ── Step events (LLM turn lifecycle) ──
   session.next.step.started:
     kind: llm.call.started
     payload:
-      session_id: data.sessionID
-      assistant_message_id: data.assistantMessageID
-      agent: data.agent
-      model_id: data.model.id
-      provider_id: data.model.providerID
-      variant: data.model.variant
-      snapshot: data.snapshot
+      session_id: properties.sessionID
+      agent: properties.agent
+      model_id: properties.model.id
+      provider_id: properties.model.providerID
+      variant: properties.model.variant
+      snapshot: properties.snapshot
 
   session.next.step.ended:
     kind: llm.call.completed
     payload:
-      session_id: data.sessionID
-      assistant_message_id: data.assistantMessageID
-      finish: data.finish
-      cost: data.cost
-      input_tokens: data.tokens.input
-      output_tokens: data.tokens.output
-      reasoning_tokens: data.tokens.reasoning
-      cache_read_tokens: data.tokens.cache.read
-      cache_write_tokens: data.tokens.cache.write
-      snapshot: data.snapshot
+      session_id: properties.sessionID
+      finish: properties.finish
+      cost: properties.cost
+      input_tokens: properties.tokens.input
+      output_tokens: properties.tokens.output
+      reasoning_tokens: properties.tokens.reasoning
+      cache_read_tokens: properties.tokens.cache.read
+      cache_write_tokens: properties.tokens.cache.write
+      snapshot: properties.snapshot
 
   session.next.step.failed:
     kind: llm.call.failed
     payload:
-      session_id: data.sessionID
-      assistant_message_id: data.assistantMessageID
-      error_type: data.error.type
-      error_message: data.error.message
+      session_id: properties.sessionID
+      error_type: properties.error.type
+      error_message: properties.error.message
 
   # ── Text streaming ──
   session.next.text.started:
     kind: message.assistant.started
     payload:
-      session_id: data.sessionID
-      assistant_message_id: data.assistantMessageID
-      text_id: data.textID
+      session_id: properties.sessionID
 
   session.next.text.delta:
     kind: message.assistant.chunk
     payload:
-      session_id: data.sessionID
-      assistant_message_id: data.assistantMessageID
-      text_id: data.textID
-      delta: data.delta
+      session_id: properties.sessionID
+      delta: properties.delta
 
   session.next.text.ended:
     kind: message.assistant
     payload:
-      session_id: data.sessionID
-      assistant_message_id: data.assistantMessageID
-      text_id: data.textID
-      text: data.text
+      session_id: properties.sessionID
+      text: properties.text
 
   # ── Reasoning streaming ──
   session.next.reasoning.started:
     kind: llm.reasoning.started
     payload:
-      session_id: data.sessionID
-      assistant_message_id: data.assistantMessageID
-      reasoning_id: data.reasoningID
-      provider_metadata: data.providerMetadata
+      session_id: properties.sessionID
+      reasoning_id: properties.reasoningID
 
   session.next.reasoning.delta:
     kind: llm.reasoning.chunk
     payload:
-      session_id: data.sessionID
-      assistant_message_id: data.assistantMessageID
-      reasoning_id: data.reasoningID
-      delta: data.delta
+      session_id: properties.sessionID
+      reasoning_id: properties.reasoningID
+      delta: properties.delta
 
   session.next.reasoning.ended:
     kind: llm.reasoning.completed
     payload:
-      session_id: data.sessionID
-      assistant_message_id: data.assistantMessageID
-      reasoning_id: data.reasoningID
-      text: data.text
-      provider_metadata: data.providerMetadata
+      session_id: properties.sessionID
+      reasoning_id: properties.reasoningID
+      text: properties.text
 
-  # ── Tool events ──
+  # ── Tool input streaming ──
   session.next.tool.input.started:
     kind: tool.input.started
     payload:
-      session_id: data.sessionID
-      assistant_message_id: data.assistantMessageID
-      call_id: data.callID
-      name: data.name
+      session_id: properties.sessionID
+      call_id: properties.callID
+      name: properties.name
 
   session.next.tool.input.delta:
     kind: tool.input.chunk
     payload:
-      session_id: data.sessionID
-      assistant_message_id: data.assistantMessageID
-      call_id: data.callID
-      delta: data.delta
+      session_id: properties.sessionID
+      call_id: properties.callID
+      delta: properties.delta
 
   session.next.tool.input.ended:
     kind: tool.input.completed
     payload:
-      session_id: data.sessionID
-      assistant_message_id: data.assistantMessageID
-      call_id: data.callID
-      text: data.text
+      session_id: properties.sessionID
+      call_id: properties.callID
+      text: properties.text
 
+  # ── Tool execution ──
   session.next.tool.called:
     kind: tool.call.started
     payload:
-      session_id: data.sessionID
-      assistant_message_id: data.assistantMessageID
-      call_id: data.callID
-      tool: data.tool
-      input: data.input
-      provider_executed: data.provider.executed
-      provider_metadata: data.provider.metadata
+      session_id: properties.sessionID
+      call_id: properties.callID
+      tool: properties.tool
+      input: properties.input
+      provider_executed: properties.provider.executed
+      provider_metadata: properties.provider.metadata
 
   session.next.tool.progress:
     kind: tool.call.progress
     payload:
-      session_id: data.sessionID
-      assistant_message_id: data.assistantMessageID
-      call_id: data.callID
-      structured: data.structured
-      content: data.content
+      session_id: properties.sessionID
+      call_id: properties.callID
+      structured: properties.structured
+      content: properties.content
 
   session.next.tool.success:
     kind: tool.call.completed
     payload:
-      session_id: data.sessionID
-      assistant_message_id: data.assistantMessageID
-      call_id: data.callID
-      structured: data.structured
-      content: data.content
-      output_paths: data.outputPaths
-      result: data.result
-      provider_executed: data.provider.executed
-      provider_metadata: data.provider.metadata
+      session_id: properties.sessionID
+      call_id: properties.callID
+      structured: properties.structured
+      content: properties.content
+      provider_executed: properties.provider.executed
+      provider_metadata: properties.provider.metadata
 
   session.next.tool.failed:
     kind: tool.call.failed
     payload:
-      session_id: data.sessionID
-      assistant_message_id: data.assistantMessageID
-      call_id: data.callID
-      error_type: data.error.type
-      error_message: data.error.message
-      result: data.result
-      provider_executed: data.provider.executed
-      provider_metadata: data.provider.metadata
+      session_id: properties.sessionID
+      call_id: properties.callID
+      error_type: properties.error.type
+      error_message: properties.error.message
+      provider_executed: properties.provider.executed
+      provider_metadata: properties.provider.metadata
 
   # ── Shell events ──
   session.next.shell.started:
     kind: tool.call.started
     payload:
-      session_id: data.sessionID
-      message_id: data.messageID
-      call_id: data.callID
+      session_id: properties.sessionID
+      call_id: properties.callID
       tool: shell
-      input: data.command
+      input: properties.command
 
   session.next.shell.ended:
     kind: tool.call.completed
     payload:
-      session_id: data.sessionID
-      call_id: data.callID
-      result: data.output
+      session_id: properties.sessionID
+      call_id: properties.callID
+      result: properties.output
 
   # ── Compaction events ──
   session.next.compaction.started:
     kind: workflow.compaction.started
     payload:
-      session_id: data.sessionID
-      message_id: data.messageID
-      reason: data.reason
+      session_id: properties.sessionID
+      reason: properties.reason
 
   session.next.compaction.delta:
     kind: workflow.compaction.chunk
     payload:
-      session_id: data.sessionID
-      message_id: data.messageID
-      text: data.text
+      session_id: properties.sessionID
+      text: properties.text
 
   session.next.compaction.ended:
     kind: workflow.compaction.completed
     payload:
-      session_id: data.sessionID
-      message_id: data.messageID
-      reason: data.reason
-      text: data.text
-      recent: data.recent
+      session_id: properties.sessionID
+      text: properties.text
+      include: properties.include

@@ -43,6 +43,8 @@ events:
       observations: observations
       step_number: step_number
       code_action: code_action
+      error: error
+      action_output: action_output
       input_tokens: token_usage.input_tokens
       output_tokens: token_usage.output_tokens
       start_time: timing.start_time
@@ -52,6 +54,11 @@ events:
     kind: planning.started
     payload:
       content: plan
+      input_tokens: token_usage.input_tokens
+      output_tokens: token_usage.output_tokens
+      start_time: timing.start_time
+      end_time: timing.end_time
+      duration: timing.duration
   TaskStep:
     kind: session.started
     payload:

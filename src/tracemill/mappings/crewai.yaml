@@ -130,12 +130,12 @@ events:
     payload:
       tool_name: tool_name
       tool_call_id: event_id
-      arguments: tool_input
+      arguments: tool_args
   tool_usage_finished:
     kind: tool.call.completed
     payload:
       tool_name: tool_name
-      result: tool_output
+      result: output
   tool_usage_error:
     kind: tool.call.failed
     payload:
@@ -154,8 +154,8 @@ events:
     payload:
       model: model
       output: response
-      input_tokens: token_usage.prompt_tokens
-      output_tokens: token_usage.completion_tokens
+      input_tokens: usage.prompt_tokens
+      output_tokens: usage.completion_tokens
   llm_call_failed:
     kind: llm.call.failed
     payload:
@@ -185,11 +185,11 @@ events:
       event_id: event_id
 
   # ── Knowledge retrieval ──
-  knowledge_retrieval_started:
+  knowledge_search_query_started:
     kind: knowledge.query.started
     payload:
       event_id: event_id
-  knowledge_retrieval_completed:
+  knowledge_search_query_completed:
     kind: knowledge.query.completed
     payload:
       event_id: event_id

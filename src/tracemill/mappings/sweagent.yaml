@@ -13,7 +13,7 @@
 # tool_calls (OpenAI format), tool_call_ids, thinking_blocks.
 #
 # message_type values: "action" (assistant), "observation" (user/tool),
-#   "system_prompt" (system), "demonstration" (user), "instance_template" (user)
+#   "system_prompt" (system), "demonstration" (user)
 #
 # Top-level .traj also has info.model_stats (InstanceStats) with:
 #   instance_cost, tokens_sent, tokens_received, api_calls

@@ -642,14 +642,15 @@ class TestLangGraphRealData:
         assert results[0].kind == EventKind.RAW
 
     def test_on_llm_stream_is_real(self):
-        """on_llm_stream is the real event emitted for non-chat LLM token streaming."""
+        """on_llm_stream is the real event emitted for non-chat LLM token streaming.
+        Chunk is a GenerationChunk with a .text attribute."""
         event = {
             "event": "on_llm_stream",
             "run_id": "llm-1",
             "name": "CompletionLLM",
             "tags": [],
-            "metadata": {"timestamp": 1717232400},
-            "data": {"chunk": "token"},
+            "metadata": {},
+            "data": {"chunk": {"text": "token", "generation_info": None, "type": "GenerationChunk"}},
             "parent_ids": [],
         }
         results = _parse_event("langgraph.yaml", event)

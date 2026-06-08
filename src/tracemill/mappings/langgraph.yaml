@@ -25,7 +25,7 @@ framework: langgraph
 framework_version: ">=1.0"
 ingestion_mode: file_watch
 type_field: event
-timestamp_field: metadata.timestamp
+timestamp_field: null
 
 events:
   # ── Chain/graph lifecycle ──
@@ -53,11 +53,11 @@ events:
     payload:
       model: metadata.ls_model_name
       run_id: run_id
-      output: data.output.content
+      output: data.output
   on_llm_stream:
     kind: llm.output.chunk
     payload:
-      content: data.chunk
+      content: data.chunk.text
 
   # ── Chat model calls (primary path for modern LangGraph) ──
   on_chat_model_start:
@@ -95,9 +95,11 @@ events:
   on_tool_error:
     kind: tool.call.failed
     payload:
-      tool_call_id: run_id
+      tool_call_id: data.tool_call_id
+      run_id: run_id
       tool_name: name
       error: data.error
+      input: data.input
 
   # ── Retriever ──
   on_retriever_start:

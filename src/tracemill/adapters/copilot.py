@@ -1,15 +1,11 @@
-"""Adapter for Copilot CLI events.jsonl format.
+"""Adapter for Copilot events (CLI JSONL and live SDK stream).
 
-Uses the Copilot SDK's own ``SessionEvent.from_dict()`` for deserialization,
-avoiding fragile hand-rolled JSON parsing.
-
-All event types are preserved — unmapped types emit as EventKind.RAW with
-the original type string preserved in metadata.raw_kind.
+Uses the Copilot SDK's ``SessionEvent.from_dict()`` for deserialization.
+Ingestion mode is a constructor parameter — no separate SDK subclass needed.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Iterator
 from datetime import datetime, timezone
@@ -27,7 +23,7 @@ from copilot.generated.session_events import (
 )
 from copilot.generated.session_events import SessionEvent as CopilotSessionEvent
 
-from tracemill.adapters.base import Adapter
+from tracemill.adapters.base import JsonLineAdapter
 from tracemill.types import EventKind, EventMetadata, SessionEvent
 
 logger = logging.getLogger(__name__)
@@ -82,57 +78,38 @@ _KIND_MAP: dict[SessionEventType, str] = {
 }
 
 
-class CLIJsonlAdapter(Adapter):
-    """Parses Copilot CLI events.jsonl lines into SessionEvents.
+class CopilotAdapter(JsonLineAdapter):
+    """Parses Copilot events into SessionEvents.
 
-    Leverages the Copilot SDK's ``SessionEvent.from_dict()`` for type-safe
-    deserialization. Tracks session_id across calls since the CLI format
-    only provides it in session.start events.
-
-    All event types are preserved — unmapped types emit as EventKind.RAW.
+    Works for both offline JSONL replay and live SDK streaming — controlled
+    by the ``ingestion_mode`` constructor parameter.
     """
 
     SOURCE_FRAMEWORK = "copilot"
-    SOURCE_ADAPTER = "cli_jsonl"
 
-    def __init__(self) -> None:
+    def __init__(self, ingestion_mode: str = "file_watch") -> None:
         self._session_id: str | None = None
+        self._ingestion_mode = ingestion_mode
 
-    def parse(self, raw: bytes | str) -> Iterator[SessionEvent]:
-        if isinstance(raw, bytes):
-            try:
-                text = raw.decode("utf-8")
-            except (UnicodeDecodeError, ValueError):
-                logger.warning("CLI adapter: failed to decode bytes as UTF-8")
-                return
-        else:
-            text = raw
-        text = text.strip()
-        if not text:
-            return
+    @property
+    def source_adapter(self) -> str:
+        return "copilot_sdk" if self._ingestion_mode == "stream" else "cli_jsonl"
 
-        try:
-            obj = json.loads(text)
-        except (json.JSONDecodeError, ValueError):
-            logger.warning("CLI adapter: failed to parse JSON line")
-            return
-
-        if not isinstance(obj, dict):
-            logger.warning("CLI adapter: expected JSON object, got %s", type(obj).__name__)
-            return
-
-        # Deserialize via the SDK
+    def parse_dict(self, obj: dict[str, Any]) -> Iterator[SessionEvent]:
+        """Deserialize via the SDK and emit canonical events."""
         try:
             sdk_event = CopilotSessionEvent.from_dict(obj)
         except Exception as exc:
-            logger.debug("CLI adapter: SDK deserialization failed: %s", exc)
+            logger.debug("CopilotAdapter: SDK deserialization failed: %s", exc)
             return
 
-        yield from self.parse_event(sdk_event, raw_dict=obj)
+        yield from self._convert(sdk_event)
 
-    def parse_event(self, sdk_event: CopilotSessionEvent, raw_dict: dict[str, Any] | None = None) -> Iterator[SessionEvent]:
-        """Parse a typed Copilot SDK SessionEvent into tracemill SessionEvents."""
-        # Track session_id from session.start
+    def parse_sdk_event(self, sdk_event: CopilotSessionEvent) -> Iterator[SessionEvent]:
+        """Direct typed interface for live SDK streaming."""
+        yield from self._convert(sdk_event)
+
+    def _convert(self, sdk_event: CopilotSessionEvent) -> Iterator[SessionEvent]:
         if isinstance(sdk_event.data, SessionStartData):
             self._session_id = sdk_event.data.session_id
 
@@ -142,7 +119,8 @@ class CLIJsonlAdapter(Adapter):
         payload = self._extract_payload(sdk_event.data, sdk_event.type, kind)
         metadata = EventMetadata(
             source_framework=self.SOURCE_FRAMEWORK,
-            source_adapter=self.SOURCE_ADAPTER,
+            source_adapter=self.source_adapter,
+            ingestion_mode=self._ingestion_mode,
             raw_kind=sdk_event.type.value,
         )
 
@@ -151,7 +129,6 @@ class CLIJsonlAdapter(Adapter):
             session_id=session_id,
             timestamp=timestamp,
             payload=payload,
-            raw_event=raw_dict,
             metadata=metadata,
         )
 

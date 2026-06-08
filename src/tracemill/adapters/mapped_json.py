@@ -14,7 +14,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from tracemill.adapters.base import Adapter
+from tracemill.adapters.base import JsonLineAdapter
 from tracemill.types import EventKind, EventMetadata, SessionEvent
 
 logger = logging.getLogger(__name__)
@@ -74,7 +74,7 @@ class FrameworkMapping(BaseModel):
 # ─── Adapter ─────────────────────────────────────────────────────────────────
 
 
-class MappedJsonAdapter(Adapter):
+class MappedJsonAdapter(JsonLineAdapter):
     """Generic adapter driven by a FrameworkMapping config.
 
     Parses JSON lines using declarative dot-path extraction. Adding support
@@ -89,25 +89,8 @@ class MappedJsonAdapter(Adapter):
     def framework(self) -> str:
         return self._mapping.framework
 
-    def parse(self, raw: bytes | str) -> Iterator[SessionEvent]:
-        """Parse a raw JSON line into SessionEvents."""
-        import json
-
-        text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
-        text = text.strip()
-        if not text:
-            return
-
-        try:
-            obj = json.loads(text)
-        except (json.JSONDecodeError, ValueError) as exc:
-            logger.debug("MappedJsonAdapter[%s]: invalid JSON: %s", self.framework, exc)
-            return
-
-        if not isinstance(obj, dict):
-            logger.debug("MappedJsonAdapter[%s]: expected dict, got %s", self.framework, type(obj))
-            return
-
+    def parse_dict(self, obj: dict[str, Any]) -> Iterator[SessionEvent]:
+        """Extract event type, timestamp, session, payload from JSON dict."""
         # Extract event type
         raw_type = _resolve_path(obj, self._mapping.type_field)
         if raw_type is None:
@@ -156,7 +139,6 @@ class MappedJsonAdapter(Adapter):
             session_id=session_id,
             timestamp=timestamp,
             payload=payload,
-            raw_event=obj,
             metadata=metadata,
         )
 

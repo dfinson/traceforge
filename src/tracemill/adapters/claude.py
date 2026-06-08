@@ -1,12 +1,11 @@
-"""Adapter for Claude Code session JSONL format.
+"""Adapter for Claude events (JSONL replay and live SDK stream).
 
-Uses the Claude Code SDK's ``parse_message()`` for deserialization,
-avoiding fragile hand-rolled JSON parsing.
+Uses the Claude Agent SDK's message parser for deserialization.
+Ingestion mode is a constructor parameter.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Iterator
 from datetime import datetime, timezone
@@ -17,96 +16,72 @@ from claude_agent_sdk import (
     Message,
     ResultMessage,
     SystemMessage,
-    TextBlock,
-    ThinkingBlock,
-    ToolResultBlock,
-    ToolUseBlock,
     UserMessage,
 )
-from claude_agent_sdk._internal.message_parser import MessageParseError, parse_message
+from claude_agent_sdk._internal.message_parser import (
+    MessageParseError,
+    parse_message,
+)
+from claude_agent_sdk.types import TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock
 
-from tracemill.adapters.base import Adapter
+from tracemill.adapters.base import JsonLineAdapter
 from tracemill.types import EventKind, EventMetadata, SessionEvent
 
 logger = logging.getLogger(__name__)
 
 
-class ClaudeJsonlAdapter(Adapter):
-    """Parses Claude Code session JSONL into SessionEvents.
+class ClaudeAdapter(JsonLineAdapter):
+    """Parses Claude events into SessionEvents.
 
-    Leverages the Claude Code SDK's ``parse_message()`` for type-safe
-    deserialization. Claude JSONL has no per-event timestamps; uses
-    datetime.now(UTC) as a fallback.
-
-    Tracks session_id across calls since it's only provided in result messages.
+    Works for both offline JSONL replay and live SDK streaming — controlled
+    by the ``ingestion_mode`` constructor parameter.
     """
 
     SOURCE_FRAMEWORK = "claude"
-    SOURCE_ADAPTER = "claude_jsonl"
 
-    def __init__(self) -> None:
-        self._session_id: str | None = None
+    def __init__(self, ingestion_mode: str = "file_watch", session_id: str | None = None) -> None:
+        self._session_id = session_id
+        self._ingestion_mode = ingestion_mode
 
-    def parse(self, raw: bytes | str) -> Iterator[SessionEvent]:
-        if isinstance(raw, bytes):
-            try:
-                text = raw.decode("utf-8")
-            except (UnicodeDecodeError, ValueError):
-                logger.warning("Claude adapter: failed to decode bytes as UTF-8")
-                return
-        else:
-            text = raw
-        text = text.strip()
-        if not text:
-            return
+    @property
+    def source_adapter(self) -> str:
+        return "claude_sdk" if self._ingestion_mode == "stream" else "claude_jsonl"
 
-        try:
-            obj = json.loads(text)
-        except (json.JSONDecodeError, ValueError):
-            logger.warning("Claude adapter: failed to parse JSON line")
-            return
-
-        if not isinstance(obj, dict):
-            logger.warning("Claude adapter: expected JSON object, got %s", type(obj).__name__)
-            return
-
-        # Deserialize via the SDK
+    def parse_dict(self, obj: dict[str, Any]) -> Iterator[SessionEvent]:
+        """Deserialize via the SDK and emit canonical events."""
         try:
             message = parse_message(obj)
         except (MessageParseError, Exception) as exc:
-            logger.debug("Claude adapter: SDK deserialization failed: %s", exc)
+            logger.debug("ClaudeAdapter: SDK deserialization failed: %s", exc)
             return
 
-        yield from self.parse_message(message, raw_dict=obj)
+        yield from self._convert_message(message)
 
-    def parse_message(self, message: Message, raw_dict: dict[str, Any] | None = None) -> Iterator[SessionEvent]:
-        """Parse a typed Claude SDK Message into tracemill SessionEvents."""
-        self._current_raw = raw_dict
+    def parse_message(self, message: Message) -> Iterator[SessionEvent]:
+        """Direct typed interface for live SDK streaming."""
+        yield from self._convert_message(message)
+
+    def _convert_message(self, message: Message) -> Iterator[SessionEvent]:
         if isinstance(message, UserMessage):
-            yield from self._handle_user(message, raw_dict)
+            yield from self._handle_user(message)
         elif isinstance(message, AssistantMessage):
-            yield from self._handle_assistant(message, raw_dict)
+            yield from self._handle_assistant(message)
         elif isinstance(message, ResultMessage):
-            yield from self._handle_result(message, raw_dict)
+            yield from self._handle_result(message)
         elif isinstance(message, SystemMessage):
-            logger.debug(
-                "Claude adapter: skipping system message (subtype=%s)",
-                message.subtype,
-            )
+            logger.debug("ClaudeAdapter: skipping system message (subtype=%s)", message.subtype)
         else:
-            logger.debug(
-                "Claude adapter: skipping unknown message type %s",
-                type(message).__name__,
-            )
+            logger.debug("ClaudeAdapter: skipping unknown message type %s", type(message).__name__)
 
     def _make_metadata(self, raw_kind: str) -> EventMetadata:
         return EventMetadata(
             source_framework=self.SOURCE_FRAMEWORK,
-            source_adapter=self.SOURCE_ADAPTER,
+            source_adapter=self.source_adapter,
+            ingestion_mode=self._ingestion_mode,
             raw_kind=raw_kind,
         )
 
-    def _handle_user(self, message: UserMessage, raw_dict: dict[str, Any] | None = None) -> Iterator[SessionEvent]:
+    def _handle_user(self, message: UserMessage) -> Iterator[SessionEvent]:
         session_id = self._session_id or "unknown"
 
         if isinstance(message.content, str):
@@ -115,7 +90,6 @@ class ClaudeJsonlAdapter(Adapter):
                 session_id=session_id,
                 timestamp=datetime.now(timezone.utc),
                 payload={"content": message.content},
-                raw_event=raw_dict,
                 metadata=self._make_metadata("user"),
             )
         elif isinstance(message.content, list):
@@ -130,7 +104,6 @@ class ClaudeJsonlAdapter(Adapter):
                             "success": not (block.is_error or False),
                             "result": self._extract_result_text(block.content),
                         },
-                        raw_event=raw_dict,
                         metadata=self._make_metadata("user.tool_result"),
                     )
                 elif isinstance(block, TextBlock):
@@ -139,11 +112,10 @@ class ClaudeJsonlAdapter(Adapter):
                         session_id=session_id,
                         timestamp=datetime.now(timezone.utc),
                         payload={"content": block.text},
-                        raw_event=raw_dict,
                         metadata=self._make_metadata("user.text"),
                     )
 
-    def _handle_assistant(self, message: AssistantMessage, raw_dict: dict[str, Any] | None = None) -> Iterator[SessionEvent]:
+    def _handle_assistant(self, message: AssistantMessage) -> Iterator[SessionEvent]:
         session_id = self._session_id or "unknown"
 
         for block in message.content:
@@ -153,7 +125,6 @@ class ClaudeJsonlAdapter(Adapter):
                     session_id=session_id,
                     timestamp=datetime.now(timezone.utc),
                     payload={"content": block.text},
-                    raw_event=raw_dict,
                     metadata=self._make_metadata("assistant.text"),
                 )
 
@@ -167,7 +138,6 @@ class ClaudeJsonlAdapter(Adapter):
                         "tool_name": block.name,
                         "arguments": block.input,
                     },
-                    raw_event=raw_dict,
                     metadata=self._make_metadata("assistant.tool_use"),
                 )
 
@@ -181,7 +151,6 @@ class ClaudeJsonlAdapter(Adapter):
                         "success": not (block.is_error or False),
                         "result": self._extract_result_text(block.content),
                     },
-                    raw_event=raw_dict,
                     metadata=self._make_metadata("assistant.tool_result"),
                 )
 
@@ -191,18 +160,15 @@ class ClaudeJsonlAdapter(Adapter):
                     session_id=session_id,
                     timestamp=datetime.now(timezone.utc),
                     payload={"content": block.thinking if hasattr(block, "thinking") else ""},
-                    raw_event=raw_dict,
                     metadata=self._make_metadata("assistant.thinking"),
                 )
 
-    def _handle_result(self, message: ResultMessage, raw_dict: dict[str, Any] | None = None) -> Iterator[SessionEvent]:
-        # Track session_id from result message
+    def _handle_result(self, message: ResultMessage) -> Iterator[SessionEvent]:
         if message.session_id:
             self._session_id = message.session_id
 
         session_id = self._session_id or "unknown"
 
-        # Emit usage event
         usage_payload: dict[str, Any] = {
             "duration_ms": message.duration_ms,
             "cost_usd": message.total_cost_usd,
@@ -219,30 +185,28 @@ class ClaudeJsonlAdapter(Adapter):
             session_id=session_id,
             timestamp=datetime.now(timezone.utc),
             payload=usage_payload,
-            raw_event=raw_dict,
             metadata=self._make_metadata("result"),
         )
 
-        # If error, also emit an error event
         if message.is_error:
             yield SessionEvent(
                 kind=EventKind.ERROR,
                 session_id=session_id,
                 timestamp=datetime.now(timezone.utc),
                 payload={"message": message.result or "Unknown error"},
-                raw_event=raw_dict,
                 metadata=self._make_metadata("result.error"),
             )
 
     @staticmethod
-    def _extract_result_text(content: str | list[dict[str, Any]] | None) -> str:
-        """Extract text from tool result content (string or list of blocks)."""
-        if content is None:
-            return ""
+    def _extract_result_text(content: Any) -> str | None:
         if isinstance(content, str):
             return content
         if isinstance(content, list):
-            return "\n".join(
-                item.get("text", "") if isinstance(item, dict) else str(item) for item in content
-            )
-        return str(content)
+            parts = []
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    parts.append(item.get("text", ""))
+                elif isinstance(item, str):
+                    parts.append(item)
+            return "\n".join(parts) if parts else None
+        return None

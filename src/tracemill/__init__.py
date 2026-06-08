@@ -1,10 +1,9 @@
 """tracemill — Agent event observation pipeline with pluggable storage backends."""
 
-from tracemill.adapters.base import Adapter
-from tracemill.adapters.claude_jsonl import ClaudeJsonlAdapter
-from tracemill.adapters.claude_sdk import ClaudeSDKAdapter
-from tracemill.adapters.cli_jsonl import CLIJsonlAdapter
-from tracemill.adapters.copilot_sdk import CopilotSDKAdapter
+from tracemill.adapters.base import Adapter, JsonLineAdapter
+from tracemill.adapters.claude import ClaudeAdapter
+from tracemill.adapters.copilot import CopilotAdapter
+from tracemill.adapters.mapped_json import MappedJsonAdapter
 from tracemill.classify import (
     ClassificationEngine,
     Classification,
@@ -34,16 +33,28 @@ from tracemill.types import (
     is_known_kind,
 )
 
+# Backward-compat aliases (deprecated)
+CLIJsonlAdapter = CopilotAdapter
+CopilotSDKAdapter = CopilotAdapter
+ClaudeJsonlAdapter = ClaudeAdapter
+ClaudeSDKAdapter = ClaudeAdapter
+
 __all__ = [
     "Adapter",
+    "JsonLineAdapter",
+    "CopilotAdapter",
+    "ClaudeAdapter",
+    "MappedJsonAdapter",
+    # Deprecated aliases
     "CLIJsonlAdapter",
+    "CopilotSDKAdapter",
+    "ClaudeJsonlAdapter",
+    "ClaudeSDKAdapter",
+    # Rest
     "CallbackSink",
     "Classification",
     "ClassificationEngine",
     "ClassifyConfig",
-    "ClaudeJsonlAdapter",
-    "ClaudeSDKAdapter",
-    "CopilotSDKAdapter",
     "Enricher",
     "EventKind",
     "EventMetadata",

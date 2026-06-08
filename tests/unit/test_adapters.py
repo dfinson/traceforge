@@ -394,68 +394,67 @@ class TestClaudeJsonlAdapter:
         assert events[0].session_id == "tracked-id"
 
 
-# ─── CopilotSDKAdapter ───────────────────────────────────────────────────────
+# ─── CopilotAdapter ingestion modes ──────────────────────────────────────────
 
 
-class TestCopilotSDKAdapter:
-    def test_produces_same_events_as_cli(self):
-        cli_adapter = CLIJsonlAdapter()
-        sdk_adapter = CopilotSDKAdapter()
+class TestCopilotAdapterModes:
+    def test_default_is_file_watch(self):
+        from tracemill.adapters.copilot import CopilotAdapter
+        adapter = CopilotAdapter()
         line = _copilot_event("user.message", {"content": "test"})
+        events = list(adapter.parse(line))
+        assert events[0].metadata.source_adapter == "cli_jsonl"
+        assert events[0].metadata.ingestion_mode == "file_watch"
 
-        cli_events = list(cli_adapter.parse(line))
-        sdk_events = list(sdk_adapter.parse(line))
-
-        assert len(cli_events) == len(sdk_events) == 1
-        assert cli_events[0].kind == sdk_events[0].kind
-        assert cli_events[0].payload == sdk_events[0].payload
-
-    def test_sets_correct_source_adapter(self):
-        adapter = CopilotSDKAdapter()
+    def test_stream_mode(self):
+        from tracemill.adapters.copilot import CopilotAdapter
+        adapter = CopilotAdapter(ingestion_mode="stream")
         line = _copilot_event("user.message", {"content": "hi"})
         events = list(adapter.parse(line))
         assert events[0].metadata.source_adapter == "copilot_sdk"
+        assert events[0].metadata.ingestion_mode == "stream"
 
-    def test_parse_event_typed_interface(self):
-        """Test the typed parse_event() interface with SDK objects."""
+    def test_parse_sdk_event_typed_interface(self):
+        """Test the typed parse_sdk_event() interface with SDK objects."""
         from copilot.generated.session_events import SessionEvent as CSE
+        from tracemill.adapters.copilot import CopilotAdapter
 
-        adapter = CopilotSDKAdapter()
+        adapter = CopilotAdapter(ingestion_mode="stream")
         obj = json.loads(_copilot_event("user.message", {"content": "typed"}))
         sdk_event = CSE.from_dict(obj)
-        events = list(adapter.parse_event(sdk_event))
+        events = list(adapter.parse_sdk_event(sdk_event))
         assert len(events) == 1
         assert events[0].payload["content"] == "typed"
         assert events[0].metadata.source_adapter == "copilot_sdk"
 
 
-# ─── ClaudeSDKAdapter ────────────────────────────────────────────────────────
+# ─── ClaudeAdapter ingestion modes ──────────────────────────────────────────
 
 
-class TestClaudeSDKAdapter:
-    def test_produces_same_events_as_claude_jsonl(self):
-        jsonl_adapter = ClaudeJsonlAdapter()
-        sdk_adapter = ClaudeSDKAdapter()
+class TestClaudeAdapterModes:
+    def test_default_is_file_watch(self):
+        from tracemill.adapters.claude import ClaudeAdapter
+        adapter = ClaudeAdapter()
         line = json.dumps({"type": "user", "message": {"content": "test"}})
+        events = list(adapter.parse(line))
+        assert len(events) == 1
+        assert events[0].metadata.source_adapter == "claude_jsonl"
+        assert events[0].metadata.ingestion_mode == "file_watch"
 
-        jsonl_events = list(jsonl_adapter.parse(line))
-        sdk_events = list(sdk_adapter.parse(line))
-
-        assert len(jsonl_events) == len(sdk_events) == 1
-        assert jsonl_events[0].kind == sdk_events[0].kind
-        assert jsonl_events[0].payload == sdk_events[0].payload
-
-    def test_sets_correct_source_adapter(self):
-        adapter = ClaudeSDKAdapter()
+    def test_stream_mode(self):
+        from tracemill.adapters.claude import ClaudeAdapter
+        adapter = ClaudeAdapter(ingestion_mode="stream")
         line = json.dumps({"type": "user", "message": {"content": "hi"}})
         events = list(adapter.parse(line))
         assert events[0].metadata.source_adapter == "claude_sdk"
+        assert events[0].metadata.ingestion_mode == "stream"
 
     def test_parse_message_typed_interface(self):
         """Test the typed parse_message() interface with SDK objects."""
         from claude_agent_sdk import UserMessage
+        from tracemill.adapters.claude import ClaudeAdapter
 
-        adapter = ClaudeSDKAdapter()
+        adapter = ClaudeAdapter(ingestion_mode="stream")
         msg = UserMessage(content="typed hello")
         events = list(adapter.parse_message(msg))
         assert len(events) == 1

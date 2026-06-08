@@ -93,24 +93,28 @@ class TestCopilotFullPipeline:
                 # raw_event should be the original parsed JSON
                 assert "type" in ev.raw_event
 
-    def test_sdk_adapter_matches_cli_adapter(self):
-        """CopilotSDKAdapter produces same events as CLIJsonlAdapter (just different metadata)."""
-        cli = CLIJsonlAdapter()
-        sdk = CopilotSDKAdapter()
+    def test_stream_mode_sets_metadata(self):
+        """CopilotAdapter(ingestion_mode='stream') sets correct metadata."""
+        from tracemill.adapters.copilot import CopilotAdapter
+
+        file_adapter = CopilotAdapter()  # default: file_watch
+        stream_adapter = CopilotAdapter(ingestion_mode="stream")
         fixture = FIXTURES / "copilot_session.jsonl"
 
-        cli_events = []
-        sdk_events = []
+        file_events = []
+        stream_events = []
         for line in fixture.read_text().splitlines():
-            cli_events.extend(cli.parse(line))
-            sdk_events.extend(sdk.parse(line))
+            file_events.extend(file_adapter.parse(line))
+            stream_events.extend(stream_adapter.parse(line))
 
-        assert len(cli_events) == len(sdk_events)
-        for c, s in zip(cli_events, sdk_events):
-            assert c.kind == s.kind
-            assert c.payload == s.payload
-            assert c.session_id == s.session_id
-            # Only metadata.source_adapter differs
+        assert len(file_events) == len(stream_events)
+        for f, s in zip(file_events, stream_events):
+            assert f.kind == s.kind
+            assert f.payload == s.payload
+            assert f.session_id == s.session_id
+            # Metadata differs by ingestion mode
+            assert f.metadata.source_adapter == "cli_jsonl"
+            assert f.metadata.ingestion_mode == "file_watch"
             assert s.metadata.source_adapter == "copilot_sdk"
             assert s.metadata.ingestion_mode == "stream"
 
@@ -136,22 +140,25 @@ class TestClaudeFullPipeline:
         for ev in enriched:
             assert ev.metadata.source_framework == "claude"
 
-    def test_sdk_adapter_matches_jsonl_adapter(self):
-        """ClaudeSDKAdapter produces same events as ClaudeJsonlAdapter."""
-        jsonl = ClaudeJsonlAdapter()
-        sdk = ClaudeSDKAdapter()
+    def test_stream_mode_sets_metadata(self):
+        """ClaudeAdapter(ingestion_mode='stream') sets correct metadata."""
+        from tracemill.adapters.claude import ClaudeAdapter
+
+        file_adapter = ClaudeAdapter()
+        stream_adapter = ClaudeAdapter(ingestion_mode="stream")
         fixture = FIXTURES / "claude_session.jsonl"
 
-        jsonl_events = []
-        sdk_events = []
+        file_events = []
+        stream_events = []
         for line in fixture.read_text().splitlines():
-            jsonl_events.extend(jsonl.parse(line))
-            sdk_events.extend(sdk.parse(line))
+            file_events.extend(file_adapter.parse(line))
+            stream_events.extend(stream_adapter.parse(line))
 
-        assert len(jsonl_events) == len(sdk_events)
-        for j, s in zip(jsonl_events, sdk_events):
-            assert j.kind == s.kind
-            assert j.payload == s.payload
+        assert len(file_events) == len(stream_events)
+        for f, s in zip(file_events, stream_events):
+            assert f.kind == s.kind
+            assert f.payload == s.payload
+            assert f.metadata.source_adapter == "claude_jsonl"
             assert s.metadata.source_adapter == "claude_sdk"
             assert s.metadata.ingestion_mode == "stream"
 

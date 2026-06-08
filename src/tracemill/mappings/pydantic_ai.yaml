@@ -15,8 +15,10 @@
 #   {"type": "stream.part_start", "part": {...}, ...}
 #   {"type": "stream.part_delta", "delta": {...}, ...}
 #
-# Real UsageMetadata fields: input_tokens, output_tokens, total_tokens,
+# Real UsageMetadata fields: input_tokens, output_tokens,
 #   cache_write_tokens, cache_read_tokens
+# NOTE: total_tokens is a @property (input+output), NOT a stored field.
+#   It will NOT appear in model_dump() unless explicitly computed by preprocessor.
 # Real tool call field: tool_call_id (not call_id — call_id is deprecated alias)
 
 framework: pydantic_ai
@@ -152,16 +154,16 @@ events:
       output_tokens: usage.output_tokens
       model: model_name
 
-  # ── Result validation ──
-  result_validation_start:
+  # ── Output validation (SDK calls this "output_validator") ──
+  output_validation_start:
     kind: guardrail.started
     payload:
       validator: validator_name
-  result_validation_pass:
+  output_validation_pass:
     kind: guardrail.passed
     payload:
       validator: validator_name
-  result_validation_fail:
+  output_validation_fail:
     kind: guardrail.failed
     payload:
       validator: validator_name

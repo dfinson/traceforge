@@ -251,3 +251,253 @@ events:
     kind: checkpoint.created
     payload:
       event_id: event_id
+  checkpoint_failed:
+    kind: checkpoint.failed
+    payload:
+      event_id: event_id
+      error: error
+  checkpoint_pruned:
+    kind: checkpoint.pruned
+    payload:
+      event_id: event_id
+  checkpoint_fork_started:
+    kind: checkpoint.fork.started
+    payload:
+      event_id: event_id
+  checkpoint_fork_completed:
+    kind: checkpoint.fork.completed
+    payload:
+      event_id: event_id
+  checkpoint_restore_started:
+    kind: checkpoint.restore.started
+    payload:
+      event_id: event_id
+  checkpoint_restore_completed:
+    kind: checkpoint.restore.completed
+    payload:
+      event_id: event_id
+  checkpoint_restore_failed:
+    kind: checkpoint.restore.failed
+    payload:
+      event_id: event_id
+      error: error
+
+  # ── Crew training/testing ──
+  crew_train_started:
+    kind: session.started
+    payload:
+      crew_name: crew_name
+  crew_train_completed:
+    kind: session.ended
+    payload:
+      crew_name: crew_name
+  crew_train_failed:
+    kind: session.error
+    payload:
+      crew_name: crew_name
+      error: error
+  crew_test_started:
+    kind: session.started
+    payload:
+      crew_name: crew_name
+  crew_test_completed:
+    kind: session.ended
+    payload:
+      crew_name: crew_name
+  crew_test_failed:
+    kind: session.error
+    payload:
+      crew_name: crew_name
+      error: error
+  crew_test_result:
+    kind: session.info
+    payload:
+      crew_name: crew_name
+      event_id: event_id
+
+  # ── Lite agent execution ──
+  lite_agent_execution_started:
+    kind: agent.spawned
+    payload:
+      agent_id: agent_id
+      agent_role: agent_role
+  lite_agent_execution_completed:
+    kind: agent.completed
+    payload:
+      agent_id: agent_id
+      output: output
+  lite_agent_execution_error:
+    kind: agent.failed
+    payload:
+      agent_id: agent_id
+      error: error
+
+  # ── Agent evaluation ──
+  agent_evaluation_started:
+    kind: agent.evaluation.started
+    payload:
+      agent_id: agent_id
+      event_id: event_id
+  agent_evaluation_completed:
+    kind: agent.evaluation.completed
+    payload:
+      agent_id: agent_id
+      event_id: event_id
+  agent_evaluation_failed:
+    kind: agent.evaluation.failed
+    payload:
+      agent_id: agent_id
+      error: error
+
+  # ── Agent reasoning ──
+  agent_reasoning_started:
+    kind: reasoning.started
+    payload:
+      agent_id: agent_id
+      event_id: event_id
+  agent_reasoning_completed:
+    kind: reasoning.completed
+    payload:
+      agent_id: agent_id
+      event_id: event_id
+  agent_reasoning_failed:
+    kind: reasoning.failed
+    payload:
+      agent_id: agent_id
+      error: error
+
+  # ── Tool errors (granular) ──
+  tool_validate_input_error:
+    kind: tool.validation.failed
+    payload:
+      tool_name: tool_name
+      error: error
+  tool_selection_error:
+    kind: tool.call.failed
+    payload:
+      error: error
+  tool_execution_error:
+    kind: tool.call.failed
+    payload:
+      tool_name: tool_name
+      error: error
+
+  # ── Memory failures ──
+  memory_save_failed:
+    kind: memory.save.failed
+    payload:
+      event_id: event_id
+      error: error
+  memory_query_failed:
+    kind: memory.query.failed
+    payload:
+      event_id: event_id
+      error: error
+  memory_retrieval_started:
+    kind: memory.query.started
+    payload:
+      event_id: event_id
+  memory_retrieval_completed:
+    kind: memory.query.completed
+    payload:
+      event_id: event_id
+  memory_retrieval_failed:
+    kind: memory.query.failed
+    payload:
+      event_id: event_id
+      error: error
+
+  # ── Knowledge failures ──
+  knowledge_query_started:
+    kind: knowledge.query.started
+    payload:
+      event_id: event_id
+  knowledge_query_completed:
+    kind: knowledge.query.completed
+    payload:
+      event_id: event_id
+  knowledge_query_failed:
+    kind: knowledge.query.failed
+    payload:
+      event_id: event_id
+      error: error
+  knowledge_search_query_failed:
+    kind: knowledge.query.failed
+    payload:
+      event_id: event_id
+      error: error
+
+  # ── LLM guardrails ──
+  llm_thinking_chunk:
+    kind: reasoning.chunk
+    payload:
+      content: chunk
+  llm_guardrail_started:
+    kind: guardrail.started
+    payload:
+      event_id: event_id
+  llm_guardrail_completed:
+    kind: guardrail.passed
+    payload:
+      event_id: event_id
+
+  # ── MCP config failure ──
+  mcp_config_fetch_failed:
+    kind: mcp.connection.failed
+    payload:
+      error: error
+
+  # ── Task evaluation ──
+  task_evaluation:
+    kind: task.evaluation
+    payload:
+      task_id: task_id
+      event_id: event_id
+
+  # ── Observation/planning events ──
+  step_observation_started:
+    kind: task.observation.started
+    payload:
+      event_id: event_id
+  step_observation_completed:
+    kind: task.observation.completed
+    payload:
+      event_id: event_id
+  step_observation_failed:
+    kind: task.observation.failed
+    payload:
+      event_id: event_id
+      error: error
+  plan_refinement:
+    kind: planning.updated
+    payload:
+      event_id: event_id
+  plan_replan_triggered:
+    kind: planning.restarted
+    payload:
+      event_id: event_id
+  goal_achieved_early:
+    kind: session.ended
+    payload:
+      event_id: event_id
+
+  # ── Flow routing ──
+  flow_plot:
+    kind: workflow.info
+    payload:
+      flow_name: flow_name
+  conversation_route_selected:
+    kind: workflow.routed
+    payload:
+      flow_name: flow_name
+      event_id: event_id
+
+  # ── Agent logging ──
+  agent_logs_started:
+    kind: agent.log.started
+    payload:
+      event_id: event_id
+  agent_logs_execution:
+    kind: agent.log.entry
+    payload:
+      event_id: event_id

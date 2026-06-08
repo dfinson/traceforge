@@ -1,10 +1,10 @@
 # OpenHands event mapping for MappedJsonAdapter
-# Targets: openhands >= 0.30, < 2.0 (JSON event files in workspace)
-# Source: OpenHands/OpenHands openhands/events/serialization/event.py
+# Targets: openhands >= 0.30, < 1.0 (JSON event files in workspace)
+# Source: All-Hands-AI/OpenHands openhands/events/serialization/event.py
 #
-# NOTE: v1.x (latest: 1.7.0) moved events to OpenHands/software-agent-sdk.
-# The serialization format remains compatible through 1.x.
-# Events added in 0.62.0+: task_tracking, loop_recovery, download observation.
+# NOTE: v1.0+ is INCOMPATIBLE — openhands/events/ was extracted to
+# OpenHands/software-agent-sdk with a completely different Pydantic model.
+# This mapping covers the 0.x compound-discriminator JSON format only.
 #
 # CRITICAL: OpenHands uses a COMPOUND discriminator:
 #   - Action events have: {"action": "run", "args": {...}}
@@ -22,7 +22,7 @@
 #   - CmdOutputMetadata: serialized via model_dump() into extras.metadata
 
 framework: openhands
-framework_version: ">=0.30,<2.0"
+framework_version: ">=0.30,<1.0"
 ingestion_mode: file_watch
 type_field: action
 timestamp_field: timestamp
@@ -191,29 +191,3 @@ events:
       content: content
       source: source
 
-  # ── Events added in 0.62.0+ ──
-  task_tracking:
-    kind: session.info
-    payload:
-      content: args.thought
-      source: source
-  loop_recovery:
-    kind: session.info
-    payload:
-      content: args.thought
-      source: source
-  observation.task_tracking:
-    kind: session.info
-    payload:
-      content: content
-      source: source
-  observation.loop_detection:
-    kind: session.error
-    payload:
-      message: content
-      source: source
-  observation.download:
-    kind: browser.result
-    payload:
-      content: content
-      source: source

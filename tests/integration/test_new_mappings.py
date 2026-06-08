@@ -159,8 +159,8 @@ class TestPydanticAIMapping:
     def test_guardrail_events(self, adapter):
         """Result validation → guardrail events."""
         events_raw = [
-            {"type": "result_validation_start", "timestamp": "2024-06-01T10:00:01Z", "validator_name": "output_check"},
-            {"type": "result_validation_fail", "timestamp": "2024-06-01T10:00:01Z", "validator_name": "output_check", "error": "profanity detected"},
+            {"type": "output_validation_start", "timestamp": "2024-06-01T10:00:01Z", "validator_name": "output_check"},
+            {"type": "output_validation_fail", "timestamp": "2024-06-01T10:00:01Z", "validator_name": "output_check", "error": "profanity detected"},
         ]
         all_events = []
         for raw in events_raw:

@@ -145,13 +145,10 @@ class TestGooseMappings:
                 "assistant",
                 {
                     "type": "toolConfirmationRequest",
-                    "data": {
-                        "actionType": "toolConfirmation",
-                        "id": "tc-1",
-                        "toolName": "shell",
-                        "arguments": {"cmd": "rm -rf /"},
-                        "prompt": "Allow?",
-                    },
+                    "id": "tc-1",
+                    "toolName": "shell",
+                    "arguments": {"cmd": "rm -rf /"},
+                    "prompt": "Allow?",
                 },
             ),
             EventKind.PERMISSION_REQUESTED,
@@ -182,10 +179,14 @@ class TestGooseMappings:
         pytest.param(
             _goose_row(
                 "assistant",
-                {"type": "frontendToolRequest", "name": "showFile", "content": "main.py"},
+                {
+                    "type": "frontendToolRequest",
+                    "id": "ftr-1",
+                    "toolCall": {"status": "success", "value": {"name": "showFile", "arguments": {"path": "main.py"}}},
+                },
             ),
             EventKind.TOOL_CALL_STARTED,
-            {"tool_name": "showFile", "content": "main.py"},
+            {"tool_name": "showFile", "tool_call_id": "ftr-1", "arguments": {"path": "main.py"}},
             1,
             0,
             id="frontend_tool_request",
@@ -739,66 +740,6 @@ class TestOpenHandsMappings:
             "mcp.tool.completed",
             {"content": "Tool result: found 5 results", "source": "agent"},
             id="observation.mcp",
-        ),
-        pytest.param(
-            {
-                "id": 16,
-                "timestamp": "2024-06-15T10:00:15Z",
-                "source": "agent",
-                "action": "task_tracking",
-                "args": {"thought": "Updating task list"},
-            },
-            EventKind.SESSION_INFO,
-            {"content": "Updating task list", "source": "agent"},
-            id="task_tracking",
-        ),
-        pytest.param(
-            {
-                "id": 17,
-                "timestamp": "2024-06-15T10:00:16Z",
-                "source": "agent",
-                "action": "loop_recovery",
-                "args": {"thought": "Breaking out of repetitive loop"},
-            },
-            EventKind.SESSION_INFO,
-            {"content": "Breaking out of repetitive loop", "source": "agent"},
-            id="loop_recovery",
-        ),
-        pytest.param(
-            {
-                "id": 35,
-                "timestamp": "2024-06-15T10:01:15Z",
-                "source": "agent",
-                "observation": "task_tracking",
-                "content": "Task list updated",
-            },
-            EventKind.SESSION_INFO,
-            {"content": "Task list updated", "source": "agent"},
-            id="observation.task_tracking",
-        ),
-        pytest.param(
-            {
-                "id": 36,
-                "timestamp": "2024-06-15T10:01:16Z",
-                "source": "agent",
-                "observation": "loop_detection",
-                "content": "Dead loop detected after 5 iterations",
-            },
-            EventKind.ERROR,
-            {"message": "Dead loop detected after 5 iterations", "source": "agent"},
-            id="observation.loop_detection",
-        ),
-        pytest.param(
-            {
-                "id": 37,
-                "timestamp": "2024-06-15T10:01:17Z",
-                "source": "agent",
-                "observation": "download",
-                "content": "Downloaded file.pdf",
-            },
-            EventKind.BROWSER_RESULT,
-            {"content": "Downloaded file.pdf", "source": "agent"},
-            id="observation.download",
         ),
     ]
 
@@ -1529,22 +1470,22 @@ class TestPydanticAIMappings:
             id="token_usage",
         ),
         pytest.param(
-            {"type": "result_validation_start", "validator_name": "schema", "timestamp": "2024-06-15T10:00:21Z"},
+            {"type": "output_validation_start", "validator_name": "schema", "timestamp": "2024-06-15T10:00:21Z"},
             EventKind.GUARDRAIL_STARTED,
             {"validator": "schema"},
-            id="result_validation_start",
+            id="output_validation_start",
         ),
         pytest.param(
-            {"type": "result_validation_pass", "validator_name": "schema", "timestamp": "2024-06-15T10:00:22Z"},
+            {"type": "output_validation_pass", "validator_name": "schema", "timestamp": "2024-06-15T10:00:22Z"},
             EventKind.GUARDRAIL_PASSED,
             {"validator": "schema"},
-            id="result_validation_pass",
+            id="output_validation_pass",
         ),
         pytest.param(
-            {"type": "result_validation_fail", "validator_name": "schema", "error": "bad shape", "timestamp": "2024-06-15T10:00:23Z"},
+            {"type": "output_validation_fail", "validator_name": "schema", "error": "bad shape", "timestamp": "2024-06-15T10:00:23Z"},
             EventKind.GUARDRAIL_FAILED,
             {"validator": "schema", "reason": "bad shape"},
-            id="result_validation_fail",
+            id="output_validation_fail",
         ),
     ]
 

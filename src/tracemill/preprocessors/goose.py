@@ -78,12 +78,12 @@ def preprocess_goose(obj: dict[str, Any]) -> list[dict[str, Any]]:
                 "data": item.get("data", ""),
             })
         elif item_type == "toolConfirmationRequest":
-            data = item.get("data", {}) if isinstance(item.get("data"), dict) else {}
             results.append({
                 "role": "tool_confirmation_request",
                 "created_at": ts,
-                "content": data.get("prompt", item.get("message", "")),
-                "name": data.get("toolName", ""),
+                "content": item.get("prompt", ""),
+                "name": item.get("toolName", ""),
+                "id": item.get("id", ""),
             })
         elif item_type == "actionRequired":
             data = item.get("data", {}) if isinstance(item.get("data"), dict) else {}
@@ -93,11 +93,14 @@ def preprocess_goose(obj: dict[str, Any]) -> list[dict[str, Any]]:
                 "content": data.get("message", item.get("message", "")),
             })
         elif item_type == "frontendToolRequest":
+            tool_call = item.get("toolCall", {})
+            value = tool_call.get("value", {}) if isinstance(tool_call, dict) else {}
             results.append({
                 "role": "frontend_tool_request",
                 "created_at": ts,
-                "name": item.get("name", ""),
-                "content": item.get("content", ""),
+                "name": value.get("name", ""),
+                "id": item.get("id", ""),
+                "input": value.get("arguments", {}),
             })
         elif item_type == "systemNotification":
             results.append({

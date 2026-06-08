@@ -1,26 +1,26 @@
 # OpenHands event mapping for MappedJsonAdapter
-# Targets: openhands >= 0.30 (JSON event files in workspace)
+# Targets: openhands >= 0.30, < 1.0 (JSON event files in workspace)
 # Source: OpenHands/OpenHands openhands/events/serialization/event.py
+#
+# NOTE: v1.x moved events to OpenHands/software-agent-sdk. This YAML covers 0.x only.
 #
 # CRITICAL: OpenHands uses a COMPOUND discriminator:
 #   - Action events have: {"action": "run", "args": {...}}
 #   - Observation events have: {"observation": "run", "content": "...", "extras": {...}}
 #
-# A single type_field CANNOT handle both shapes. This YAML uses type_field: action
-# which means ONLY action events are correctly discriminated. Observation events
-# will resolve to type="unknown" (no "action" field) and fall to default_kind=raw.
+# An OpenHandsPreProcessor synthesizes compound types:
+#   "action" key → type = action value (e.g. "run")
+#   "observation" key → type = "observation.<value>" (e.g. "observation.run")
 #
-# For full support, an OpenHandsPreProcessor is needed that:
-#   1. Checks for "action" key → emits {"_type": "action.<value>", ...}
-#   2. Checks for "observation" key → emits {"_type": "observation.<value>", ...}
-#   3. Flattens args/extras into top-level for payload extraction
-#
-# Real top-level event fields:
-#   id, timestamp, source, message, cause, action/observation, args/content+extras,
-#   timeout, tool_call_metadata, llm_metrics
+# Serialization rules (event_to_dict):
+#   - TOP_KEYS hoisted: id, timestamp, source, message, cause, action/observation,
+#     tool_call_metadata, llm_metrics
+#   - Actions: all dataclass fields → "args" dict
+#   - Observations: "content" hoisted to top-level, remaining fields → "extras" dict
+#   - CmdOutputMetadata: serialized via model_dump() into extras.metadata
 
 framework: openhands
-framework_version: ">=0.30"
+framework_version: ">=0.30,<1.0"
 ingestion_mode: file_watch
 type_field: action
 timestamp_field: timestamp
@@ -96,6 +96,18 @@ events:
     payload:
       query: args.query
       source: source
+  call_tool_mcp:
+    kind: mcp.tool.started
+    payload:
+      tool_name: args.name
+      arguments: args.arguments
+      thought: args.thought
+      source: source
+  condensation:
+    kind: session.info
+    payload:
+      summary: args.summary
+      source: source
 
   # ── Observation events (preprocessor synthesizes action: "observation.<value>") ──
   observation.run:
@@ -113,7 +125,7 @@ events:
     kind: browser.result
     payload:
       content: content
-      url: url
+      url: extras.url
       source: source
   observation.read:
     kind: file.read
@@ -155,4 +167,24 @@ events:
     kind: session.ended
     payload:
       output: content
+      source: source
+  observation.think:
+    kind: reasoning.completed
+    payload:
+      content: content
+      source: source
+  observation.user_rejected:
+    kind: session.abort
+    payload:
+      message: content
+      source: source
+  observation.condense:
+    kind: session.info
+    payload:
+      content: content
+      source: source
+  observation.mcp:
+    kind: mcp.tool.completed
+    payload:
+      content: content
       source: source

@@ -42,10 +42,10 @@ class TestLangGraphMapping:
         assert all_events[1].kind == EventKind.WORKFLOW_COMPLETED
 
     def test_llm_calls(self, adapter):
-        """LLM start → end with token counts."""
+        """Chat model start → end with token counts via usage_metadata."""
         events_raw = [
-            {"event": "on_llm_start", "run_id": "llm-1", "metadata": {"ls_model_name": "gpt-4", "timestamp": 1717232400, "ls_input_tokens": 100}},
-            {"event": "on_llm_end", "run_id": "llm-1", "data": {"output": {"content": "response"}}, "metadata": {"ls_model_name": "gpt-4", "timestamp": 1717232401, "ls_input_tokens": 100, "ls_output_tokens": 50}},
+            {"event": "on_chat_model_start", "run_id": "llm-1", "name": "ChatOpenAI", "metadata": {"ls_model_name": "gpt-4", "timestamp": 1717232400}, "data": {}, "tags": [], "parent_ids": []},
+            {"event": "on_chat_model_end", "run_id": "llm-1", "name": "ChatOpenAI", "data": {"output": {"content": "response", "usage_metadata": {"input_tokens": 100, "output_tokens": 50, "total_tokens": 150}}}, "metadata": {"ls_model_name": "gpt-4", "timestamp": 1717232401}, "tags": [], "parent_ids": []},
         ]
         all_events = []
         for raw in events_raw:
@@ -54,6 +54,7 @@ class TestLangGraphMapping:
         assert all_events[0].payload["model"] == "gpt-4"
         assert all_events[1].kind == EventKind.LLM_CALL_COMPLETED
         assert all_events[1].payload["output_tokens"] == 50
+        assert all_events[1].payload["input_tokens"] == 100
 
     def test_tool_calls(self, adapter):
         """Tool start → end."""
@@ -70,11 +71,13 @@ class TestLangGraphMapping:
         assert all_events[1].payload["result"] == "sunny"
 
     def test_error_propagation(self, adapter):
-        """Chain/tool errors map correctly."""
-        raw = {"event": "on_chain_error", "run_id": "run-err", "data": {"error": "timeout"}, "metadata": {"timestamp": 1717232400}}
+        """Tool errors map correctly. Note: on_chain_error/on_llm_error are NOT
+        emitted by astream_events v2 (handler doesn't override them)."""
+        raw = {"event": "on_tool_error", "run_id": "run-err", "name": "calculator", "data": {"error": "timeout"}, "metadata": {"timestamp": 1717232400}, "tags": [], "parent_ids": []}
         events = list(adapter.parse(json.dumps(raw)))
-        assert events[0].kind == EventKind.WORKFLOW_FAILED
+        assert events[0].kind == EventKind.TOOL_CALL_FAILED
         assert events[0].payload["error"] == "timeout"
+        assert events[0].payload["tool_name"] == "calculator"
 
     def test_retriever_events(self, adapter):
         """RAG retriever start/end."""
@@ -177,82 +180,83 @@ class TestSmolagentsMapping:
         )
 
     def test_agent_lifecycle(self, adapter):
-        """Agent start → end."""
+        """TaskStep (session start) → FinalAnswer (session end) via real step types."""
         events_raw = [
-            {"step_type": "AgentStart", "timestamp": "2024-06-01T10:00:00Z", "agent_name": "coder", "model_id": "Qwen/Qwen2.5-72B", "task": "Fix the bug"},
-            {"step_type": "AgentEnd", "timestamp": "2024-06-01T10:00:30Z", "agent_name": "coder", "final_answer": "Bug fixed!"},
+            {"task": "Fix the bug", "timestamp": "2024-06-01T10:00:00Z"},
+            {"output": "Bug fixed!", "timestamp": "2024-06-01T10:00:30Z"},
         ]
         all_events = []
         for raw in events_raw:
             all_events.extend(adapter.parse(json.dumps(raw)))
         assert all_events[0].kind == EventKind.SESSION_STARTED
-        assert all_events[0].payload["model"] == "Qwen/Qwen2.5-72B"
         assert all_events[0].payload["task"] == "Fix the bug"
         assert all_events[1].kind == EventKind.SESSION_ENDED
         assert all_events[1].payload["output"] == "Bug fixed!"
 
     def test_thinking_and_planning(self, adapter):
-        """Thinking/planning steps."""
-        events_raw = [
-            {"step_type": "ThinkingStep", "timestamp": "2024-06-01T10:00:01Z", "thought": "Let me analyze this", "model_id": "gpt-4"},
-            {"step_type": "PlanningStep", "timestamp": "2024-06-01T10:00:02Z", "plan": "1. Read file\n2. Fix bug\n3. Test", "facts": "Bug is in main.py"},
-        ]
-        all_events = []
-        for raw in events_raw:
-            all_events.extend(adapter.parse(json.dumps(raw)))
-        assert all_events[0].kind == EventKind.REASONING_STARTED
-        assert all_events[0].payload["content"] == "Let me analyze this"
-        assert all_events[1].kind == EventKind.PLANNING_STARTED
-        assert "1. Read file" in all_events[1].payload["content"]
+        """PlanningStep from field presence."""
+        raw = {"plan": "1. Read file\n2. Fix bug\n3. Test", "timestamp": "2024-06-01T10:00:02Z"}
+        events = list(adapter.parse(json.dumps(raw)))
+        assert events[0].kind == EventKind.PLANNING_STARTED
+        assert "1. Read file" in events[0].payload["content"]
 
     def test_tool_calls(self, adapter):
-        """Tool call → output."""
-        events_raw = [
-            {"step_type": "ToolCall", "timestamp": "2024-06-01T10:00:03Z", "tool_name": "python_interpreter", "call_id": "c1", "tool_input": "print('hello')"},
-            {"step_type": "ToolOutput", "timestamp": "2024-06-01T10:00:04Z", "tool_name": "python_interpreter", "call_id": "c1", "output": "hello"},
-        ]
-        all_events = []
-        for raw in events_raw:
-            all_events.extend(adapter.parse(json.dumps(raw)))
-        assert all_events[0].kind == EventKind.TOOL_CALL_STARTED
-        assert all_events[0].payload["tool_name"] == "python_interpreter"
-        assert all_events[1].kind == EventKind.TOOL_CALL_COMPLETED
-        assert all_events[1].payload["result"] == "hello"
-
-    def test_code_execution(self, adapter):
-        """Code execution steps (CodeAgent)."""
-        events_raw = [
-            {"step_type": "CodeExecutionStep", "timestamp": "2024-06-01T10:00:05Z", "code": "x = 1 + 1\nprint(x)", "language": "python"},
-            {"step_type": "CodeExecutionResult", "timestamp": "2024-06-01T10:00:06Z", "output": "2", "return_code": 0},
-        ]
-        all_events = []
-        for raw in events_raw:
-            all_events.extend(adapter.parse(json.dumps(raw)))
-        assert all_events[0].kind == EventKind.COMMAND_STARTED
-        assert all_events[0].payload["command"] == "x = 1 + 1\nprint(x)"
-        assert all_events[1].kind == EventKind.COMMAND_COMPLETED
-        assert all_events[1].payload["exit_code"] == 0
-
-    def test_multi_agent(self, adapter):
-        """Multi-agent delegation."""
-        events_raw = [
-            {"step_type": "ManagedAgentCall", "timestamp": "2024-06-01T10:00:07Z", "agent_name": "researcher", "task": "Find docs"},
-            {"step_type": "ManagedAgentResult", "timestamp": "2024-06-01T10:00:20Z", "agent_name": "researcher", "output": "Found 3 relevant docs"},
-        ]
-        all_events = []
-        for raw in events_raw:
-            all_events.extend(adapter.parse(json.dumps(raw)))
-        assert all_events[0].kind == EventKind.AGENT_SPAWNED
-        assert all_events[0].payload["agent_id"] == "researcher"
-        assert all_events[1].kind == EventKind.AGENT_COMPLETED
-
-    def test_usage_tracking(self, adapter):
-        """Token usage events."""
-        raw = {"step_type": "TokenUsage", "timestamp": "2024-06-01T10:00:30Z", "input_tokens": 500, "output_tokens": 200, "cost": 0.01, "model_id": "gpt-4o"}
+        """ToolCall extracted from ActionStep.tool_calls by preprocessor."""
+        raw = {"step_type": "ToolCall", "timestamp": "2024-06-01T10:00:03Z", "tool_name": "python_interpreter", "call_id": "c1", "tool_input": "print('hello')"}
         events = list(adapter.parse(json.dumps(raw)))
-        assert events[0].kind == EventKind.USAGE
+        assert events[0].kind == EventKind.TOOL_CALL_STARTED
+        assert events[0].payload["tool_name"] == "python_interpreter"
+
+    def test_action_step_with_tool_calls(self, adapter):
+        """ActionStep with nested tool_calls splits into ActionStep + ToolCall events."""
+        raw = {
+            "step_number": 1,
+            "timing": {"start_time": 1717232400.0, "end_time": 1717232401.0, "duration": 1.0},
+            "model_output": "I'll search for docs",
+            "observations": "Found 3 results",
+            "code_action": "search('docs')",
+            "token_usage": {"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
+            "tool_calls": [{"id": "tc-1", "type": "function", "function": {"name": "web_search", "arguments": "{\"query\": \"docs\"}"}}],
+            "is_final_answer": False,
+        }
+        events = list(adapter.parse(json.dumps(raw)))
+        assert events[0].kind == EventKind.MESSAGE_ASSISTANT
+        assert events[0].payload["step_number"] == 1
+        assert events[0].payload["code_action"] == "search('docs')"
+        assert events[0].payload["input_tokens"] == 100
+        assert len(events) == 2
+        assert events[1].kind == EventKind.TOOL_CALL_STARTED
+        assert events[1].payload["tool_name"] == "web_search"
+
+    def test_final_answer_from_action_step(self, adapter):
+        """ActionStep with is_final_answer=true maps to FinalAnswer."""
+        raw = {
+            "step_number": 3,
+            "timing": {"start_time": 1717232410.0, "end_time": 1717232411.0, "duration": 1.0},
+            "model_output": "The answer is 42",
+            "action_output": "42",
+            "is_final_answer": True,
+            "token_usage": {"input_tokens": 50, "output_tokens": 10, "total_tokens": 60},
+            "tool_calls": [],
+        }
+        events = list(adapter.parse(json.dumps(raw)))
+        assert events[0].kind == EventKind.SESSION_ENDED
+        assert events[0].payload["output"] == "42"
+
+    def test_usage_from_action_step(self, adapter):
+        """Token usage is extracted from ActionStep inline."""
+        raw = {
+            "step_number": 2,
+            "timing": {"start_time": 1717232405.0, "end_time": 1717232406.0, "duration": 1.0},
+            "model_output": "Working...",
+            "token_usage": {"input_tokens": 500, "output_tokens": 200, "total_tokens": 700},
+            "tool_calls": [],
+            "is_final_answer": False,
+        }
+        events = list(adapter.parse(json.dumps(raw)))
+        assert events[0].kind == EventKind.MESSAGE_ASSISTANT
         assert events[0].payload["input_tokens"] == 500
-        assert events[0].payload["cost_usd"] == 0.01
+        assert events[0].payload["output_tokens"] == 200
 
 
 class TestAllYAMLMappingsLoadable:

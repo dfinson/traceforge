@@ -1,159 +1,253 @@
 # CrewAI event mapping for MappedJsonAdapter
-# Targets: crewai >= 0.86 (Flow events via blinker Signal)
-# Source: crewAI-inc/crewAI src/crewai/flow/flow_events.py
+# Targets: crewai >= 1.0.0 (crewai_event_bus with BaseEventListener)
+# Source: crewAIInc/crewAI lib/crewai/src/crewai/events/
 #
-# IMPORTANT: CrewAI v0.86 only emits 4 Flow lifecycle events.
-# Agent/Task/LLM/Tool events are NOT emitted as subscribable JSON events.
-# Token usage is only accessible post-run via crew.usage_metrics.
-# The fictional "AgentExecutionStartedEvent" etc. below are ASPIRATIONAL
-# mappings for a future version that may expose these as events.
+# CrewAI 1.x ships a full event bus (crewai_event_bus) with 60+ typed events.
+# All events inherit from BaseEvent which provides:
+#   type (Literal[...]), timestamp, event_id, parent_event_id, previous_event_id,
+#   triggered_by_event_id, emission_sequence, source_fingerprint, source_type,
+#   fingerprint_metadata, task_id, task_name, agent_id, agent_role
 #
-# Real events use snake_case type values from dataclasses.asdict():
-#   flow_started, flow_finished, method_execution_started, method_execution_finished
+# Events are subscribed via BaseEventListener + @on(EventType) decorator.
+# The event bus is a singleton: `from crewai.events import crewai_event_bus`
+#
+# NOTE: crewAI-inc/crewAI (hyphenated, 0.86) is a FROZEN FORK.
+# The active repo is crewAIInc/crewAI (capital Inc) at 1.10+.
 
 framework: crewai
-framework_version: ">=0.86"
+framework_version: ">=1.0.0"
 ingestion_mode: file_watch
 type_field: type
 timestamp_field: timestamp
 
 events:
-  # ── REAL Flow events (confirmed in source) ──
+  # ── Flow lifecycle (lib/crewai/src/crewai/events/types/flow_events.py) ──
+  flow_created:
+    kind: workflow.created
+    payload:
+      flow_name: flow_name
   flow_started:
     kind: workflow.started
     payload:
       flow_name: flow_name
+      inputs: inputs
   flow_finished:
     kind: workflow.completed
     payload:
       flow_name: flow_name
-      output: result
+      result: result
+      state: state
+  flow_paused:
+    kind: workflow.paused
+    payload:
+      flow_name: flow_name
   method_execution_started:
     kind: task.started
     payload:
       flow_name: flow_name
       task_name: method_name
+      state: state
+      params: params
   method_execution_finished:
     kind: task.completed
     payload:
       flow_name: flow_name
       task_name: method_name
-      output: result
+      result: result
+      state: state
+  method_execution_failed:
+    kind: task.failed
+    payload:
+      flow_name: flow_name
+      task_name: method_name
+      error: error
+  method_execution_paused:
+    kind: task.paused
+    payload:
+      flow_name: flow_name
+      task_name: method_name
 
-  # ── ASPIRATIONAL: These events do NOT exist in crewai v0.86.
-  # They are mapped in case a future version adds an event bus.
-  # The weekly CI audit will detect when/if these become real. ──
+  # ── Crew lifecycle ──
+  crew_kickoff_started:
+    kind: session.started
+    payload:
+      crew_name: crew_name
+      event_id: event_id
+  crew_kickoff_completed:
+    kind: session.ended
+    payload:
+      crew_name: crew_name
+      output: output
+  crew_kickoff_failed:
+    kind: session.error
+    payload:
+      crew_name: crew_name
+      error: error
 
-  AgentExecutionStartedEvent:
+  # ── Agent execution ──
+  agent_execution_started:
     kind: agent.spawned
     payload:
       agent_id: agent_id
       agent_role: agent_role
       task_name: task_name
-  AgentExecutionCompletedEvent:
+  agent_execution_completed:
     kind: agent.completed
     payload:
       agent_id: agent_id
       agent_role: agent_role
       output: output
-  AgentExecutionErrorEvent:
+  agent_execution_error:
     kind: agent.failed
     payload:
       agent_id: agent_id
+      agent_role: agent_role
       error: error
 
-  # ── Task lifecycle (aspirational) ──
-  TaskStartedEvent:
+  # ── Task lifecycle ──
+  task_started:
     kind: task.started
     payload:
       task_id: task_id
       task_name: task_name
       agent_role: agent_role
-  TaskCompletedEvent:
+  task_completed:
     kind: task.completed
     payload:
       task_id: task_id
       task_name: task_name
       output: output
-  TaskFailedEvent:
+  task_failed:
     kind: task.failed
     payload:
       task_id: task_id
+      task_name: task_name
       error: error
 
-  # ── Tool usage (aspirational) ──
-  ToolUsageStartedEvent:
+  # ── Tool usage ──
+  tool_usage_started:
     kind: tool.call.started
     payload:
       tool_name: tool_name
       tool_call_id: event_id
       arguments: tool_input
-  ToolUsageFinishedEvent:
+  tool_usage_finished:
     kind: tool.call.completed
     payload:
-      tool_call_id: started_event_id
       tool_name: tool_name
       result: tool_output
-      success: success
-  ToolUsageErrorEvent:
+  tool_usage_error:
     kind: tool.call.failed
     payload:
       tool_name: tool_name
       error: error
 
-  # ── LLM calls (aspirational) ──
-  LLMCallStartedEvent:
+  # ── LLM calls ──
+  llm_call_started:
     kind: llm.call.started
     payload:
       model: model
       agent_role: agent_role
-  LLMCallCompletedEvent:
+      event_id: event_id
+  llm_call_completed:
     kind: llm.call.completed
     payload:
       model: model
       output: response
       input_tokens: token_usage.prompt_tokens
       output_tokens: token_usage.completion_tokens
-  LLMCallFailedEvent:
+  llm_call_failed:
     kind: llm.call.failed
     payload:
+      model: model
       error: error
-      model: model
+  llm_stream_chunk:
+    kind: llm.output.chunk
+    payload:
+      content: chunk
 
-  # ── Crew lifecycle (aspirational) ──
-  CrewStartedEvent:
-    kind: session.started
+  # ── Memory operations ──
+  memory_save_started:
+    kind: memory.save.started
     payload:
-      crew_name: crew_name
-  CrewCompletedEvent:
-    kind: session.ended
+      event_id: event_id
+  memory_save_completed:
+    kind: memory.save.completed
     payload:
-      crew_name: crew_name
-      output: output
-  CrewFailedEvent:
-    kind: session.error
+      event_id: event_id
+  memory_query_started:
+    kind: memory.query.started
     payload:
-      message: error
+      event_id: event_id
+  memory_query_completed:
+    kind: memory.query.completed
+    payload:
+      event_id: event_id
 
-  # ── Delegation (aspirational) ──
-  AgentDelegationStartedEvent:
-    kind: agent.handoff
+  # ── Knowledge retrieval ──
+  knowledge_retrieval_started:
+    kind: knowledge.query.started
     payload:
-      from_agent: from_agent_role
-      to_agent: to_agent_role
-      task: task_description
-  AgentDelegationCompletedEvent:
-    kind: agent.completed
+      event_id: event_id
+  knowledge_retrieval_completed:
+    kind: knowledge.query.completed
     payload:
-      from_agent: from_agent_role
-      to_agent: to_agent_role
-      output: output
+      event_id: event_id
 
-  # ── Telemetry (aspirational) ──
-  TokenUsageEvent:
-    kind: telemetry.usage
+  # ── MCP connections ──
+  mcp_connection_started:
+    kind: mcp.connection.started
     payload:
-      input_tokens: prompt_tokens
-      output_tokens: completion_tokens
-      cost_usd: total_cost
-      model: model
+      event_id: event_id
+  mcp_connection_completed:
+    kind: mcp.connection.completed
+    payload:
+      event_id: event_id
+  mcp_connection_failed:
+    kind: mcp.connection.failed
+    payload:
+      error: error
+  mcp_tool_execution_started:
+    kind: mcp.tool.started
+    payload:
+      event_id: event_id
+  mcp_tool_execution_completed:
+    kind: mcp.tool.completed
+    payload:
+      event_id: event_id
+  mcp_tool_execution_failed:
+    kind: mcp.tool.failed
+    payload:
+      error: error
+
+  # ── Human feedback / conversation ──
+  flow_input_requested:
+    kind: input.requested
+    payload:
+      flow_name: flow_name
+  flow_input_received:
+    kind: input.received
+    payload:
+      flow_name: flow_name
+  human_feedback_requested:
+    kind: input.requested
+    payload:
+      event_id: event_id
+  human_feedback_received:
+    kind: input.received
+    payload:
+      event_id: event_id
+  conversation_message_added:
+    kind: message.user
+    payload:
+      event_id: event_id
+
+  # ── Checkpoints ──
+  checkpoint_started:
+    kind: checkpoint.started
+    payload:
+      event_id: event_id
+  checkpoint_completed:
+    kind: checkpoint.created
+    payload:
+      event_id: event_id

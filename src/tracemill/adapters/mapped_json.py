@@ -276,8 +276,15 @@ def _preprocess_smolagents(obj: dict[str, Any]) -> list[dict[str, Any]]:
         return [normalized]
 
     # Determine step type from field presence
+    # Order matters: check most specific first
     if "step_number" in normalized:
-        normalized["step_type"] = "ActionStep"
+        # ActionStep — but check if it's the final answer
+        if normalized.get("is_final_answer"):
+            # ActionStep with is_final_answer=true: action_output IS the answer
+            normalized["step_type"] = "FinalAnswer"
+            normalized["output"] = normalized.get("action_output", "")
+        else:
+            normalized["step_type"] = "ActionStep"
         tool_calls = normalized.get("tool_calls", [])
         if tool_calls and isinstance(tool_calls, list):
             results = [normalized]
@@ -294,11 +301,12 @@ def _preprocess_smolagents(obj: dict[str, Any]) -> list[dict[str, Any]]:
             return results
     elif "plan" in normalized:
         normalized["step_type"] = "PlanningStep"
-    elif "task" in normalized and "step_number" not in normalized:
-        normalized["step_type"] = "TaskStep"
     elif "system_prompt" in normalized:
         normalized["step_type"] = "SystemPromptStep"
-    elif "is_final_answer" in normalized and normalized.get("is_final_answer"):
+    elif "task" in normalized:
+        normalized["step_type"] = "TaskStep"
+    elif "output" in normalized and len(set(normalized.keys()) - {"output", "timestamp", "step_type"}) == 0:
+        # Bare FinalAnswerStep: only has "output" (+ maybe timestamp)
         normalized["step_type"] = "FinalAnswer"
     else:
         normalized["step_type"] = "unknown"

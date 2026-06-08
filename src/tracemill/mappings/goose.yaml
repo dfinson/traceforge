@@ -1,6 +1,6 @@
 # Goose event mapping for MappedJsonAdapter
 # Targets: goose >= 1.0 (SQLite messages table, JSON-serialized rows)
-# Source: block/goose crates/goose-providers/src/conversation/message.rs
+# Source: aaif-goose/goose crates/goose/src/session_manager.rs, message.rs
 #
 # IMPORTANT: Real Goose only has TWO role values: "user" and "assistant".
 # Tool calls are NESTED inside content_json as {"type": "toolRequest", ...}
@@ -11,14 +11,22 @@
 # A GoosePreProcessor is needed to extract nested tool calls into separate events.
 #
 # Real schema: messages table columns:
-#   id, message_id, session_id, role, content_json, created_timestamp, metadata_json
-# Session table has: total_tokens, input_tokens, output_tokens, accumulated_cost
+#   id, message_id, session_id, role, content_json, created_timestamp,
+#   timestamp, tokens, metadata_json
+# Session table has: total_tokens, input_tokens, output_tokens,
+#   accumulated_total_tokens, accumulated_input_tokens, accumulated_output_tokens,
+#   accumulated_cost
+#
+# MessageContent variants (all in content_json array):
+#   text, image, toolRequest, toolResponse, toolConfirmationRequest,
+#   actionRequired, frontendToolRequest, thinking, redactedThinking,
+#   systemNotification
 
 framework: goose
 framework_version: ">=1.0"
 ingestion_mode: poll
 type_field: role
-timestamp_field: created_at
+timestamp_field: created_timestamp
 preprocessor: goose
 
 events:
@@ -45,6 +53,34 @@ events:
       tool_call_id: tool_use_id
       result: content
       success: is_success
+
+  # ── Additional MessageContent variants (preprocessor extracts from content_json) ──
+  thinking:
+    kind: reasoning.started
+    payload:
+      content: thinking
+  image:
+    kind: message.attachment
+    payload:
+      content: data
+  tool_confirmation_request:
+    kind: permission.requested
+    payload:
+      content: content
+      tool_name: name
+  action_required:
+    kind: input.requested
+    payload:
+      content: content
+  frontend_tool_request:
+    kind: tool.call.started
+    payload:
+      tool_name: name
+      content: content
+  system_notification:
+    kind: session.info
+    payload:
+      message: content
 
   # ── Session lifecycle (from poll metadata) ──
   session_start:

@@ -85,22 +85,22 @@ class TestCrewAIRealData:
         results = _parse_event("crewai.yaml", event)
         assert len(results) == 1
         assert results[0].kind == EventKind.WORKFLOW_COMPLETED
-        assert results[0].payload["output"] == {"blog_post": "...content..."}
+        assert results[0].payload["result"] == {"blog_post": "...content..."}
 
-    def test_fictional_agent_event_maps_but_never_fires(self):
-        """AgentExecutionStartedEvent does NOT exist in CrewAI v0.86.0.
-        The YAML still maps it (aspirational) so it parses — but never fires."""
+    def test_real_agent_execution_event(self):
+        """agent_execution_started is now a REAL event in CrewAI 1.x."""
         event = {
-            "type": "AgentExecutionStartedEvent",
+            "type": "agent_execution_started",
             "timestamp": "2024-06-15T12:00:00Z",
+            "event_id": "evt-123",
             "agent_id": "researcher",
             "agent_role": "Senior Researcher",
             "task_name": "Research topic",
         }
         results = _parse_event("crewai.yaml", event)
-        # Maps because YAML has "AgentExecutionStartedEvent" key (aspirational)
         assert len(results) == 1
         assert results[0].kind == EventKind.AGENT_SPAWNED
+        assert results[0].payload["agent_role"] == "Senior Researcher"
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -624,9 +624,9 @@ class TestLangGraphRealData:
         assert len(results) == 1
         assert results[0].kind == EventKind.KNOWLEDGE_QUERY_STARTED
 
-    def test_on_llm_new_token_never_emitted(self):
+    def test_on_llm_new_token_not_mapped(self):
         """on_llm_new_token is an INTERNAL callback name — never appears as event.
-        It's translated to on_chat_model_stream or on_llm_stream."""
+        It was removed from the YAML since it's fictitious. Falls to raw."""
         event = {
             "event": "on_llm_new_token",
             "run_id": "x",
@@ -637,9 +637,25 @@ class TestLangGraphRealData:
             "parent_ids": [],
         }
         results = _parse_event("langgraph.yaml", event)
-        # YAML has this mapped but it never fires in real astream_events v2
+        assert len(results) == 1
+        # Not mapped — falls to raw (this event never actually fires in astream_events v2)
+        assert results[0].kind == EventKind.RAW
+
+    def test_on_llm_stream_is_real(self):
+        """on_llm_stream is the real event emitted for non-chat LLM token streaming."""
+        event = {
+            "event": "on_llm_stream",
+            "run_id": "llm-1",
+            "name": "CompletionLLM",
+            "tags": [],
+            "metadata": {"timestamp": 1717232400},
+            "data": {"chunk": "token"},
+            "parent_ids": [],
+        }
+        results = _parse_event("langgraph.yaml", event)
         assert len(results) == 1
         assert results[0].kind == EventKind.LLM_OUTPUT_CHUNK
+        assert results[0].payload["content"] == "token"
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -789,18 +805,32 @@ class TestSmolagentsRealData:
         assert results[0].kind == EventKind.SESSION_STARTED
         assert results[0].payload["task"] == "What is the weather in Paris?"
 
-    def test_fictional_step_type_works(self):
-        """The current YAML works IF someone preprocesses to add step_type."""
+    def test_system_prompt_step(self):
+        """Real SystemPromptStep — inferred from field presence."""
         event = {
-            "step_type": "AgentStart",
+            "system_prompt": "You are a helpful coding agent with access to tools.",
             "timestamp": "2024-01-01T00:00:00Z",
-            "agent_name": "ToolCallingAgent",
-            "model_id": "gpt-4o",
-            "task": "Search for weather",
         }
         results = _parse_event("smolagents.yaml", event)
         assert len(results) == 1
-        assert results[0].kind == EventKind.SESSION_STARTED
+        assert results[0].kind == EventKind.MESSAGE_SYSTEM
+        assert "helpful coding agent" in results[0].payload["content"]
+
+    def test_final_answer_from_is_final_answer(self):
+        """ActionStep with is_final_answer=true maps to FinalAnswer."""
+        event = {
+            "step_number": 3,
+            "timing": {"start_time": 1718123470.0, "end_time": 1718123471.0, "duration": 1.0},
+            "model_output": "The weather is sunny",
+            "action_output": "It's sunny in Paris, 22°C",
+            "is_final_answer": True,
+            "token_usage": {"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
+            "tool_calls": [],
+        }
+        results = _parse_event("smolagents.yaml", event)
+        assert len(results) == 1
+        assert results[0].kind == EventKind.SESSION_ENDED
+        assert results[0].payload["output"] == "It's sunny in Paris, 22°C"
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

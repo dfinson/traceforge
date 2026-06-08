@@ -1,5 +1,5 @@
 # Cline / Roo Code event mapping for MappedJsonAdapter
-# Targets: cline >= 3.0 (VS Code extension globalStorage JSON format)
+# Targets: cline >= 3.88 (VS Code extension globalStorage JSON format)
 # Source: cline/cline apps/vscode/src/shared/ExtensionMessage.ts
 #
 # IMPORTANT: Real Cline uses a COMPOUND discriminator:
@@ -22,7 +22,7 @@
 # Tool info: JSON.parse(text) on say="tool" → {tool, path, content, diff}
 
 framework: cline
-framework_version: ">=3.0"
+framework_version: ">=3.88"
 ingestion_mode: file_watch
 type_field: type
 timestamp_field: ts
@@ -90,6 +90,90 @@ events:
     kind: session.ended
     payload:
       output: text
+  say.user_feedback:
+    kind: message.user
+    payload:
+      content: text
+  say.user_feedback_diff:
+    kind: message.user
+    payload:
+      content: text
+  say.reasoning:
+    kind: reasoning.started
+    payload:
+      content: text
+  say.diff:
+    kind: file.edited
+    payload:
+      content: text
+  say.shell_integration_warning:
+    kind: session.warning
+    payload:
+      message: text
+  say.api_req_retried:
+    kind: llm.call.retried
+    payload:
+      content: text
+  say.api_req_deleted:
+    kind: llm.call.cancelled
+    payload:
+      content: text
+  say.deleted_api_reqs:
+    kind: session.info
+    payload:
+      content: text
+  say.checkpoint_saved:
+    kind: checkpoint.created
+    payload:
+      content: text
+  say.load_mcp_documentation:
+    kind: mcp.info
+    payload:
+      content: text
+  say.sub_agent_task:
+    kind: agent.spawned
+    payload:
+      content: text
+  say.sub_agent_result:
+    kind: agent.completed
+    payload:
+      content: text
+  say.new_task_started:
+    kind: session.started
+    payload:
+      content: text
+  say.hook_output:
+    kind: command.completed
+    payload:
+      content: text
+  say.auto_approval_max_reached:
+    kind: session.warning
+    payload:
+      message: text
+  say.use_mcp_server:
+    kind: mcp.tool.started
+    payload:
+      content: text
+  say.mcp_server_response:
+    kind: mcp.tool.completed
+    payload:
+      content: text
+  say.inspect_site_result:
+    kind: browser.result
+    payload:
+      content: text
+  say.chat_truncated:
+    kind: session.warning
+    payload:
+      message: text
+  say.context_condensed:
+    kind: session.info
+    payload:
+      content: text
+  say.tool_output:
+    kind: tool.call.completed
+    payload:
+      content: text
 
   # ── Ask subtypes (preprocessor synthesizes "ask.<subtype>") ──
   ask.followup:
@@ -110,6 +194,58 @@ events:
     payload:
       content: text
   ask.resume_task:
+    kind: input.requested
+    payload:
+      content: text
+  ask.plan_mode_respond:
+    kind: input.requested
+    payload:
+      content: text
+  ask.act_mode_respond:
+    kind: input.requested
+    payload:
+      content: text
+  ask.command_output:
+    kind: permission.requested
+    payload:
+      content: text
+  ask.browser_action_launch:
+    kind: permission.requested
+    payload:
+      content: text
+  ask.use_mcp_server:
+    kind: permission.requested
+    payload:
+      content: text
+  ask.api_configuration:
+    kind: input.requested
+    payload:
+      content: text
+  ask.resume_completed_task:
+    kind: input.requested
+    payload:
+      content: text
+  ask.mistake_limit_reached:
+    kind: input.requested
+    payload:
+      content: text
+  ask.auto_approval_max_reached:
+    kind: input.requested
+    payload:
+      content: text
+  ask.sub_agent_task:
+    kind: permission.requested
+    payload:
+      content: text
+  ask.new_task:
+    kind: input.requested
+    payload:
+      content: text
+  ask.condense_context:
+    kind: input.requested
+    payload:
+      content: text
+  ask.report_bug:
     kind: input.requested
     payload:
       content: text

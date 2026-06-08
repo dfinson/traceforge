@@ -1,27 +1,36 @@
-"""Adapter for Copilot SDK subprocess stdout (same wire format as CLI JSONL)."""
+"""Adapter for Copilot SDK subprocess stdout (same wire format as CLI JSONL).
+
+Provides both the raw ``parse()`` interface (JSONL lines) and a typed
+``parse_event()`` interface that accepts SDK ``SessionEvent`` objects directly.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 
+from copilot.generated.session_events import SessionEvent as CopilotSessionEvent
+
 from tracemill.adapters.cli_jsonl import CLIJsonlAdapter
-from tracemill.types import EventMetadata, SessionEvent
+from tracemill.types import SessionEvent
 
 
 class CopilotSDKAdapter(CLIJsonlAdapter):
     """Parses Copilot SDK subprocess stdout into SessionEvents.
 
-    Wire format is identical to CLI JSONL. This is a thin subclass
-    that sets metadata.agent_sdk to "copilot-sdk".
+    Wire format is identical to CLI JSONL. This subclass overrides
+    metadata.agent_sdk to "copilot-sdk" to distinguish live SDK events
+    from offline JSONL replay.
     """
 
     def parse(self, raw: bytes | str) -> Iterator[SessionEvent]:
         for event in super().parse(raw):
-            yield SessionEvent(
-                id=event.id,
-                kind=event.kind,
-                session_id=event.session_id,
-                timestamp=event.timestamp,
-                payload=event.payload,
-                metadata=EventMetadata(agent_sdk="copilot-sdk"),
+            yield event.model_copy(
+                update={"metadata": event.metadata.model_copy(update={"agent_sdk": "copilot-sdk"})}
+            )
+
+    def parse_event(self, sdk_event: CopilotSessionEvent) -> Iterator[SessionEvent]:
+        """Parse a typed Copilot SDK SessionEvent (live streaming interface)."""
+        for event in super().parse_event(sdk_event):
+            yield event.model_copy(
+                update={"metadata": event.metadata.model_copy(update={"agent_sdk": "copilot-sdk"})}
             )

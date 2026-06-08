@@ -1,4 +1,8 @@
-"""Adapter for Claude Code session JSONL format."""
+"""Adapter for Claude Code session JSONL format.
+
+Uses the Claude Code SDK's ``parse_message()`` for deserialization,
+avoiding fragile hand-rolled JSON parsing.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +10,20 @@ import json
 import logging
 from collections.abc import Iterator
 from datetime import datetime, timezone
+from typing import Any
+
+from claude_code_sdk import (
+    AssistantMessage,
+    Message,
+    ResultMessage,
+    SystemMessage,
+    TextBlock,
+    ThinkingBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+    UserMessage,
+)
+from claude_code_sdk._internal.message_parser import MessageParseError, parse_message
 
 from tracemill.adapters.base import Adapter
 from tracemill.types import EventKind, EventMetadata, SessionEvent
@@ -16,17 +34,25 @@ logger = logging.getLogger(__name__)
 class ClaudeJsonlAdapter(Adapter):
     """Parses Claude Code session JSONL into SessionEvents.
 
-    Note: Claude JSONL has no per-event timestamps. Uses datetime.now(UTC)
-    as a fallback for all events.
+    Leverages the Claude Code SDK's ``parse_message()`` for type-safe
+    deserialization. Claude JSONL has no per-event timestamps; uses
+    datetime.now(UTC) as a fallback.
 
-    Tracks session_id across calls since it's only provided in user messages.
+    Tracks session_id across calls since it's only provided in result messages.
     """
 
     def __init__(self) -> None:
         self._session_id: str | None = None
 
     def parse(self, raw: bytes | str) -> Iterator[SessionEvent]:
-        text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+        if isinstance(raw, bytes):
+            try:
+                text = raw.decode("utf-8")
+            except (UnicodeDecodeError, ValueError):
+                logger.warning("Claude adapter: failed to decode bytes as UTF-8")
+                return
+        else:
+            text = raw
         text = text.strip()
         if not text:
             return
@@ -41,112 +67,145 @@ class ClaudeJsonlAdapter(Adapter):
             logger.warning("Claude adapter: expected JSON object, got %s", type(obj).__name__)
             return
 
-        msg_type = obj.get("type")
-        if not msg_type:
-            logger.debug("Claude adapter: line has no 'type' field, skipping")
+        # Deserialize via the SDK
+        try:
+            message = parse_message(obj)
+        except (MessageParseError, Exception) as exc:
+            logger.debug("Claude adapter: SDK deserialization failed: %s", exc)
             return
 
-        if msg_type == "user":
-            yield from self._parse_user(obj)
-        elif msg_type == "assistant":
-            yield from self._parse_assistant(obj)
+        yield from self.parse_message(message)
+
+    def parse_message(self, message: Message) -> Iterator[SessionEvent]:
+        """Parse a typed Claude SDK Message into tracemill SessionEvents."""
+        if isinstance(message, UserMessage):
+            yield from self._handle_user(message)
+        elif isinstance(message, AssistantMessage):
+            yield from self._handle_assistant(message)
+        elif isinstance(message, ResultMessage):
+            yield from self._handle_result(message)
+        elif isinstance(message, SystemMessage):
+            logger.debug("Claude adapter: skipping system message (subtype=%s)", message.subtype)
         else:
-            logger.debug("Claude adapter: unknown type %s, skipping", msg_type)
+            logger.debug("Claude adapter: skipping unknown message type %s", type(message).__name__)
 
-    def _parse_user(self, obj: dict) -> Iterator[SessionEvent]:
-        message = obj.get("message", {}) or {}
-
-        # Track session_id
-        sid = obj.get("sessionId") or message.get("sessionId")
-        if sid:
-            self._session_id = sid
-
-        content = message.get("content", "")
-        if isinstance(content, list):
-            content = self._extract_text_from_blocks(content)
-
-        yield SessionEvent(
-            kind=EventKind.USER_MESSAGE,
-            session_id=self._session_id or "unknown",
-            timestamp=datetime.now(timezone.utc),
-            payload={"content": content},
-            metadata=EventMetadata(agent_sdk="claude-code"),
-        )
-
-    def _parse_assistant(self, obj: dict) -> Iterator[SessionEvent]:
-        message = obj.get("message", {}) or {}
-        content_blocks = message.get("content", [])
-
-        if not isinstance(content_blocks, list):
-            content_blocks = []
-
+    def _handle_user(self, message: UserMessage) -> Iterator[SessionEvent]:
         session_id = self._session_id or "unknown"
 
-        for block in content_blocks:
-            if not isinstance(block, dict):
-                continue
+        if isinstance(message.content, str):
+            yield SessionEvent(
+                kind=EventKind.USER_MESSAGE,
+                session_id=session_id,
+                timestamp=datetime.now(timezone.utc),
+                payload={"content": message.content},
+                metadata=EventMetadata(agent_sdk="claude-code"),
+            )
+        elif isinstance(message.content, list):
+            # User messages can contain tool_result blocks
+            for block in message.content:
+                if isinstance(block, ToolResultBlock):
+                    yield SessionEvent(
+                        kind=EventKind.TOOL_COMPLETE,
+                        session_id=session_id,
+                        timestamp=datetime.now(timezone.utc),
+                        payload={
+                            "tool_call_id": block.tool_use_id,
+                            "success": not (block.is_error or False),
+                            "result": self._extract_result_text(block.content),
+                        },
+                        metadata=EventMetadata(agent_sdk="claude-code"),
+                    )
+                elif isinstance(block, TextBlock):
+                    yield SessionEvent(
+                        kind=EventKind.USER_MESSAGE,
+                        session_id=session_id,
+                        timestamp=datetime.now(timezone.utc),
+                        payload={"content": block.text},
+                        metadata=EventMetadata(agent_sdk="claude-code"),
+                    )
 
-            block_type = block.get("type")
+    def _handle_assistant(self, message: AssistantMessage) -> Iterator[SessionEvent]:
+        session_id = self._session_id or "unknown"
 
-            if block_type == "text":
+        for block in message.content:
+            if isinstance(block, TextBlock):
                 yield SessionEvent(
                     kind=EventKind.ASSISTANT_MESSAGE,
                     session_id=session_id,
                     timestamp=datetime.now(timezone.utc),
-                    payload={"content": block.get("text", "")},
+                    payload={"content": block.text},
                     metadata=EventMetadata(agent_sdk="claude-code"),
                 )
 
-            elif block_type == "tool_use":
-                input_data = block.get("input", {})
+            elif isinstance(block, ToolUseBlock):
                 yield SessionEvent(
                     kind=EventKind.TOOL_START,
                     session_id=session_id,
                     timestamp=datetime.now(timezone.utc),
                     payload={
-                        "tool_call_id": block.get("id"),
-                        "tool_name": block.get("name"),
-                        "arguments": json.dumps(input_data) if input_data else None,
+                        "tool_call_id": block.id,
+                        "tool_name": block.name,
+                        "arguments": block.input,
                     },
                     metadata=EventMetadata(agent_sdk="claude-code"),
                 )
 
-            elif block_type == "tool_result":
-                content = block.get("content", "")
-                result_text = self._extract_result_text(content)
+            elif isinstance(block, ToolResultBlock):
                 yield SessionEvent(
                     kind=EventKind.TOOL_COMPLETE,
                     session_id=session_id,
                     timestamp=datetime.now(timezone.utc),
                     payload={
-                        "tool_call_id": block.get("tool_use_id"),
-                        "success": not block.get("is_error", False),
-                        "result": result_text,
+                        "tool_call_id": block.tool_use_id,
+                        "success": not (block.is_error or False),
+                        "result": self._extract_result_text(block.content),
                     },
                     metadata=EventMetadata(agent_sdk="claude-code"),
                 )
 
-            elif block_type == "thinking":
-                # Skip thinking blocks
+            elif isinstance(block, ThinkingBlock):
                 logger.debug("Claude adapter: skipping thinking block")
 
-        # Extract usage if present
-        usage = message.get("usage")
-        if usage and isinstance(usage, dict):
+    def _handle_result(self, message: ResultMessage) -> Iterator[SessionEvent]:
+        # Track session_id from result message
+        if message.session_id:
+            self._session_id = message.session_id
+
+        session_id = self._session_id or "unknown"
+
+        # Emit usage event
+        usage_payload: dict[str, Any] = {
+            "duration_ms": message.duration_ms,
+            "cost_usd": message.total_cost_usd,
+            "num_turns": message.num_turns,
+        }
+        if message.usage:
+            usage_payload["input_tokens"] = message.usage.get("input_tokens")
+            usage_payload["output_tokens"] = message.usage.get("output_tokens")
+            usage_payload["cache_read_tokens"] = message.usage.get("cache_read_input_tokens")
+            usage_payload["cache_write_tokens"] = message.usage.get("cache_creation_input_tokens")
+
+        yield SessionEvent(
+            kind=EventKind.USAGE,
+            session_id=session_id,
+            timestamp=datetime.now(timezone.utc),
+            payload=usage_payload,
+            metadata=EventMetadata(agent_sdk="claude-code"),
+        )
+
+        # If error, also emit an error event
+        if message.is_error:
             yield SessionEvent(
-                kind=EventKind.USAGE,
+                kind=EventKind.ERROR,
                 session_id=session_id,
                 timestamp=datetime.now(timezone.utc),
-                payload={
-                    "input_tokens": usage.get("input_tokens"),
-                    "output_tokens": usage.get("output_tokens"),
-                    "cache_read_tokens": usage.get("cache_read_input_tokens"),
-                    "cache_write_tokens": usage.get("cache_creation_input_tokens"),
-                },
+                payload={"message": message.result or "Unknown error"},
                 metadata=EventMetadata(agent_sdk="claude-code"),
             )
 
-    def _extract_result_text(self, content: str | list | None) -> str:
+    @staticmethod
+    def _extract_result_text(content: str | list[dict[str, Any]] | None) -> str:
+        """Extract text from tool result content (string or list of blocks)."""
         if content is None:
             return ""
         if isinstance(content, str):
@@ -156,8 +215,3 @@ class ClaudeJsonlAdapter(Adapter):
                 item.get("text", "") if isinstance(item, dict) else str(item) for item in content
             )
         return str(content)
-
-    def _extract_text_from_blocks(self, blocks: list) -> str:
-        return "\n".join(
-            item.get("text", "") if isinstance(item, dict) else str(item) for item in blocks
-        )

@@ -1,8 +1,10 @@
-"""Tests for adapter implementations."""
+"""Tests for adapter implementations using SDK-based deserialization."""
 
 from __future__ import annotations
 
 import asyncio
+import json
+import uuid
 from pathlib import Path
 
 import pytest
@@ -19,16 +21,31 @@ from tracemill.sinks.callback import CallbackSink
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 
 
+def _uid() -> str:
+    return str(uuid.uuid4())
+
+
+def _copilot_event(event_type: str, data: dict, ts: str = "2024-01-01T00:00:00Z") -> str:
+    return json.dumps({"type": event_type, "id": _uid(), "timestamp": ts, "data": data})
+
+
 # ─── CLIJsonlAdapter ─────────────────────────────────────────────────────────
 
 
 class TestCLIJsonlAdapter:
     def test_parse_session_start(self):
         adapter = CLIJsonlAdapter()
-        line = (
-            '{"type":"session.start","data":{"sessionId":"s1","selectedModel":"gpt-4",'
-            '"copilotVersion":"1.0","startTime":"2024-01-01T00:00:00Z",'
-            '"context":{"cwd":"/tmp"}},"id":"e1","timestamp":"2024-01-01T00:00:00Z"}'
+        line = _copilot_event(
+            "session.start",
+            {
+                "sessionId": "s1",
+                "selectedModel": "gpt-4",
+                "copilotVersion": "1.0",
+                "startTime": "2024-01-01T00:00:00Z",
+                "version": 1.0,
+                "producer": "copilot-cli",
+                "context": {"cwd": "/tmp"},
+            },
         )
         events = list(adapter.parse(line))
         assert len(events) == 1
@@ -42,7 +59,7 @@ class TestCLIJsonlAdapter:
 
     def test_parse_user_message(self):
         adapter = CLIJsonlAdapter()
-        line = '{"type":"user.message","data":{"content":"hello"},"id":"e2","timestamp":"2024-01-01T00:00:01Z"}'
+        line = _copilot_event("user.message", {"content": "hello"})
         events = list(adapter.parse(line))
         assert len(events) == 1
         assert events[0].kind == EventKind.USER_MESSAGE
@@ -50,10 +67,13 @@ class TestCLIJsonlAdapter:
 
     def test_parse_tool_execution_start(self):
         adapter = CLIJsonlAdapter()
-        line = (
-            '{"type":"tool.execution_start","data":{"toolCallId":"tc1","toolName":"grep",'
-            '"arguments":{"pattern":"foo"},"model":"gpt-4","turnId":"t1"},'
-            '"id":"e3","timestamp":"2024-01-01T00:00:02Z"}'
+        line = _copilot_event(
+            "tool.execution_start",
+            {
+                "toolCallId": "tc1",
+                "toolName": "grep",
+                "arguments": {"pattern": "foo"},
+            },
         )
         events = list(adapter.parse(line))
         assert len(events) == 1
@@ -65,10 +85,13 @@ class TestCLIJsonlAdapter:
 
     def test_parse_tool_execution_complete(self):
         adapter = CLIJsonlAdapter()
-        line = (
-            '{"type":"tool.execution_complete","data":{"toolCallId":"tc1","model":"gpt-4",'
-            '"success":true,"result":{"content":"found it","detailedContent":null},'
-            '"toolTelemetry":{"durationMs":100}},"id":"e4","timestamp":"2024-01-01T00:00:03Z"}'
+        line = _copilot_event(
+            "tool.execution_complete",
+            {
+                "toolCallId": "tc1",
+                "success": True,
+                "result": {"content": "found it", "detailedContent": None},
+            },
         )
         events = list(adapter.parse(line))
         assert len(events) == 1
@@ -80,10 +103,17 @@ class TestCLIJsonlAdapter:
 
     def test_parse_assistant_usage(self):
         adapter = CLIJsonlAdapter()
-        line = (
-            '{"type":"assistant.usage","data":{"inputTokens":100,"outputTokens":50,'
-            '"cacheReadTokens":30,"cacheWriteTokens":10,"cost":0.002,'
-            '"model":"gpt-4","duration":1500},"id":"e5","timestamp":"2024-01-01T00:00:04Z"}'
+        line = _copilot_event(
+            "assistant.usage",
+            {
+                "model": "gpt-4",
+                "inputTokens": 100,
+                "outputTokens": 50,
+                "cacheReadTokens": 30,
+                "cacheWriteTokens": 10,
+                "cost": 0.002,
+                "duration": 1500,
+            },
         )
         events = list(adapter.parse(line))
         assert len(events) == 1
@@ -99,42 +129,61 @@ class TestCLIJsonlAdapter:
 
     def test_parse_session_shutdown(self):
         adapter = CLIJsonlAdapter()
-        line = (
-            '{"type":"session.shutdown","data":{"shutdownType":"normal",'
-            '"totalPremiumRequests":5,"totalApiDurationMs":8000},'
-            '"id":"e6","timestamp":"2024-01-01T00:00:05Z"}'
+        line = _copilot_event(
+            "session.shutdown",
+            {
+                "shutdownType": "routine",
+                "totalPremiumRequests": 5,
+                "totalApiDurationMs": 8000,
+                "codeChanges": {"filesModified": [], "linesAdded": 0, "linesRemoved": 0},
+                "modelMetrics": {},
+                "sessionStartTime": 1717232400.0,
+            },
         )
         events = list(adapter.parse(line))
         assert len(events) == 1
         assert events[0].kind == EventKind.SESSION_END
 
-    def test_skips_unknown_event_types(self):
+    def test_unknown_event_type_emits_raw(self):
         adapter = CLIJsonlAdapter()
-        line = '{"type":"future.event","data":{},"id":"e7","timestamp":"2024-01-01T00:00:06Z"}'
+        # SDK maps unrecognized types to SessionEventType.UNKNOWN ("unknown")
+        line = json.dumps(
+            {"type": "future.event", "id": _uid(), "timestamp": "2024-01-01T00:00:00Z", "data": {}}
+        )
         events = list(adapter.parse(line))
-        assert events == []
+        assert len(events) == 1
+        assert events[0].kind == EventKind.RAW
+        assert events[0].payload["original_type"] == "unknown"
 
     def test_skips_non_json(self):
         adapter = CLIJsonlAdapter()
         events = list(adapter.parse("not json!"))
         assert events == []
 
-    def test_handles_missing_fields(self):
+    def test_handles_sdk_parse_failure_gracefully(self):
         adapter = CLIJsonlAdapter()
-        # user.message with no data field
-        line = '{"type":"user.message","id":"e8","timestamp":"2024-01-01T00:00:07Z"}'
+        # Valid JSON but SDK can't parse (missing required fields)
+        line = json.dumps(
+            {"type": "user.message", "id": "not-a-uuid", "timestamp": "2024-01-01T00:00:00Z"}
+        )
         events = list(adapter.parse(line))
-        assert len(events) == 1
-        assert events[0].payload["content"] is None
+        assert events == []  # Gracefully skipped
 
     def test_retains_session_id_across_calls(self):
         adapter = CLIJsonlAdapter()
-        start_line = (
-            '{"type":"session.start","data":{"sessionId":"persistent-id",'
-            '"selectedModel":"gpt-4","copilotVersion":"1.0","startTime":"2024-01-01T00:00:00Z",'
-            '"context":{"cwd":"/tmp"}},"id":"e1","timestamp":"2024-01-01T00:00:00Z"}'
+        start_line = _copilot_event(
+            "session.start",
+            {
+                "sessionId": "persistent-id",
+                "selectedModel": "gpt-4",
+                "copilotVersion": "1.0",
+                "startTime": "2024-01-01T00:00:00Z",
+                "version": 1.0,
+                "producer": "copilot-cli",
+                "context": {"cwd": "/tmp"},
+            },
         )
-        msg_line = '{"type":"user.message","data":{"content":"hi"},"id":"e2","timestamp":"2024-01-01T00:00:01Z"}'
+        msg_line = _copilot_event("user.message", {"content": "hi"})
 
         list(adapter.parse(start_line))
         events = list(adapter.parse(msg_line))
@@ -147,20 +196,22 @@ class TestCLIJsonlAdapter:
         for line in fixture.read_text().splitlines():
             all_events.extend(adapter.parse(line))
 
-        # 15 lines, skip turn_start, turn_end, hook.start, hook.end, session.info = 5 skipped
-        # Remaining: session.start, user.message, 2x assistant.message, 2x tool_start,
-        #   2x tool_complete, usage, shutdown = 10
-        assert len(all_events) == 10
+        # 15 lines, all now produce events (nothing skipped)
+        assert len(all_events) == 15
 
         kinds = [e.kind for e in all_events]
         assert kinds[0] == EventKind.SESSION_START
         assert kinds[1] == EventKind.USER_MESSAGE
+        assert EventKind.TURN_START in kinds
+        assert EventKind.TURN_END in kinds
+        assert EventKind.HOOK_START in kinds
+        assert EventKind.HOOK_END in kinds
+        assert EventKind.SESSION_INFO in kinds
         assert EventKind.TOOL_START in kinds
         assert EventKind.TOOL_COMPLETE in kinds
         assert EventKind.USAGE in kinds
         assert kinds[-1] == EventKind.SESSION_END
 
-        # All events should have the session_id from session.start
         for ev in all_events:
             assert ev.session_id == "sess-abc-123"
 
@@ -171,42 +222,71 @@ class TestCLIJsonlAdapter:
 class TestClaudeJsonlAdapter:
     def test_parse_user_message(self):
         adapter = ClaudeJsonlAdapter()
-        line = '{"type":"user","message":{"content":"hello world"},"sessionId":"cs1","cwd":"/tmp"}'
+        line = json.dumps({"type": "user", "message": {"content": "hello world"}})
         events = list(adapter.parse(line))
         assert len(events) == 1
         assert events[0].kind == EventKind.USER_MESSAGE
         assert events[0].payload["content"] == "hello world"
-        assert events[0].session_id == "cs1"
         assert events[0].metadata.agent_sdk == "claude-code"
 
     def test_parse_assistant_text_block(self):
         adapter = ClaudeJsonlAdapter()
-        line = '{"type":"assistant","message":{"content":[{"type":"text","text":"Hello!"}],"model":"claude-3"}}'
+        line = json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [{"type": "text", "text": "Hello!"}],
+                    "model": "claude-3",
+                },
+            }
+        )
         events = list(adapter.parse(line))
-        # text block → ASSISTANT_MESSAGE (no usage since missing)
         text_events = [e for e in events if e.kind == EventKind.ASSISTANT_MESSAGE]
         assert len(text_events) == 1
         assert text_events[0].payload["content"] == "Hello!"
 
     def test_parse_assistant_tool_use_block(self):
         adapter = ClaudeJsonlAdapter()
-        line = (
-            '{"type":"assistant","message":{"content":'
-            '[{"type":"tool_use","id":"tu-1","name":"read_file","input":{"path":"x.py"}}],'
-            '"model":"claude-3"}}'
+        line = json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "tu-1",
+                            "name": "read_file",
+                            "input": {"path": "x.py"},
+                        }
+                    ],
+                    "model": "claude-3",
+                },
+            }
         )
         events = list(adapter.parse(line))
         tool_events = [e for e in events if e.kind == EventKind.TOOL_START]
         assert len(tool_events) == 1
         assert tool_events[0].payload["tool_call_id"] == "tu-1"
         assert tool_events[0].payload["tool_name"] == "read_file"
+        assert tool_events[0].payload["arguments"] == {"path": "x.py"}
 
     def test_parse_assistant_tool_result_block(self):
         adapter = ClaudeJsonlAdapter()
-        line = (
-            '{"type":"assistant","message":{"content":'
-            '[{"type":"tool_result","tool_use_id":"tu-1","content":"file contents","is_error":false}],'
-            '"model":"claude-3"}}'
+        line = json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "tu-1",
+                            "content": "file contents",
+                            "is_error": False,
+                        }
+                    ],
+                    "model": "claude-3",
+                },
+            }
         )
         events = list(adapter.parse(line))
         result_events = [e for e in events if e.kind == EventKind.TOOL_COMPLETE]
@@ -217,29 +297,56 @@ class TestClaudeJsonlAdapter:
 
     def test_handles_list_of_blocks_result_content(self):
         adapter = ClaudeJsonlAdapter()
-        line = (
-            '{"type":"assistant","message":{"content":'
-            '[{"type":"tool_result","tool_use_id":"tu-2",'
-            '"content":[{"type":"text","text":"line1"},{"type":"text","text":"line2"}],'
-            '"is_error":false}],"model":"claude-3"}}'
+        line = json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "tu-2",
+                            "content": [
+                                {"type": "text", "text": "line1"},
+                                {"type": "text", "text": "line2"},
+                            ],
+                            "is_error": False,
+                        }
+                    ],
+                    "model": "claude-3",
+                },
+            }
         )
         events = list(adapter.parse(line))
         result_events = [e for e in events if e.kind == EventKind.TOOL_COMPLETE]
         assert len(result_events) == 1
         assert result_events[0].payload["result"] == "line1\nline2"
 
-    def test_extracts_usage(self):
+    def test_extracts_usage_from_result_message(self):
         adapter = ClaudeJsonlAdapter()
-        line = (
-            '{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}],'
-            '"model":"claude-3","usage":{"input_tokens":100,"output_tokens":50,'
-            '"cache_read_input_tokens":30,"cache_creation_input_tokens":10}}}'
+        line = json.dumps(
+            {
+                "type": "result",
+                "subtype": "success",
+                "duration_ms": 5000,
+                "duration_api_ms": 4000,
+                "is_error": False,
+                "num_turns": 2,
+                "session_id": "sess-1",
+                "total_cost_usd": 0.005,
+                "usage": {
+                    "input_tokens": 100,
+                    "output_tokens": 50,
+                    "cache_read_input_tokens": 30,
+                    "cache_creation_input_tokens": 10,
+                },
+            }
         )
         events = list(adapter.parse(line))
         usage_events = [e for e in events if e.kind == EventKind.USAGE]
         assert len(usage_events) == 1
         assert usage_events[0].payload["input_tokens"] == 100
         assert usage_events[0].payload["output_tokens"] == 50
+        assert usage_events[0].payload["cost_usd"] == 0.005
 
     def test_handles_malformed_input(self):
         adapter = ClaudeJsonlAdapter()
@@ -263,9 +370,28 @@ class TestClaudeJsonlAdapter:
         assert EventKind.TOOL_COMPLETE in kinds
         assert EventKind.USAGE in kinds
 
-        # Session ID should be tracked from user messages
-        for ev in all_events:
-            assert ev.session_id == "claude-sess-456"
+        # Session ID tracked from result message
+        result_events = [e for e in all_events if e.kind == EventKind.USAGE]
+        assert result_events[-1].session_id == "claude-sess-456"
+
+    def test_session_id_tracked_from_result(self):
+        adapter = ClaudeJsonlAdapter()
+        line = json.dumps(
+            {
+                "type": "result",
+                "subtype": "success",
+                "duration_ms": 1000,
+                "duration_api_ms": 800,
+                "is_error": False,
+                "num_turns": 1,
+                "session_id": "tracked-id",
+            }
+        )
+        list(adapter.parse(line))
+        # Next message should have the tracked session_id
+        msg_line = json.dumps({"type": "user", "message": {"content": "follow-up"}})
+        events = list(adapter.parse(msg_line))
+        assert events[0].session_id == "tracked-id"
 
 
 # ─── CopilotSDKAdapter ───────────────────────────────────────────────────────
@@ -275,7 +401,7 @@ class TestCopilotSDKAdapter:
     def test_produces_same_events_as_cli(self):
         cli_adapter = CLIJsonlAdapter()
         sdk_adapter = CopilotSDKAdapter()
-        line = '{"type":"user.message","data":{"content":"test"},"id":"e1","timestamp":"2024-01-01T00:00:00Z"}'
+        line = _copilot_event("user.message", {"content": "test"})
 
         cli_events = list(cli_adapter.parse(line))
         sdk_events = list(sdk_adapter.parse(line))
@@ -286,8 +412,20 @@ class TestCopilotSDKAdapter:
 
     def test_sets_correct_agent_sdk(self):
         adapter = CopilotSDKAdapter()
-        line = '{"type":"user.message","data":{"content":"hi"},"id":"e1","timestamp":"2024-01-01T00:00:00Z"}'
+        line = _copilot_event("user.message", {"content": "hi"})
         events = list(adapter.parse(line))
+        assert events[0].metadata.agent_sdk == "copilot-sdk"
+
+    def test_parse_event_typed_interface(self):
+        """Test the typed parse_event() interface with SDK objects."""
+        from copilot.generated.session_events import SessionEvent as CSE
+
+        adapter = CopilotSDKAdapter()
+        obj = json.loads(_copilot_event("user.message", {"content": "typed"}))
+        sdk_event = CSE.from_dict(obj)
+        events = list(adapter.parse_event(sdk_event))
+        assert len(events) == 1
+        assert events[0].payload["content"] == "typed"
         assert events[0].metadata.agent_sdk == "copilot-sdk"
 
 
@@ -298,7 +436,7 @@ class TestClaudeSDKAdapter:
     def test_produces_same_events_as_claude_jsonl(self):
         jsonl_adapter = ClaudeJsonlAdapter()
         sdk_adapter = ClaudeSDKAdapter()
-        line = '{"type":"user","message":{"content":"test"},"sessionId":"s1"}'
+        line = json.dumps({"type": "user", "message": {"content": "test"}})
 
         jsonl_events = list(jsonl_adapter.parse(line))
         sdk_events = list(sdk_adapter.parse(line))
@@ -309,8 +447,19 @@ class TestClaudeSDKAdapter:
 
     def test_sets_correct_agent_sdk(self):
         adapter = ClaudeSDKAdapter()
-        line = '{"type":"user","message":{"content":"hi"},"sessionId":"s1"}'
+        line = json.dumps({"type": "user", "message": {"content": "hi"}})
         events = list(adapter.parse(line))
+        assert events[0].metadata.agent_sdk == "claude-sdk"
+
+    def test_parse_message_typed_interface(self):
+        """Test the typed parse_message() interface with SDK objects."""
+        from claude_code_sdk import UserMessage
+
+        adapter = ClaudeSDKAdapter()
+        msg = UserMessage(content="typed hello")
+        events = list(adapter.parse_message(msg))
+        assert len(events) == 1
+        assert events[0].payload["content"] == "typed hello"
         assert events[0].metadata.agent_sdk == "claude-sdk"
 
 
@@ -346,6 +495,16 @@ class TestMalformedInput:
         for line in malformed_lines:
             events = list(adapter.parse(line))
             assert events == [] or all(isinstance(e, SessionEvent) for e in events)
+
+    def test_cli_invalid_utf8_bytes(self):
+        adapter = CLIJsonlAdapter()
+        events = list(adapter.parse(b"\xff\xfe invalid"))
+        assert events == []
+
+    def test_claude_invalid_utf8_bytes(self):
+        adapter = ClaudeJsonlAdapter()
+        events = list(adapter.parse(b"\xff\xfe invalid"))
+        assert events == []
 
 
 # ─── Integration: Pipeline + CallbackSink ────────────────────────────────────

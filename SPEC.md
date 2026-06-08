@@ -139,7 +139,8 @@ class UsageRecord:
 # --- Adapters ---
 
 class Adapter(ABC):
-    """Parses raw agent output into SessionEvents. Stateless."""
+    """Parses raw agent output into SessionEvents.
+    May track session_id across calls (stateful for session context)."""
 
     @abstractmethod
     def parse(self, raw: bytes | str) -> Iterator[SessionEvent]:
@@ -195,44 +196,69 @@ class EventBus:
 
 ## §4 — Adapters
 
-Each adapter handles one agent SDK's output format. Adapters are **stateless pure transforms** — they don't manage processes, connections, or files. A consumer feeds raw data to the adapter and receives structured events back.
+Each adapter handles one agent SDK's output format. Adapters leverage their respective **SDK packages** for deserialization — avoiding fragile hand-rolled JSON parsing. A consumer feeds raw data to the adapter and receives structured events back.
 
-| Adapter | Input Format | What It Parses |
+### Dependencies
+
+| Package | Version | Purpose |
 | --- | --- | --- |
-| `CopilotSDKAdapter` | Copilot SDK subprocess stdout (JSON lines) | Tool calls, messages, usage, errors |
-| `ClaudeSDKAdapter` | Claude SDK subprocess stdout (JSON lines) | Tool calls, messages, usage, errors |
-| `CLIJsonlAdapter` | `events.jsonl` files from Copilot CLI sessions on disk | Same event types, different wire format |
-| `ClaudeJsonlAdapter` | Claude `session_state/` files on disk | Session transcripts, tool history |
+| `github-copilot-sdk` | `>=0.3.0,<0.4` | Typed deserialization of Copilot events via `SessionEvent.from_dict()` |
+| `claude-code-sdk` | `>=0.0.25,<0.1` | Typed deserialization of Claude messages via `parse_message()` |
+
+### Adapter Table
+
+| Adapter | Input | SDK Entry Point | Interface |
+| --- | --- | --- | --- |
+| `CLIJsonlAdapter` | Copilot `events.jsonl` (raw lines) | `SessionEvent.from_dict()` | `parse(raw)` |
+| `ClaudeJsonlAdapter` | Claude session JSONL (raw lines) | `parse_message()` | `parse(raw)` |
+| `CopilotSDKAdapter` | Live Copilot SDK stream | Inherits from CLIJsonlAdapter | `parse(raw)` + `parse_event(sdk_event)` |
+| `ClaudeSDKAdapter` | Live Claude SDK stream | Inherits from ClaudeJsonlAdapter | `parse(raw)` + `parse_message(sdk_msg)` |
+
+### Dual Interface
+
+Adapters expose two usage patterns:
+
+1. **`parse(raw: bytes | str)`** — JSONL replay mode. Accepts a raw line, deserializes via the SDK internally, and yields `SessionEvent`s. Used for processing log files.
+
+2. **`parse_event()` / `parse_message()`** — Typed SDK object mode. Accepts an already-typed SDK object (e.g., from a live streaming session) and yields `SessionEvent`s. Avoids redundant serialization round-trips.
 
 New adapters (Gemini, custom agents) are added by implementing `Adapter.parse()`. The pipeline doesn't care where events come from.
 
 ### Adapter Contract
 
-- **Never crash.** Unknown fields are ignored. Missing fields produce partial events with a warning logged. Completely unparseable input is skipped with a warning.
-- **Stateless.** No buffering, no memory of previous calls. Each `parse()` call is independent.
-- **Yield zero or more events.** A single line of input may produce zero events (if it's noise) or multiple events (if the format bundles them).
+- **Never crash.** SDK deserialization failures are caught and logged at debug level. Unknown event types are skipped. Completely unparseable input yields zero events.
+- **Stateful session_id tracking.** Adapters track `session_id` across calls since it's only available in specific event types (Copilot: `session.start`, Claude: `result` message).
+- **Yield zero or more events.** A single line of input may produce zero events (noise/skipped) or multiple events (Claude assistant messages with multiple content blocks).
 
-### Reference Implementation: CLIJsonlAdapter
-
-The CLIJsonlAdapter parses Copilot CLI `events.jsonl` files. Each line is a JSON object with a `type` field. Known types and their mappings:
+### Copilot Event Type Mapping
 
 ```python
-EVENT_TYPE_MAP = {
-    "user.message": EventKind.USER_MESSAGE,
-    "assistant.message": EventKind.ASSISTANT_MESSAGE,
-    "tool.start": EventKind.TOOL_START,
-    "tool.complete": EventKind.TOOL_COMPLETE,
-    "file.change": EventKind.FILE_CHANGE,
-    "usage": EventKind.USAGE,
-    "error": EventKind.ERROR,
+_KIND_MAP = {
+    SessionEventType.SESSION_START: EventKind.SESSION_START,
+    SessionEventType.USER_MESSAGE: EventKind.USER_MESSAGE,
+    SessionEventType.ASSISTANT_MESSAGE: EventKind.ASSISTANT_MESSAGE,
+    SessionEventType.TOOL_EXECUTION_START: EventKind.TOOL_START,
+    SessionEventType.TOOL_EXECUTION_COMPLETE: EventKind.TOOL_COMPLETE,
+    SessionEventType.ASSISTANT_USAGE: EventKind.USAGE,
+    SessionEventType.SESSION_SHUTDOWN: EventKind.SESSION_END,
+    SessionEventType.SESSION_ERROR: EventKind.ERROR,
 }
 ```
 
-Unknown `type` values are logged and skipped. The adapter extracts:
-- `timestamp` from the JSON `timestamp` field (ISO 8601)
-- `session_id` from the JSON `session_id` field or filename context
-- Tool name, arguments, results from nested `tool` objects
-- Token counts from `usage` objects
+Skipped types (noise): `turn_start`, `turn_end`, `hook_start`, `hook_end`, `session_info`, `abort`, `system_message`, `external_tool_requested`, `external_tool_completed`.
+
+### Claude Message Type Mapping
+
+| SDK Type | Yields |
+| --- | --- |
+| `UserMessage` (str content) | `USER_MESSAGE` |
+| `UserMessage` (list with `ToolResultBlock`) | `TOOL_COMPLETE` |
+| `AssistantMessage` → `TextBlock` | `ASSISTANT_MESSAGE` |
+| `AssistantMessage` → `ToolUseBlock` | `TOOL_START` |
+| `AssistantMessage` → `ToolResultBlock` | `TOOL_COMPLETE` |
+| `ResultMessage` | `USAGE` (+ `ERROR` if `is_error`) |
+| `SystemMessage` | Skipped |
+| `ThinkingBlock` | Skipped |
 
 ---
 

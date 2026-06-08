@@ -15,6 +15,8 @@ dependencies = [
     "tree-sitter>=0.23",
     "tree-sitter-bash>=0.23",
     "tree-sitter-powershell>=0.23",
+    "github-copilot-sdk>=0.3.0,<0.4",
+    "claude-code-sdk>=0.0.25,<0.1",
 ]
 
 [project.optional-dependencies]

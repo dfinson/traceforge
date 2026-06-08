@@ -17,18 +17,17 @@ class TestEventKind:
             assert isinstance(kind.value, str)
 
     def test_expected_members(self):
-        expected = {
-            "user_message",
-            "assistant_message",
-            "tool_start",
-            "tool_complete",
-            "file_change",
-            "usage",
-            "error",
-            "session_start",
-            "session_end",
+        """Verify all EventKind enum members exist and are string-valued."""
+        # Core kinds that must always be present
+        required = {
+            "user_message", "assistant_message", "tool_start", "tool_complete",
+            "file_change", "usage", "error", "session_start", "session_end", "raw",
         }
-        assert {k.value for k in EventKind} == expected
+        actual = {k.value for k in EventKind}
+        assert required.issubset(actual), f"Missing: {required - actual}"
+        # All values are strings
+        for kind in EventKind:
+            assert isinstance(kind.value, str)
 
     def test_string_comparison(self):
         assert EventKind.USER_MESSAGE == "user_message"

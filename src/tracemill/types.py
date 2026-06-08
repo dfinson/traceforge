@@ -14,15 +14,65 @@ if TYPE_CHECKING:
 
 
 class EventKind(str, Enum):
+    # --- Messages ---
     USER_MESSAGE = "user_message"
     ASSISTANT_MESSAGE = "assistant_message"
+    SYSTEM_MESSAGE = "system_message"
+
+    # --- Tool lifecycle ---
     TOOL_START = "tool_start"
     TOOL_COMPLETE = "tool_complete"
-    FILE_CHANGE = "file_change"
-    USAGE = "usage"
-    ERROR = "error"
+    TOOL_PARTIAL_RESULT = "tool_partial_result"
+    TOOL_PROGRESS = "tool_progress"
+
+    # --- Turn lifecycle ---
+    TURN_START = "turn_start"
+    TURN_END = "turn_end"
+
+    # --- Session lifecycle ---
     SESSION_START = "session_start"
     SESSION_END = "session_end"
+    SESSION_INFO = "session_info"
+    SESSION_WARNING = "session_warning"
+    SESSION_RESUME = "session_resume"
+    SESSION_IDLE = "session_idle"
+
+    # --- Agent reasoning ---
+    ASSISTANT_INTENT = "assistant_intent"
+    ASSISTANT_REASONING = "assistant_reasoning"
+
+    # --- Subagent orchestration ---
+    SUBAGENT_START = "subagent_start"
+    SUBAGENT_COMPLETE = "subagent_complete"
+    SUBAGENT_FAILED = "subagent_failed"
+
+    # --- Hook lifecycle ---
+    HOOK_START = "hook_start"
+    HOOK_END = "hook_end"
+
+    # --- External tool / MCP ---
+    EXTERNAL_TOOL_REQUESTED = "external_tool_requested"
+    EXTERNAL_TOOL_COMPLETED = "external_tool_completed"
+
+    # --- Permissions / user input ---
+    PERMISSION_REQUESTED = "permission_requested"
+    PERMISSION_COMPLETED = "permission_completed"
+    USER_INPUT_REQUESTED = "user_input_requested"
+    USER_INPUT_COMPLETED = "user_input_completed"
+
+    # --- Skill invocation ---
+    SKILL_INVOKED = "skill_invoked"
+
+    # --- Telemetry ---
+    USAGE = "usage"
+    FILE_CHANGE = "file_change"
+
+    # --- Errors / abort ---
+    ERROR = "error"
+    ABORT = "abort"
+
+    # --- Catch-all for unmapped event types ---
+    RAW = "raw"
 
 
 def _uuid4_str() -> str:

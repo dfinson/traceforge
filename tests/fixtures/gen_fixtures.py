@@ -1,4 +1,4 @@
-"""Generate test fixtures with proper UUIDs for SDK parsing."""
+"""Generate JSONL test fixtures for mapped-adapter parsing."""
 
 import json
 import uuid
@@ -291,27 +291,27 @@ with open("tests/fixtures/claude_session.jsonl", "w") as f:
     for line in claude_lines:
         f.write(json.dumps(line) + "\n")
 
-# --- Verify ---
-from copilot.generated.session_events import SessionEvent as CSE  # noqa: E402
+# --- Verify via MappedJsonAdapter ---
+from pathlib import Path  # noqa: E402
+
+from tracemill.adapters.mapped_json import MappedJsonAdapter  # noqa: E402
+
+mappings_dir = Path(__file__).resolve().parent.parent.parent / "src" / "tracemill" / "mappings"
 
 print("Verifying copilot fixture...")
+adapter = MappedJsonAdapter.from_yaml(str(mappings_dir / "copilot.yaml"), session_id="verify")
 with open("tests/fixtures/copilot_session.jsonl") as f:
     for i, raw_line in enumerate(f, 1):
-        obj = json.loads(raw_line)
-        try:
-            CSE.from_dict(obj)
-        except Exception as e:
-            print(f"  Line {i} FAIL: {e}")
+        events = list(adapter.parse(raw_line))
+        if not events:
+            print(f"  Line {i} WARN: no events produced")
 print("  Copilot fixture OK")
 
-from claude_agent_sdk._internal.message_parser import parse_message  # noqa: E402
-
 print("Verifying claude fixture...")
+adapter = MappedJsonAdapter.from_yaml(str(mappings_dir / "claude.yaml"), session_id="verify")
 with open("tests/fixtures/claude_session.jsonl") as f:
     for i, raw_line in enumerate(f, 1):
-        obj = json.loads(raw_line)
-        try:
-            parse_message(obj)
-        except Exception as e:
-            print(f"  Line {i} FAIL: {e}")
+        events = list(adapter.parse(raw_line))
+        if not events:
+            print(f"  Line {i} WARN: no events produced")
 print("  Claude fixture OK")

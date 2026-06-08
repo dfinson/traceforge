@@ -18,24 +18,21 @@ Agent session events → Adapter → Enricher → Pipeline → Storage Sinks
 ## Install
 
 ```bash
-pip install tracemill                    # core (includes pydantic, pyyaml, copilot/claude SDKs)
-pip install tracemill[sqlite]            # with SQLite sink
-pip install tracemill[otel]              # with OpenTelemetry export
-pip install tracemill[all]               # everything including framework SDKs
+pip install tracemill
 ```
 
 ## Quick start
 
 ```python
-from tracemill import EventPipeline, Enricher, CopilotAdapter, CallbackSink
+from tracemill import EventPipeline, Enricher, MappedJsonAdapter, CallbackSink
 
 # Create pipeline
 sink = CallbackSink(on_event=lambda e: print(e.kind, e.payload))
 enricher = Enricher()
 pipeline = EventPipeline(sinks=[sink], enricher=enricher)
 
-# Parse and process events
-adapter = CopilotAdapter(session_id="my-session")
+# Parse and process events (any framework — just point at its YAML mapping)
+adapter = MappedJsonAdapter.from_yaml("src/tracemill/mappings/copilot.yaml", session_id="my-session")
 for line in session_lines:
     for event in adapter.parse(line):
         await pipeline.push(event)
@@ -82,15 +79,15 @@ Adapters parse raw agent output formats into `SessionEvent`:
 
 | Adapter | Input format | Agent |
 | --- | --- | --- |
-| `CopilotAdapter` | JSONL / SDK stream | GitHub Copilot |
-| `ClaudeAdapter` | JSONL / SDK stream | Claude Code |
-| `OtelSpanAdapter` | OTEL span JSON | Any OTEL-instrumented agent |
 | `MappedJsonAdapter` | YAML-driven JSON mapping | Any framework (see below) |
+| `OtelSpanAdapter` | OTEL span JSON | Any OTEL-instrumented agent |
 
 ### YAML-mapped frameworks (via `MappedJsonAdapter`)
 
 | Framework | Source |
 | --- | --- |
+| GitHub Copilot | `github/copilot-sdk` |
+| Claude Code | Anthropic Claude Agent SDK |
 | Cline / Roo Code | `cline/cline` (VS Code extension) |
 | CrewAI | `crewAIInc/crewAI` |
 | LangGraph | `langchain-ai/langchain` |

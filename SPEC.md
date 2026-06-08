@@ -31,7 +31,7 @@ The library doesn't decide what to do with agent events. It parses them, enriche
 ┌─────────────────────────────────────────────────────────────┐
 │                    INPUT ADAPTERS                            │
 │                                                             │
-│  CopilotAdapter      ClaudeAdapter      MappedJsonAdapter   │
+│  MappedJsonAdapter (YAML-driven)    OtelSpanAdapter (MAF spans)  │
 │                                                             │
 │  Each adapter: raw bytes/files → SessionEvent stream        │
 │  Defensive parsing. Unknown fields ignored. Never crash.    │
@@ -260,69 +260,67 @@ Each adapter handles one agent SDK's output format. Adapters leverage their resp
 
 | Package | Version | Purpose |
 | --- | --- | --- |
-| `github-copilot-sdk` | `>=1.0.0,<2` | Typed deserialization of Copilot events via `SessionEvent.from_dict()` |
-| `claude-agent-sdk` | `>=0.2.93,<1` | Typed deserialization of Claude messages via `parse_message()` |
-| `langgraph` | `>=1.2.4,<2` | StreamChannel subscription for LangGraph agents |
-| `pydantic-ai-slim` | `>=1.106.0,<2` | AgentEventStream types for Pydantic AI agents |
-| `smolagents` | `>=1.26.0,<2` | Callback registry types for HuggingFace smolagents |
-| `autogen-agentchat` | `>=0.7.5,<1` | Event bus subscription for Microsoft Agent Framework |
+| `pydantic` | `>=2.0` | Data models, config validation |
+| `pyyaml` | `>=6.0` | YAML mapping and config parsing |
+| `tree-sitter` | `>=0.24` | Shell command classification |
+| `tree-sitter-bash` | `>=0.24` | Bash grammar for classifier |
+| `tree-sitter-powershell` | `>=0.24` | PowerShell grammar for classifier |
+
+No framework SDK dependencies. All frameworks are parsed via declarative YAML mappings.
 
 ### Adapter Table
 
-| Adapter | Input | SDK Entry Point | Interface |
+| Adapter | Input | Mechanism | Interface |
 | --- | --- | --- | --- |
-| `CopilotAdapter(ingestion_mode="file_watch")` | Copilot `events.jsonl` (raw lines) | `SessionEvent.from_dict()` | `parse(raw)` |
-| `CopilotAdapter(ingestion_mode="stream")` | Live Copilot SDK stream | `SessionEvent.from_dict()` | `parse(raw)` + `parse_sdk_event(sdk_event)` |
-| `ClaudeAdapter(ingestion_mode="file_watch")` | Claude session JSONL (raw lines) | `parse_message()` | `parse(raw)` |
-| `ClaudeAdapter(ingestion_mode="stream")` | Live Claude SDK stream | `parse_message()` | `parse(raw)` + `parse_message(sdk_msg)` |
-| `MappedJsonAdapter` | YAML-driven JSON parsing | N/A | `parse(raw)` |
+| `MappedJsonAdapter` + `copilot.yaml` | Copilot `events.jsonl` | YAML dot-path extraction | `parse(raw)` |
+| `MappedJsonAdapter` + `claude.yaml` | Claude session JSONL | YAML + `claude` preprocessor | `parse(raw)` |
+| `MappedJsonAdapter` + `*.yaml` | Any YAML-mapped framework | YAML dot-path extraction | `parse(raw)` |
+| `OtelSpanAdapter` | OTel span JSON | YAML span mapping (`maf.yaml`) | `parse(raw)` / `parse_span(dict)` |
 
-### Dual Interface
+### Unified Interface
 
-Adapters expose two usage patterns:
+Adapters expose one usage pattern:
 
-1. **`parse(raw: bytes | str)`** — JSONL replay mode. Accepts a raw line, deserializes via the SDK internally, and yields `SessionEvent`s. Used for processing log files.
+- **`parse(raw: bytes | str)`** -- Accepts a raw JSON line, maps via YAML dot-paths, and yields `SessionEvent`s.
 
-2. **`parse_event()` / `parse_message()`** — Typed SDK object mode. Accepts an already-typed SDK object (e.g., from a live streaming session) and yields `SessionEvent`s. Avoids redundant serialization round-trips.
-
-New adapters (Gemini, custom agents) are added by implementing `Adapter.parse()`. The pipeline doesn't care where events come from.
+New frameworks are added by writing a YAML mapping file (no Python code required). Complex event shapes (e.g., Claude's nested content blocks) use a preprocessor to flatten into individual dicts before YAML mapping.
 
 ### Adapter Contract
 
-- **Never crash.** SDK deserialization failures are caught and logged at debug level. Unknown event types are skipped. Completely unparseable input yields zero events.
-- **Stateful session_id tracking.** Adapters track `session_id` across calls since it's only available in specific event types (Copilot: `session.start`, Claude: `result` message).
-- **Yield zero or more events.** A single line of input may produce zero events (noise/skipped) or multiple events (Claude assistant messages with multiple content blocks).
+- **Never crash.** JSON parse failures are caught and logged at debug level. Unknown event types map to `default_kind` (either `raw` or silently skipped when `default_kind: ""`). Completely unparseable input yields zero events.
+- **Constructor session_id.** The `session_id` is set at construction time and applied to all events.
+- **Yield zero or more events.** A single line of input may produce zero events (noise/skipped) or multiple events (Claude assistant messages with multiple content blocks, via preprocessor).
 
 ### Copilot Event Type Mapping
 
-```python
-_KIND_MAP = {
-    SessionEventType.SESSION_START: EventKind.SESSION_STARTED,
-    SessionEventType.SESSION_SHUTDOWN: EventKind.SESSION_ENDED,
-    SessionEventType.USER_MESSAGE: EventKind.MESSAGE_USER,
-    SessionEventType.ASSISTANT_MESSAGE: EventKind.MESSAGE_ASSISTANT,
-    SessionEventType.TOOL_EXECUTION_START: EventKind.TOOL_CALL_STARTED,
-    SessionEventType.TOOL_EXECUTION_COMPLETE: EventKind.TOOL_CALL_COMPLETED,
-    SessionEventType.ASSISTANT_USAGE: EventKind.USAGE,
-    SessionEventType.SESSION_ERROR: EventKind.ERROR,
-    # ... 30+ additional mappings for turn, hook, agent, permission events
-}
-```
+Defined in `mappings/copilot.yaml`. Wire format: `{type, id, timestamp, data: {...}}`.
 
-All event types are preserved — nothing is skipped. Unmapped types emit as `EventKind.RAW`.
+| Wire Type | Canonical Kind |
+| --- | --- |
+| `session.start` | `session.started` |
+| `session.shutdown` | `session.ended` |
+| `user.message` | `message.user` |
+| `assistant.message` | `message.assistant` |
+| `tool.execution_start` | `tool.call.started` |
+| `tool.execution_complete` | `tool.call.completed` |
+| `assistant.usage` | `telemetry.usage` |
+| `session.error` | `session.error` |
+
+Plus 20+ additional mappings for turn, hook, agent, permission, skill, and input events. Unmapped types emit as `raw`.
 
 ### Claude Message Type Mapping
 
-| SDK Type | Yields |
+Defined in `mappings/claude.yaml` with `claude` preprocessor. Wire format varies by message type.
+
+| Preprocessed Block Type | Canonical Kind |
 | --- | --- |
-| `UserMessage` (str content) | `message.user` |
-| `UserMessage` (list with `ToolResultBlock`) | `tool.call.completed` |
-| `AssistantMessage` → `TextBlock` | `message.assistant` |
-| `AssistantMessage` → `ToolUseBlock` | `tool.call.started` |
-| `AssistantMessage` → `ToolResultBlock` | `tool.call.completed` |
-| `AssistantMessage` → `ThinkingBlock` | `llm.thinking.chunk` |
-| `ResultMessage` | `usage` (+ `error` if `is_error`) |
-| `SystemMessage` | Skipped (logged at debug level) |
+| `user.text` | `message.user` |
+| `assistant.text` | `message.assistant` |
+| `assistant.tool_use` | `tool.call.started` |
+| `assistant.tool_result` | `tool.call.completed` |
+| `assistant.thinking` | `llm.thinking.chunk` |
+| `result` | `telemetry.usage` |
+| `system` | Silently skipped (`default_kind: ""`) |
 
 ### §4.1 — Target Framework Coverage
 
@@ -330,19 +328,19 @@ The event taxonomy is designed to accommodate all major agent frameworks:
 
 | Framework | Ingestion Mode | Status |
 |---|---|---|
-| **GitHub Copilot** | `stream` (SDK), `file_watch` (events.jsonl) | ✅ Implemented |
-| **Claude Code** | `stream` (SDK), `file_watch` (session JSONL) | ✅ Implemented |
-| **Aider** | `file_watch` (markdown logs), `poll` (PostHog) | 🔲 Planned |
-| **OpenHands** | `poll` (REST API), `file_watch` (JSON per event) | 🔲 Planned |
-| **SWE-agent** | `file_watch` (trajectory JSON) | 🔲 Planned |
-| **Codex CLI** | `stream` (Rust protocol) | 🔲 Planned |
-| **Cline / Roo Code** | `stream` (gRPC), `file_watch` (VS Code storage) | 🔲 Planned |
-| **CrewAI** | `stream` (event bus listener) | 🔲 Planned |
-| **LangGraph** | `stream` (StreamChannel) | 🔲 Planned |
-| **MS Agent Framework** | `stream` (in-memory events) | 🔲 Planned |
-| **Pydantic AI** | `stream` (AgentEventStream) | 🔲 Planned |
-| **Goose** | `poll` (SQLite), `stream` (hooks) | 🔲 Planned |
-| **Smolagents** | `stream` (callback registry) | 🔲 Planned |
+| **GitHub Copilot** | `file_watch` (events.jsonl) | ✅ YAML-mapped (`copilot.yaml`) |
+| **Claude Code** | `file_watch` (session JSONL) | ✅ YAML-mapped (`claude.yaml` + preprocessor) |
+| **Aider** | `file_watch` (markdown logs) | ✅ YAML-mapped (`aider_markdown.yaml` + AiderPreParser) |
+| **OpenHands** | `file_watch` (JSON per event) | ✅ YAML-mapped (`openhands.yaml` + preprocessor) |
+| **SWE-agent** | `file_watch` (trajectory JSON) | ✅ YAML-mapped (`sweagent.yaml`) |
+| **Cline / Roo Code** | `file_watch` (VS Code storage) | ✅ YAML-mapped (`cline.yaml` + preprocessor) |
+| **CrewAI** | `file_watch` (event logs) | ✅ YAML-mapped (`crewai.yaml`) |
+| **LangGraph** | `file_watch` (event logs) | ✅ YAML-mapped (`langgraph.yaml`) |
+| **MS Agent Framework** | `stream` (OTel spans) | ✅ YAML-mapped (`maf.yaml` + OtelSpanAdapter) |
+| **Pydantic AI** | `file_watch` (event logs) | ✅ YAML-mapped (`pydantic_ai.yaml` + preprocessor) |
+| **Goose** | `file_watch` (session logs) | ✅ YAML-mapped (`goose.yaml` + preprocessor) |
+| **Smolagents** | `file_watch` (step logs) | ✅ YAML-mapped (`smolagents.yaml` + preprocessor) |
+| **OpenCode** | `file_watch` (SSE logs) | ✅ YAML-mapped (`opencode.yaml`) |
 
 New adapters implement `Adapter.parse()` and map framework events → canonical `EventKind` strings.
 
@@ -596,8 +594,8 @@ This library is extracted from [CodePlane](https://github.com/dfinson/codeplane)
 | `Enricher` | `backend/services/events/event_enricher.py` | None — already a pure stateful class |
 | `EventPipeline` | `backend/services/events/event_pipeline.py` | Remove `_db_*` methods, inject `StorageSink` list |
 | `density.py` | `backend/services/events/story/review.py` | None — pure functions |
-| `CopilotAdapter(ingestion_mode="stream")` | `backend/services/adapters/copilot_adapter.py` `.stream_events()` parsing | Decouple from subprocess management |
-| `CopilotAdapter(ingestion_mode="file_watch")` | `backend/services/watcher/copilot.py` `._process_new_events()` | Decouple from file tailing |
+| `MappedJsonAdapter` + `copilot.yaml` | `backend/services/adapters/copilot_adapter.py` `.stream_events()` parsing | Decouple from subprocess management |
+| `MappedJsonAdapter` + `copilot.yaml` | `backend/services/watcher/copilot.py` `._process_new_events()` | Decouple from file tailing |
 | `EventBus` | `backend/services/events/event_bus.py` | None — already fully generic |
 | OTEL instruments | `backend/services/analytics/telemetry.py` | None — already standard OTEL |
 | `SQLiteSink` | `backend/persistence/telemetry_*_repo.py` | Consolidate into single sink, remove SQLAlchemy |
@@ -608,7 +606,7 @@ CodePlane then depends on tracemill instead of owning the code. Its EventProcess
 
 ### §8.1 — Relationship to memrelay
 
-[memrelay](https://github.com/dfinson/memrelay) is the first standalone consumer of tracemill. It implements a `GraphitiSink` (a `StorageSink` subclass) that feeds enriched events into a Graphiti knowledge graph for persistent memory. memrelay also uses tracemill's `CopilotAdapter(ingestion_mode="file_watch")` to parse Copilot CLI session files.
+[memrelay](https://github.com/dfinson/memrelay) is the first standalone consumer of tracemill. It implements a `GraphitiSink` (a `StorageSink` subclass) that feeds enriched events into a Graphiti knowledge graph for persistent memory. memrelay uses tracemill's `MappedJsonAdapter` with `copilot.yaml` to parse Copilot CLI session files.
 
 The boundary is clean: tracemill handles parsing, enrichment, and pipeline orchestration. memrelay handles daemon lifecycle, Graphiti integration, MCP tools, and memory retrieval.
 
@@ -696,8 +694,7 @@ otel = [
     "opentelemetry-sdk>=1.20",
 ]
 all = [
-    "tracemill[sqlite]",
-    "tracemill[otel]",
+    "tracemill",
 ]
 dev = [
     "pytest>=8.0",
@@ -912,10 +909,10 @@ steps:
 
 ### Step 3: Adapters
 
-- `CopilotAdapter(ingestion_mode="file_watch")` — extract from CodePlane's `SessionStateWatcher._process_new_events()`
-- `CopilotAdapter(ingestion_mode="stream")` — extract from CodePlane's `CopilotAdapter.stream_events()` parsing
-- `ClaudeAdapter(ingestion_mode="stream")` — extract from CodePlane's `ClaudeAdapter` parsing
-- `ClaudeAdapter(ingestion_mode="file_watch")` — extract from CodePlane's `ClaudeSessionStateWatcher`
+- `MappedJsonAdapter` + `copilot.yaml` -- extract from CodePlane's `SessionStateWatcher._process_new_events()`
+- `MappedJsonAdapter` + `copilot.yaml` -- extract from CodePlane's `CopilotAdapter.stream_events()` parsing
+- `MappedJsonAdapter` + `claude.yaml` -- extract from CodePlane's `ClaudeAdapter` parsing
+- `MappedJsonAdapter` + `claude.yaml` -- extract from CodePlane's `ClaudeSessionStateWatcher`
 - Capture real session fixtures for each format
 - Defensive parsing tests (malformed input)
 

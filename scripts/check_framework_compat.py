@@ -16,69 +16,35 @@ from importlib.metadata import version as pkg_version
 
 
 def check_copilot() -> list[str]:
-    """Verify Copilot SDK exports the types we use."""
-    errors: list[str] = []
-    try:
-        from copilot.generated.session_events import (  # noqa: F401
-            AssistantMessageData,
-            AssistantUsageData,
-            SessionEventType,
-            SessionShutdownData,
-            SessionStartData,
-            ToolExecutionCompleteData,
-            ToolExecutionStartData,
-            UserMessageData,
-        )
-        from copilot.generated.session_events import SessionEvent as CopilotSessionEvent
-    except ImportError as e:
-        errors.append(f"Missing import: {e}")
-        return errors
-
-    # Verify SessionEvent has from_dict
-    if not hasattr(CopilotSessionEvent, "from_dict"):
-        errors.append("CopilotSessionEvent.from_dict() method missing")
-
-    # Verify SessionEventType has expected values
-    expected_types = [
-        "SESSION_START",
-        "SESSION_SHUTDOWN",
-        "USER_MESSAGE",
-        "ASSISTANT_MESSAGE",
-        "TOOL_EXECUTION_START",
-        "TOOL_EXECUTION_COMPLETE",
-        "ASSISTANT_USAGE",
-        "ASSISTANT_TURN_START",
-        "ASSISTANT_TURN_END",
-    ]
-    for t in expected_types:
-        if not hasattr(SessionEventType, t):
-            errors.append(f"SessionEventType.{t} missing")
-
-    return errors
+    """Verify Copilot YAML mapping can parse a representative event."""
+    return _validate_mapping_with_sample(
+        "copilot",
+        {
+            "type": "session.start",
+            "id": "test-id",
+            "timestamp": "2024-01-01T00:00:00Z",
+            "data": {
+                "sessionId": "sess-1",
+                "selectedModel": "gpt-4",
+                "copilotVersion": "1.0",
+                "startTime": "2024-01-01T00:00:00Z",
+                "version": 1,
+                "producer": "copilot-cli",
+                "context": {"cwd": "/tmp"},
+            },
+        },
+    )
 
 
 def check_claude() -> list[str]:
-    """Verify Claude SDK exports the types we use."""
-    errors: list[str] = []
-    try:
-        from claude_agent_sdk import (  # noqa: F401
-            AssistantMessage,
-            Message,
-            ResultMessage,
-            SystemMessage,
-            UserMessage,
-        )
-        from claude_agent_sdk.types import TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock  # noqa: F401
-    except ImportError as e:
-        errors.append(f"Missing import: {e}")
-        return errors
-
-    try:
-        from claude_agent_sdk._internal.message_parser import MessageParseError, parse_message  # noqa: F401
-    except ImportError as e:
-        errors.append(f"Internal parser missing: {e}")
-
-    return errors
+    """Verify Claude YAML mapping can parse a representative event."""
+    return _validate_mapping_with_sample(
+        "claude",
+        {
+            "type": "user",
+            "message": {"content": "hello world"},
+        },
+    )
 
 
 def check_langgraph() -> list[str]:

@@ -16,10 +16,6 @@ jobs:
       fail-fast: false
       matrix:
         framework:
-          - name: copilot
-            package: github-copilot-sdk
-          - name: claude
-            package: claude-agent-sdk
           - name: langgraph
             package: langgraph
           - name: pydantic-ai

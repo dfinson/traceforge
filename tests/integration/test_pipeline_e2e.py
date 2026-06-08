@@ -11,16 +11,19 @@ from pathlib import Path
 
 import pytest
 
-from tracemill import (
-    ClaudeAdapter,
-    CopilotAdapter,
-    Enricher,
-    EventKind,
-    SessionEvent,
-)
-from tracemill.adapters.mapped_json import FrameworkMapping, EventMapping, MappedJsonAdapter
+from tracemill import Enricher, EventKind, SessionEvent
+from tracemill.adapters.mapped_json import EventMapping, FrameworkMapping, MappedJsonAdapter
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
+MAPPINGS_DIR = Path(__file__).resolve().parents[2] / "src" / "tracemill" / "mappings"
+
+
+def _copilot_adapter(session_id: str = "test-session") -> MappedJsonAdapter:
+    return MappedJsonAdapter.from_yaml(str(MAPPINGS_DIR / "copilot.yaml"), session_id=session_id)
+
+
+def _claude_adapter(session_id: str = "test-session") -> MappedJsonAdapter:
+    return MappedJsonAdapter.from_yaml(str(MAPPINGS_DIR / "claude.yaml"), session_id=session_id)
 
 
 def _uid() -> str:
@@ -49,7 +52,7 @@ class TestCopilotFullPipeline:
     """End-to-end: Copilot JSONL fixture → adapter → enricher → sink."""
 
     def test_fixture_through_enricher(self):
-        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
+        adapter = _copilot_adapter()
         enricher = Enricher()
         fixture = FIXTURES / "copilot_session.jsonl"
 
@@ -78,7 +81,7 @@ class TestCopilotFullPipeline:
 
     def test_raw_event_preserved(self):
         """Every event carries the original JSON verbatim in raw_event."""
-        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
+        adapter = _copilot_adapter()
         fixture = FIXTURES / "copilot_session.jsonl"
 
         for line in fixture.read_text().splitlines():
@@ -88,35 +91,12 @@ class TestCopilotFullPipeline:
                 # raw_event should be the original parsed JSON
                 assert "type" in ev.raw_event
 
-    def test_stream_mode_sets_metadata(self):
-        """CopilotAdapter(ingestion_mode='stream') sets correct metadata."""
-        from tracemill.adapters.copilot import CopilotAdapter
-
-        file_adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
-        stream_adapter = CopilotAdapter(ingestion_mode="stream", session_id="test-session")
-        fixture = FIXTURES / "copilot_session.jsonl"
-
-        file_events = []
-        stream_events = []
-        for line in fixture.read_text().splitlines():
-            file_events.extend(file_adapter.parse(line))
-            stream_events.extend(stream_adapter.parse(line))
-
-        assert len(file_events) == len(stream_events)
-        for f, s in zip(file_events, stream_events):
-            assert f.kind == s.kind
-            assert f.payload == s.payload
-            assert f.session_id == s.session_id
-            # Metadata differs by ingestion mode
-            assert f.metadata.ingestion_mode == "file_watch"
-            assert s.metadata.ingestion_mode == "stream"
-
 
 class TestClaudeFullPipeline:
     """End-to-end: Claude JSONL fixture → adapter → enricher → sink."""
 
     def test_fixture_through_enricher(self):
-        adapter = ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session")
+        adapter = _claude_adapter()
         enricher = Enricher()
         fixture = FIXTURES / "claude_session.jsonl"
 
@@ -132,27 +112,6 @@ class TestClaudeFullPipeline:
         # All have metadata
         for ev in enriched:
             assert ev.metadata.source_framework == "claude"
-
-    def test_stream_mode_sets_metadata(self):
-        """ClaudeAdapter(ingestion_mode='stream') sets correct metadata."""
-        from tracemill.adapters.claude import ClaudeAdapter
-
-        file_adapter = ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session")
-        stream_adapter = ClaudeAdapter(ingestion_mode="stream", session_id="test-session")
-        fixture = FIXTURES / "claude_session.jsonl"
-
-        file_events = []
-        stream_events = []
-        for line in fixture.read_text().splitlines():
-            file_events.extend(file_adapter.parse(line))
-            stream_events.extend(stream_adapter.parse(line))
-
-        assert len(file_events) == len(stream_events)
-        for f, s in zip(file_events, stream_events):
-            assert f.kind == s.kind
-            assert f.payload == s.payload
-
-            assert s.metadata.ingestion_mode == "stream"
 
 
 class TestMappedJsonFullPipeline:
@@ -550,12 +509,12 @@ class TestCrossAdapterConsistency:
         events = []
 
         # Copilot
-        copilot = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
+        copilot = _copilot_adapter()
         for line in (FIXTURES / "copilot_session.jsonl").read_text().splitlines():
             events.extend(copilot.parse(line))
 
         # Claude
-        claude = ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session")
+        claude = _claude_adapter()
         for line in (FIXTURES / "claude_session.jsonl").read_text().splitlines():
             events.extend(claude.parse(line))
 
@@ -643,7 +602,7 @@ class TestEnricherIntegration:
 
     def test_tool_pairing_copilot(self):
         """Enricher pairs Copilot tool start/complete and computes duration."""
-        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
+        adapter = _copilot_adapter()
         enricher = Enricher()
 
         start = json.dumps(
@@ -704,7 +663,7 @@ class TestEnricherIntegration:
 
     def test_flush_emits_unpaired(self):
         """Unpaired tool starts are emitted on flush."""
-        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
+        adapter = _copilot_adapter()
         enricher = Enricher()
 
         session_start = json.dumps(
@@ -756,8 +715,8 @@ class TestAdapterRobustness:
     @pytest.mark.parametrize(
         "make_adapter",
         [
-            lambda: CopilotAdapter(ingestion_mode="file_watch", session_id="test-session"),
-            lambda: ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session"),
+            lambda: _copilot_adapter(),
+            lambda: _claude_adapter(),
         ],
     )
     def test_empty_input(self, make_adapter):
@@ -769,8 +728,8 @@ class TestAdapterRobustness:
     @pytest.mark.parametrize(
         "make_adapter",
         [
-            lambda: CopilotAdapter(ingestion_mode="file_watch", session_id="test-session"),
-            lambda: ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session"),
+            lambda: _copilot_adapter(),
+            lambda: _claude_adapter(),
         ],
     )
     def test_garbage_input(self, make_adapter):
@@ -781,8 +740,8 @@ class TestAdapterRobustness:
     @pytest.mark.parametrize(
         "make_adapter",
         [
-            lambda: CopilotAdapter(ingestion_mode="file_watch", session_id="test-session"),
-            lambda: ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session"),
+            lambda: _copilot_adapter(),
+            lambda: _claude_adapter(),
         ],
     )
     def test_non_dict_json(self, make_adapter):
@@ -818,7 +777,7 @@ class TestAdapterRobustness:
 
     def test_copilot_unknown_event_type(self):
         """Unknown Copilot event types emit as RAW."""
-        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
+        adapter = _copilot_adapter()
         line = json.dumps(
             {
                 "type": "future.new_feature",
@@ -833,7 +792,7 @@ class TestAdapterRobustness:
 
     def test_claude_system_message_handling(self):
         """Claude system messages are handled gracefully."""
-        adapter = ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session")
+        adapter = _claude_adapter()
         line = json.dumps({"type": "system", "message": {"content": "System prompt here"}})
         events = list(adapter.parse(line))
         # System messages may be skipped or emitted as system

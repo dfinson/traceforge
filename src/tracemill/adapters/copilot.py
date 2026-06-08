@@ -85,8 +85,8 @@ class CopilotAdapter(JsonLineAdapter):
     by the ``ingestion_mode`` constructor parameter.
     """
 
-    def __init__(self, ingestion_mode: IngestionMode) -> None:
-        self._session_id: str | None = None
+    def __init__(self, ingestion_mode: IngestionMode, session_id: str) -> None:
+        self._session_id = session_id
         self._ingestion_mode = ingestion_mode
 
     def parse_dict(self, obj: dict[str, Any]) -> Iterator[SessionEvent]:
@@ -104,23 +104,18 @@ class CopilotAdapter(JsonLineAdapter):
         yield from self._convert(sdk_event)
 
     def _convert(self, sdk_event: CopilotSessionEvent) -> Iterator[SessionEvent]:
-        if isinstance(sdk_event.data, SessionStartData):
-            self._session_id = sdk_event.data.session_id
-
         kind = _KIND_MAP.get(sdk_event.type, EventKind.RAW)
-        session_id = self._session_id or "unknown"
         timestamp = sdk_event.timestamp if sdk_event.timestamp else datetime.now(timezone.utc)
         payload = self._extract_payload(sdk_event.data, sdk_event.type, kind)
         metadata = EventMetadata(
             source_framework="copilot",
-            source_adapter="copilot",
             ingestion_mode=self._ingestion_mode,
             raw_kind=sdk_event.type.value,
         )
 
         yield SessionEvent(
             kind=kind,
-            session_id=session_id,
+            session_id=self._session_id,
             timestamp=timestamp,
             payload=payload,
             metadata=metadata,

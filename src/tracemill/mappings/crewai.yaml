@@ -6,7 +6,6 @@ framework: crewai
 ingestion_mode: file_watch
 type_field: type
 timestamp_field: timestamp
-session_field: event_id
 
 events:
   # Agent lifecycle

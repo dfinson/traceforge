@@ -6,7 +6,6 @@ framework: goose
 ingestion_mode: poll
 type_field: role
 timestamp_field: created_at
-session_field: session_id
 
 events:
   user:

@@ -66,7 +66,6 @@ class FrameworkMapping(BaseModel):
     ingestion_mode: IngestionMode  # must be explicit in YAML
     type_field: str = "type"  # dot-path to event type in raw JSON
     timestamp_field: str | None = None  # dot-path to timestamp
-    session_field: str | None = None  # dot-path to session ID
     default_kind: str = EventKind.RAW  # kind for unmapped event types
     events: dict[str, EventMapping] = Field(default_factory=dict)  # raw_type → mapping
 
@@ -81,7 +80,7 @@ class MappedJsonAdapter(JsonLineAdapter):
     for a new framework requires only a YAML mapping file, not Python code.
     """
 
-    def __init__(self, mapping: FrameworkMapping, session_id: str | None = None):
+    def __init__(self, mapping: FrameworkMapping, session_id: str):
         self._mapping = mapping
         self._session_id = session_id
 
@@ -108,13 +107,6 @@ class MappedJsonAdapter(JsonLineAdapter):
             if ts_raw is not None:
                 timestamp = self._parse_timestamp(ts_raw)
 
-        # Extract session ID
-        if self._mapping.session_field:
-            sid = _resolve_path(obj, self._mapping.session_field)
-            if sid is not None:
-                self._session_id = str(sid)
-        session_id = self._session_id or "unknown"
-
         # Extract payload
         payload: dict[str, Any] = {}
         if event_mapping and event_mapping.payload:
@@ -129,14 +121,13 @@ class MappedJsonAdapter(JsonLineAdapter):
 
         metadata = EventMetadata(
             source_framework=self._mapping.framework,
-            source_adapter="mapped_json",
             ingestion_mode=self._mapping.ingestion_mode,
             raw_kind=raw_type,
         )
 
         yield SessionEvent(
             kind=kind,
-            session_id=session_id,
+            session_id=self._session_id,
             timestamp=timestamp,
             payload=payload,
             metadata=metadata,
@@ -161,7 +152,7 @@ class MappedJsonAdapter(JsonLineAdapter):
         return datetime.now(timezone.utc)
 
     @classmethod
-    def from_yaml(cls, yaml_path: str, session_id: str | None = None) -> "MappedJsonAdapter":
+    def from_yaml(cls, yaml_path: str, session_id: str) -> "MappedJsonAdapter":
         """Load a MappedJsonAdapter from a YAML mapping file."""
         import yaml
 

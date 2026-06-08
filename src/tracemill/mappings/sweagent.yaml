@@ -6,7 +6,6 @@ framework: sweagent
 ingestion_mode: file_watch
 type_field: role
 timestamp_field: timestamp
-session_field: trajectory_id
 
 events:
   # Agent actions

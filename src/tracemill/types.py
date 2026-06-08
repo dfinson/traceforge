@@ -183,7 +183,6 @@ class EventMetadata(BaseModel):
 
     # --- Source provenance ---
     source_framework: str | None = None  # "copilot", "claude", "aider", "cline", etc.
-    source_adapter: str | None = None  # adapter class that produced this event
     ingestion_mode: IngestionMode | None = None
     raw_kind: str | None = None  # original framework-specific event type
 

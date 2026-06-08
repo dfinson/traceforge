@@ -51,7 +51,7 @@ class TestCopilotFullPipeline:
     """End-to-end: Copilot JSONL fixture → adapter → enricher → sink."""
 
     def test_fixture_through_enricher(self):
-        adapter = CopilotAdapter(ingestion_mode="file_watch")
+        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
         enricher = Enricher()
         fixture = FIXTURES / "copilot_session.jsonl"
 
@@ -77,11 +77,10 @@ class TestCopilotFullPipeline:
         # All events have metadata
         for ev in enriched:
             assert ev.metadata.source_framework == "copilot"
-            assert ev.metadata.source_adapter == "copilot"
 
     def test_raw_event_preserved(self):
         """Every event carries the original JSON verbatim in raw_event."""
-        adapter = CopilotAdapter(ingestion_mode="file_watch")
+        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
         fixture = FIXTURES / "copilot_session.jsonl"
 
         for line in fixture.read_text().splitlines():
@@ -95,8 +94,8 @@ class TestCopilotFullPipeline:
         """CopilotAdapter(ingestion_mode='stream') sets correct metadata."""
         from tracemill.adapters.copilot import CopilotAdapter
 
-        file_adapter = CopilotAdapter(ingestion_mode="file_watch")
-        stream_adapter = CopilotAdapter(ingestion_mode="stream")
+        file_adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
+        stream_adapter = CopilotAdapter(ingestion_mode="stream", session_id="test-session")
         fixture = FIXTURES / "copilot_session.jsonl"
 
         file_events = []
@@ -111,9 +110,7 @@ class TestCopilotFullPipeline:
             assert f.payload == s.payload
             assert f.session_id == s.session_id
             # Metadata differs by ingestion mode
-            assert f.metadata.source_adapter == "copilot"
             assert f.metadata.ingestion_mode == "file_watch"
-            assert s.metadata.source_adapter == "copilot"
             assert s.metadata.ingestion_mode == "stream"
 
 
@@ -121,7 +118,7 @@ class TestClaudeFullPipeline:
     """End-to-end: Claude JSONL fixture → adapter → enricher → sink."""
 
     def test_fixture_through_enricher(self):
-        adapter = ClaudeAdapter(ingestion_mode="file_watch")
+        adapter = ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session")
         enricher = Enricher()
         fixture = FIXTURES / "claude_session.jsonl"
 
@@ -142,8 +139,8 @@ class TestClaudeFullPipeline:
         """ClaudeAdapter(ingestion_mode='stream') sets correct metadata."""
         from tracemill.adapters.claude import ClaudeAdapter
 
-        file_adapter = ClaudeAdapter(ingestion_mode="file_watch")
-        stream_adapter = ClaudeAdapter(ingestion_mode="stream")
+        file_adapter = ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session")
+        stream_adapter = ClaudeAdapter(ingestion_mode="stream", session_id="test-session")
         fixture = FIXTURES / "claude_session.jsonl"
 
         file_events = []
@@ -156,8 +153,7 @@ class TestClaudeFullPipeline:
         for f, s in zip(file_events, stream_events):
             assert f.kind == s.kind
             assert f.payload == s.payload
-            assert f.metadata.source_adapter == "claude"
-            assert s.metadata.source_adapter == "claude"
+
             assert s.metadata.ingestion_mode == "stream"
 
 
@@ -167,7 +163,8 @@ class TestMappedJsonFullPipeline:
     @pytest.fixture
     def crewai_adapter(self):
         return MappedJsonAdapter.from_yaml(
-            str(Path(__file__).resolve().parents[1] / ".." / "src" / "tracemill" / "mappings" / "crewai.yaml")
+            str(Path(__file__).resolve().parents[1] / ".." / "src" / "tracemill" / "mappings" / "crewai.yaml"),
+            session_id="test-session",
         )
 
     def test_crewai_session_lifecycle(self, crewai_adapter):
@@ -203,13 +200,13 @@ class TestMappedJsonFullPipeline:
         # All have consistent framework metadata
         for ev in all_events:
             assert ev.metadata.source_framework == "crewai"
-            assert ev.metadata.source_adapter == "mapped_json"
             assert ev.metadata.ingestion_mode == "file_watch"
 
     def test_openhands_session(self):
         """Simulate an OpenHands session: message → think → command → file edit."""
         adapter = MappedJsonAdapter.from_yaml(
-            str(Path(__file__).resolve().parents[1] / ".." / "src" / "tracemill" / "mappings" / "openhands.yaml")
+            str(Path(__file__).resolve().parents[1] / ".." / "src" / "tracemill" / "mappings" / "openhands.yaml"),
+            session_id="test-session",
         )
         events_raw = [
             {"event_type": "MessageAction", "timestamp": 1717232400, "session_id": "oh-1", "content": "Fix the bug in main.py", "role": "user"},
@@ -235,15 +232,16 @@ class TestMappedJsonFullPipeline:
         assert kinds[5] == "file.edited"
         assert kinds[6] == "session.ended"
 
-        # Session ID tracked
+        # Session ID from constructor
         for ev in all_events:
-            assert ev.session_id == "oh-1"
+            assert ev.session_id == "test-session"
             assert ev.metadata.source_framework == "openhands"
 
     def test_cline_session(self):
         """Simulate a Cline/Roo Code session."""
         adapter = MappedJsonAdapter.from_yaml(
-            str(Path(__file__).resolve().parents[1] / ".." / "src" / "tracemill" / "mappings" / "cline.yaml")
+            str(Path(__file__).resolve().parents[1] / ".." / "src" / "tracemill" / "mappings" / "cline.yaml"),
+            session_id="test-session",
         )
         events_raw = [
             {"type": "say", "ts": "2024-06-01T10:00:00Z", "taskId": "cline-1", "text": "I'll fix that for you"},
@@ -272,12 +270,13 @@ class TestMappedJsonFullPipeline:
         assert all_events[2].payload["cost"] == 0.003
 
         for ev in all_events:
-            assert ev.session_id == "cline-1"
+            assert ev.session_id == "test-session"
 
     def test_aider_session(self):
         """Simulate an Aider session."""
         adapter = MappedJsonAdapter.from_yaml(
-            str(Path(__file__).resolve().parents[1] / ".." / "src" / "tracemill" / "mappings" / "aider.yaml")
+            str(Path(__file__).resolve().parents[1] / ".." / "src" / "tracemill" / "mappings" / "aider.yaml"),
+            session_id="test-session",
         )
         events_raw = [
             {"event": "session_start", "timestamp": "2024-06-01T10:00:00Z", "session_id": "aid-1", "main_model": "gpt-4", "cwd": "/project"},
@@ -311,7 +310,8 @@ class TestMappedJsonFullPipeline:
     def test_goose_session(self):
         """Simulate Goose events from SQLite rows."""
         adapter = MappedJsonAdapter.from_yaml(
-            str(Path(__file__).resolve().parents[1] / ".." / "src" / "tracemill" / "mappings" / "goose.yaml")
+            str(Path(__file__).resolve().parents[1] / ".." / "src" / "tracemill" / "mappings" / "goose.yaml"),
+            session_id="test-session",
         )
         events_raw = [
             {"role": "user", "created_at": 1717232400, "session_id": "goose-1", "content": "Help me refactor"},
@@ -333,7 +333,7 @@ class TestMappedJsonFullPipeline:
 
         assert all_events[1].payload["tool_name"] == "shell"
         for ev in all_events:
-            assert ev.session_id == "goose-1"
+            assert ev.session_id == "test-session"
             assert ev.metadata.ingestion_mode == "poll"
 
 
@@ -348,18 +348,19 @@ class TestCrossAdapterConsistency:
         events = []
 
         # Copilot
-        copilot = CopilotAdapter(ingestion_mode="file_watch")
+        copilot = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
         for line in (FIXTURES / "copilot_session.jsonl").read_text().splitlines():
             events.extend(copilot.parse(line))
 
         # Claude
-        claude = ClaudeAdapter(ingestion_mode="file_watch")
+        claude = ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session")
         for line in (FIXTURES / "claude_session.jsonl").read_text().splitlines():
             events.extend(claude.parse(line))
 
         # MappedJson (CrewAI)
         crewai = MappedJsonAdapter.from_yaml(
-            str(Path(__file__).resolve().parents[1] / ".." / "src" / "tracemill" / "mappings" / "crewai.yaml")
+            str(Path(__file__).resolve().parents[1] / ".." / "src" / "tracemill" / "mappings" / "crewai.yaml"),
+            session_id="test-session",
         )
         events.extend(crewai.parse(json.dumps({
             "type": "TaskStartedEvent", "timestamp": "2024-06-01T10:00:00Z",
@@ -424,7 +425,7 @@ class TestEnricherIntegration:
 
     def test_tool_pairing_copilot(self):
         """Enricher pairs Copilot tool start/complete and computes duration."""
-        adapter = CopilotAdapter(ingestion_mode="file_watch")
+        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
         enricher = Enricher()
 
         start = json.dumps({
@@ -462,7 +463,7 @@ class TestEnricherIntegration:
 
     def test_flush_emits_unpaired(self):
         """Unpaired tool starts are emitted on flush."""
-        adapter = CopilotAdapter(ingestion_mode="file_watch")
+        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
         enricher = Enricher()
 
         session_start = json.dumps({
@@ -496,8 +497,8 @@ class TestAdapterRobustness:
     """Test error handling and edge cases across all adapters."""
 
     @pytest.mark.parametrize("make_adapter", [
-        lambda: CopilotAdapter(ingestion_mode="file_watch"),
-        lambda: ClaudeAdapter(ingestion_mode="file_watch"),
+        lambda: CopilotAdapter(ingestion_mode="file_watch", session_id="test-session"),
+        lambda: ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session"),
     ])
     def test_empty_input(self, make_adapter):
         adapter = make_adapter()
@@ -506,8 +507,8 @@ class TestAdapterRobustness:
         assert list(adapter.parse("   ")) == []
 
     @pytest.mark.parametrize("make_adapter", [
-        lambda: CopilotAdapter(ingestion_mode="file_watch"),
-        lambda: ClaudeAdapter(ingestion_mode="file_watch"),
+        lambda: CopilotAdapter(ingestion_mode="file_watch", session_id="test-session"),
+        lambda: ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session"),
     ])
     def test_garbage_input(self, make_adapter):
         adapter = make_adapter()
@@ -515,8 +516,8 @@ class TestAdapterRobustness:
         assert list(adapter.parse(b"\x00\xff\xfe")) == []
 
     @pytest.mark.parametrize("make_adapter", [
-        lambda: CopilotAdapter(ingestion_mode="file_watch"),
-        lambda: ClaudeAdapter(ingestion_mode="file_watch"),
+        lambda: CopilotAdapter(ingestion_mode="file_watch", session_id="test-session"),
+        lambda: ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session"),
     ])
     def test_non_dict_json(self, make_adapter):
         adapter = make_adapter()
@@ -527,7 +528,7 @@ class TestAdapterRobustness:
 
     def test_mapped_json_missing_type_field(self):
         mapping = FrameworkMapping(framework="test", ingestion_mode="file_watch", events={})
-        adapter = MappedJsonAdapter(mapping)
+        adapter = MappedJsonAdapter(mapping, session_id="test-session")
         # No "type" field in the JSON — should still produce RAW event
         events = list(adapter.parse(json.dumps({"data": "hello"})))
         assert len(events) == 1
@@ -541,14 +542,14 @@ class TestAdapterRobustness:
             ingestion_mode="file_watch",
             events={"big": EventMapping(kind="message.user", payload={"content": "data"})},
         )
-        adapter = MappedJsonAdapter(mapping)
+        adapter = MappedJsonAdapter(mapping, session_id="test-session")
         big_data = "x" * 100_000
         events = list(adapter.parse(json.dumps({"type": "big", "data": big_data})))
         assert len(events) == 1
 
     def test_copilot_unknown_event_type(self):
         """Unknown Copilot event types emit as RAW."""
-        adapter = CopilotAdapter(ingestion_mode="file_watch")
+        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
         line = json.dumps({
             "type": "future.new_feature",
             "id": _uid(),
@@ -561,7 +562,7 @@ class TestAdapterRobustness:
 
     def test_claude_system_message_handling(self):
         """Claude system messages are handled gracefully."""
-        adapter = ClaudeAdapter(ingestion_mode="file_watch")
+        adapter = ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session")
         line = json.dumps({"type": "system", "message": {"content": "System prompt here"}})
         events = list(adapter.parse(line))
         # System messages may be skipped or emitted as system
@@ -580,7 +581,7 @@ class TestAdapterRobustness:
                 )
             },
         )
-        adapter = MappedJsonAdapter(mapping)
+        adapter = MappedJsonAdapter(mapping, session_id="test-session")
         line = json.dumps({"type": "evt", "name": "grep"})
         events = list(adapter.parse(line))
         assert len(events) == 1
@@ -600,7 +601,7 @@ class TestAllMappingsE2E:
 
     @pytest.fixture(params=MAPPING_FILES, ids=lambda p: p.stem)
     def adapter(self, request):
-        return MappedJsonAdapter.from_yaml(str(request.param))
+        return MappedJsonAdapter.from_yaml(str(request.param), session_id="test-session")
 
     def test_adapter_parses_generic_event(self, adapter):
         """Each mapping can handle at least a generic event line."""

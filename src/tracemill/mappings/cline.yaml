@@ -6,7 +6,6 @@ framework: cline
 ingestion_mode: file_watch
 type_field: type
 timestamp_field: ts
-session_field: taskId
 
 events:
   say:

@@ -65,7 +65,6 @@ class TestFrameworkMapping:
             ingestion_mode="file_watch",
             type_field="type",
             timestamp_field="timestamp",
-            session_field="event_id",
             events={
                 "TaskStartedEvent": EventMapping(
                     kind="task.started",
@@ -87,7 +86,6 @@ class TestMappedJsonAdapter:
             ingestion_mode="file_watch",
             type_field="type",
             timestamp_field="timestamp",
-            session_field="event_id",
             events={
                 "TaskStartedEvent": EventMapping(
                     kind="task.started",
@@ -103,7 +101,7 @@ class TestMappedJsonAdapter:
                 ),
             },
         )
-        return MappedJsonAdapter(mapping)
+        return MappedJsonAdapter(mapping, session_id="test-session")
 
     def test_mapped_event(self, crewai_adapter):
         line = json.dumps({
@@ -119,7 +117,7 @@ class TestMappedJsonAdapter:
         assert ev.kind == "task.started"
         assert ev.payload["task_id"] == "t1"
         assert ev.payload["task_name"] == "Research topic"
-        assert ev.session_id == "evt-123"
+        assert ev.session_id == "test-session"
         assert ev.metadata.source_framework == "crewai"
         assert ev.metadata.raw_kind == "TaskStartedEvent"
 
@@ -159,7 +157,7 @@ class TestMappedJsonAdapter:
                 )
             },
         )
-        adapter = MappedJsonAdapter(mapping)
+        adapter = MappedJsonAdapter(mapping, session_id="test-session")
         line = json.dumps({
             "event_type": "llm.done",
             "usage": {"prompt_tokens": 100, "completion_tokens": 50},
@@ -170,20 +168,16 @@ class TestMappedJsonAdapter:
         assert events[0].payload["output_tokens"] == 50
         assert events[0].payload["model"] == "gpt-4"
 
-    def test_session_id_persists(self):
+    def test_session_id_from_constructor(self):
         mapping = FrameworkMapping(
             framework="test",
             ingestion_mode="file_watch",
             type_field="type",
-            session_field="sid",
             events={"msg": EventMapping(kind="message.user", payload={"content": "text"})},
         )
-        adapter = MappedJsonAdapter(mapping)
-        # First event sets session_id
-        list(adapter.parse(json.dumps({"type": "msg", "sid": "session-1", "text": "hello"})))
-        # Second event without sid inherits it
-        events = list(adapter.parse(json.dumps({"type": "msg", "text": "world"})))
-        assert events[0].session_id == "session-1"
+        adapter = MappedJsonAdapter(mapping, session_id="my-session-123")
+        events = list(adapter.parse(json.dumps({"type": "msg", "text": "hello"})))
+        assert events[0].session_id == "my-session-123"
 
     def test_timestamp_parsing_iso(self):
         mapping = FrameworkMapping(
@@ -193,7 +187,7 @@ class TestMappedJsonAdapter:
             timestamp_field="ts",
             events={"x": EventMapping(kind="raw")},
         )
-        adapter = MappedJsonAdapter(mapping)
+        adapter = MappedJsonAdapter(mapping, session_id="test-session")
         line = json.dumps({"type": "x", "ts": "2024-06-01T10:00:00Z"})
         events = list(adapter.parse(line))
         assert events[0].timestamp.year == 2024
@@ -207,7 +201,7 @@ class TestMappedJsonAdapter:
             timestamp_field="ts",
             events={"x": EventMapping(kind="raw")},
         )
-        adapter = MappedJsonAdapter(mapping)
+        adapter = MappedJsonAdapter(mapping, session_id="test-session")
         line = json.dumps({"type": "x", "ts": 1717232400})
         events = list(adapter.parse(line))
         assert events[0].timestamp.year == 2024
@@ -247,5 +241,5 @@ class TestYAMLMappings:
             )
 
     def test_adapter_from_yaml(self, mapping_file):
-        adapter = MappedJsonAdapter.from_yaml(str(mapping_file))
+        adapter = MappedJsonAdapter.from_yaml(str(mapping_file), session_id="test-session")
         assert adapter.framework == mapping_file.stem or adapter.framework

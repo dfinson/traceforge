@@ -32,7 +32,7 @@ def _copilot_event(event_type: str, data: dict, ts: str = "2024-01-01T00:00:00Z"
 
 class TestCopilotFileWatch:
     def test_parse_session_start(self):
-        adapter = CopilotAdapter(ingestion_mode="file_watch")
+        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
         line = _copilot_event(
             "session.start",
             {
@@ -55,7 +55,7 @@ class TestCopilotFileWatch:
         assert ev.metadata.source_framework == "copilot"
 
     def test_parse_user_message(self):
-        adapter = CopilotAdapter(ingestion_mode="file_watch")
+        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
         line = _copilot_event("user.message", {"content": "hello"})
         events = list(adapter.parse(line))
         assert len(events) == 1
@@ -63,7 +63,7 @@ class TestCopilotFileWatch:
         assert events[0].payload["content"] == "hello"
 
     def test_parse_tool_execution_start(self):
-        adapter = CopilotAdapter(ingestion_mode="file_watch")
+        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
         line = _copilot_event(
             "tool.execution_start",
             {
@@ -81,7 +81,7 @@ class TestCopilotFileWatch:
         assert ev.payload["arguments"] == {"pattern": "foo"}
 
     def test_parse_tool_execution_complete(self):
-        adapter = CopilotAdapter(ingestion_mode="file_watch")
+        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
         line = _copilot_event(
             "tool.execution_complete",
             {
@@ -99,7 +99,7 @@ class TestCopilotFileWatch:
         assert ev.payload["result"] == "found it"
 
     def test_parse_assistant_usage(self):
-        adapter = CopilotAdapter(ingestion_mode="file_watch")
+        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
         line = _copilot_event(
             "assistant.usage",
             {
@@ -125,7 +125,7 @@ class TestCopilotFileWatch:
         assert ev.payload["duration_ms"] == 1500
 
     def test_parse_session_shutdown(self):
-        adapter = CopilotAdapter(ingestion_mode="file_watch")
+        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
         line = _copilot_event(
             "session.shutdown",
             {
@@ -142,7 +142,7 @@ class TestCopilotFileWatch:
         assert events[0].kind == EventKind.SESSION_ENDED
 
     def test_unknown_event_type_emits_raw(self):
-        adapter = CopilotAdapter(ingestion_mode="file_watch")
+        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
         # SDK maps unrecognized types to SessionEventType.UNKNOWN ("unknown")
         line = json.dumps(
             {"type": "future.event", "id": _uid(), "timestamp": "2024-01-01T00:00:00Z", "data": {}}
@@ -153,12 +153,12 @@ class TestCopilotFileWatch:
         assert events[0].payload["original_type"] == "unknown"
 
     def test_skips_non_json(self):
-        adapter = CopilotAdapter(ingestion_mode="file_watch")
+        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
         events = list(adapter.parse("not json!"))
         assert events == []
 
     def test_handles_sdk_parse_failure_gracefully(self):
-        adapter = CopilotAdapter(ingestion_mode="file_watch")
+        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
         # Valid JSON but SDK can't parse (missing required fields)
         line = json.dumps(
             {"type": "user.message", "id": "not-a-uuid", "timestamp": "2024-01-01T00:00:00Z"}
@@ -167,12 +167,11 @@ class TestCopilotFileWatch:
         assert events == []  # Gracefully skipped
 
     def test_retains_session_id_across_calls(self):
-        adapter = CopilotAdapter(ingestion_mode="file_watch")
-        sid = _uid()
+        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
         start_line = _copilot_event(
             "session.start",
             {
-                "sessionId": sid,
+                "sessionId": _uid(),
                 "selectedModel": "gpt-4",
                 "copilotVersion": "1.0",
                 "startTime": "2024-01-01T00:00:00Z",
@@ -185,10 +184,11 @@ class TestCopilotFileWatch:
 
         list(adapter.parse(start_line))
         events = list(adapter.parse(msg_line))
-        assert events[0].session_id == sid
+        # session_id comes from constructor, not event data
+        assert events[0].session_id == "test-session"
 
     def test_full_fixture_roundtrip(self):
-        adapter = CopilotAdapter(ingestion_mode="file_watch")
+        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
         fixture = FIXTURES / "copilot_session.jsonl"
         all_events: list[SessionEvent] = []
         for line in fixture.read_text().splitlines():
@@ -211,7 +211,7 @@ class TestCopilotFileWatch:
         assert kinds[-1] == EventKind.SESSION_ENDED
 
         for ev in all_events:
-            assert ev.session_id == "550e8400-e29b-41d4-a716-446655440001"
+            assert ev.session_id == "test-session"
 
 
 # ─── ClaudeAdapter (file_watch) ──────────────────────────────────────────────
@@ -219,7 +219,7 @@ class TestCopilotFileWatch:
 
 class TestClaudeFileWatch:
     def test_parse_user_message(self):
-        adapter = ClaudeAdapter(ingestion_mode="file_watch")
+        adapter = ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session")
         line = json.dumps({"type": "user", "message": {"content": "hello world"}})
         events = list(adapter.parse(line))
         assert len(events) == 1
@@ -228,7 +228,7 @@ class TestClaudeFileWatch:
         assert events[0].metadata.source_framework == "claude"
 
     def test_parse_assistant_text_block(self):
-        adapter = ClaudeAdapter(ingestion_mode="file_watch")
+        adapter = ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session")
         line = json.dumps(
             {
                 "type": "assistant",
@@ -244,7 +244,7 @@ class TestClaudeFileWatch:
         assert text_events[0].payload["content"] == "Hello!"
 
     def test_parse_assistant_tool_use_block(self):
-        adapter = ClaudeAdapter(ingestion_mode="file_watch")
+        adapter = ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session")
         line = json.dumps(
             {
                 "type": "assistant",
@@ -269,7 +269,7 @@ class TestClaudeFileWatch:
         assert tool_events[0].payload["arguments"] == {"path": "x.py"}
 
     def test_parse_assistant_tool_result_block(self):
-        adapter = ClaudeAdapter(ingestion_mode="file_watch")
+        adapter = ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session")
         line = json.dumps(
             {
                 "type": "assistant",
@@ -294,7 +294,7 @@ class TestClaudeFileWatch:
         assert result_events[0].payload["result"] == "file contents"
 
     def test_handles_list_of_blocks_result_content(self):
-        adapter = ClaudeAdapter(ingestion_mode="file_watch")
+        adapter = ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session")
         line = json.dumps(
             {
                 "type": "assistant",
@@ -320,7 +320,7 @@ class TestClaudeFileWatch:
         assert result_events[0].payload["result"] == "line1\nline2"
 
     def test_extracts_usage_from_result_message(self):
-        adapter = ClaudeAdapter(ingestion_mode="file_watch")
+        adapter = ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session")
         line = json.dumps(
             {
                 "type": "result",
@@ -347,13 +347,13 @@ class TestClaudeFileWatch:
         assert usage_events[0].payload["cost_usd"] == 0.005
 
     def test_handles_malformed_input(self):
-        adapter = ClaudeAdapter(ingestion_mode="file_watch")
+        adapter = ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session")
         assert list(adapter.parse("not json")) == []
         assert list(adapter.parse("")) == []
         assert list(adapter.parse("{}")) == []
 
     def test_full_fixture_roundtrip(self):
-        adapter = ClaudeAdapter(ingestion_mode="file_watch")
+        adapter = ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session")
         fixture = FIXTURES / "claude_session.jsonl"
         all_events: list[SessionEvent] = []
         for line in fixture.read_text().splitlines():
@@ -368,12 +368,12 @@ class TestClaudeFileWatch:
         assert EventKind.TOOL_CALL_COMPLETED in kinds
         assert EventKind.USAGE in kinds
 
-        # Session ID tracked from result message
+        # Session ID from constructor
         result_events = [e for e in all_events if e.kind == EventKind.USAGE]
-        assert result_events[-1].session_id == "claude-sess-456"
+        assert result_events[-1].session_id == "test-session"
 
-    def test_session_id_tracked_from_result(self):
-        adapter = ClaudeAdapter(ingestion_mode="file_watch")
+    def test_session_id_from_constructor(self):
+        adapter = ClaudeAdapter(ingestion_mode="file_watch", session_id="my-session")
         line = json.dumps(
             {
                 "type": "result",
@@ -382,14 +382,15 @@ class TestClaudeFileWatch:
                 "duration_api_ms": 800,
                 "is_error": False,
                 "num_turns": 1,
-                "session_id": "tracked-id",
+                "session_id": "ignored-id",
             }
         )
-        list(adapter.parse(line))
-        # Next message should have the tracked session_id
+        events = list(adapter.parse(line))
+        # session_id always comes from constructor, not event data
+        assert events[0].session_id == "my-session"
         msg_line = json.dumps({"type": "user", "message": {"content": "follow-up"}})
         events = list(adapter.parse(msg_line))
-        assert events[0].session_id == "tracked-id"
+        assert events[0].session_id == "my-session"
 
 
 # ─── CopilotAdapter ingestion modes ──────────────────────────────────────────
@@ -398,18 +399,16 @@ class TestClaudeFileWatch:
 class TestCopilotAdapterModes:
     def test_default_is_file_watch(self):
         from tracemill.adapters.copilot import CopilotAdapter
-        adapter = CopilotAdapter(ingestion_mode="file_watch")
+        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
         line = _copilot_event("user.message", {"content": "test"})
         events = list(adapter.parse(line))
-        assert events[0].metadata.source_adapter == "copilot"
         assert events[0].metadata.ingestion_mode == "file_watch"
 
     def test_stream_mode(self):
         from tracemill.adapters.copilot import CopilotAdapter
-        adapter = CopilotAdapter(ingestion_mode="stream")
+        adapter = CopilotAdapter(ingestion_mode="stream", session_id="test-session")
         line = _copilot_event("user.message", {"content": "hi"})
         events = list(adapter.parse(line))
-        assert events[0].metadata.source_adapter == "copilot"
         assert events[0].metadata.ingestion_mode == "stream"
 
     def test_parse_sdk_event_typed_interface(self):
@@ -417,13 +416,12 @@ class TestCopilotAdapterModes:
         from copilot.generated.session_events import SessionEvent as CSE
         from tracemill.adapters.copilot import CopilotAdapter
 
-        adapter = CopilotAdapter(ingestion_mode="stream")
+        adapter = CopilotAdapter(ingestion_mode="stream", session_id="test-session")
         obj = json.loads(_copilot_event("user.message", {"content": "typed"}))
         sdk_event = CSE.from_dict(obj)
         events = list(adapter.parse_sdk_event(sdk_event))
         assert len(events) == 1
         assert events[0].payload["content"] == "typed"
-        assert events[0].metadata.source_adapter == "copilot"
 
 
 # ─── ClaudeAdapter ingestion modes ──────────────────────────────────────────
@@ -432,19 +430,17 @@ class TestCopilotAdapterModes:
 class TestClaudeAdapterModes:
     def test_default_is_file_watch(self):
         from tracemill.adapters.claude import ClaudeAdapter
-        adapter = ClaudeAdapter(ingestion_mode="file_watch")
+        adapter = ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session")
         line = json.dumps({"type": "user", "message": {"content": "test"}})
         events = list(adapter.parse(line))
         assert len(events) == 1
-        assert events[0].metadata.source_adapter == "claude"
         assert events[0].metadata.ingestion_mode == "file_watch"
 
     def test_stream_mode(self):
         from tracemill.adapters.claude import ClaudeAdapter
-        adapter = ClaudeAdapter(ingestion_mode="stream")
+        adapter = ClaudeAdapter(ingestion_mode="stream", session_id="test-session")
         line = json.dumps({"type": "user", "message": {"content": "hi"}})
         events = list(adapter.parse(line))
-        assert events[0].metadata.source_adapter == "claude"
         assert events[0].metadata.ingestion_mode == "stream"
 
     def test_parse_message_typed_interface(self):
@@ -452,12 +448,11 @@ class TestClaudeAdapterModes:
         from claude_agent_sdk import UserMessage
         from tracemill.adapters.claude import ClaudeAdapter
 
-        adapter = ClaudeAdapter(ingestion_mode="stream")
+        adapter = ClaudeAdapter(ingestion_mode="stream", session_id="test-session")
         msg = UserMessage(content="typed hello")
         events = list(adapter.parse_message(msg))
         assert len(events) == 1
         assert events[0].payload["content"] == "typed hello"
-        assert events[0].metadata.source_adapter == "claude"
 
 
 # ─── Malformed Input ─────────────────────────────────────────────────────────
@@ -470,36 +465,36 @@ class TestMalformedInput:
         return fixture.read_text().splitlines()
 
     def test_cli_adapter_no_crashes(self, malformed_lines: list[str]):
-        adapter = CopilotAdapter(ingestion_mode="file_watch")
+        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
         for line in malformed_lines:
             events = list(adapter.parse(line))
             assert events == [] or all(isinstance(e, SessionEvent) for e in events)
 
     def test_claude_adapter_no_crashes(self, malformed_lines: list[str]):
-        adapter = ClaudeAdapter(ingestion_mode="file_watch")
+        adapter = ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session")
         for line in malformed_lines:
             events = list(adapter.parse(line))
             assert events == [] or all(isinstance(e, SessionEvent) for e in events)
 
     def test_copilot_sdk_adapter_no_crashes(self, malformed_lines: list[str]):
-        adapter = CopilotAdapter(ingestion_mode="stream")
+        adapter = CopilotAdapter(ingestion_mode="stream", session_id="test-session")
         for line in malformed_lines:
             events = list(adapter.parse(line))
             assert events == [] or all(isinstance(e, SessionEvent) for e in events)
 
     def test_claude_sdk_adapter_no_crashes(self, malformed_lines: list[str]):
-        adapter = ClaudeAdapter(ingestion_mode="stream")
+        adapter = ClaudeAdapter(ingestion_mode="stream", session_id="test-session")
         for line in malformed_lines:
             events = list(adapter.parse(line))
             assert events == [] or all(isinstance(e, SessionEvent) for e in events)
 
     def test_cli_invalid_utf8_bytes(self):
-        adapter = CopilotAdapter(ingestion_mode="file_watch")
+        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
         events = list(adapter.parse(b"\xff\xfe invalid"))
         assert events == []
 
     def test_claude_invalid_utf8_bytes(self):
-        adapter = ClaudeAdapter(ingestion_mode="file_watch")
+        adapter = ClaudeAdapter(ingestion_mode="file_watch", session_id="test-session")
         events = list(adapter.parse(b"\xff\xfe invalid"))
         assert events == []
 
@@ -517,7 +512,7 @@ class TestAdapterPipelineIntegration:
 
         sink = CallbackSink(on_event=on_event)
         pipeline = EventPipeline(sinks=[sink])
-        adapter = CopilotAdapter(ingestion_mode="file_watch")
+        adapter = CopilotAdapter(ingestion_mode="file_watch", session_id="test-session")
 
         fixture = FIXTURES / "copilot_session.jsonl"
 

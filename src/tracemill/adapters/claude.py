@@ -18,16 +18,25 @@ from claude_agent_sdk import (
     SystemMessage,
     UserMessage,
 )
-from claude_agent_sdk._internal.message_parser import (
-    MessageParseError,
-    parse_message,
-)
 from claude_agent_sdk.types import TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock
 
 from tracemill.adapters.base import JsonLineAdapter
 from tracemill.types import EventKind, EventMetadata, IngestionMode, SessionEvent
 
 logger = logging.getLogger(__name__)
+
+# Isolate private SDK import — if claude_agent_sdk changes internals,
+# only this block needs updating.
+try:
+    from claude_agent_sdk._internal.message_parser import (
+        MessageParseError,
+        parse_message,
+    )
+except ImportError as _exc:
+    raise ImportError(
+        "claude_agent_sdk._internal.message_parser not found. "
+        "ClaudeAdapter requires claude-agent-sdk>=0.2.93."
+    ) from _exc
 
 
 class ClaudeAdapter(JsonLineAdapter):
@@ -37,7 +46,7 @@ class ClaudeAdapter(JsonLineAdapter):
     by the ``ingestion_mode`` constructor parameter.
     """
 
-    def __init__(self, ingestion_mode: IngestionMode, session_id: str | None = None) -> None:
+    def __init__(self, ingestion_mode: IngestionMode, session_id: str) -> None:
         self._session_id = session_id
         self._ingestion_mode = ingestion_mode
 
@@ -70,18 +79,15 @@ class ClaudeAdapter(JsonLineAdapter):
     def _make_metadata(self, raw_kind: str) -> EventMetadata:
         return EventMetadata(
             source_framework="claude",
-            source_adapter="claude",
             ingestion_mode=self._ingestion_mode,
             raw_kind=raw_kind,
         )
 
     def _handle_user(self, message: UserMessage) -> Iterator[SessionEvent]:
-        session_id = self._session_id or "unknown"
-
         if isinstance(message.content, str):
             yield SessionEvent(
                 kind=EventKind.MESSAGE_USER,
-                session_id=session_id,
+                session_id=self._session_id,
                 timestamp=datetime.now(timezone.utc),
                 payload={"content": message.content},
                 metadata=self._make_metadata("user"),
@@ -91,7 +97,7 @@ class ClaudeAdapter(JsonLineAdapter):
                 if isinstance(block, ToolResultBlock):
                     yield SessionEvent(
                         kind=EventKind.TOOL_CALL_COMPLETED,
-                        session_id=session_id,
+                        session_id=self._session_id,
                         timestamp=datetime.now(timezone.utc),
                         payload={
                             "tool_call_id": block.tool_use_id,
@@ -103,20 +109,18 @@ class ClaudeAdapter(JsonLineAdapter):
                 elif isinstance(block, TextBlock):
                     yield SessionEvent(
                         kind=EventKind.MESSAGE_USER,
-                        session_id=session_id,
+                        session_id=self._session_id,
                         timestamp=datetime.now(timezone.utc),
                         payload={"content": block.text},
                         metadata=self._make_metadata("user.text"),
                     )
 
     def _handle_assistant(self, message: AssistantMessage) -> Iterator[SessionEvent]:
-        session_id = self._session_id or "unknown"
-
         for block in message.content:
             if isinstance(block, TextBlock):
                 yield SessionEvent(
                     kind=EventKind.MESSAGE_ASSISTANT,
-                    session_id=session_id,
+                    session_id=self._session_id,
                     timestamp=datetime.now(timezone.utc),
                     payload={"content": block.text},
                     metadata=self._make_metadata("assistant.text"),
@@ -125,7 +129,7 @@ class ClaudeAdapter(JsonLineAdapter):
             elif isinstance(block, ToolUseBlock):
                 yield SessionEvent(
                     kind=EventKind.TOOL_CALL_STARTED,
-                    session_id=session_id,
+                    session_id=self._session_id,
                     timestamp=datetime.now(timezone.utc),
                     payload={
                         "tool_call_id": block.id,
@@ -138,7 +142,7 @@ class ClaudeAdapter(JsonLineAdapter):
             elif isinstance(block, ToolResultBlock):
                 yield SessionEvent(
                     kind=EventKind.TOOL_CALL_COMPLETED,
-                    session_id=session_id,
+                    session_id=self._session_id,
                     timestamp=datetime.now(timezone.utc),
                     payload={
                         "tool_call_id": block.tool_use_id,
@@ -151,18 +155,13 @@ class ClaudeAdapter(JsonLineAdapter):
             elif isinstance(block, ThinkingBlock):
                 yield SessionEvent(
                     kind=EventKind.LLM_THINKING_CHUNK,
-                    session_id=session_id,
+                    session_id=self._session_id,
                     timestamp=datetime.now(timezone.utc),
                     payload={"content": block.thinking if hasattr(block, "thinking") else ""},
                     metadata=self._make_metadata("assistant.thinking"),
                 )
 
     def _handle_result(self, message: ResultMessage) -> Iterator[SessionEvent]:
-        if message.session_id:
-            self._session_id = message.session_id
-
-        session_id = self._session_id or "unknown"
-
         usage_payload: dict[str, Any] = {
             "duration_ms": message.duration_ms,
             "cost_usd": message.total_cost_usd,
@@ -176,7 +175,7 @@ class ClaudeAdapter(JsonLineAdapter):
 
         yield SessionEvent(
             kind=EventKind.USAGE,
-            session_id=session_id,
+            session_id=self._session_id,
             timestamp=datetime.now(timezone.utc),
             payload=usage_payload,
             metadata=self._make_metadata("result"),
@@ -185,7 +184,7 @@ class ClaudeAdapter(JsonLineAdapter):
         if message.is_error:
             yield SessionEvent(
                 kind=EventKind.ERROR,
-                session_id=session_id,
+                session_id=self._session_id,
                 timestamp=datetime.now(timezone.utc),
                 payload={"message": message.result or "Unknown error"},
                 metadata=self._make_metadata("result.error"),

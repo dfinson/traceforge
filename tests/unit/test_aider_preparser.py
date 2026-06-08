@@ -1,4 +1,4 @@
-"""Tests for MarkdownPreParser (Aider .aider.chat.history.md parsing)."""
+"""Tests for AiderPreParser (Aider .aider.chat.history.md parsing)."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ from datetime import datetime, timezone
 
 import pytest
 
-from tracemill.parsers.markdown import (
+from tracemill.parsers.aider import (
     FileEdit,
     LineType,
-    MarkdownPreParser,
+    AiderPreParser,
     ToolOutputKind,
     classify_line,
     classify_tool_output,
@@ -164,10 +164,10 @@ new_b
 # ─── Full parser integration ─────────────────────────────────────────────────
 
 
-class TestMarkdownPreParser:
+class TestAiderPreParser:
     @pytest.fixture
-    def parser(self) -> MarkdownPreParser:
-        return MarkdownPreParser()
+    def parser(self) -> AiderPreParser:
+        return AiderPreParser()
 
     def test_session_start(self, parser):
         text = "# aider chat started at 2024-11-03 16:31:35\n\n"
@@ -331,7 +331,7 @@ Hi there!
         assert timestamps == sorted(timestamps)
 
     def test_incremental_parsing(self):
-        parser = MarkdownPreParser()
+        parser = AiderPreParser()
 
         chunk1 = "# aider chat started at 2024-06-01 10:00:00\n\n"
         events1 = list(parser.parse_chunk(chunk1))

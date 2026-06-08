@@ -1,4 +1,4 @@
-"""MarkdownPreParser — converts Aider .aider.chat.history.md into event dicts.
+"""AiderPreParser — converts Aider .aider.chat.history.md into event dicts.
 
 Aider writes session logs as append-only markdown. This parser classifies
 each line, accumulates multi-line blocks, and emits structured dicts suitable
@@ -170,7 +170,7 @@ class _SessionState:
         return self.start_time + timedelta(seconds=self.sequence)
 
 
-class MarkdownPreParser:
+class AiderPreParser:
     """Converts Aider .aider.chat.history.md into structured event dicts.
 
     Each yielded dict has a ``type`` field matching aider.yaml event types,

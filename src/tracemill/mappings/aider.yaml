@@ -2,7 +2,7 @@
 # Targets: aider >= 0.70 (structured JSON events in .aider.events.json)
 # Source: paul-gauthier/aider event logging format.
 # Note: Aider's primary logs are markdown (.aider.chat.history.md) which
-# require a separate MarkdownPreParser before feeding into this adapter.
+# require a separate AiderPreParser before feeding into this adapter.
 
 framework: aider
 framework_version: ">=0.70"

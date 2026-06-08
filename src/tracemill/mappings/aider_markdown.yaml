@@ -1,6 +1,6 @@
 # Aider Markdown Pre-Parser output mapping for MappedJsonAdapter
-# Maps event dicts emitted by MarkdownPreParser → canonical event kinds.
-# Input: MarkdownPreParser.parse_text() output, serialized as JSONL
+# Maps event dicts emitted by AiderPreParser → canonical event kinds.
+# Input: AiderPreParser.parse_text() output, serialized as JSONL
 # Source format: .aider.chat.history.md (append-only markdown session log)
 #
 # This mapping handles the pre-parser's output types. For aider's native

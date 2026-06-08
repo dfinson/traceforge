@@ -152,7 +152,7 @@ jobs:
           "
 
       - name: Run mapping integration tests
-        run: pytest tests/integration/test_new_mappings.py tests/integration/test_pipeline_e2e.py tests/integration/test_markdown_contract.py -q --tb=short
+        run: pytest tests/integration/test_new_mappings.py tests/integration/test_pipeline_e2e.py tests/integration/test_aider_contract.py -q --tb=short
 
       - name: Check event kind coverage
         run: |

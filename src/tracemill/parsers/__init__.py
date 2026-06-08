@@ -1,5 +1,5 @@
 """Pre-parsers that convert non-JSONL agent logs into structured event dicts."""
 
-from tracemill.parsers.markdown import MarkdownPreParser
+from tracemill.parsers.aider import AiderPreParser
 
-__all__ = ["MarkdownPreParser"]
+__all__ = ["AiderPreParser"]

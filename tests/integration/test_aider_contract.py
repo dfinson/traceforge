@@ -1,4 +1,4 @@
-"""Contract and drift-detection tests for MarkdownPreParser.
+"""Contract and drift-detection tests for AiderPreParser.
 
 These tests prove:
 A. The parser is CORRECT today (golden fixture produces expected events)
@@ -21,7 +21,7 @@ import pytest
 import yaml
 
 from tracemill.adapters.mapped_json import MappedJsonAdapter
-from tracemill.parsers.markdown import MarkdownPreParser
+from tracemill.parsers.aider import AiderPreParser
 from tracemill.types import SessionEvent
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures"
@@ -36,7 +36,7 @@ class TestGoldenFixture:
 
     @pytest.fixture
     def events(self) -> list[dict]:
-        parser = MarkdownPreParser()
+        parser = AiderPreParser()
         fixture = FIXTURES_DIR / "aider_chat_history.md"
         return list(parser.parse_file(fixture))
 
@@ -135,7 +135,7 @@ class TestParserYamlContract:
     @pytest.fixture
     def parser_event_types(self) -> set[str]:
         """All event types the parser can emit (from the golden fixture)."""
-        parser = MarkdownPreParser()
+        parser = AiderPreParser()
         fixture = FIXTURES_DIR / "aider_chat_history.md"
         events = list(parser.parse_file(fixture))
         return {e["type"] for e in events}
@@ -170,7 +170,7 @@ class TestEndToEndPipeline:
 
     @pytest.fixture
     def parser_events(self) -> list[dict]:
-        parser = MarkdownPreParser()
+        parser = AiderPreParser()
         fixture = FIXTURES_DIR / "aider_chat_history.md"
         return list(parser.parse_file(fixture))
 
@@ -219,8 +219,8 @@ class TestFormatRegression:
     """Specific format patterns that, if broken, indicate aider changed its output."""
 
     @pytest.fixture
-    def parser(self) -> MarkdownPreParser:
-        return MarkdownPreParser()
+    def parser(self) -> AiderPreParser:
+        return AiderPreParser()
 
     def test_session_header_format(self, parser):
         """Aider session header must match '# aider chat started at YYYY-MM-DD HH:MM:SS'."""

@@ -167,12 +167,12 @@ def check_maf() -> list[str]:
 
 
 def check_aider() -> list[str]:
-    """Verify MarkdownPreParser can parse aider's format and produce valid events."""
+    """Verify AiderPreParser can parse aider's format and produce valid events."""
     errors: list[str] = []
     try:
-        from tracemill.parsers.markdown import MarkdownPreParser
+        from tracemill.parsers.aider import AiderPreParser
 
-        parser = MarkdownPreParser()
+        parser = AiderPreParser()
         sample = (
             "# aider chat started at 2024-06-01 10:00:00\n\n"
             "> Aider v0.86.2\n"
@@ -198,7 +198,7 @@ def check_aider() -> list[str]:
                     "file_edit_applied", "git_commit"}
         missing = expected - types
         if missing:
-            errors.append(f"MarkdownPreParser missing event types: {missing}")
+            errors.append(f"AiderPreParser missing event types: {missing}")
 
         # Validate end-to-end through MappedJsonAdapter
         import json
@@ -217,7 +217,7 @@ def check_aider() -> list[str]:
             errors.append(f"Events not mapped by aider_markdown.yaml: {set(unmapped)}")
 
     except Exception as e:
-        errors.append(f"MarkdownPreParser failed: {e}")
+        errors.append(f"AiderPreParser failed: {e}")
     return errors
 
 

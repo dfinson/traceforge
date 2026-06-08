@@ -102,7 +102,6 @@ class ClaudeJsonlAdapter(Adapter):
         return EventMetadata(
             source_framework=self.SOURCE_FRAMEWORK,
             source_adapter=self.SOURCE_ADAPTER,
-            agent_sdk=self.SOURCE_FRAMEWORK,
             raw_kind=raw_kind,
         )
 

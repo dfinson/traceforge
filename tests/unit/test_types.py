@@ -39,19 +39,6 @@ class TestEventKind:
     def test_string_comparison(self):
         assert EventKind.MESSAGE_USER == "message.user"
 
-    def test_normalize_kind_legacy(self):
-        from tracemill.types import normalize_kind
-
-        assert normalize_kind("user_message") == "message.user"
-        assert normalize_kind("tool_start") == "tool.call.started"
-        assert normalize_kind("session_start") == "session.started"
-
-    def test_normalize_kind_passthrough(self):
-        from tracemill.types import normalize_kind
-
-        assert normalize_kind("tool.call.started") == "tool.call.started"
-        assert normalize_kind("custom.event") == "custom.event"
-
     def test_is_known_kind(self):
         from tracemill.types import is_known_kind
 
@@ -64,7 +51,7 @@ class TestEventMetadata:
     def test_defaults(self):
         meta = EventMetadata()
         assert meta.repo is None
-        assert meta.agent_sdk is None
+        assert meta.source_framework is None
         assert meta.turn_id is None
         assert meta.visibility == "visible"
         assert meta.classification is None
@@ -73,7 +60,7 @@ class TestEventMetadata:
         assert meta.duration_ms is None
 
     def test_roundtrip(self):
-        meta = EventMetadata(repo="myrepo", agent_sdk="copilot", duration_ms=123.4)
+        meta = EventMetadata(repo="myrepo", source_framework="copilot", duration_ms=123.4)
         json_str = meta.model_dump_json()
         restored = EventMetadata.model_validate_json(json_str)
         assert restored == meta

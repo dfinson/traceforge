@@ -32,7 +32,6 @@ from tracemill.types import (
     TelemetrySpan,
     UsageRecord,
     is_known_kind,
-    normalize_kind,
 )
 
 __all__ = [
@@ -64,6 +63,5 @@ __all__ = [
     "get_default_registry",
     "is_known_kind",
     "load_config",
-    "normalize_kind",
     "normalize_tool_name",
 ]

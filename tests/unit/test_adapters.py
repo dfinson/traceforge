@@ -410,7 +410,7 @@ class TestCopilotSDKAdapter:
         assert cli_events[0].kind == sdk_events[0].kind
         assert cli_events[0].payload == sdk_events[0].payload
 
-    def test_sets_correct_agent_sdk(self):
+    def test_sets_correct_source_adapter(self):
         adapter = CopilotSDKAdapter()
         line = _copilot_event("user.message", {"content": "hi"})
         events = list(adapter.parse(line))
@@ -445,7 +445,7 @@ class TestClaudeSDKAdapter:
         assert jsonl_events[0].kind == sdk_events[0].kind
         assert jsonl_events[0].payload == sdk_events[0].payload
 
-    def test_sets_correct_agent_sdk(self):
+    def test_sets_correct_source_adapter(self):
         adapter = ClaudeSDKAdapter()
         line = json.dumps({"type": "user", "message": {"content": "hi"}})
         events = list(adapter.parse(line))

@@ -5,7 +5,6 @@ EventKind uses an open string registry with dot-notation grammar:
 
 Any string is a valid kind (forward-compatible), but canonical kinds are
 defined as constants for autocomplete, documentation, and filtering.
-Legacy aliases (pre-v2 flat names) are supported via normalize_kind().
 """
 
 from __future__ import annotations
@@ -156,52 +155,6 @@ KNOWN_KINDS: frozenset[str] = frozenset(
 )
 
 
-# ─── Legacy Aliases ──────────────────────────────────────────────────────────
-# Maps pre-v2 flat EventKind values to new canonical strings.
-
-_LEGACY_ALIASES: dict[str, str] = {
-    "user_message": EventKind.MESSAGE_USER,
-    "assistant_message": EventKind.MESSAGE_ASSISTANT,
-    "system_message": EventKind.MESSAGE_SYSTEM,
-    "tool_start": EventKind.TOOL_CALL_STARTED,
-    "tool_complete": EventKind.TOOL_CALL_COMPLETED,
-    "tool_partial_result": EventKind.TOOL_RESULT_CHUNK,
-    "tool_progress": EventKind.TOOL_PROGRESS,
-    "turn_start": EventKind.TURN_STARTED,
-    "turn_end": EventKind.TURN_ENDED,
-    "session_start": EventKind.SESSION_STARTED,
-    "session_end": EventKind.SESSION_ENDED,
-    "session_info": EventKind.SESSION_INFO,
-    "session_warning": EventKind.SESSION_WARNING,
-    "session_resume": EventKind.SESSION_RESUMED,
-    "session_idle": EventKind.SESSION_IDLE,
-    "assistant_intent": EventKind.PLANNING_STARTED,
-    "assistant_reasoning": EventKind.REASONING_STARTED,
-    "subagent_start": EventKind.AGENT_SPAWNED,
-    "subagent_complete": EventKind.AGENT_COMPLETED,
-    "subagent_failed": EventKind.AGENT_FAILED,
-    "hook_start": EventKind.HOOK_STARTED,
-    "hook_end": EventKind.HOOK_COMPLETED,
-    "external_tool_requested": EventKind.TOOL_CALL_STARTED,
-    "external_tool_completed": EventKind.TOOL_CALL_COMPLETED,
-    "permission_requested": EventKind.PERMISSION_REQUESTED,
-    "permission_completed": EventKind.PERMISSION_GRANTED,
-    "user_input_requested": EventKind.INPUT_REQUESTED,
-    "user_input_completed": EventKind.INPUT_RECEIVED,
-    "skill_invoked": EventKind.SKILL_INVOKED,
-    "file_change": EventKind.FILE_EDITED,
-    "raw": EventKind.RAW,
-}
-
-
-def normalize_kind(kind: str) -> str:
-    """Normalize an event kind string, resolving legacy aliases.
-
-    Returns the canonical kind if a legacy alias matches, otherwise
-    returns the input unchanged (any string is valid).
-    """
-    return _LEGACY_ALIASES.get(kind, kind)
-
 
 def is_known_kind(kind: str) -> bool:
     """Check if a kind string is in the canonical registry."""
@@ -242,9 +195,7 @@ class EventMetadata(BaseModel):
     namespace: tuple[str, ...] | None = None  # scope path (subgraph, subagent)
     partial: bool = False  # True if this is a streaming chunk
 
-    # --- Legacy/existing fields ---
     repo: str | None = None
-    agent_sdk: str | None = None  # deprecated: use source_framework
     turn_id: str | None = None
     visibility: Literal["visible", "system", "collapsed"] = "visible"
     phases: frozenset[str] | None = None

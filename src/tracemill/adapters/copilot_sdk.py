@@ -31,7 +31,6 @@ class CopilotSDKAdapter(CLIJsonlAdapter):
                     "metadata": event.metadata.model_copy(
                         update={
                             "source_adapter": self.SOURCE_ADAPTER,
-                            "agent_sdk": "copilot-sdk",
                             "ingestion_mode": "stream",
                         }
                     )
@@ -46,7 +45,6 @@ class CopilotSDKAdapter(CLIJsonlAdapter):
                     "metadata": event.metadata.model_copy(
                         update={
                             "source_adapter": self.SOURCE_ADAPTER,
-                            "agent_sdk": "copilot-sdk",
                             "ingestion_mode": "stream",
                         }
                     )

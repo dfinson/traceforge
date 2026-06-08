@@ -222,7 +222,7 @@ Event kinds use dot-notation: `<domain>[.<object>].<phase>`. Any string is valid
 | **telemetry** | `usage`, `error`, `abort` |
 | **catch-all** | `raw` (unmapped events with `payload["original_type"]`) |
 
-Legacy flat names (e.g., `"user_message"`, `"tool_start"`) are resolved via `normalize_kind()`.
+Unknown/unmapped event types from any framework are emitted as `raw` with the original type preserved in `payload["original_type"]`.
 
 ### §3.2 — Payload Contracts
 

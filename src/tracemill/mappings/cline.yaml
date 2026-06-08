@@ -1,6 +1,25 @@
 # Cline / Roo Code event mapping for MappedJsonAdapter
 # Targets: cline >= 3.0 (VS Code extension globalStorage JSON format)
-# Source: cline/cline VS Code extension storage format.
+# Source: cline/cline apps/vscode/src/shared/ExtensionMessage.ts
+#
+# IMPORTANT: Real Cline uses a COMPOUND discriminator:
+#   - type_field "type" has ONLY two values: "ask" or "say"
+#   - The actual sub-type is in the "ask" or "say" field:
+#     {type: "say", say: "api_req_started", text: JSON.stringify({tokensIn, tokensOut, cost})}
+#     {type: "ask", ask: "tool", text: JSON.stringify({tool, path})}
+#
+# The flat type_field approach correctly maps "ask" and "say" to broad categories.
+# However, fine-grained events (api_req_started, tool, command, etc.) are SUBTYPES
+# that appear as values in the "say"/"ask" field, NOT as "type" field values.
+#
+# Events like "api_req_started" in this YAML will NEVER fire against real Cline data
+# because type is always "ask" or "say". They are here for ClinePreProcessor output
+# that flattens: {type: "say", say: "api_req_started"} → {type: "api_req_started"}.
+#
+# Real ClineMessage structure:
+#   {ts: number, type: "ask"|"say", ask?: ClineAsk, say?: ClineSay, text?: string, ...}
+# API metrics: JSON.parse(text) on say="api_req_started" → {tokensIn, tokensOut, cost}
+# Tool info: JSON.parse(text) on say="tool" → {tool, path, content, diff}
 
 framework: cline
 framework_version: ">=3.0"

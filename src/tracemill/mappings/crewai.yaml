@@ -1,6 +1,15 @@
 # CrewAI event mapping for MappedJsonAdapter
-# Targets: crewai >= 0.86 (BaseEvent subclasses serialized as JSON)
-# Source: crewAI-inc/crewAI lib/crewai/src/crewai/events/
+# Targets: crewai >= 0.86 (Flow events via blinker Signal)
+# Source: crewAI-inc/crewAI src/crewai/flow/flow_events.py
+#
+# IMPORTANT: CrewAI v0.86 only emits 4 Flow lifecycle events.
+# Agent/Task/LLM/Tool events are NOT emitted as subscribable JSON events.
+# Token usage is only accessible post-run via crew.usage_metrics.
+# The fictional "AgentExecutionStartedEvent" etc. below are ASPIRATIONAL
+# mappings for a future version that may expose these as events.
+#
+# Real events use snake_case type values from dataclasses.asdict():
+#   flow_started, flow_finished, method_execution_started, method_execution_finished
 
 framework: crewai
 framework_version: ">=0.86"
@@ -9,7 +18,32 @@ type_field: type
 timestamp_field: timestamp
 
 events:
-  # ── Agent lifecycle ──
+  # ── REAL Flow events (confirmed in source) ──
+  flow_started:
+    kind: workflow.started
+    payload:
+      flow_name: flow_name
+  flow_finished:
+    kind: workflow.completed
+    payload:
+      flow_name: flow_name
+      output: result
+  method_execution_started:
+    kind: task.started
+    payload:
+      flow_name: flow_name
+      task_name: method_name
+  method_execution_finished:
+    kind: task.completed
+    payload:
+      flow_name: flow_name
+      task_name: method_name
+      output: result
+
+  # ── ASPIRATIONAL: These events do NOT exist in crewai v0.86.
+  # They are mapped in case a future version adds an event bus.
+  # The weekly CI audit will detect when/if these become real. ──
+
   AgentExecutionStartedEvent:
     kind: agent.spawned
     payload:
@@ -28,7 +62,7 @@ events:
       agent_id: agent_id
       error: error
 
-  # ── Task lifecycle ──
+  # ── Task lifecycle (aspirational) ──
   TaskStartedEvent:
     kind: task.started
     payload:
@@ -47,7 +81,7 @@ events:
       task_id: task_id
       error: error
 
-  # ── Tool usage ──
+  # ── Tool usage (aspirational) ──
   ToolUsageStartedEvent:
     kind: tool.call.started
     payload:
@@ -67,7 +101,7 @@ events:
       tool_name: tool_name
       error: error
 
-  # ── LLM calls ──
+  # ── LLM calls (aspirational) ──
   LLMCallStartedEvent:
     kind: llm.call.started
     payload:
@@ -86,7 +120,7 @@ events:
       error: error
       model: model
 
-  # ── Crew lifecycle ──
+  # ── Crew lifecycle (aspirational) ──
   CrewStartedEvent:
     kind: session.started
     payload:
@@ -101,7 +135,7 @@ events:
     payload:
       message: error
 
-  # ── Delegation ──
+  # ── Delegation (aspirational) ──
   AgentDelegationStartedEvent:
     kind: agent.handoff
     payload:
@@ -115,68 +149,7 @@ events:
       to_agent: to_agent_role
       output: output
 
-  # ── Memory ──
-  MemoryQueryStartedEvent:
-    kind: memory.query.started
-    payload:
-      query: query
-  MemoryQueryCompletedEvent:
-    kind: memory.query.completed
-    payload:
-      results: results
-  MemorySaveStartedEvent:
-    kind: memory.save.started
-    payload:
-      content: content
-  MemorySaveCompletedEvent:
-    kind: memory.save.completed
-    payload:
-      success: success
-
-  # ── Knowledge/RAG ──
-  KnowledgeQueryStartedEvent:
-    kind: knowledge.query.started
-    payload:
-      query: query
-      source: source
-  KnowledgeQueryCompletedEvent:
-    kind: knowledge.query.completed
-    payload:
-      results: results
-      source: source
-
-  # ── Flow/workflow ──
-  FlowStartedEvent:
-    kind: workflow.started
-    payload:
-      flow_name: flow_name
-  FlowFinishedEvent:
-    kind: workflow.completed
-    payload:
-      flow_name: flow_name
-      output: output
-  FlowFailedEvent:
-    kind: workflow.failed
-    payload:
-      flow_name: flow_name
-      error: error
-
-  # ── Guardrails ──
-  GuardrailStartedEvent:
-    kind: guardrail.started
-    payload:
-      guardrail_name: name
-  GuardrailPassedEvent:
-    kind: guardrail.passed
-    payload:
-      guardrail_name: name
-  GuardrailFailedEvent:
-    kind: guardrail.failed
-    payload:
-      guardrail_name: name
-      reason: reason
-
-  # ── Telemetry (aggregate) ──
+  # ── Telemetry (aspirational) ──
   TokenUsageEvent:
     kind: telemetry.usage
     payload:

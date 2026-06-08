@@ -1,8 +1,27 @@
 # smolagents (HuggingFace) event mapping for MappedJsonAdapter
-# Targets: smolagents >= 1.0 (structured step logging)
-# Source: huggingface/smolagents agent step events.
-# Note: smolagents emits structured step objects. Use a StepCallback
-# that serializes to JSONL for file_watch ingestion.
+# Targets: smolagents >= 1.0 (preprocessor-emitted JSONL)
+# Source: huggingface/smolagents src/smolagents/memory.py
+#
+# CRITICAL: smolagents does NOT have a "step_type" discriminator field.
+# Step type is inferred from FIELD PRESENCE in the serialized dict:
+#   - has "step_number" → ActionStep
+#   - has "plan" → PlanningStep
+#   - has "task" (and no step_number) → TaskStep
+#   - has "system_prompt" → SystemPromptStep
+#
+# Real ActionStep.dict() keys:
+#   step_number, timing, model_input_messages, tool_calls, error,
+#   model_output_message, model_output, observations, action_output,
+#   token_usage, is_final_answer
+#
+# Real ToolCall dict: {id, type: "function", function: {name, arguments}}
+# Real TokenUsage: {input_tokens, output_tokens, total_tokens}
+#
+# This YAML assumes a SmolagentsPreProcessor that adds a "step_type" field:
+#   {"step_type": "ActionStep", "step_number": 1, ...}
+#   {"step_type": "ToolCall", "tool_name": "web_search", ...}
+#
+# Without the preprocessor, all real smolagents steps resolve to "unknown" → raw.
 
 framework: smolagents
 framework_version: ">=1.0"

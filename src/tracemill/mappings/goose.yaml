@@ -1,8 +1,18 @@
 # Goose event mapping for MappedJsonAdapter
-# Targets: goose >= 1.0 (SQLite messages table, JSON-serialized)
-# Source: block/goose session storage format.
-# Note: Goose stores messages in a SQLite DB. Use a poll-based ingestion
-# that queries the messages table and feeds rows through this adapter.
+# Targets: goose >= 1.0 (SQLite messages table, JSON-serialized rows)
+# Source: block/goose crates/goose-providers/src/conversation/message.rs
+#
+# IMPORTANT: Real Goose only has TWO role values: "user" and "assistant".
+# Tool calls are NESTED inside content_json as {"type": "toolRequest", ...}
+# items within the assistant message array. They are NOT separate rows.
+# Tool results are {"type": "toolResponse", ...} nested in user messages.
+#
+# The flat type_field: role approach can ONLY distinguish user/assistant.
+# A GoosePreProcessor is needed to extract nested tool calls into separate events.
+#
+# Real schema: messages table columns:
+#   id, message_id, session_id, role, content_json, created_timestamp, metadata_json
+# Session table has: total_tokens, input_tokens, output_tokens, accumulated_cost
 
 framework: goose
 framework_version: ">=1.0"
@@ -11,21 +21,19 @@ type_field: role
 timestamp_field: created_at
 
 events:
-  # ── Messages ──
+  # ── REAL messages (confirmed — these are the ONLY role values) ──
   user:
     kind: message.user
     payload:
-      content: content
+      content: content_json
   assistant:
     kind: message.assistant
     payload:
-      content: content
-  system:
-    kind: message.system
-    payload:
-      content: content
+      content: content_json
 
-  # ── Tool lifecycle ──
+  # ── FICTIONAL roles below — these NEVER fire in real Goose.
+  # Kept for forward compatibility if Goose adds a preprocessor layer.
+  # The weekly CI audit will flag if these are still dead code. ──
   tool_use:
     kind: tool.call.started
     payload:
@@ -39,7 +47,7 @@ events:
       result: content
       success: is_success
 
-  # ── Session lifecycle ──
+  # ── Session lifecycle (fictional — would need poll metadata) ──
   session_start:
     kind: session.started
     payload:
@@ -50,36 +58,7 @@ events:
     payload:
       reason: reason
 
-  # ── File operations ──
-  file_write:
-    kind: file.edited
-    payload:
-      path: path
-      content: content
-  file_read:
-    kind: file.read
-    payload:
-      path: path
-
-  # ── Command execution ──
-  shell_command:
-    kind: command.started
-    payload:
-      command: command
-  shell_output:
-    kind: command.completed
-    payload:
-      content: output
-      exit_code: exit_code
-
-  # ── Errors ──
-  error:
-    kind: session.error
-    payload:
-      message: content
-      error_type: type
-
-  # ── Usage/cost ──
+  # ── Usage/cost (fictional — real data is on session table) ──
   usage:
     kind: telemetry.usage
     payload:

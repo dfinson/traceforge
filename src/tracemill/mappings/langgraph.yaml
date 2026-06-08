@@ -1,8 +1,22 @@
 # LangGraph event mapping for MappedJsonAdapter
-# Targets: langgraph >= 0.2 (callback-based event streaming)
-# Source: langchain-ai/langgraph event format from astream_events().
-# Note: LangGraph emits events via LangChain's callback system. Use
-# a CallbackHandler that serializes to JSONL for file_watch ingestion.
+# Targets: langgraph >= 0.2 (astream_events version="v2")
+# Source: langchain-ai/langchain libs/core/langchain_core/tracers/event_stream.py
+#
+# This is the BEST-FITTING YAML — LangGraph's astream_events(version="v2") emits
+# flat dicts with exactly the structure our adapter expects:
+#   {event, run_id, name, tags, metadata, data, parent_ids}
+#
+# Event names confirmed in source:
+#   on_chain_start/end/stream, on_chat_model_start/stream/end,
+#   on_tool_start/end/error, on_retriever_start/end, on_prompt_start/end
+#
+# NOTE: "on_llm_new_token" is an INTERNAL callback name that NEVER appears
+# in astream_events v2 output. It becomes on_chat_model_stream or on_llm_stream.
+# We map it anyway for on_llm_stream (non-chat model) compatibility.
+#
+# Token usage: on on_chat_model_end → data.output.usage_metadata =
+#   {input_tokens, output_tokens, total_tokens}
+# Model name: metadata.ls_model_name
 
 framework: langgraph
 framework_version: ">=0.2"

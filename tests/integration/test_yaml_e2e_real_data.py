@@ -50,20 +50,19 @@ class TestCrewAIRealData:
 
     def test_flow_started_event(self):
         """Real FlowStartedEvent from dataclasses.asdict().
-        CrewAI emits type="flow_started" but YAML expects "FlowStartedEvent"."""
+        After YAML fix: "flow_started" now maps correctly."""
         event = {
             "type": "flow_started",
             "flow_name": "ContentCreationFlow",
             "timestamp": "2024-06-15T12:00:00.000000",
         }
         results = _parse_event("crewai.yaml", event)
-        # Falls to default_kind=raw because "flow_started" != "FlowStartedEvent"
         assert len(results) == 1
-        assert results[0].kind == EventKind.RAW
-        assert results[0].payload["original_type"] == "flow_started"
+        assert results[0].kind == EventKind.WORKFLOW_STARTED
+        assert results[0].payload["flow_name"] == "ContentCreationFlow"
 
     def test_method_execution_started(self):
-        """Real MethodExecutionStartedEvent — not mapped in YAML."""
+        """Real MethodExecutionStartedEvent — now correctly mapped."""
         event = {
             "type": "method_execution_started",
             "flow_name": "ContentCreationFlow",
@@ -72,10 +71,11 @@ class TestCrewAIRealData:
         }
         results = _parse_event("crewai.yaml", event)
         assert len(results) == 1
-        assert results[0].kind == EventKind.RAW
+        assert results[0].kind == EventKind.TASK_STARTED
+        assert results[0].payload["task_name"] == "generate_outline"
 
     def test_flow_finished_event(self):
-        """Real FlowFinishedEvent — type="flow_finished" not "FlowFinishedEvent"."""
+        """Real FlowFinishedEvent — now correctly mapped."""
         event = {
             "type": "flow_finished",
             "flow_name": "ContentCreationFlow",
@@ -84,11 +84,12 @@ class TestCrewAIRealData:
         }
         results = _parse_event("crewai.yaml", event)
         assert len(results) == 1
-        assert results[0].kind == EventKind.RAW
+        assert results[0].kind == EventKind.WORKFLOW_COMPLETED
+        assert results[0].payload["output"] == {"blog_post": "...content..."}
 
     def test_fictional_agent_event_maps_but_never_fires(self):
         """AgentExecutionStartedEvent does NOT exist in CrewAI v0.86.0.
-        The YAML maps it, so it parses — but this event never fires in reality."""
+        The YAML still maps it (aspirational) so it parses — but never fires."""
         event = {
             "type": "AgentExecutionStartedEvent",
             "timestamp": "2024-06-15T12:00:00Z",
@@ -97,7 +98,7 @@ class TestCrewAIRealData:
             "task_name": "Research topic",
         }
         results = _parse_event("crewai.yaml", event)
-        # Maps because YAML has "AgentExecutionStartedEvent" key
+        # Maps because YAML has "AgentExecutionStartedEvent" key (aspirational)
         assert len(results) == 1
         assert results[0].kind == EventKind.AGENT_SPAWNED
 
@@ -114,8 +115,7 @@ class TestOpenHandsRealData:
 
     def test_cmd_run_action(self):
         """Real CmdRunAction from event_to_dict().
-        OpenHands uses "action"/"observation" as discriminator, NOT "event_type".
-        The YAML has type_field: event_type — no such field exists in real data."""
+        After YAML fix: type_field is now "action", which correctly resolves."""
         event = {
             "id": 4,
             "timestamp": "2025-01-15T12:34:56.123456",
@@ -135,13 +135,16 @@ class TestOpenHandsRealData:
             "llm_metrics": None,
         }
         results = _parse_event("openhands.yaml", event)
-        # "event_type" field doesn't exist → type resolves to "unknown" → raw
+        # "action" field = "run" → maps to command.started
         assert len(results) == 1
-        assert results[0].kind == EventKind.RAW
-        assert results[0].payload["original_type"] == "unknown"
+        assert results[0].kind == EventKind.COMMAND_STARTED
+        assert results[0].payload["command"] == "ls -la"
+        assert results[0].payload["thought"] == "I need to list files"
+        assert results[0].payload["source"] == "agent"
 
     def test_cmd_output_observation(self):
-        """Real CmdOutputObservation from event_to_dict()."""
+        """Real CmdOutputObservation — has "observation" key, not "action".
+        With type_field: action, observation events fall to raw."""
         event = {
             "id": 5,
             "timestamp": "2025-01-15T12:34:57.456789",
@@ -160,11 +163,13 @@ class TestOpenHandsRealData:
             "llm_metrics": None,
         }
         results = _parse_event("openhands.yaml", event)
+        # No "action" field → type resolves to "unknown" → raw
         assert len(results) == 1
         assert results[0].kind == EventKind.RAW
+        assert results[0].payload["original_type"] == "unknown"
 
     def test_agent_think_action(self):
-        """Real AgentThinkAction — no event_type field present."""
+        """Real AgentThinkAction — action: "think" now correctly maps."""
         event = {
             "id": 3,
             "timestamp": "2025-01-15T12:34:55.000000",
@@ -178,10 +183,11 @@ class TestOpenHandsRealData:
         }
         results = _parse_event("openhands.yaml", event)
         assert len(results) == 1
-        assert results[0].kind == EventKind.RAW
+        assert results[0].kind == EventKind.REASONING_STARTED
+        assert results[0].payload["content"] == "I should check the project structure first"
 
     def test_message_action_user(self):
-        """Real MessageAction (user's task) — no event_type field."""
+        """Real MessageAction — action: "message" now correctly maps."""
         event = {
             "id": 1,
             "timestamp": "2025-01-15T12:34:50.000000",
@@ -198,7 +204,8 @@ class TestOpenHandsRealData:
         }
         results = _parse_event("openhands.yaml", event)
         assert len(results) == 1
-        assert results[0].kind == EventKind.RAW
+        assert results[0].kind == EventKind.MESSAGE_USER
+        assert results[0].payload["content"] == "Fix the bug in auth.py"
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -213,8 +220,7 @@ class TestGooseRealData:
 
     def test_user_text_message(self):
         """Real user message row from messages table.
-        Goose YAML type_field is "role", timestamp is "created_at".
-        Real Goose uses "created_timestamp" — timestamp mismatch but role works."""
+        Goose YAML: type_field "role", payload content: content_json."""
         event = {
             "role": "user",
             "content_json": json.dumps([
@@ -223,9 +229,10 @@ class TestGooseRealData:
             "created_at": "2025-02-21T18:19:26Z",
         }
         results = _parse_event("goose.yaml", event)
-        # "user" role matches YAML events.user → message.user
         assert len(results) == 1
         assert results[0].kind == EventKind.MESSAGE_USER
+        # content_json is extracted as a string (the JSON-encoded array)
+        assert "List the files" in results[0].payload["content"]
 
     def test_assistant_with_tool_request(self):
         """Real assistant message with nested toolRequest content.
@@ -246,9 +253,11 @@ class TestGooseRealData:
             "created_at": "2025-02-21T18:19:27Z",
         }
         results = _parse_event("goose.yaml", event)
-        # Maps to message.assistant — the nested tool call is invisible to flat YAML
+        # Maps to message.assistant — the nested tool call is invisible
         assert len(results) == 1
         assert results[0].kind == EventKind.MESSAGE_ASSISTANT
+        # The entire content_json string is captured — contains tool call data
+        assert "toolRequest" in results[0].payload["content"]
 
     def test_tool_use_role_fictional(self):
         """Goose YAML maps 'tool_use' as if it's a role value — it's NOT.
@@ -306,7 +315,7 @@ class TestSWEAgentRealData:
 
     def test_tool_response(self):
         """Real tool response from history (role: tool).
-        This role is NOT mapped in the YAML — falls to raw."""
+        After YAML fix: "tool" role is now mapped → tool.output."""
         event = {
             "role": "tool",
             "content": 'Found 1 matches for "missing_colon.py"',
@@ -315,10 +324,9 @@ class TestSWEAgentRealData:
             "tool_call_ids": ["call_PbWErNIge3YTrli3fiVvmIid"],
         }
         results = _parse_event("sweagent.yaml", event)
-        # "tool" role is NOT mapped in current YAML → falls to default_kind=raw
         assert len(results) == 1
-        assert results[0].kind == EventKind.RAW
-        assert results[0].payload["original_type"] == "tool"
+        assert results[0].kind == EventKind.TOOL_OUTPUT
+        assert 'Found 1 matches' in results[0].payload["content"]
 
     def test_system_prompt(self):
         """Real system prompt entry."""
@@ -859,21 +867,20 @@ class TestCompatibilityMatrix:
     @pytest.mark.parametrize(
         "yaml_name,status",
         [
-            ("langgraph.yaml", "works"),      # event field matches real astream_events
-            ("aider.yaml", "aspirational"),    # event names are plausible but unverified
-            ("aider_markdown.yaml", "works"),  # parser output is controlled by us
-            ("sweagent.yaml", "partial"),      # role field matches for user/assistant/system
-            ("goose.yaml", "partial"),         # user/assistant role matches, tools don't
-            ("cline.yaml", "partial"),         # ask/say match, subtypes don't
-            ("crewai.yaml", "broken"),         # maps fictional event class names
-            ("openhands.yaml", "broken"),      # wrong discriminator (event_type vs action/observation)
-            ("pydantic_ai.yaml", "broken"),    # wrong discriminator (type vs kind/event_kind)
-            ("smolagents.yaml", "broken"),     # wrong discriminator (step_type doesn't exist)
+            ("langgraph.yaml", "works"),        # event field matches real astream_events
+            ("aider.yaml", "aspirational"),      # event names are plausible but unverified
+            ("aider_markdown.yaml", "works"),    # parser output is controlled by us
+            ("sweagent.yaml", "works"),          # role field matches all 4 real roles
+            ("goose.yaml", "partial"),           # user/assistant match, tools need preprocessor
+            ("cline.yaml", "partial"),           # ask/say match, subtypes need preprocessor
+            ("crewai.yaml", "partial"),          # 4 real flow events + aspirational future events
+            ("openhands.yaml", "partial"),       # action events work, observations need preprocessor
+            ("pydantic_ai.yaml", "needs_preprocessor"),  # native format uses kind/event_kind
+            ("smolagents.yaml", "needs_preprocessor"),    # no discriminator field at all
         ],
     )
     def test_status_documented(self, yaml_name: str, status: str):
         """Each YAML's real-world compatibility is documented."""
         yaml_path = MAPPINGS_DIR / yaml_name
         assert yaml_path.exists(), f"{yaml_name} not found"
-        # This test just documents the status — actual validation is in framework-specific tests above
-        assert status in ("works", "partial", "aspirational", "broken")
+        assert status in ("works", "partial", "aspirational", "needs_preprocessor")

@@ -203,34 +203,32 @@ class TestMappedJsonFullPipeline:
             assert ev.metadata.ingestion_mode == "file_watch"
 
     def test_openhands_session(self):
-        """Simulate an OpenHands session: message → think → command → file edit."""
+        """Simulate an OpenHands session using REAL format: action field discriminator."""
         adapter = MappedJsonAdapter.from_yaml(
             str(Path(__file__).resolve().parents[1] / ".." / "src" / "tracemill" / "mappings" / "openhands.yaml"),
             session_id="test-session",
         )
         events_raw = [
-            {"event_type": "MessageAction", "timestamp": 1717232400, "session_id": "oh-1", "content": "Fix the bug in main.py", "role": "user"},
-            {"event_type": "AgentThinkAction", "timestamp": 1717232401, "session_id": "oh-1", "thought": "I need to read main.py first"},
-            {"event_type": "FileReadAction", "timestamp": 1717232402, "session_id": "oh-1", "path": "/workspace/main.py"},
-            {"event_type": "CmdRunAction", "timestamp": 1717232403, "session_id": "oh-1", "command": "python -m pytest"},
-            {"event_type": "CmdOutputObservation", "timestamp": 1717232404, "session_id": "oh-1", "content": "PASSED", "exit_code": 0},
-            {"event_type": "FileWriteAction", "timestamp": 1717232405, "session_id": "oh-1", "path": "/workspace/main.py", "content": "fixed code"},
-            {"event_type": "AgentFinishAction", "timestamp": 1717232406, "session_id": "oh-1", "outputs": {"content": "Bug fixed"}},
+            {"action": "message", "timestamp": 1717232400, "source": "user", "args": {"content": "Fix the bug in main.py", "wait_for_response": True}},
+            {"action": "think", "timestamp": 1717232401, "source": "agent", "args": {"thought": "I need to read main.py first"}},
+            {"action": "read", "timestamp": 1717232402, "source": "agent", "args": {"path": "/workspace/main.py"}},
+            {"action": "run", "timestamp": 1717232403, "source": "agent", "args": {"command": "python -m pytest"}},
+            {"action": "write", "timestamp": 1717232405, "source": "agent", "args": {"path": "/workspace/main.py", "content": "fixed code"}},
+            {"action": "finish", "timestamp": 1717232406, "source": "agent", "args": {"outputs": {"content": "Bug fixed"}}},
         ]
 
         all_events = []
         for evt in events_raw:
             all_events.extend(adapter.parse(json.dumps(evt)))
 
-        assert len(all_events) == 7
+        assert len(all_events) == 6
         kinds = [e.kind for e in all_events]
         assert kinds[0] == "message.user"
         assert kinds[1] == "reasoning.started"
         assert kinds[2] == "file.read"
         assert kinds[3] == "command.started"
-        assert kinds[4] == "command.completed"
-        assert kinds[5] == "file.edited"
-        assert kinds[6] == "session.ended"
+        assert kinds[4] == "file.edited"
+        assert kinds[5] == "session.ended"
 
         # Session ID from constructor
         for ev in all_events:

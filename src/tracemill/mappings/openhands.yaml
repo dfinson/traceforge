@@ -1,142 +1,101 @@
 # OpenHands event mapping for MappedJsonAdapter
 # Targets: openhands >= 0.30 (JSON event files in workspace)
-# Source: All-Hands-AI/OpenHands runtime event format.
+# Source: OpenHands/OpenHands openhands/events/serialization/event.py
+#
+# CRITICAL: OpenHands uses a COMPOUND discriminator:
+#   - Action events have: {"action": "run", "args": {...}}
+#   - Observation events have: {"observation": "run", "content": "...", "extras": {...}}
+#
+# A single type_field CANNOT handle both shapes. This YAML uses type_field: action
+# which means ONLY action events are correctly discriminated. Observation events
+# will resolve to type="unknown" (no "action" field) and fall to default_kind=raw.
+#
+# For full support, an OpenHandsPreProcessor is needed that:
+#   1. Checks for "action" key → emits {"_type": "action.<value>", ...}
+#   2. Checks for "observation" key → emits {"_type": "observation.<value>", ...}
+#   3. Flattens args/extras into top-level for payload extraction
+#
+# Real top-level event fields:
+#   id, timestamp, source, message, cause, action/observation, args/content+extras,
+#   timeout, tool_call_metadata, llm_metrics
 
 framework: openhands
 framework_version: ">=0.30"
 ingestion_mode: file_watch
-type_field: event_type
+type_field: action
 timestamp_field: timestamp
 
 events:
-  # ── Session lifecycle ──
-  AgentStartAction:
-    kind: session.started
+  # ── Action events (real — discriminated by "action" field value) ──
+  run:
+    kind: command.started
     payload:
-      agent_id: agent
-      model: model
-
-  # ── Agent actions ──
-  AgentThinkAction:
+      command: args.command
+      thought: args.thought
+      source: source
+  run_ipython:
+    kind: command.started
+    payload:
+      command: args.code
+      source: source
+  think:
     kind: reasoning.started
     payload:
-      content: thought
-  AgentFinishAction:
+      content: args.thought
+      source: source
+  finish:
     kind: session.ended
     payload:
-      output: outputs.content
-  AgentDelegateAction:
-    kind: agent.spawned
-    payload:
-      agent_id: agent
-      task: inputs.task
-  AgentRejectAction:
-    kind: session.abort
-    payload:
-      message: outputs.reason
-
-  # ── Command execution ──
-  CmdRunAction:
-    kind: command.started
-    payload:
-      command: command
-      timeout: timeout
-  CmdOutputObservation:
-    kind: command.completed
-    payload:
-      content: content
-      exit_code: exit_code
-
-  # ── File operations ──
-  FileReadAction:
-    kind: file.read
-    payload:
-      path: path
-  FileWriteAction:
-    kind: file.edited
-    payload:
-      path: path
-      content: content
-  FileEditAction:
-    kind: file.edited
-    payload:
-      path: path
-      old_str: old_str
-      new_str: new_str
-
-  # ── IPython / code execution ──
-  IPythonRunCellAction:
-    kind: command.started
-    payload:
-      command: code
-  IPythonRunCellObservation:
-    kind: command.completed
-    payload:
-      content: content
-
-  # ── Browser ──
-  BrowseURLAction:
-    kind: browser.launched
-    payload:
-      url: url
-  BrowseInteractiveAction:
-    kind: browser.action
-    payload:
-      browser_actions: browser_actions
-  BrowserOutputObservation:
-    kind: browser.result
-    payload:
-      content: content
-      url: url
-
-  # ── Messages ──
-  MessageAction:
+      output: args.outputs.content
+      source: source
+  message:
     kind: message.user
     payload:
-      content: content
-      role: role
-  AgentMessageAction:
-    kind: message.assistant
+      content: args.content
+      source: source
+  delegate:
+    kind: agent.spawned
     payload:
-      content: content
-
-  # ── Memory/recall ──
-  AgentRecallAction:
+      agent_id: args.agent
+      task: args.inputs.task
+      source: source
+  reject:
+    kind: session.abort
+    payload:
+      message: args.outputs.reason
+      source: source
+  browse:
+    kind: browser.launched
+    payload:
+      url: args.url
+      source: source
+  browse_interactive:
+    kind: browser.action
+    payload:
+      actions: args.browser_actions
+      source: source
+  read:
+    kind: file.read
+    payload:
+      path: args.path
+      source: source
+  write:
+    kind: file.edited
+    payload:
+      path: args.path
+      content: args.content
+      source: source
+  edit:
+    kind: file.edited
+    payload:
+      path: args.path
+      source: source
+  recall:
     kind: memory.query.started
     payload:
-      query: query
-  AgentRecallObservation:
-    kind: memory.query.completed
-    payload:
-      content: memories
+      query: args.query
+      source: source
 
-  # ── Checkpoints ──
-  AgentStateCheckpoint:
-    kind: checkpoint.created
-    payload:
-      checkpoint_id: id
-
-  # ── Errors ──
-  ErrorObservation:
-    kind: session.error
-    payload:
-      message: content
-  AgentStuckObservation:
-    kind: session.error
-    payload:
-      message: content
-
-  # ── Delegation results ──
-  AgentDelegateObservation:
-    kind: agent.completed
-    payload:
-      output: outputs.content
-
-  # ── Telemetry ──
-  LLMCompletionObservation:
-    kind: telemetry.usage
-    payload:
-      input_tokens: input_tokens
-      output_tokens: output_tokens
-      cost_usd: cost
-      model: model
+  # NOTE: Observation events (observation: "run", "browse", etc.) will NOT
+  # match because they lack an "action" field. They fall to default_kind=raw.
+  # This is a known limitation requiring an OpenHandsPreProcessor.

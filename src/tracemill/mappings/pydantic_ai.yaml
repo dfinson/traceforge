@@ -1,8 +1,21 @@
 # PydanticAI event mapping for MappedJsonAdapter
-# Targets: pydantic-ai >= 0.0.36 (structured event callbacks)
-# Source: pydantic/pydantic-ai agent run events.
-# Note: PydanticAI emits events via its streaming interface. Use a
-# serializer that writes events to JSONL for file_watch ingestion.
+# Targets: pydantic-ai >= 0.0.36 (preprocessor-emitted JSONL)
+# Source: pydantic/pydantic-ai pydantic_ai_slim/pydantic_ai/messages.py
+#
+# CRITICAL: PydanticAI does NOT emit flat JSON events with a "type" field.
+# Its native format uses multi-level discrimination:
+#   - Messages: "kind" = "request" | "response"
+#   - Parts: "part_kind" = "system-prompt" | "user-prompt" | "text" | "tool-call" | ...
+#   - Stream events: "event_kind" = "part_start" | "part_delta" | "part_end" | ...
+#   - Usage: ModelResponse.usage = {input_tokens, output_tokens, ...}
+#
+# This YAML assumes a PydanticAIPreProcessor normalizes the native format to
+# flat JSONL with a "type" discriminator. The preprocessor MUST synthesize:
+#   {"type": "agent_run_start", "model_name": "...", "timestamp": "..."}
+#   {"type": "model_response", "usage": {...}, ...}
+#   etc.
+#
+# Without the preprocessor, all real PydanticAI events resolve to "unknown" → raw.
 
 framework: pydantic_ai
 framework_version: ">=0.0.36"

@@ -24,8 +24,23 @@
 # Cost: session.next.step.ended → properties.cost (number, USD)
 # Model: session.next.step.started → properties.model = {id, providerID, variant?}
 #
+# Timestamp: Despite the internal Schema name "DateTimeUtcFromMillis", the SSE
+# wire format bypasses Schema.encode — JSON.stringify calls DateTime.Utc.toJSON()
+# which returns an ISO 8601 UTC string (e.g. "2024-01-15T12:34:56.789Z").
+#
 # Prompt shape: {text: string, files?: FileAttachment[], agents?: AgentAttachment[],
 #   references?: ReferenceAttachment[]}
+# FileAttachment: {uri, mime, name?, description?, source?}
+# AgentAttachment: {name, source?}
+# ReferenceAttachment: {name, kind: "local"|"git"|"invalid", uri?, repository?,
+#   branch?, target?, targetUri?, problem?, source?}
+#
+# ToolOutput.Structured: Record<string, any> (plain JSON object)
+# ToolOutput.Content: tagged union on "type":
+#   {type: "text", text: string} | {type: "file", uri: string, mime: string, name?: string}
+#
+# Instance SSE also emits server.connected and server.heartbeat with empty properties.
+# Global SSE (/global/event) uses a DIFFERENT wire format — not covered by this YAML.
 #
 # 26 total events defined in All union at v1.2.24.
 

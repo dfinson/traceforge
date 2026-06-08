@@ -18,19 +18,37 @@ class CopilotSDKAdapter(CLIJsonlAdapter):
     """Parses Copilot SDK subprocess stdout into SessionEvents.
 
     Wire format is identical to CLI JSONL. This subclass overrides
-    metadata.agent_sdk to "copilot-sdk" to distinguish live SDK events
+    source_adapter to "copilot_sdk" to distinguish live SDK events
     from offline JSONL replay.
     """
+
+    SOURCE_ADAPTER = "copilot_sdk"
 
     def parse(self, raw: bytes | str) -> Iterator[SessionEvent]:
         for event in super().parse(raw):
             yield event.model_copy(
-                update={"metadata": event.metadata.model_copy(update={"agent_sdk": "copilot-sdk"})}
+                update={
+                    "metadata": event.metadata.model_copy(
+                        update={
+                            "source_adapter": self.SOURCE_ADAPTER,
+                            "agent_sdk": "copilot-sdk",
+                            "ingestion_mode": "stream",
+                        }
+                    )
+                }
             )
 
     def parse_event(self, sdk_event: CopilotSessionEvent) -> Iterator[SessionEvent]:
         """Parse a typed Copilot SDK SessionEvent (live streaming interface)."""
         for event in super().parse_event(sdk_event):
             yield event.model_copy(
-                update={"metadata": event.metadata.model_copy(update={"agent_sdk": "copilot-sdk"})}
+                update={
+                    "metadata": event.metadata.model_copy(
+                        update={
+                            "source_adapter": self.SOURCE_ADAPTER,
+                            "agent_sdk": "copilot-sdk",
+                            "ingestion_mode": "stream",
+                        }
+                    )
+                }
             )

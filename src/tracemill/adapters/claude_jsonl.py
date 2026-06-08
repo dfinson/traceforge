@@ -41,6 +41,9 @@ class ClaudeJsonlAdapter(Adapter):
     Tracks session_id across calls since it's only provided in result messages.
     """
 
+    SOURCE_FRAMEWORK = "claude"
+    SOURCE_ADAPTER = "claude_jsonl"
+
     def __init__(self) -> None:
         self._session_id: str | None = None
 
@@ -85,27 +88,40 @@ class ClaudeJsonlAdapter(Adapter):
         elif isinstance(message, ResultMessage):
             yield from self._handle_result(message)
         elif isinstance(message, SystemMessage):
-            logger.debug("Claude adapter: skipping system message (subtype=%s)", message.subtype)
+            logger.debug(
+                "Claude adapter: skipping system message (subtype=%s)",
+                message.subtype,
+            )
         else:
-            logger.debug("Claude adapter: skipping unknown message type %s", type(message).__name__)
+            logger.debug(
+                "Claude adapter: skipping unknown message type %s",
+                type(message).__name__,
+            )
+
+    def _make_metadata(self, raw_kind: str) -> EventMetadata:
+        return EventMetadata(
+            source_framework=self.SOURCE_FRAMEWORK,
+            source_adapter=self.SOURCE_ADAPTER,
+            agent_sdk=self.SOURCE_FRAMEWORK,
+            raw_kind=raw_kind,
+        )
 
     def _handle_user(self, message: UserMessage) -> Iterator[SessionEvent]:
         session_id = self._session_id or "unknown"
 
         if isinstance(message.content, str):
             yield SessionEvent(
-                kind=EventKind.USER_MESSAGE,
+                kind=EventKind.MESSAGE_USER,
                 session_id=session_id,
                 timestamp=datetime.now(timezone.utc),
                 payload={"content": message.content},
-                metadata=EventMetadata(agent_sdk="claude-code"),
+                metadata=self._make_metadata("user"),
             )
         elif isinstance(message.content, list):
-            # User messages can contain tool_result blocks
             for block in message.content:
                 if isinstance(block, ToolResultBlock):
                     yield SessionEvent(
-                        kind=EventKind.TOOL_COMPLETE,
+                        kind=EventKind.TOOL_CALL_COMPLETED,
                         session_id=session_id,
                         timestamp=datetime.now(timezone.utc),
                         payload={
@@ -113,15 +129,15 @@ class ClaudeJsonlAdapter(Adapter):
                             "success": not (block.is_error or False),
                             "result": self._extract_result_text(block.content),
                         },
-                        metadata=EventMetadata(agent_sdk="claude-code"),
+                        metadata=self._make_metadata("user.tool_result"),
                     )
                 elif isinstance(block, TextBlock):
                     yield SessionEvent(
-                        kind=EventKind.USER_MESSAGE,
+                        kind=EventKind.MESSAGE_USER,
                         session_id=session_id,
                         timestamp=datetime.now(timezone.utc),
                         payload={"content": block.text},
-                        metadata=EventMetadata(agent_sdk="claude-code"),
+                        metadata=self._make_metadata("user.text"),
                     )
 
     def _handle_assistant(self, message: AssistantMessage) -> Iterator[SessionEvent]:
@@ -130,16 +146,16 @@ class ClaudeJsonlAdapter(Adapter):
         for block in message.content:
             if isinstance(block, TextBlock):
                 yield SessionEvent(
-                    kind=EventKind.ASSISTANT_MESSAGE,
+                    kind=EventKind.MESSAGE_ASSISTANT,
                     session_id=session_id,
                     timestamp=datetime.now(timezone.utc),
                     payload={"content": block.text},
-                    metadata=EventMetadata(agent_sdk="claude-code"),
+                    metadata=self._make_metadata("assistant.text"),
                 )
 
             elif isinstance(block, ToolUseBlock):
                 yield SessionEvent(
-                    kind=EventKind.TOOL_START,
+                    kind=EventKind.TOOL_CALL_STARTED,
                     session_id=session_id,
                     timestamp=datetime.now(timezone.utc),
                     payload={
@@ -147,12 +163,12 @@ class ClaudeJsonlAdapter(Adapter):
                         "tool_name": block.name,
                         "arguments": block.input,
                     },
-                    metadata=EventMetadata(agent_sdk="claude-code"),
+                    metadata=self._make_metadata("assistant.tool_use"),
                 )
 
             elif isinstance(block, ToolResultBlock):
                 yield SessionEvent(
-                    kind=EventKind.TOOL_COMPLETE,
+                    kind=EventKind.TOOL_CALL_COMPLETED,
                     session_id=session_id,
                     timestamp=datetime.now(timezone.utc),
                     payload={
@@ -160,11 +176,17 @@ class ClaudeJsonlAdapter(Adapter):
                         "success": not (block.is_error or False),
                         "result": self._extract_result_text(block.content),
                     },
-                    metadata=EventMetadata(agent_sdk="claude-code"),
+                    metadata=self._make_metadata("assistant.tool_result"),
                 )
 
             elif isinstance(block, ThinkingBlock):
-                logger.debug("Claude adapter: skipping thinking block")
+                yield SessionEvent(
+                    kind=EventKind.LLM_THINKING_CHUNK,
+                    session_id=session_id,
+                    timestamp=datetime.now(timezone.utc),
+                    payload={"content": block.thinking if hasattr(block, "thinking") else ""},
+                    metadata=self._make_metadata("assistant.thinking"),
+                )
 
     def _handle_result(self, message: ResultMessage) -> Iterator[SessionEvent]:
         # Track session_id from result message
@@ -190,7 +212,7 @@ class ClaudeJsonlAdapter(Adapter):
             session_id=session_id,
             timestamp=datetime.now(timezone.utc),
             payload=usage_payload,
-            metadata=EventMetadata(agent_sdk="claude-code"),
+            metadata=self._make_metadata("result"),
         )
 
         # If error, also emit an error event
@@ -200,7 +222,7 @@ class ClaudeJsonlAdapter(Adapter):
                 session_id=session_id,
                 timestamp=datetime.now(timezone.utc),
                 payload={"message": message.result or "Unknown error"},
-                metadata=EventMetadata(agent_sdk="claude-code"),
+                metadata=self._make_metadata("result.error"),
             )
 
     @staticmethod

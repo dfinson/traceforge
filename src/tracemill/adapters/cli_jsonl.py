@@ -4,8 +4,7 @@ Uses the Copilot SDK's own ``SessionEvent.from_dict()`` for deserialization,
 avoiding fragile hand-rolled JSON parsing.
 
 All event types are preserved — unmapped types emit as EventKind.RAW with
-the original type string in payload["original_type"]. Unknown fields are
-preserved in payload["extras"].
+the original type string preserved in metadata.raw_kind and payload["extras"].
 """
 
 from __future__ import annotations
@@ -33,39 +32,52 @@ from tracemill.types import EventKind, EventMetadata, SessionEvent
 
 logger = logging.getLogger(__name__)
 
-#: Maps Copilot SDK event types to tracemill EventKind.
-_KIND_MAP: dict[SessionEventType, EventKind] = {
-    SessionEventType.SESSION_START: EventKind.SESSION_START,
-    SessionEventType.SESSION_RESUME: EventKind.SESSION_RESUME,
-    SessionEventType.SESSION_SHUTDOWN: EventKind.SESSION_END,
+#: Maps Copilot SDK event types to canonical tracemill event kinds.
+_KIND_MAP: dict[SessionEventType, str] = {
+    # Session lifecycle
+    SessionEventType.SESSION_START: EventKind.SESSION_STARTED,
+    SessionEventType.SESSION_RESUME: EventKind.SESSION_RESUMED,
+    SessionEventType.SESSION_SHUTDOWN: EventKind.SESSION_ENDED,
     SessionEventType.SESSION_ERROR: EventKind.ERROR,
     SessionEventType.SESSION_INFO: EventKind.SESSION_INFO,
     SessionEventType.SESSION_WARNING: EventKind.SESSION_WARNING,
     SessionEventType.SESSION_IDLE: EventKind.SESSION_IDLE,
-    SessionEventType.USER_MESSAGE: EventKind.USER_MESSAGE,
-    SessionEventType.ASSISTANT_MESSAGE: EventKind.ASSISTANT_MESSAGE,
-    SessionEventType.ASSISTANT_TURN_START: EventKind.TURN_START,
-    SessionEventType.ASSISTANT_TURN_END: EventKind.TURN_END,
-    SessionEventType.ASSISTANT_INTENT: EventKind.ASSISTANT_INTENT,
-    SessionEventType.ASSISTANT_REASONING: EventKind.ASSISTANT_REASONING,
-    SessionEventType.ASSISTANT_USAGE: EventKind.USAGE,
-    SessionEventType.TOOL_EXECUTION_START: EventKind.TOOL_START,
-    SessionEventType.TOOL_EXECUTION_COMPLETE: EventKind.TOOL_COMPLETE,
-    SessionEventType.TOOL_EXECUTION_PARTIAL_RESULT: EventKind.TOOL_PARTIAL_RESULT,
+    # Messages
+    SessionEventType.USER_MESSAGE: EventKind.MESSAGE_USER,
+    SessionEventType.ASSISTANT_MESSAGE: EventKind.MESSAGE_ASSISTANT,
+    SessionEventType.SYSTEM_MESSAGE: EventKind.MESSAGE_SYSTEM,
+    # Turn lifecycle
+    SessionEventType.ASSISTANT_TURN_START: EventKind.TURN_STARTED,
+    SessionEventType.ASSISTANT_TURN_END: EventKind.TURN_ENDED,
+    # Reasoning
+    SessionEventType.ASSISTANT_INTENT: EventKind.PLANNING_STARTED,
+    SessionEventType.ASSISTANT_REASONING: EventKind.REASONING_STARTED,
+    # Tool lifecycle
+    SessionEventType.TOOL_EXECUTION_START: EventKind.TOOL_CALL_STARTED,
+    SessionEventType.TOOL_EXECUTION_COMPLETE: EventKind.TOOL_CALL_COMPLETED,
+    SessionEventType.TOOL_EXECUTION_PARTIAL_RESULT: EventKind.TOOL_RESULT_CHUNK,
     SessionEventType.TOOL_EXECUTION_PROGRESS: EventKind.TOOL_PROGRESS,
-    SessionEventType.HOOK_START: EventKind.HOOK_START,
-    SessionEventType.HOOK_END: EventKind.HOOK_END,
-    SessionEventType.EXTERNAL_TOOL_REQUESTED: EventKind.EXTERNAL_TOOL_REQUESTED,
-    SessionEventType.EXTERNAL_TOOL_COMPLETED: EventKind.EXTERNAL_TOOL_COMPLETED,
-    SessionEventType.SUBAGENT_STARTED: EventKind.SUBAGENT_START,
-    SessionEventType.SUBAGENT_COMPLETED: EventKind.SUBAGENT_COMPLETE,
-    SessionEventType.SUBAGENT_FAILED: EventKind.SUBAGENT_FAILED,
+    # Usage
+    SessionEventType.ASSISTANT_USAGE: EventKind.USAGE,
+    # Hook lifecycle
+    SessionEventType.HOOK_START: EventKind.HOOK_STARTED,
+    SessionEventType.HOOK_END: EventKind.HOOK_COMPLETED,
+    # External tools (MCP-level)
+    SessionEventType.EXTERNAL_TOOL_REQUESTED: EventKind.TOOL_CALL_STARTED,
+    SessionEventType.EXTERNAL_TOOL_COMPLETED: EventKind.TOOL_CALL_COMPLETED,
+    # Agent orchestration
+    SessionEventType.SUBAGENT_STARTED: EventKind.AGENT_SPAWNED,
+    SessionEventType.SUBAGENT_COMPLETED: EventKind.AGENT_COMPLETED,
+    SessionEventType.SUBAGENT_FAILED: EventKind.AGENT_FAILED,
+    # Skills
     SessionEventType.SKILL_INVOKED: EventKind.SKILL_INVOKED,
+    # Permissions
     SessionEventType.PERMISSION_REQUESTED: EventKind.PERMISSION_REQUESTED,
-    SessionEventType.PERMISSION_COMPLETED: EventKind.PERMISSION_COMPLETED,
-    SessionEventType.USER_INPUT_REQUESTED: EventKind.USER_INPUT_REQUESTED,
-    SessionEventType.USER_INPUT_COMPLETED: EventKind.USER_INPUT_COMPLETED,
-    SessionEventType.SYSTEM_MESSAGE: EventKind.SYSTEM_MESSAGE,
+    SessionEventType.PERMISSION_COMPLETED: EventKind.PERMISSION_GRANTED,
+    # User input
+    SessionEventType.USER_INPUT_REQUESTED: EventKind.INPUT_REQUESTED,
+    SessionEventType.USER_INPUT_COMPLETED: EventKind.INPUT_RECEIVED,
+    # Abort
     SessionEventType.ABORT: EventKind.ABORT,
 }
 
@@ -77,9 +89,11 @@ class CLIJsonlAdapter(Adapter):
     deserialization. Tracks session_id across calls since the CLI format
     only provides it in session.start events.
 
-    All event types are preserved — unmapped types emit as EventKind.RAW
-    with the original type string in payload["original_type"].
+    All event types are preserved — unmapped types emit as EventKind.RAW.
     """
+
+    SOURCE_FRAMEWORK = "copilot"
+    SOURCE_ADAPTER = "cli_jsonl"
 
     def __init__(self) -> None:
         self._session_id: str | None = None
@@ -104,9 +118,7 @@ class CLIJsonlAdapter(Adapter):
             return
 
         if not isinstance(obj, dict):
-            logger.warning(
-                "CLI adapter: expected JSON object, got %s", type(obj).__name__
-            )
+            logger.warning("CLI adapter: expected JSON object, got %s", type(obj).__name__)
             return
 
         # Deserialize via the SDK
@@ -126,11 +138,14 @@ class CLIJsonlAdapter(Adapter):
 
         kind = _KIND_MAP.get(sdk_event.type, EventKind.RAW)
         session_id = self._session_id or "unknown"
-        timestamp = (
-            sdk_event.timestamp if sdk_event.timestamp else datetime.now(timezone.utc)
-        )
+        timestamp = sdk_event.timestamp if sdk_event.timestamp else datetime.now(timezone.utc)
         payload = self._extract_payload(sdk_event.data, sdk_event.type, kind)
-        metadata = EventMetadata(agent_sdk="copilot-cli")
+        metadata = EventMetadata(
+            source_framework=self.SOURCE_FRAMEWORK,
+            source_adapter=self.SOURCE_ADAPTER,
+            agent_sdk=self.SOURCE_FRAMEWORK,
+            raw_kind=sdk_event.type.value,
+        )
 
         yield SessionEvent(
             kind=kind,
@@ -141,7 +156,7 @@ class CLIJsonlAdapter(Adapter):
         )
 
     def _extract_payload(
-        self, data: Any, event_type: SessionEventType, kind: EventKind
+        self, data: Any, event_type: SessionEventType, kind: str
     ) -> dict[str, Any]:
         """Extract a normalized payload dict from a typed SDK data object."""
         if isinstance(data, SessionStartData):
@@ -177,12 +192,8 @@ class CLIJsonlAdapter(Adapter):
 
         if isinstance(data, AssistantUsageData):
             return {
-                "input_tokens": (
-                    int(data.input_tokens) if data.input_tokens else None
-                ),
-                "output_tokens": (
-                    int(data.output_tokens) if data.output_tokens else None
-                ),
+                "input_tokens": (int(data.input_tokens) if data.input_tokens else None),
+                "output_tokens": (int(data.output_tokens) if data.output_tokens else None),
                 "cache_read_tokens": (
                     int(data.cache_read_tokens) if data.cache_read_tokens else None
                 ),
@@ -196,9 +207,7 @@ class CLIJsonlAdapter(Adapter):
 
         if isinstance(data, SessionShutdownData):
             return {
-                "shutdown_type": (
-                    data.shutdown_type.value if data.shutdown_type else None
-                ),
+                "shutdown_type": (data.shutdown_type.value if data.shutdown_type else None),
                 "total_premium_requests": int(data.total_premium_requests),
                 "total_api_duration_ms": data.total_api_duration_ms,
             }

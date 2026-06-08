@@ -18,19 +18,37 @@ class ClaudeSDKAdapter(ClaudeJsonlAdapter):
     """Parses Claude SDK subprocess stdout into SessionEvents.
 
     Content structure matches Claude JSONL format. This subclass overrides
-    metadata.agent_sdk to "claude-sdk" to distinguish live SDK events
+    source_adapter to "claude_sdk" to distinguish live SDK events
     from offline JSONL replay.
     """
+
+    SOURCE_ADAPTER = "claude_sdk"
 
     def parse(self, raw: bytes | str) -> Iterator[SessionEvent]:
         for event in super().parse(raw):
             yield event.model_copy(
-                update={"metadata": event.metadata.model_copy(update={"agent_sdk": "claude-sdk"})}
+                update={
+                    "metadata": event.metadata.model_copy(
+                        update={
+                            "source_adapter": self.SOURCE_ADAPTER,
+                            "agent_sdk": "claude-sdk",
+                            "ingestion_mode": "stream",
+                        }
+                    )
+                }
             )
 
     def parse_message(self, message: Message) -> Iterator[SessionEvent]:
         """Parse a typed Claude SDK Message (live streaming interface)."""
         for event in super().parse_message(message):
             yield event.model_copy(
-                update={"metadata": event.metadata.model_copy(update={"agent_sdk": "claude-sdk"})}
+                update={
+                    "metadata": event.metadata.model_copy(
+                        update={
+                            "source_adapter": self.SOURCE_ADAPTER,
+                            "agent_sdk": "claude-sdk",
+                            "ingestion_mode": "stream",
+                        }
+                    )
+                }
             )

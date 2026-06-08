@@ -12,25 +12,52 @@ from tests.conftest import make_event, make_span, make_usage
 
 
 class TestEventKind:
-    def test_all_values_are_strings(self):
-        for kind in EventKind:
-            assert isinstance(kind.value, str)
+    def test_known_kinds_are_strings(self):
+        from tracemill.types import KNOWN_KINDS
 
-    def test_expected_members(self):
-        """Verify all EventKind enum members exist and are string-valued."""
-        # Core kinds that must always be present
+        for kind in KNOWN_KINDS:
+            assert isinstance(kind, str)
+
+    def test_expected_canonical_kinds(self):
+        """Verify core canonical kinds are present."""
+        from tracemill.types import KNOWN_KINDS
+
         required = {
-            "user_message", "assistant_message", "tool_start", "tool_complete",
-            "file_change", "usage", "error", "session_start", "session_end", "raw",
+            "message.user",
+            "message.assistant",
+            "tool.call.started",
+            "tool.call.completed",
+            "file.edited",
+            "usage",
+            "error",
+            "session.started",
+            "session.ended",
+            "raw",
         }
-        actual = {k.value for k in EventKind}
-        assert required.issubset(actual), f"Missing: {required - actual}"
-        # All values are strings
-        for kind in EventKind:
-            assert isinstance(kind.value, str)
+        assert required.issubset(KNOWN_KINDS), f"Missing: {required - KNOWN_KINDS}"
 
     def test_string_comparison(self):
-        assert EventKind.USER_MESSAGE == "user_message"
+        assert EventKind.MESSAGE_USER == "message.user"
+
+    def test_normalize_kind_legacy(self):
+        from tracemill.types import normalize_kind
+
+        assert normalize_kind("user_message") == "message.user"
+        assert normalize_kind("tool_start") == "tool.call.started"
+        assert normalize_kind("session_start") == "session.started"
+
+    def test_normalize_kind_passthrough(self):
+        from tracemill.types import normalize_kind
+
+        assert normalize_kind("tool.call.started") == "tool.call.started"
+        assert normalize_kind("custom.event") == "custom.event"
+
+    def test_is_known_kind(self):
+        from tracemill.types import is_known_kind
+
+        assert is_known_kind("message.user")
+        assert is_known_kind("tool.call.started")
+        assert not is_known_kind("totally.unknown.thing")
 
 
 class TestEventMetadata:
@@ -82,7 +109,7 @@ class TestSessionEvent:
 
     def test_roundtrip(self):
         event = make_event(
-            kind=EventKind.TOOL_START,
+            kind=EventKind.TOOL_CALL_STARTED,
             payload={"tool": "grep", "args": ["pattern"]},
             metadata=EventMetadata(classification=None, duration_ms=42.0),
         )
@@ -90,7 +117,7 @@ class TestSessionEvent:
         restored = SessionEvent.model_validate_json(json_str)
         assert restored == event
         assert restored.id == event.id
-        assert restored.kind == EventKind.TOOL_START
+        assert restored.kind == EventKind.TOOL_CALL_STARTED
         assert restored.metadata.classification is None
 
     def test_payload_preserved(self):

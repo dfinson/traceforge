@@ -52,7 +52,7 @@ class Enricher:
         """Enrich a single event. Returns None if event is buffered (tool_start waiting
         for its tool_complete pair). Returns enriched event when ready. May return a list
         if a displaced orphan start needs to be emitted alongside buffering a new start."""
-        if event.kind == EventKind.TOOL_START:
+        if event.kind == EventKind.TOOL_CALL_STARTED:
             event = self._classify(event)
             event = self._set_visibility(event)
             event = self._set_phase(event)
@@ -70,7 +70,7 @@ class Enricher:
                 return None
             return event
 
-        if event.kind == EventKind.TOOL_COMPLETE:
+        if event.kind == EventKind.TOOL_CALL_COMPLETED:
             tool_call_id = _extract_tool_call_id(event)
             start_event = self._pending.get(tool_call_id) if tool_call_id else None
 
@@ -232,7 +232,7 @@ class Enricher:
         """Set metadata.visibility based on event kind and classification."""
         visibility = Visibility.VISIBLE
 
-        if event.kind in (EventKind.SESSION_START, EventKind.SESSION_END):
+        if event.kind in (EventKind.SESSION_STARTED, EventKind.SESSION_ENDED):
             visibility = Visibility.SYSTEM
         elif event.metadata.classification is not None:
             cls: Classification = event.metadata.classification
@@ -254,13 +254,13 @@ class Enricher:
 
     def _detect_phases(self, event: SessionEvent) -> frozenset[str]:
         """Determine the phase(s) for an event from its Classification."""
-        if event.kind in (EventKind.USER_MESSAGE, EventKind.ASSISTANT_MESSAGE):
+        if event.kind in (EventKind.MESSAGE_USER, EventKind.MESSAGE_ASSISTANT):
             return frozenset({Phase.PLANNING})
 
         cls: Classification | None = event.metadata.classification
 
         if cls is None:
-            if event.kind in (EventKind.TOOL_START, EventKind.TOOL_COMPLETE):
+            if event.kind in (EventKind.TOOL_CALL_STARTED, EventKind.TOOL_CALL_COMPLETED):
                 return frozenset({Phase.IMPLEMENTATION})
             return frozenset({Phase.PLANNING})
 

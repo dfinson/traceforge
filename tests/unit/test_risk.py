@@ -320,7 +320,7 @@ class TestEnricherIntegration:
         enricher = Enricher()
         event = SessionEvent(
             session_id="test",
-            kind=EventKind.TOOL_START,
+            kind=EventKind.TOOL_CALL_STARTED,
             timestamp=datetime.now(tz=timezone.utc),
             payload={
                 "tool_name": "bash",
@@ -353,7 +353,7 @@ class TestEnricherIntegration:
         enricher = Enricher()
         event = SessionEvent(
             session_id="test",
-            kind=EventKind.TOOL_START,
+            kind=EventKind.TOOL_CALL_STARTED,
             timestamp=datetime.now(tz=timezone.utc),
             payload={
                 "tool_name": "edit",
@@ -418,7 +418,7 @@ class TestConfidence:
         enricher = Enricher()
         event = SessionEvent(
             session_id="test",
-            kind=EventKind.TOOL_START,
+            kind=EventKind.TOOL_CALL_STARTED,
             timestamp=datetime.now(tz=timezone.utc),
             payload={
                 "tool_name": "bash",
@@ -607,7 +607,7 @@ class TestToolRisk:
         enricher = Enricher()
         event = SessionEvent(
             session_id="test",
-            kind=EventKind.TOOL_START,
+            kind=EventKind.TOOL_CALL_STARTED,
             timestamp=datetime.now(tz=timezone.utc),
             payload={
                 "tool_name": "edit",
@@ -632,7 +632,7 @@ class TestToolRisk:
         enricher = Enricher()
         event = SessionEvent(
             session_id="test",
-            kind=EventKind.TOOL_START,
+            kind=EventKind.TOOL_CALL_STARTED,
             timestamp=datetime.now(tz=timezone.utc),
             payload={
                 "tool_name": "view",

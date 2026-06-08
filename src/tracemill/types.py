@@ -1,78 +1,219 @@
-"""Core types for the tracemill event pipeline."""
+"""Core types for the tracemill event pipeline.
+
+EventKind uses an open string registry with dot-notation grammar:
+    <domain>[.<object>].<phase>
+
+Any string is a valid kind (forward-compatible), but canonical kinds are
+defined as constants for autocomplete, documentation, and filtering.
+Legacy aliases (pre-v2 flat names) are supported via normalize_kind().
+"""
 
 from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from enum import Enum
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-if TYPE_CHECKING:
-    pass
+
+# ─── EventKind: Open String Registry ────────────────────────────────────────
+#
+# Grammar: <domain>[.<object>].<phase>
+# Phases: started, completed, failed, chunk, progress, requested, received,
+#         granted, denied, created, restored, skipped
 
 
-class EventKind(str, Enum):
-    # --- Messages ---
-    USER_MESSAGE = "user_message"
-    ASSISTANT_MESSAGE = "assistant_message"
-    SYSTEM_MESSAGE = "system_message"
-
-    # --- Tool lifecycle ---
-    TOOL_START = "tool_start"
-    TOOL_COMPLETE = "tool_complete"
-    TOOL_PARTIAL_RESULT = "tool_partial_result"
-    TOOL_PROGRESS = "tool_progress"
-
-    # --- Turn lifecycle ---
-    TURN_START = "turn_start"
-    TURN_END = "turn_end"
+class EventKind:
+    """Known canonical event kinds. Any string is valid as a kind value."""
 
     # --- Session lifecycle ---
-    SESSION_START = "session_start"
-    SESSION_END = "session_end"
-    SESSION_INFO = "session_info"
-    SESSION_WARNING = "session_warning"
-    SESSION_RESUME = "session_resume"
-    SESSION_IDLE = "session_idle"
+    SESSION_STARTED: Final = "session.started"
+    SESSION_ENDED: Final = "session.ended"
+    SESSION_PAUSED: Final = "session.paused"
+    SESSION_RESUMED: Final = "session.resumed"
+    SESSION_IDLE: Final = "session.idle"
+    SESSION_INFO: Final = "session.info"
+    SESSION_WARNING: Final = "session.warning"
 
-    # --- Agent reasoning ---
-    ASSISTANT_INTENT = "assistant_intent"
-    ASSISTANT_REASONING = "assistant_reasoning"
+    # --- Turn/step lifecycle ---
+    TURN_STARTED: Final = "turn.started"
+    TURN_ENDED: Final = "turn.ended"
+    TURN_SKIPPED: Final = "turn.skipped"
 
-    # --- Subagent orchestration ---
-    SUBAGENT_START = "subagent_start"
-    SUBAGENT_COMPLETE = "subagent_complete"
-    SUBAGENT_FAILED = "subagent_failed"
+    # --- Messages ---
+    MESSAGE_USER: Final = "message.user"
+    MESSAGE_ASSISTANT: Final = "message.assistant"
+    MESSAGE_SYSTEM: Final = "message.system"
+    MESSAGE_ASSISTANT_CHUNK: Final = "message.assistant.chunk"
+
+    # --- Tool lifecycle ---
+    TOOL_CALL_STARTED: Final = "tool.call.started"
+    TOOL_CALL_COMPLETED: Final = "tool.call.completed"
+    TOOL_CALL_FAILED: Final = "tool.call.failed"
+    TOOL_RESULT_CHUNK: Final = "tool.result.chunk"
+    TOOL_PROGRESS: Final = "tool.progress"
+    TOOL_VALIDATION_FAILED: Final = "tool.validation.failed"
+
+    # --- LLM call lifecycle ---
+    LLM_CALL_STARTED: Final = "llm.call.started"
+    LLM_CALL_COMPLETED: Final = "llm.call.completed"
+    LLM_CALL_FAILED: Final = "llm.call.failed"
+    LLM_OUTPUT_CHUNK: Final = "llm.output.chunk"
+    LLM_THINKING_CHUNK: Final = "llm.thinking.chunk"
+
+    # --- Planning / reasoning ---
+    PLANNING_STARTED: Final = "planning.started"
+    PLANNING_COMPLETED: Final = "planning.completed"
+    PLANNING_FAILED: Final = "planning.failed"
+    REASONING_STARTED: Final = "reasoning.started"
+    REASONING_COMPLETED: Final = "reasoning.completed"
+
+    # --- Agent orchestration ---
+    AGENT_SPAWNED: Final = "agent.spawned"
+    AGENT_COMPLETED: Final = "agent.completed"
+    AGENT_FAILED: Final = "agent.failed"
+    AGENT_HANDOFF: Final = "agent.handoff"
+
+    # --- File operations ---
+    FILE_CREATED: Final = "file.created"
+    FILE_EDITED: Final = "file.edited"
+    FILE_DELETED: Final = "file.deleted"
+    FILE_READ: Final = "file.read"
+
+    # --- Command/shell execution ---
+    COMMAND_STARTED: Final = "command.started"
+    COMMAND_OUTPUT: Final = "command.output"
+    COMMAND_COMPLETED: Final = "command.completed"
+    COMMAND_FAILED: Final = "command.failed"
+
+    # --- MCP protocol (connection-level, not tool calls) ---
+    MCP_CONNECTION_STARTED: Final = "mcp.connection.started"
+    MCP_CONNECTION_COMPLETED: Final = "mcp.connection.completed"
+    MCP_CONNECTION_FAILED: Final = "mcp.connection.failed"
 
     # --- Hook lifecycle ---
-    HOOK_START = "hook_start"
-    HOOK_END = "hook_end"
+    HOOK_STARTED: Final = "hook.started"
+    HOOK_COMPLETED: Final = "hook.completed"
+    HOOK_FAILED: Final = "hook.failed"
 
-    # --- External tool / MCP ---
-    EXTERNAL_TOOL_REQUESTED = "external_tool_requested"
-    EXTERNAL_TOOL_COMPLETED = "external_tool_completed"
+    # --- Permission / approval ---
+    PERMISSION_REQUESTED: Final = "permission.requested"
+    PERMISSION_GRANTED: Final = "permission.granted"
+    PERMISSION_DENIED: Final = "permission.denied"
 
-    # --- Permissions / user input ---
-    PERMISSION_REQUESTED = "permission_requested"
-    PERMISSION_COMPLETED = "permission_completed"
-    USER_INPUT_REQUESTED = "user_input_requested"
-    USER_INPUT_COMPLETED = "user_input_completed"
+    # --- Human-in-the-loop input ---
+    INPUT_REQUESTED: Final = "input.requested"
+    INPUT_RECEIVED: Final = "input.received"
+
+    # --- Checkpoint / snapshot ---
+    CHECKPOINT_CREATED: Final = "checkpoint.created"
+    CHECKPOINT_RESTORED: Final = "checkpoint.restored"
+
+    # --- Memory operations ---
+    MEMORY_QUERY_STARTED: Final = "memory.query.started"
+    MEMORY_QUERY_COMPLETED: Final = "memory.query.completed"
+    MEMORY_SAVE_STARTED: Final = "memory.save.started"
+    MEMORY_SAVE_COMPLETED: Final = "memory.save.completed"
+
+    # --- Knowledge / RAG retrieval ---
+    KNOWLEDGE_QUERY_STARTED: Final = "knowledge.query.started"
+    KNOWLEDGE_QUERY_COMPLETED: Final = "knowledge.query.completed"
+
+    # --- Browser actions ---
+    BROWSER_LAUNCHED: Final = "browser.launched"
+    BROWSER_ACTION: Final = "browser.action"
+    BROWSER_RESULT: Final = "browser.result"
+
+    # --- Guardrail / safety ---
+    GUARDRAIL_STARTED: Final = "guardrail.started"
+    GUARDRAIL_PASSED: Final = "guardrail.passed"
+    GUARDRAIL_FAILED: Final = "guardrail.failed"
 
     # --- Skill invocation ---
-    SKILL_INVOKED = "skill_invoked"
+    SKILL_INVOKED: Final = "skill.invoked"
+
+    # --- Workflow / task graph ---
+    WORKFLOW_STARTED: Final = "workflow.started"
+    WORKFLOW_COMPLETED: Final = "workflow.completed"
+    WORKFLOW_FAILED: Final = "workflow.failed"
+    TASK_STARTED: Final = "task.started"
+    TASK_COMPLETED: Final = "task.completed"
+    TASK_FAILED: Final = "task.failed"
 
     # --- Telemetry ---
-    USAGE = "usage"
-    FILE_CHANGE = "file_change"
+    USAGE: Final = "usage"
+    ERROR: Final = "error"
+    ABORT: Final = "abort"
 
-    # --- Errors / abort ---
-    ERROR = "error"
-    ABORT = "abort"
+    # --- Catch-all ---
+    RAW: Final = "raw"
 
-    # --- Catch-all for unmapped event types ---
-    RAW = "raw"
+
+# Registry of all canonical kinds for validation/filtering
+KNOWN_KINDS: frozenset[str] = frozenset(
+    v for k, v in vars(EventKind).items() if k.isupper() and isinstance(v, str)
+)
+
+
+# ─── Legacy Aliases ──────────────────────────────────────────────────────────
+# Maps pre-v2 flat EventKind values to new canonical strings.
+
+_LEGACY_ALIASES: dict[str, str] = {
+    "user_message": EventKind.MESSAGE_USER,
+    "assistant_message": EventKind.MESSAGE_ASSISTANT,
+    "system_message": EventKind.MESSAGE_SYSTEM,
+    "tool_start": EventKind.TOOL_CALL_STARTED,
+    "tool_complete": EventKind.TOOL_CALL_COMPLETED,
+    "tool_partial_result": EventKind.TOOL_RESULT_CHUNK,
+    "tool_progress": EventKind.TOOL_PROGRESS,
+    "turn_start": EventKind.TURN_STARTED,
+    "turn_end": EventKind.TURN_ENDED,
+    "session_start": EventKind.SESSION_STARTED,
+    "session_end": EventKind.SESSION_ENDED,
+    "session_info": EventKind.SESSION_INFO,
+    "session_warning": EventKind.SESSION_WARNING,
+    "session_resume": EventKind.SESSION_RESUMED,
+    "session_idle": EventKind.SESSION_IDLE,
+    "assistant_intent": EventKind.PLANNING_STARTED,
+    "assistant_reasoning": EventKind.REASONING_STARTED,
+    "subagent_start": EventKind.AGENT_SPAWNED,
+    "subagent_complete": EventKind.AGENT_COMPLETED,
+    "subagent_failed": EventKind.AGENT_FAILED,
+    "hook_start": EventKind.HOOK_STARTED,
+    "hook_end": EventKind.HOOK_COMPLETED,
+    "external_tool_requested": EventKind.TOOL_CALL_STARTED,
+    "external_tool_completed": EventKind.TOOL_CALL_COMPLETED,
+    "permission_requested": EventKind.PERMISSION_REQUESTED,
+    "permission_completed": EventKind.PERMISSION_GRANTED,
+    "user_input_requested": EventKind.INPUT_REQUESTED,
+    "user_input_completed": EventKind.INPUT_RECEIVED,
+    "skill_invoked": EventKind.SKILL_INVOKED,
+    "file_change": EventKind.FILE_EDITED,
+    "raw": EventKind.RAW,
+}
+
+
+def normalize_kind(kind: str) -> str:
+    """Normalize an event kind string, resolving legacy aliases.
+
+    Returns the canonical kind if a legacy alias matches, otherwise
+    returns the input unchanged (any string is valid).
+    """
+    return _LEGACY_ALIASES.get(kind, kind)
+
+
+def is_known_kind(kind: str) -> bool:
+    """Check if a kind string is in the canonical registry."""
+    return kind in KNOWN_KINDS
+
+
+# ─── Ingestion Mode ──────────────────────────────────────────────────────────
+
+IngestionMode = Literal["stream", "file_watch", "poll", "replay"]
+
+
+# ─── Event Metadata ──────────────────────────────────────────────────────────
 
 
 def _uuid4_str() -> str:
@@ -80,14 +221,34 @@ def _uuid4_str() -> str:
 
 
 class EventMetadata(BaseModel):
+    """Contextual information attached to every event."""
+
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
+    # --- Source provenance ---
+    source_framework: str | None = None  # "copilot", "claude", "aider", "cline", etc.
+    source_adapter: str | None = None  # adapter class that produced this event
+    ingestion_mode: IngestionMode | None = None
+    raw_kind: str | None = None  # original framework-specific event type
+
+    # --- Correlation ---
+    span_id: str | None = None  # unique ID for this lifecycle span
+    parent_id: str | None = None  # links child events to parent
+    correlation_id: str | None = None  # groups related events
+    run_id: str | None = None  # top-level run/session identifier
+
+    # --- Ordering ---
+    sequence: int | None = None  # monotonic ordering within a stream
+    namespace: tuple[str, ...] | None = None  # scope path (subgraph, subagent)
+    partial: bool = False  # True if this is a streaming chunk
+
+    # --- Legacy/existing fields ---
     repo: str | None = None
-    agent_sdk: str | None = None
+    agent_sdk: str | None = None  # deprecated: use source_framework
     turn_id: str | None = None
     visibility: Literal["visible", "system", "collapsed"] = "visible"
     phases: frozenset[str] | None = None
-    classification: Any = None  # Classification | None (Any to avoid circular import)
+    classification: Any = None  # Classification | None (avoid circular import)
     tool_display: str | None = None
     tool_intent: str | None = None
     duration_ms: float | None = None
@@ -100,15 +261,23 @@ class EventMetadata(BaseModel):
         return v
 
 
+# ─── Session Event ───────────────────────────────────────────────────────────
+
+
 class SessionEvent(BaseModel):
+    """The universal event type. Every adapter produces these."""
+
     model_config = ConfigDict(frozen=True)
 
     id: str = Field(default_factory=_uuid4_str)
-    kind: EventKind
+    kind: str  # Open string — use EventKind constants for canonical kinds
     session_id: str
     timestamp: datetime
     payload: dict[str, Any]
     metadata: EventMetadata = Field(default_factory=EventMetadata)
+
+
+# ─── Telemetry Span ──────────────────────────────────────────────────────────
 
 
 class TelemetrySpan(BaseModel):
@@ -119,6 +288,9 @@ class TelemetrySpan(BaseModel):
     start_time: datetime
     end_time: datetime
     attributes: dict[str, Any] = Field(default_factory=dict)
+
+
+# ─── Usage Record ────────────────────────────────────────────────────────────
 
 
 class UsageRecord(BaseModel):

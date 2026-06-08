@@ -43,7 +43,7 @@ def _make_tool_start(
     **extra_payload,
 ) -> SessionEvent:
     return SessionEvent(
-        kind=EventKind.TOOL_START,
+        kind=EventKind.TOOL_CALL_STARTED,
         session_id=session_id,
         timestamp=ts or datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
         payload={"tool_call_id": tool_call_id, "tool_name": tool_name, **extra_payload},
@@ -58,7 +58,7 @@ def _make_tool_complete(
     **extra_payload,
 ) -> SessionEvent:
     return SessionEvent(
-        kind=EventKind.TOOL_COMPLETE,
+        kind=EventKind.TOOL_CALL_COMPLETED,
         session_id=session_id,
         timestamp=ts or datetime(2024, 1, 1, 12, 0, 5, tzinfo=timezone.utc),
         payload={"tool_call_id": tool_call_id, "tool_name": tool_name, **extra_payload},
@@ -103,7 +103,7 @@ class TestToolPairing:
         flushed = enricher.flush()
         assert len(flushed) == 1
         assert flushed[0].metadata.duration_ms is None
-        assert flushed[0].kind == EventKind.TOOL_START
+        assert flushed[0].kind == EventKind.TOOL_CALL_STARTED
 
     def test_unmatched_complete_passed_through(self):
         enricher = Enricher()
@@ -256,14 +256,14 @@ class TestVisibility:
 
     def test_session_start_is_internal(self):
         enricher = Enricher()
-        event = _make_event(EventKind.SESSION_START)
+        event = _make_event(EventKind.SESSION_STARTED)
         result = enricher.process(event)
         assert result is not None
         assert result.metadata.visibility == "system"
 
     def test_session_end_is_internal(self):
         enricher = Enricher()
-        event = _make_event(EventKind.SESSION_END)
+        event = _make_event(EventKind.SESSION_ENDED)
         result = enricher.process(event)
         assert result is not None
         assert result.metadata.visibility == "system"
@@ -277,7 +277,7 @@ class TestVisibility:
 
     def test_user_message_is_visible(self):
         enricher = Enricher()
-        event = _make_event(EventKind.USER_MESSAGE)
+        event = _make_event(EventKind.MESSAGE_USER)
         result = enricher.process(event)
         assert result is not None
         assert result.metadata.visibility == "visible"
@@ -291,13 +291,13 @@ class TestVisibility:
 class TestPhaseDetection:
     def test_user_message_is_planning(self):
         enricher = Enricher()
-        event = _make_event(EventKind.USER_MESSAGE)
+        event = _make_event(EventKind.MESSAGE_USER)
         result = enricher.process(event)
         assert result.metadata.phases == frozenset({"planning"})
 
     def test_assistant_message_is_planning(self):
         enricher = Enricher()
-        event = _make_event(EventKind.ASSISTANT_MESSAGE)
+        event = _make_event(EventKind.MESSAGE_ASSISTANT)
         result = enricher.process(event)
         assert result.metadata.phases == frozenset({"planning"})
 
@@ -432,7 +432,7 @@ class TestEdgeCases:
         enricher = Enricher()
         start = _make_tool_start(tool_name="report_intent")
         complete = SessionEvent(
-            kind=EventKind.TOOL_COMPLETE,
+            kind=EventKind.TOOL_CALL_COMPLETED,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 2, tzinfo=timezone.utc),
             payload={"tool_call_id": "tc-1", "result": "ok"},
@@ -472,7 +472,7 @@ class TestEdgeCases:
         """Bug #9: _enrichment that's not a dict should not crash."""
         enricher = Enricher()
         event = SessionEvent(
-            kind=EventKind.USER_MESSAGE,
+            kind=EventKind.MESSAGE_USER,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
             payload={"content": "hi", "_enrichment": "invalid_string"},
@@ -485,7 +485,7 @@ class TestEdgeCases:
         """_enrichment: None should not crash."""
         enricher = Enricher()
         event = SessionEvent(
-            kind=EventKind.USER_MESSAGE,
+            kind=EventKind.MESSAGE_USER,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
             payload={"content": "hi", "_enrichment": None},
@@ -520,7 +520,7 @@ class TestEdgeCases:
         """TOOL_START with no tool_call_id should not be buffered."""
         enricher = Enricher()
         event = SessionEvent(
-            kind=EventKind.TOOL_START,
+            kind=EventKind.TOOL_CALL_STARTED,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
             payload={"tool_name": "edit"},
@@ -532,7 +532,7 @@ class TestEdgeCases:
         """TOOL_COMPLETE with no tool_call_id should pass through."""
         enricher = Enricher()
         event = SessionEvent(
-            kind=EventKind.TOOL_COMPLETE,
+            kind=EventKind.TOOL_CALL_COMPLETED,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
             payload={"tool_name": "edit", "result": "ok"},
@@ -547,14 +547,14 @@ class TestEdgeCases:
 
         enricher = Enricher()
         start = SessionEvent(
-            kind=EventKind.TOOL_START,
+            kind=EventKind.TOOL_CALL_STARTED,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
             payload={"tool_call_id": "tc-m", "tool_name": "edit"},
             metadata=EventMetadata(turn_id="turn-42", repo="my/repo"),
         )
         complete = SessionEvent(
-            kind=EventKind.TOOL_COMPLETE,
+            kind=EventKind.TOOL_CALL_COMPLETED,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 1, tzinfo=timezone.utc),
             payload={"tool_call_id": "tc-m", "result": "done"},
@@ -592,7 +592,7 @@ class TestEdgeCases:
         enricher = Enricher()
         pipeline = EventPipeline(sinks=[recorder.sink], enricher=enricher)
 
-        event = _make_event(EventKind.USER_MESSAGE)
+        event = _make_event(EventKind.MESSAGE_USER)
 
         with patch.object(enricher, "process", side_effect=RuntimeError("boom")):
             await pipeline.push(event)
@@ -650,7 +650,7 @@ class TestIDStabilityAndRobustness:
         )
         # Create a complete with naive timestamp that will cause TypeError in subtraction
         complete = SessionEvent(
-            kind=EventKind.TOOL_COMPLETE,
+            kind=EventKind.TOOL_CALL_COMPLETED,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 1),  # naive — will fail on subtract
             payload={"tool_call_id": "tc-fail", "tool_name": "edit"},
@@ -682,7 +682,7 @@ class TestIDStabilityAndRobustness:
         )
         # Complete has no arguments — merged payload should still contain start's
         complete = SessionEvent(
-            kind=EventKind.TOOL_COMPLETE,
+            kind=EventKind.TOOL_CALL_COMPLETED,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 2, tzinfo=timezone.utc),
             payload={"tool_call_id": "tc-phase", "result": "0 failures"},
@@ -697,7 +697,7 @@ class TestIDStabilityAndRobustness:
         """Non-string tool_call_id should not crash or buffer."""
         enricher = Enricher()
         event = SessionEvent(
-            kind=EventKind.TOOL_START,
+            kind=EventKind.TOOL_CALL_STARTED,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
             payload={"tool_call_id": 12345, "tool_name": "edit"},
@@ -711,7 +711,7 @@ class TestIDStabilityAndRobustness:
         """Empty string tool_call_id should not buffer."""
         enricher = Enricher()
         event = SessionEvent(
-            kind=EventKind.TOOL_START,
+            kind=EventKind.TOOL_CALL_STARTED,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
             payload={"tool_call_id": "", "tool_name": "edit"},
@@ -1120,7 +1120,7 @@ class TestEnrichmentTypeGuard:
         """If _enrichment is a string/int/None, enricher should not crash."""
         enricher = Enricher()
         event = SessionEvent(
-            kind=EventKind.TOOL_START,
+            kind=EventKind.TOOL_CALL_STARTED,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
             payload={
@@ -1140,7 +1140,7 @@ class TestEnrichmentTypeGuard:
     def test_none_enrichment_in_payload(self):
         enricher = Enricher()
         event = SessionEvent(
-            kind=EventKind.TOOL_START,
+            kind=EventKind.TOOL_CALL_STARTED,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
             payload={

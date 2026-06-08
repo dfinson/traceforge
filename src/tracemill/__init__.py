@@ -23,7 +23,17 @@ from tracemill.enricher import Enricher
 from tracemill.pipeline import EventPipeline
 from tracemill.sinks.base import StorageSink
 from tracemill.sinks.callback import CallbackSink
-from tracemill.types import EventKind, EventMetadata, SessionEvent, TelemetrySpan, UsageRecord
+from tracemill.types import (
+    KNOWN_KINDS,
+    EventKind,
+    EventMetadata,
+    IngestionMode,
+    SessionEvent,
+    TelemetrySpan,
+    UsageRecord,
+    is_known_kind,
+    normalize_kind,
+)
 
 __all__ = [
     "Adapter",
@@ -39,6 +49,8 @@ __all__ = [
     "EventKind",
     "EventMetadata",
     "EventPipeline",
+    "IngestionMode",
+    "KNOWN_KINDS",
     "Phase",
     "SessionEvent",
     "StorageSink",
@@ -50,6 +62,8 @@ __all__ = [
     "classify_shell",
     "classify_tool",
     "get_default_registry",
+    "is_known_kind",
     "load_config",
+    "normalize_kind",
     "normalize_tool_name",
 ]

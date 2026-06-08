@@ -50,19 +50,19 @@ class TestCLIJsonlAdapter:
         events = list(adapter.parse(line))
         assert len(events) == 1
         ev = events[0]
-        assert ev.kind == EventKind.SESSION_START
+        assert ev.kind == EventKind.SESSION_STARTED
         assert ev.session_id == "s1"
         assert ev.payload["model"] == "gpt-4"
         assert ev.payload["cwd"] == "/tmp"
         assert ev.payload["version"] == "1.0"
-        assert ev.metadata.agent_sdk == "copilot-cli"
+        assert ev.metadata.source_framework == "copilot"
 
     def test_parse_user_message(self):
         adapter = CLIJsonlAdapter()
         line = _copilot_event("user.message", {"content": "hello"})
         events = list(adapter.parse(line))
         assert len(events) == 1
-        assert events[0].kind == EventKind.USER_MESSAGE
+        assert events[0].kind == EventKind.MESSAGE_USER
         assert events[0].payload["content"] == "hello"
 
     def test_parse_tool_execution_start(self):
@@ -78,7 +78,7 @@ class TestCLIJsonlAdapter:
         events = list(adapter.parse(line))
         assert len(events) == 1
         ev = events[0]
-        assert ev.kind == EventKind.TOOL_START
+        assert ev.kind == EventKind.TOOL_CALL_STARTED
         assert ev.payload["tool_call_id"] == "tc1"
         assert ev.payload["tool_name"] == "grep"
         assert ev.payload["arguments"] == {"pattern": "foo"}
@@ -96,7 +96,7 @@ class TestCLIJsonlAdapter:
         events = list(adapter.parse(line))
         assert len(events) == 1
         ev = events[0]
-        assert ev.kind == EventKind.TOOL_COMPLETE
+        assert ev.kind == EventKind.TOOL_CALL_COMPLETED
         assert ev.payload["tool_call_id"] == "tc1"
         assert ev.payload["success"] is True
         assert ev.payload["result"] == "found it"
@@ -142,7 +142,7 @@ class TestCLIJsonlAdapter:
         )
         events = list(adapter.parse(line))
         assert len(events) == 1
-        assert events[0].kind == EventKind.SESSION_END
+        assert events[0].kind == EventKind.SESSION_ENDED
 
     def test_unknown_event_type_emits_raw(self):
         adapter = CLIJsonlAdapter()
@@ -200,17 +200,17 @@ class TestCLIJsonlAdapter:
         assert len(all_events) == 15
 
         kinds = [e.kind for e in all_events]
-        assert kinds[0] == EventKind.SESSION_START
-        assert kinds[1] == EventKind.USER_MESSAGE
-        assert EventKind.TURN_START in kinds
-        assert EventKind.TURN_END in kinds
-        assert EventKind.HOOK_START in kinds
-        assert EventKind.HOOK_END in kinds
+        assert kinds[0] == EventKind.SESSION_STARTED
+        assert kinds[1] == EventKind.MESSAGE_USER
+        assert EventKind.TURN_STARTED in kinds
+        assert EventKind.TURN_ENDED in kinds
+        assert EventKind.HOOK_STARTED in kinds
+        assert EventKind.HOOK_COMPLETED in kinds
         assert EventKind.SESSION_INFO in kinds
-        assert EventKind.TOOL_START in kinds
-        assert EventKind.TOOL_COMPLETE in kinds
+        assert EventKind.TOOL_CALL_STARTED in kinds
+        assert EventKind.TOOL_CALL_COMPLETED in kinds
         assert EventKind.USAGE in kinds
-        assert kinds[-1] == EventKind.SESSION_END
+        assert kinds[-1] == EventKind.SESSION_ENDED
 
         for ev in all_events:
             assert ev.session_id == "sess-abc-123"
@@ -225,9 +225,9 @@ class TestClaudeJsonlAdapter:
         line = json.dumps({"type": "user", "message": {"content": "hello world"}})
         events = list(adapter.parse(line))
         assert len(events) == 1
-        assert events[0].kind == EventKind.USER_MESSAGE
+        assert events[0].kind == EventKind.MESSAGE_USER
         assert events[0].payload["content"] == "hello world"
-        assert events[0].metadata.agent_sdk == "claude-code"
+        assert events[0].metadata.source_framework == "claude"
 
     def test_parse_assistant_text_block(self):
         adapter = ClaudeJsonlAdapter()
@@ -241,7 +241,7 @@ class TestClaudeJsonlAdapter:
             }
         )
         events = list(adapter.parse(line))
-        text_events = [e for e in events if e.kind == EventKind.ASSISTANT_MESSAGE]
+        text_events = [e for e in events if e.kind == EventKind.MESSAGE_ASSISTANT]
         assert len(text_events) == 1
         assert text_events[0].payload["content"] == "Hello!"
 
@@ -264,7 +264,7 @@ class TestClaudeJsonlAdapter:
             }
         )
         events = list(adapter.parse(line))
-        tool_events = [e for e in events if e.kind == EventKind.TOOL_START]
+        tool_events = [e for e in events if e.kind == EventKind.TOOL_CALL_STARTED]
         assert len(tool_events) == 1
         assert tool_events[0].payload["tool_call_id"] == "tu-1"
         assert tool_events[0].payload["tool_name"] == "read_file"
@@ -289,7 +289,7 @@ class TestClaudeJsonlAdapter:
             }
         )
         events = list(adapter.parse(line))
-        result_events = [e for e in events if e.kind == EventKind.TOOL_COMPLETE]
+        result_events = [e for e in events if e.kind == EventKind.TOOL_CALL_COMPLETED]
         assert len(result_events) == 1
         assert result_events[0].payload["tool_call_id"] == "tu-1"
         assert result_events[0].payload["success"] is True
@@ -317,7 +317,7 @@ class TestClaudeJsonlAdapter:
             }
         )
         events = list(adapter.parse(line))
-        result_events = [e for e in events if e.kind == EventKind.TOOL_COMPLETE]
+        result_events = [e for e in events if e.kind == EventKind.TOOL_CALL_COMPLETED]
         assert len(result_events) == 1
         assert result_events[0].payload["result"] == "line1\nline2"
 
@@ -364,10 +364,10 @@ class TestClaudeJsonlAdapter:
         assert len(all_events) > 0
 
         kinds = [e.kind for e in all_events]
-        assert EventKind.USER_MESSAGE in kinds
-        assert EventKind.ASSISTANT_MESSAGE in kinds
-        assert EventKind.TOOL_START in kinds
-        assert EventKind.TOOL_COMPLETE in kinds
+        assert EventKind.MESSAGE_USER in kinds
+        assert EventKind.MESSAGE_ASSISTANT in kinds
+        assert EventKind.TOOL_CALL_STARTED in kinds
+        assert EventKind.TOOL_CALL_COMPLETED in kinds
         assert EventKind.USAGE in kinds
 
         # Session ID tracked from result message
@@ -414,7 +414,7 @@ class TestCopilotSDKAdapter:
         adapter = CopilotSDKAdapter()
         line = _copilot_event("user.message", {"content": "hi"})
         events = list(adapter.parse(line))
-        assert events[0].metadata.agent_sdk == "copilot-sdk"
+        assert events[0].metadata.source_adapter == "copilot_sdk"
 
     def test_parse_event_typed_interface(self):
         """Test the typed parse_event() interface with SDK objects."""
@@ -426,7 +426,7 @@ class TestCopilotSDKAdapter:
         events = list(adapter.parse_event(sdk_event))
         assert len(events) == 1
         assert events[0].payload["content"] == "typed"
-        assert events[0].metadata.agent_sdk == "copilot-sdk"
+        assert events[0].metadata.source_adapter == "copilot_sdk"
 
 
 # ─── ClaudeSDKAdapter ────────────────────────────────────────────────────────
@@ -449,7 +449,7 @@ class TestClaudeSDKAdapter:
         adapter = ClaudeSDKAdapter()
         line = json.dumps({"type": "user", "message": {"content": "hi"}})
         events = list(adapter.parse(line))
-        assert events[0].metadata.agent_sdk == "claude-sdk"
+        assert events[0].metadata.source_adapter == "claude_sdk"
 
     def test_parse_message_typed_interface(self):
         """Test the typed parse_message() interface with SDK objects."""
@@ -460,7 +460,7 @@ class TestClaudeSDKAdapter:
         events = list(adapter.parse_message(msg))
         assert len(events) == 1
         assert events[0].payload["content"] == "typed hello"
-        assert events[0].metadata.agent_sdk == "claude-sdk"
+        assert events[0].metadata.source_adapter == "claude_sdk"
 
 
 # ─── Malformed Input ─────────────────────────────────────────────────────────
@@ -535,5 +535,5 @@ class TestAdapterPipelineIntegration:
         assert len(collected) > 0
         assert all(isinstance(e, SessionEvent) for e in collected)
         kinds = {e.kind for e in collected}
-        assert EventKind.SESSION_START in kinds
-        assert EventKind.USER_MESSAGE in kinds
+        assert EventKind.SESSION_STARTED in kinds
+        assert EventKind.MESSAGE_USER in kinds

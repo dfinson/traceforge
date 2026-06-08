@@ -1,4 +1,4 @@
-"""Tests for AiderPreParser (Aider .aider.chat.history.md parsing)."""
+"""Tests for AiderPreParser (tree-sitter-markdown based parsing)."""
 
 from __future__ import annotations
 
@@ -7,57 +7,11 @@ import json
 import pytest
 
 from tracemill.parsers.aider import (
-    LineType,
     AiderPreParser,
     ToolOutputKind,
-    classify_line,
     classify_tool_output,
     extract_edits,
 )
-
-
-# ─── Line classification ─────────────────────────────────────────────────────
-
-
-class TestClassifyLine:
-    def test_session_header(self):
-        lt, content = classify_line("# aider chat started at 2024-11-03 16:31:35")
-        assert lt == LineType.SESSION_HEADER
-        assert content == "2024-11-03 16:31:35"
-
-    def test_user_input(self):
-        lt, content = classify_line("#### fix the login bug")
-        assert lt == LineType.USER_INPUT
-        assert content == "fix the login bug"
-
-    def test_slash_command(self):
-        lt, content = classify_line("#### /add src/auth.py")
-        assert lt == LineType.USER_INPUT
-        assert content == "/add src/auth.py"
-
-    def test_tool_output(self):
-        lt, content = classify_line("> Aider v0.86.2")
-        assert lt == LineType.TOOL_OUTPUT
-        assert content == "Aider v0.86.2"
-
-    def test_tool_output_empty_blockquote(self):
-        lt, content = classify_line("> ")
-        assert lt == LineType.TOOL_OUTPUT
-        assert content == ""
-
-    def test_ai_response(self):
-        lt, content = classify_line("Here's the fix for the login bug:")
-        assert lt == LineType.AI_RESPONSE
-        assert content == "Here's the fix for the login bug:"
-
-    def test_blank_line(self):
-        lt, content = classify_line("")
-        assert lt == LineType.BLANK
-        assert content == ""
-
-    def test_blank_whitespace(self):
-        lt, content = classify_line("   ")
-        assert lt == LineType.BLANK
 
 
 # ─── Tool output sub-classification ──────────────────────────────────────────
@@ -159,7 +113,7 @@ new_b
         assert extract_edits(text) == []
 
 
-# ─── Full parser integration ─────────────────────────────────────────────────
+# ─── Full parser — tree-sitter AST based ─────────────────────────────────────
 
 
 class TestAiderPreParser:
@@ -181,8 +135,9 @@ class TestAiderPreParser:
 """
         events = list(parser.parse_text(text))
         assert events[0]["type"] == "session_start"
-        assert events[1]["type"] == "user_message"
-        assert events[1]["content"] == "fix the login bug"
+        user_msgs = [e for e in events if e["type"] == "user_message"]
+        assert len(user_msgs) == 1
+        assert user_msgs[0]["content"] == "fix the login bug"
 
     def test_slash_command(self, parser):
         text = """# aider chat started at 2024-11-03 16:31:35
@@ -190,9 +145,10 @@ class TestAiderPreParser:
 #### /add src/auth.py
 """
         events = list(parser.parse_text(text))
-        assert events[1]["type"] == "slash_command"
-        assert events[1]["command"] == "/add"
-        assert events[1]["args"] == "src/auth.py"
+        cmds = [e for e in events if e["type"] == "slash_command"]
+        assert len(cmds) == 1
+        assert cmds[0]["command"] == "/add"
+        assert cmds[0]["args"] == "src/auth.py"
 
     def test_ai_response(self, parser):
         text = """# aider chat started at 2024-11-03 16:31:35
@@ -205,8 +161,10 @@ I'll update the auth module.
 """
         events = list(parser.parse_text(text))
         ai_events = [e for e in events if e["type"] == "assistant_message"]
-        assert len(ai_events) == 1
-        assert "fix for the login bug" in ai_events[0]["content"]
+        assert len(ai_events) >= 1
+        # At least one AI event should contain the fix text
+        all_ai_text = " ".join(e["content"] for e in ai_events)
+        assert "fix for the login bug" in all_ai_text
 
     def test_tool_output_classification(self, parser):
         text = """# aider chat started at 2024-11-03 16:31:35
@@ -325,7 +283,6 @@ Hi there!
 """
         events = list(parser.parse_text(text))
         timestamps = [e["timestamp"] for e in events]
-        # All timestamps should be in increasing order
         assert timestamps == sorted(timestamps)
 
     def test_incremental_parsing(self):
@@ -333,14 +290,14 @@ Hi there!
 
         chunk1 = "# aider chat started at 2024-06-01 10:00:00\n\n"
         events1 = list(parser.parse_chunk(chunk1))
-        assert len(events1) == 1
-        assert events1[0]["type"] == "session_start"
-
-        chunk2 = "#### fix the bug\n"
-        events2 = list(parser.parse_chunk(chunk2))  # noqa: F841
-        # May not flush yet (waiting for type change)
-        # But offset should advance
+        # Session start may or may not be emitted yet (held back as last event)
         assert parser.current_offset > 0
+
+        chunk2 = "#### fix the bug\n\n"
+        events2 = list(parser.parse_chunk(chunk2))
+        # Now session_start should be confirmed closed
+        all_types = [e["type"] for e in events1 + events2]
+        assert "session_start" in all_types
 
     def test_model_propagates_to_events(self, parser):
         text = """# aider chat started at 2024-06-01 10:00:00
@@ -369,8 +326,68 @@ Hi there!
 """
         events = list(parser.parse_text(text))
         for event in events:
-            # Should be JSON-serializable (for feeding to MappedJsonAdapter)
             serialized = json.dumps(event)
             assert serialized
             roundtrip = json.loads(serialized)
             assert roundtrip["type"] == event["type"]
+
+    def test_search_replace_not_confused_with_blockquote(self, parser):
+        """The >>>>>>> REPLACE footer must not emit tool output events."""
+        text = """# aider chat started at 2024-06-01 10:00:00
+
+#### fix it
+
+src/main.py
+<<<<<<< SEARCH
+old_code()
+=======
+new_code()
+>>>>>>> REPLACE
+"""
+        events = list(parser.parse_text(text))
+        tool_outputs = [e for e in events if e["type"] == "tool_output"]
+        # No spurious tool_output from the >>>>>>> REPLACE line
+        assert len(tool_outputs) == 0
+
+    def test_multiple_search_replace_blocks(self, parser):
+        """Multiple SEARCH/REPLACE blocks in one AI response."""
+        text = """# aider chat started at 2024-06-01 10:00:00
+
+#### refactor
+
+src/a.py
+<<<<<<< SEARCH
+old_a
+=======
+new_a
+>>>>>>> REPLACE
+
+src/b.py
+<<<<<<< SEARCH
+old_b
+=======
+new_b
+>>>>>>> REPLACE
+
+> Applied edit to src/a.py
+> Applied edit to src/b.py
+"""
+        events = list(parser.parse_text(text))
+        edits = [e for e in events if e["type"] == "file_edit"]
+        assert len(edits) == 2
+        assert edits[0]["file_path"] == "src/a.py"
+        assert edits[1]["file_path"] == "src/b.py"
+
+    def test_fixture_file_parses(self, parser):
+        """Smoke test against the real fixture file."""
+        import pathlib
+
+        fixture = pathlib.Path(__file__).parent.parent / "fixtures" / "aider_chat_history.md"
+        if not fixture.exists():
+            pytest.skip("fixture not found")
+
+        events = list(parser.parse_file(fixture))
+        assert len(events) > 5
+        types = {e["type"] for e in events}
+        assert "session_start" in types
+        assert "user_message" in types

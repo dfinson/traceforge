@@ -1,16 +1,17 @@
 """AiderPreParser — converts Aider .aider.chat.history.md into event dicts.
 
-Aider writes session logs as append-only markdown. This parser classifies
-each line, accumulates multi-line blocks, and emits structured dicts suitable
-for feeding into MappedJsonAdapter with the aider.yaml mapping.
+Aider writes session logs as append-only markdown. This parser uses
+tree-sitter-markdown to build an AST and tree-sitter queries to extract
+structural blocks, then emits structured dicts suitable for feeding into
+MappedJsonAdapter with the aider_markdown.yaml mapping.
 
 Format authority: Aider-AI/aider:aider/io.py
 
-Line types:
-  # aider chat started at <datetime>   → session.started
-  #### <text>                           → user message or slash command
-  > <text>                              → tool/system output (sub-classified)
-  <anything else>                       → AI response content
+Query-based AST classification:
+  atx_heading (h1) "aider chat started at …"  → session.started
+  atx_heading (h4)                             → user message / slash command
+  block_quote (single >)                       → tool/system output (sub-classified)
+  paragraph / setext_heading / other           → AI response content
 """
 
 from __future__ import annotations
@@ -23,47 +24,39 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+import tree_sitter as ts
+import tree_sitter_markdown as tsmd
 
-# ─── Line classification ─────────────────────────────────────────────────────
+_MD_LANGUAGE = ts.Language(tsmd.language())
 
+# ─── Tree-sitter queries ─────────────────────────────────────────────────────
+# A single multi-pattern query captures all structural blocks.  Pattern index
+# determines the block role; document-order iteration comes from matches().
 
-class LineType(Enum):
-    SESSION_HEADER = "session_header"
-    USER_INPUT = "user_input"
-    TOOL_OUTPUT = "tool_output"
-    AI_RESPONSE = "ai_response"
-    BLANK = "blank"
+_BLOCK_QUERY = ts.Query(
+    _MD_LANGUAGE,
+    """
+    (atx_heading (atx_h1_marker) (inline) @h1_text) @h1
+    (atx_heading (atx_h4_marker) (inline) @h4_text) @h4
+    (block_quote) @bq
+    (paragraph) @para
+    (setext_heading) @setext
+    (fenced_code_block) @fenced
+    """,
+)
 
+_ROLE_SESSION = 0  # pattern index for h1 heading
+_ROLE_USER = 1  # pattern index for h4 heading
+_ROLE_BQ = 2  # pattern index for block_quote
+_ROLE_PARA = 3  # pattern index for paragraph
+_ROLE_SETEXT = 4  # pattern index for setext_heading
+_ROLE_FENCED = 5  # pattern index for fenced_code_block
 
-_SESSION_RE = re.compile(r"^#\s+aider chat started at\s+(.+)$")
-_USER_RE = re.compile(r"^####\s+(.+)$")
-_TOOL_RE = re.compile(r"^>\s?(.*)$")
+# Parents that indicate a structural block (not content inside a block_quote)
+_STRUCTURAL_PARENTS = frozenset({"section", "document"})
 
-
-def classify_line(line: str) -> tuple[LineType, str]:
-    """Classify a line and return (type, extracted_content)."""
-    stripped = line.rstrip()
-
-    if not stripped:
-        return LineType.BLANK, ""
-
-    m = _SESSION_RE.match(stripped)
-    if m:
-        return LineType.SESSION_HEADER, m.group(1).strip()
-
-    m = _USER_RE.match(stripped)
-    if m:
-        return LineType.USER_INPUT, m.group(1)
-
-    # >>>>>>> REPLACE is part of SEARCH/REPLACE blocks, not tool output
-    if stripped.startswith(">>>>>>> REPLACE"):
-        return LineType.AI_RESPONSE, stripped
-
-    m = _TOOL_RE.match(stripped)
-    if m:
-        return LineType.TOOL_OUTPUT, m.group(1)
-
-    return LineType.AI_RESPONSE, stripped
+# Marker that tree-sitter-markdown misparses as nested block_quotes
+_REPLACE_FOOTER_RE = re.compile(r"^>{7}\s*REPLACE\s*$")
 
 
 # ─── Tool output sub-classification ──────────────────────────────────────────
@@ -161,7 +154,6 @@ def extract_edits(ai_text: str) -> list[FileEdit]:
     edits: list[FileEdit] = []
     for m in _SEARCH_REPLACE_RE.finditer(ai_text):
         file_path = m.group(1).strip()
-        # Skip if it looks like a code fence marker rather than a filename
         if file_path.startswith("```"):
             continue
         edits.append(
@@ -172,6 +164,52 @@ def extract_edits(ai_text: str) -> list[FileEdit]:
             )
         )
     return edits
+
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+
+
+def _node_text(node: ts.Node, source: bytes) -> str:
+    return source[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
+
+
+def _is_replace_footer(node: ts.Node, source: bytes) -> bool:
+    """True if this block_quote is a >>>>>>> REPLACE footer."""
+    first_line = _node_text(node, source).split("\n", 1)[0]
+    return bool(_REPLACE_FOOTER_RE.match(first_line))
+
+
+def _strip_blockquote_markers(raw: str) -> list[str]:
+    """Strip leading '> ' or '>' from each line of a block quote."""
+    lines: list[str] = []
+    for line in raw.splitlines():
+        if line.startswith("> "):
+            lines.append(line[2:])
+        elif line.startswith(">"):
+            lines.append(line[1:])
+        else:
+            lines.append(line)
+    return lines
+
+
+# ─── Typed block produced by query classification ───────────────────────────
+
+_BLOCK_SESSION = "session"
+_BLOCK_USER = "user"
+_BLOCK_TOOL = "tool"
+_BLOCK_AI = "ai"
+
+
+@dataclass(slots=True)
+class _Block:
+    """A classified structural block extracted from query matches."""
+
+    role: str  # one of _BLOCK_*
+    byte_pos: int
+    # For session/user: the heading inline text
+    text: str = ""
+    # For tool/ai: the AST node (used to extract raw bytes)
+    node: ts.Node | None = None
 
 
 # ─── Main parser ─────────────────────────────────────────────────────────────
@@ -188,7 +226,6 @@ class _SessionState:
     edit_format: str | None = None
 
     def next_timestamp(self) -> datetime:
-        """Generate a monotonically increasing timestamp."""
         self.sequence += 1
         return self.start_time + timedelta(seconds=self.sequence)
 
@@ -196,8 +233,8 @@ class _SessionState:
 class AiderPreParser:
     """Converts Aider .aider.chat.history.md into structured event dicts.
 
-    Each yielded dict has a ``type`` field matching aider.yaml event types,
-    ready to be serialized as JSON and fed to ``MappedJsonAdapter``.
+    Uses a tree-sitter query to capture all structural blocks in one pass,
+    then sorts them by byte position and emits events in document order.
 
     Supports:
     - Full file parsing (``parse_file`` / ``parse_text``)
@@ -207,8 +244,10 @@ class AiderPreParser:
     def __init__(self, offset: int = 0) -> None:
         self._offset = offset
         self._state: _SessionState | None = None
-        self._buffer: list[str] = []
-        self._buffer_type: LineType | None = None
+        self._ts_parser = ts.Parser(_MD_LANGUAGE)
+        # Incremental state
+        self._accumulated: str = ""
+        self._emitted_count: int = 0
 
     @property
     def current_offset(self) -> int:
@@ -224,72 +263,132 @@ class AiderPreParser:
         """Parse markdown text and yield event dicts."""
         self._offset = 0
         self._state = None
-        self._buffer = []
-        self._buffer_type = None
+        self._accumulated = ""
+        self._emitted_count = 0
 
-        for line in text.splitlines(keepends=True):
-            yield from self._process_line(line)
-            self._offset += len(line.encode("utf-8"))
-
-        # Flush remaining buffer
-        yield from self._flush_buffer()
+        source = text.encode("utf-8")
+        tree = self._ts_parser.parse(source)
+        yield from self._process_tree(tree, source)
+        self._offset = len(source)
 
     def parse_chunk(self, chunk: str) -> Iterator[dict[str, Any]]:
         """Parse an incremental chunk (for file-watch mode).
 
-        Maintains internal state across calls. Track ``current_offset``
-        to know where to read from next.
+        Accumulates text, re-parses the full tree with tree-sitter,
+        and emits only events beyond what was previously emitted.
+        The last event is held back until the next chunk confirms
+        it is structurally closed.
         """
-        for line in chunk.splitlines(keepends=True):
-            yield from self._process_line(line)
-            self._offset += len(line.encode("utf-8"))
+        self._accumulated += chunk
+        source = self._accumulated.encode("utf-8")
+        tree = self._ts_parser.parse(source)
 
-        # Don't flush on chunks — partial blocks may still be accumulating
+        self._state = None
+        all_events = list(self._process_tree(tree, source))
 
-    def _process_line(self, line: str) -> Iterator[dict[str, Any]]:
-        """Process a single line, yielding events when blocks complete."""
-        line_type, content = classify_line(line)
+        safe_end = max(len(all_events) - 1, 0)
+        new_events = all_events[self._emitted_count : safe_end]
+        self._emitted_count = safe_end
+        self._offset = len(source)
 
-        if line_type == LineType.BLANK:
-            if self._buffer_type == LineType.AI_RESPONSE:
-                self._buffer.append("")  # preserve paragraph breaks in AI text
-            return
+        yield from new_events
 
-        # If the line type changes, flush the previous block
-        if line_type != self._buffer_type and self._buffer_type is not None:
-            yield from self._flush_buffer()
+    # ─── Query-based block extraction ────────────────────────────────────
 
-        # Handle session headers immediately (they don't accumulate)
-        if line_type == LineType.SESSION_HEADER:
-            yield from self._flush_buffer()
-            yield from self._start_session(content)
-            return
+    def _extract_blocks(self, tree: ts.Tree, source: bytes) -> list[_Block]:
+        """Run the structural query and classify each match into a _Block."""
+        cursor = ts.QueryCursor(_BLOCK_QUERY)
+        blocks: list[_Block] = []
 
-        # Accumulate
-        self._buffer_type = line_type
-        self._buffer.append(content)
+        for pat_idx, captures in cursor.matches(tree.root_node):
+            if pat_idx == _ROLE_SESSION:
+                heading_nodes = captures.get("h1", [])
+                text_nodes = captures.get("h1_text", [])
+                if heading_nodes and text_nodes:
+                    blocks.append(
+                        _Block(
+                            role=_BLOCK_SESSION,
+                            byte_pos=heading_nodes[0].start_byte,
+                            text=_node_text(text_nodes[0], source).strip(),
+                        )
+                    )
 
-    def _flush_buffer(self) -> Iterator[dict[str, Any]]:
-        """Flush the accumulated buffer into event(s)."""
-        if not self._buffer or self._buffer_type is None:
-            self._buffer = []
-            self._buffer_type = None
-            return
+            elif pat_idx == _ROLE_USER:
+                heading_nodes = captures.get("h4", [])
+                text_nodes = captures.get("h4_text", [])
+                if heading_nodes and text_nodes:
+                    blocks.append(
+                        _Block(
+                            role=_BLOCK_USER,
+                            byte_pos=heading_nodes[0].start_byte,
+                            text=_node_text(text_nodes[0], source).strip(),
+                        )
+                    )
 
-        buf_type = self._buffer_type
-        lines = self._buffer
-        self._buffer = []
-        self._buffer_type = None
+            elif pat_idx == _ROLE_BQ:
+                bq_nodes = captures.get("bq", [])
+                for node in bq_nodes:
+                    # Skip paragraphs/content inside block_quotes
+                    if node.parent and node.parent.type not in _STRUCTURAL_PARENTS:
+                        continue
+                    if _is_replace_footer(node, source):
+                        blocks.append(_Block(role=_BLOCK_AI, byte_pos=node.start_byte, node=node))
+                    else:
+                        blocks.append(_Block(role=_BLOCK_TOOL, byte_pos=node.start_byte, node=node))
 
-        if buf_type == LineType.USER_INPUT:
-            yield from self._emit_user_input(lines)
-        elif buf_type == LineType.TOOL_OUTPUT:
-            yield from self._emit_tool_outputs(lines)
-        elif buf_type == LineType.AI_RESPONSE:
-            yield from self._emit_ai_response(lines)
+            elif pat_idx in (_ROLE_PARA, _ROLE_SETEXT, _ROLE_FENCED):
+                cap_name = {_ROLE_PARA: "para", _ROLE_SETEXT: "setext", _ROLE_FENCED: "fenced"}[
+                    pat_idx
+                ]
+                content_nodes = captures.get(cap_name, [])
+                for node in content_nodes:
+                    # Only structural-level paragraphs, not those inside block_quotes
+                    if node.parent and node.parent.type not in _STRUCTURAL_PARENTS:
+                        continue
+                    blocks.append(_Block(role=_BLOCK_AI, byte_pos=node.start_byte, node=node))
 
-    def _start_session(self, datetime_str: str) -> Iterator[dict[str, Any]]:
-        """Handle a session-start header."""
+        blocks.sort(key=lambda b: b.byte_pos)
+        return blocks
+
+    # ─── Event generation ────────────────────────────────────────────────
+
+    def _process_tree(self, tree: ts.Tree, source: bytes) -> Iterator[dict[str, Any]]:
+        """Extract blocks via query, group contiguous AI nodes, emit events."""
+        blocks = self._extract_blocks(tree, source)
+        ai_nodes: list[ts.Node] = []
+
+        for block in blocks:
+            if block.role == _BLOCK_AI:
+                if block.node:
+                    ai_nodes.append(block.node)
+                continue
+
+            # Non-AI block: flush any accumulated AI content first
+            if ai_nodes:
+                yield from self._emit_ai_from_nodes(ai_nodes, source)
+                ai_nodes = []
+
+            if block.role == _BLOCK_SESSION:
+                yield from self._start_session(block.text)
+            elif block.role == _BLOCK_USER:
+                yield from self._emit_user_input(block.text)
+            elif block.role == _BLOCK_TOOL:
+                if block.node:
+                    yield from self._handle_block_quote(block.node, source)
+
+        # Flush trailing AI content
+        if ai_nodes:
+            yield from self._emit_ai_from_nodes(ai_nodes, source)
+
+    # ─── Event emitters ──────────────────────────────────────────────────
+
+    def _start_session(self, content: str) -> Iterator[dict[str, Any]]:
+        prefix = "aider chat started at"
+        if content.startswith(prefix):
+            datetime_str = content[len(prefix) :].strip()
+        else:
+            datetime_str = content
+
         try:
             dt = datetime.strptime(datetime_str, "%Y-%m-%d %H:%M:%S")
             dt = dt.replace(tzinfo=timezone.utc)
@@ -301,41 +400,52 @@ class AiderPreParser:
 
         yield self._make_event(
             "session_start",
-            {
-                "session_id": session_id,
-                "started_at": dt.isoformat(),
-            },
+            {"session_id": session_id, "started_at": dt.isoformat()},
         )
 
-    def _emit_user_input(self, lines: list[str]) -> Iterator[dict[str, Any]]:
-        """Emit user message or slash command event(s)."""
-        content = "\n".join(lines)
-
+    def _emit_user_input(self, content: str) -> Iterator[dict[str, Any]]:
         if content.startswith("/"):
-            # Slash command
             parts = content.split(None, 1)
             yield self._make_event(
                 "slash_command",
-                {
-                    "command": parts[0],
-                    "args": parts[1] if len(parts) > 1 else "",
-                },
+                {"command": parts[0], "args": parts[1] if len(parts) > 1 else ""},
             )
         else:
             yield self._make_event("user_message", {"content": content})
 
-    def _emit_tool_outputs(self, lines: list[str]) -> Iterator[dict[str, Any]]:
-        """Classify and emit tool output events."""
+    def _handle_block_quote(self, node: ts.Node, source: bytes) -> Iterator[dict[str, Any]]:
+        raw = _node_text(node, source)
+        lines = _strip_blockquote_markers(raw)
         for line_text in lines:
             if not line_text.strip():
                 continue
             result = classify_tool_output(line_text)
             yield from self._tool_result_to_event(result, line_text)
 
+    def _emit_ai_from_nodes(self, nodes: list[ts.Node], source: bytes) -> Iterator[dict[str, Any]]:
+        """Reconstruct AI response text from contiguous AST nodes."""
+        start = nodes[0].start_byte
+        end = nodes[-1].end_byte
+        content = source[start:end].decode("utf-8", errors="replace").strip()
+        if not content:
+            return
+
+        yield self._make_event("assistant_message", {"content": content})
+
+        edits = extract_edits(content)
+        for edit in edits:
+            yield self._make_event(
+                "file_edit",
+                {
+                    "file_path": edit.file_path,
+                    "search": edit.search,
+                    "replace": edit.replace,
+                },
+            )
+
     def _tool_result_to_event(
         self, result: ToolOutputResult, raw_text: str
     ) -> Iterator[dict[str, Any]]:
-        """Convert a classified tool output into an event dict."""
         match result.kind:
             case ToolOutputKind.VERSION:
                 yield self._make_event("version_info", result.fields)
@@ -361,28 +471,7 @@ class AiderPreParser:
             case ToolOutputKind.GENERIC:
                 yield self._make_event("tool_output", {"text": raw_text})
 
-    def _emit_ai_response(self, lines: list[str]) -> Iterator[dict[str, Any]]:
-        """Emit AI response event and any embedded file edits."""
-        content = "\n".join(lines).strip()
-        if not content:
-            return
-
-        yield self._make_event("assistant_message", {"content": content})
-
-        # Extract file edits from SEARCH/REPLACE blocks
-        edits = extract_edits(content)
-        for edit in edits:
-            yield self._make_event(
-                "file_edit",
-                {
-                    "file_path": edit.file_path,
-                    "search": edit.search,
-                    "replace": edit.replace,
-                },
-            )
-
     def _make_event(self, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """Construct a standard event dict."""
         state = self._state
         timestamp = state.next_timestamp() if state else datetime.now(timezone.utc)
 

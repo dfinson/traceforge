@@ -74,6 +74,9 @@ events:
       error_message: properties.error.message
       status_code: properties.error.statusCode
       is_retryable: properties.error.isRetryable
+      response_headers: properties.error.responseHeaders
+      response_body: properties.error.responseBody
+      error_metadata: properties.error.metadata
 
   # ── Step events (LLM turn lifecycle) ──
   session.next.step.started:

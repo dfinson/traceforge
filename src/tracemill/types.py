@@ -225,6 +225,7 @@ class SessionEvent(BaseModel):
     session_id: str
     timestamp: datetime
     payload: dict[str, Any]
+    raw_event: dict[str, Any] | None = None  # Original event data, verbatim
     metadata: EventMetadata = Field(default_factory=EventMetadata)
 
 

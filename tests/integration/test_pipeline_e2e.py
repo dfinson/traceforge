@@ -81,6 +81,18 @@ class TestCopilotFullPipeline:
             assert ev.metadata.source_framework == "copilot"
             assert ev.metadata.source_adapter in ("cli_jsonl", "copilot_sdk")
 
+    def test_raw_event_preserved(self):
+        """Every event carries the original JSON verbatim in raw_event."""
+        adapter = CLIJsonlAdapter()
+        fixture = FIXTURES / "copilot_session.jsonl"
+
+        for line in fixture.read_text().splitlines():
+            for ev in adapter.parse(line):
+                assert ev.raw_event is not None
+                assert isinstance(ev.raw_event, dict)
+                # raw_event should be the original parsed JSON
+                assert "type" in ev.raw_event
+
     def test_sdk_adapter_matches_cli_adapter(self):
         """CopilotSDKAdapter produces same events as CLIJsonlAdapter (just different metadata)."""
         cli = CLIJsonlAdapter()

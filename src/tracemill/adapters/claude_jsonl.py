@@ -77,16 +77,17 @@ class ClaudeJsonlAdapter(Adapter):
             logger.debug("Claude adapter: SDK deserialization failed: %s", exc)
             return
 
-        yield from self.parse_message(message)
+        yield from self.parse_message(message, raw_dict=obj)
 
-    def parse_message(self, message: Message) -> Iterator[SessionEvent]:
+    def parse_message(self, message: Message, raw_dict: dict[str, Any] | None = None) -> Iterator[SessionEvent]:
         """Parse a typed Claude SDK Message into tracemill SessionEvents."""
+        self._current_raw = raw_dict
         if isinstance(message, UserMessage):
-            yield from self._handle_user(message)
+            yield from self._handle_user(message, raw_dict)
         elif isinstance(message, AssistantMessage):
-            yield from self._handle_assistant(message)
+            yield from self._handle_assistant(message, raw_dict)
         elif isinstance(message, ResultMessage):
-            yield from self._handle_result(message)
+            yield from self._handle_result(message, raw_dict)
         elif isinstance(message, SystemMessage):
             logger.debug(
                 "Claude adapter: skipping system message (subtype=%s)",
@@ -105,7 +106,7 @@ class ClaudeJsonlAdapter(Adapter):
             raw_kind=raw_kind,
         )
 
-    def _handle_user(self, message: UserMessage) -> Iterator[SessionEvent]:
+    def _handle_user(self, message: UserMessage, raw_dict: dict[str, Any] | None = None) -> Iterator[SessionEvent]:
         session_id = self._session_id or "unknown"
 
         if isinstance(message.content, str):
@@ -114,6 +115,7 @@ class ClaudeJsonlAdapter(Adapter):
                 session_id=session_id,
                 timestamp=datetime.now(timezone.utc),
                 payload={"content": message.content},
+                raw_event=raw_dict,
                 metadata=self._make_metadata("user"),
             )
         elif isinstance(message.content, list):
@@ -128,6 +130,7 @@ class ClaudeJsonlAdapter(Adapter):
                             "success": not (block.is_error or False),
                             "result": self._extract_result_text(block.content),
                         },
+                        raw_event=raw_dict,
                         metadata=self._make_metadata("user.tool_result"),
                     )
                 elif isinstance(block, TextBlock):
@@ -136,10 +139,11 @@ class ClaudeJsonlAdapter(Adapter):
                         session_id=session_id,
                         timestamp=datetime.now(timezone.utc),
                         payload={"content": block.text},
+                        raw_event=raw_dict,
                         metadata=self._make_metadata("user.text"),
                     )
 
-    def _handle_assistant(self, message: AssistantMessage) -> Iterator[SessionEvent]:
+    def _handle_assistant(self, message: AssistantMessage, raw_dict: dict[str, Any] | None = None) -> Iterator[SessionEvent]:
         session_id = self._session_id or "unknown"
 
         for block in message.content:
@@ -149,6 +153,7 @@ class ClaudeJsonlAdapter(Adapter):
                     session_id=session_id,
                     timestamp=datetime.now(timezone.utc),
                     payload={"content": block.text},
+                    raw_event=raw_dict,
                     metadata=self._make_metadata("assistant.text"),
                 )
 
@@ -162,6 +167,7 @@ class ClaudeJsonlAdapter(Adapter):
                         "tool_name": block.name,
                         "arguments": block.input,
                     },
+                    raw_event=raw_dict,
                     metadata=self._make_metadata("assistant.tool_use"),
                 )
 
@@ -175,6 +181,7 @@ class ClaudeJsonlAdapter(Adapter):
                         "success": not (block.is_error or False),
                         "result": self._extract_result_text(block.content),
                     },
+                    raw_event=raw_dict,
                     metadata=self._make_metadata("assistant.tool_result"),
                 )
 
@@ -184,10 +191,11 @@ class ClaudeJsonlAdapter(Adapter):
                     session_id=session_id,
                     timestamp=datetime.now(timezone.utc),
                     payload={"content": block.thinking if hasattr(block, "thinking") else ""},
+                    raw_event=raw_dict,
                     metadata=self._make_metadata("assistant.thinking"),
                 )
 
-    def _handle_result(self, message: ResultMessage) -> Iterator[SessionEvent]:
+    def _handle_result(self, message: ResultMessage, raw_dict: dict[str, Any] | None = None) -> Iterator[SessionEvent]:
         # Track session_id from result message
         if message.session_id:
             self._session_id = message.session_id
@@ -211,6 +219,7 @@ class ClaudeJsonlAdapter(Adapter):
             session_id=session_id,
             timestamp=datetime.now(timezone.utc),
             payload=usage_payload,
+            raw_event=raw_dict,
             metadata=self._make_metadata("result"),
         )
 
@@ -221,6 +230,7 @@ class ClaudeJsonlAdapter(Adapter):
                 session_id=session_id,
                 timestamp=datetime.now(timezone.utc),
                 payload={"message": message.result or "Unknown error"},
+                raw_event=raw_dict,
                 metadata=self._make_metadata("result.error"),
             )
 

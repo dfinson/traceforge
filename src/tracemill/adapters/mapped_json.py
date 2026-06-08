@@ -140,10 +140,9 @@ class MappedJsonAdapter(Adapter):
                 if value is not None:
                     payload[field_name] = value
 
-        # For unmapped or RAW events, preserve the full object
+        # For unmapped or RAW events, note the original type
         if kind == EventKind.RAW or not event_mapping:
             payload["original_type"] = raw_type
-            payload["extras"] = obj
 
         metadata = EventMetadata(
             source_framework=self._mapping.framework,
@@ -157,6 +156,7 @@ class MappedJsonAdapter(Adapter):
             session_id=session_id,
             timestamp=timestamp,
             payload=payload,
+            raw_event=obj,
             metadata=metadata,
         )
 

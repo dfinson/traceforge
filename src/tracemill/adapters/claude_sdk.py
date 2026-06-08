@@ -7,6 +7,7 @@ Provides both the raw ``parse()`` interface (JSONL lines) and a typed
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Any
 
 from claude_agent_sdk import Message
 
@@ -37,9 +38,9 @@ class ClaudeSDKAdapter(ClaudeJsonlAdapter):
                 }
             )
 
-    def parse_message(self, message: Message) -> Iterator[SessionEvent]:
+    def parse_message(self, message: Message, raw_dict: dict[str, Any] | None = None) -> Iterator[SessionEvent]:
         """Parse a typed Claude SDK Message (live streaming interface)."""
-        for event in super().parse_message(message):
+        for event in super().parse_message(message, raw_dict=raw_dict):
             yield event.model_copy(
                 update={
                     "metadata": event.metadata.model_copy(

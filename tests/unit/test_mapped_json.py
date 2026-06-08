@@ -128,7 +128,8 @@ class TestMappedJsonAdapter:
         ev = events[0]
         assert ev.kind == EventKind.RAW
         assert ev.payload["original_type"] == "FutureNewEvent"
-        assert ev.payload["extras"]["data"] == "stuff"
+        # Full original data preserved verbatim in raw_event
+        assert ev.raw_event == {"type": "FutureNewEvent", "data": "stuff"}
 
     def test_empty_input(self, crewai_adapter):
         assert list(crewai_adapter.parse("")) == []

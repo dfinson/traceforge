@@ -7,6 +7,7 @@ Provides both the raw ``parse()`` interface (JSONL lines) and a typed
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Any
 
 from copilot.generated.session_events import SessionEvent as CopilotSessionEvent
 
@@ -37,9 +38,9 @@ class CopilotSDKAdapter(CLIJsonlAdapter):
                 }
             )
 
-    def parse_event(self, sdk_event: CopilotSessionEvent) -> Iterator[SessionEvent]:
+    def parse_event(self, sdk_event: CopilotSessionEvent, raw_dict: dict[str, Any] | None = None) -> Iterator[SessionEvent]:
         """Parse a typed Copilot SDK SessionEvent (live streaming interface)."""
-        for event in super().parse_event(sdk_event):
+        for event in super().parse_event(sdk_event, raw_dict=raw_dict):
             yield event.model_copy(
                 update={
                     "metadata": event.metadata.model_copy(

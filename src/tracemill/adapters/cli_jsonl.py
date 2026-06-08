@@ -4,7 +4,7 @@ Uses the Copilot SDK's own ``SessionEvent.from_dict()`` for deserialization,
 avoiding fragile hand-rolled JSON parsing.
 
 All event types are preserved — unmapped types emit as EventKind.RAW with
-the original type string preserved in metadata.raw_kind and payload["extras"].
+the original type string preserved in metadata.raw_kind.
 """
 
 from __future__ import annotations
@@ -128,9 +128,9 @@ class CLIJsonlAdapter(Adapter):
             logger.debug("CLI adapter: SDK deserialization failed: %s", exc)
             return
 
-        yield from self.parse_event(sdk_event)
+        yield from self.parse_event(sdk_event, raw_dict=obj)
 
-    def parse_event(self, sdk_event: CopilotSessionEvent) -> Iterator[SessionEvent]:
+    def parse_event(self, sdk_event: CopilotSessionEvent, raw_dict: dict[str, Any] | None = None) -> Iterator[SessionEvent]:
         """Parse a typed Copilot SDK SessionEvent into tracemill SessionEvents."""
         # Track session_id from session.start
         if isinstance(sdk_event.data, SessionStartData):
@@ -151,6 +151,7 @@ class CLIJsonlAdapter(Adapter):
             session_id=session_id,
             timestamp=timestamp,
             payload=payload,
+            raw_event=raw_dict,
             metadata=metadata,
         )
 
@@ -218,12 +219,8 @@ class CLIJsonlAdapter(Adapter):
                 ),
             }
 
-        # Fallback: preserve all data via to_dict() + original_type for RAW events
+        # Fallback: preserve original_type for RAW events
         payload: dict[str, Any] = {}
         if kind == EventKind.RAW:
             payload["original_type"] = event_type.value
-        if hasattr(data, "to_dict"):
-            payload["extras"] = data.to_dict()
-        elif data is not None:
-            payload["extras"] = str(data)
         return payload

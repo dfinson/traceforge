@@ -30,6 +30,8 @@ jobs:
             package: autogen-agentchat
           - name: maf
             package: microsoft-agents-hosting-core
+          - name: aider
+            package: aider-chat
 
     steps:
       - uses: actions/checkout@v4
@@ -121,13 +123,26 @@ jobs:
           python -c "
           from pathlib import Path
           from tracemill.adapters.mapped_json import MappedJsonAdapter
+          from tracemill.adapters.otel import OtelSpanAdapter, _SPAN_KIND_MAP
+          import yaml
 
           mappings_dir = Path('src/tracemill/mappings')
           failures = []
           for yaml_file in sorted(mappings_dir.glob('*.yaml')):
               try:
-                  adapter = MappedJsonAdapter.from_yaml(str(yaml_file), session_id='audit')
-                  print(f'✓ {yaml_file.stem}: {len(adapter._mapping.events)} events mapped')
+                  with open(yaml_file) as f:
+                      data = yaml.safe_load(f)
+
+                  if 'spans' in data:
+                      # OTel span mapping (maf.yaml)
+                      span_count = len(data['spans'])
+                      print(f'✓ {yaml_file.stem}: {span_count} spans mapped (OTel)')
+                  elif 'events' in data:
+                      # Standard JSON-line mapping
+                      adapter = MappedJsonAdapter.from_yaml(str(yaml_file), session_id='audit')
+                      print(f'✓ {yaml_file.stem}: {len(adapter._mapping.events)} events mapped')
+                  else:
+                      failures.append((yaml_file.stem, 'No events or spans key found'))
               except Exception as e:
                   failures.append((yaml_file.stem, str(e)))
                   print(f'✗ {yaml_file.stem}: {e}')
@@ -137,7 +152,7 @@ jobs:
           "
 
       - name: Run mapping integration tests
-        run: pytest tests/integration/test_new_mappings.py tests/integration/test_pipeline_e2e.py -q --tb=short
+        run: pytest tests/integration/test_new_mappings.py tests/integration/test_pipeline_e2e.py tests/integration/test_markdown_contract.py -q --tb=short
 
       - name: Check event kind coverage
         run: |
@@ -151,8 +166,12 @@ jobs:
           for yaml_file in sorted(mappings_dir.glob('*.yaml')):
               with open(yaml_file) as f:
                   data = yaml.safe_load(f)
-              for evt in data.get('events', {}).values():
-                  all_mapped_kinds.add(evt['kind'])
+              if 'events' in data:
+                  for evt in data['events'].values():
+                      all_mapped_kinds.add(evt['kind'])
+              elif 'spans' in data:
+                  for span_cfg in data['spans'].values():
+                      all_mapped_kinds.add(span_cfg['kind'])
 
           unmapped = KNOWN_KINDS - all_mapped_kinds - {'raw'}
           covered = len(all_mapped_kinds & KNOWN_KINDS)

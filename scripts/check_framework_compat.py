@@ -77,32 +77,58 @@ def check_claude() -> list[str]:
 
 
 def check_langgraph() -> list[str]:
-    """Verify LangGraph is importable (mapping-based, no direct code dep)."""
+    """Verify LangGraph is importable and our mapping can parse a sample event."""
     errors: list[str] = []
     try:
         import langgraph  # noqa: F401
     except ImportError as e:
         errors.append(f"langgraph not importable: {e}")
+        return errors
+
+    # Validate our mapping can parse a representative event
+    errors.extend(_validate_mapping_with_sample("langgraph", {
+        "event": "on_chain_start",
+        "metadata": {"timestamp": "2024-01-01T00:00:00Z"},
+        "run_id": "run-1",
+        "name": "agent_graph",
+        "data": {"input": {"query": "test"}},
+    }))
     return errors
 
 
 def check_pydantic_ai() -> list[str]:
-    """Verify PydanticAI is importable."""
+    """Verify PydanticAI is importable and our mapping can parse a sample event."""
     errors: list[str] = []
     try:
         import pydantic_ai  # noqa: F401
     except ImportError as e:
         errors.append(f"pydantic_ai not importable: {e}")
+        return errors
+
+    errors.extend(_validate_mapping_with_sample("pydantic_ai", {
+        "event_type": "agent_run_start",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "agent_name": "test_agent",
+        "model_name": "gpt-4o",
+    }))
     return errors
 
 
 def check_smolagents() -> list[str]:
-    """Verify smolagents is importable."""
+    """Verify smolagents is importable and our mapping can parse a sample event."""
     errors: list[str] = []
     try:
         import smolagents  # noqa: F401
     except ImportError as e:
         errors.append(f"smolagents not importable: {e}")
+        return errors
+
+    errors.extend(_validate_mapping_with_sample("smolagents", {
+        "step_type": "AgentStep",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "agent_name": "ToolCallingAgent",
+        "thought": "I should search for this",
+    }))
     return errors
 
 
@@ -117,14 +143,109 @@ def check_autogen() -> list[str]:
 
 
 def check_maf() -> list[str]:
-    """Verify Microsoft 365 Agents SDK is importable and has expected telemetry."""
+    """Verify MAF OTel adapter can parse a representative span."""
     errors: list[str] = []
     try:
-        from microsoft_agents.hosting.core.telemetry.core._agents_telemetry import (  # noqa: F401
-            _AgentsTelemetry,
+        from tracemill.adapters.otel import OtelSpanAdapter
+
+        adapter = OtelSpanAdapter(ingestion_mode="stream", session_id="compat-test")
+        span = {
+            "name": "agents.app.run",
+            "start_time_unix_nano": 1717232400_000_000_000,
+            "end_time_unix_nano": 1717232400_050_000_000,
+            "status": {"status_code": 1},
+            "attributes": {"activity.type": "message"},
+        }
+        events = list(adapter.parse_span(span))
+        if not events:
+            errors.append("OtelSpanAdapter produced no events for agents.app.run span")
+        elif events[0].kind != "turn.started":
+            errors.append(f"Expected kind 'turn.started', got '{events[0].kind}'")
+    except Exception as e:
+        errors.append(f"OtelSpanAdapter failed: {e}")
+    return errors
+
+
+def check_aider() -> list[str]:
+    """Verify MarkdownPreParser can parse aider's format and produce valid events."""
+    errors: list[str] = []
+    try:
+        from tracemill.parsers.markdown import MarkdownPreParser
+
+        parser = MarkdownPreParser()
+        sample = (
+            "# aider chat started at 2024-06-01 10:00:00\n\n"
+            "> Aider v0.86.2\n"
+            "> Model: gpt-4o with diff edit format\n\n"
+            "#### fix the bug\n\n"
+            "Here's the fix:\n\n"
+            "src/main.py\n"
+            "<<<<<<< SEARCH\n"
+            "old_code()\n"
+            "=======\n"
+            "new_code()\n"
+            ">>>>>>> REPLACE\n\n"
+            "> Tokens: 1k sent, 50 received.\n"
+            "> Applied edit to src/main.py\n"
+            "> Commit abc1234 fix: the bug\n"
         )
-    except ImportError as e:
-        errors.append(f"MAF telemetry not importable: {e}")
+        events = list(parser.parse_text(sample))
+
+        # Must produce all expected event types
+        types = {e["type"] for e in events}
+        expected = {"session_start", "version_info", "model_info", "user_message",
+                    "assistant_message", "file_edit", "token_usage",
+                    "file_edit_applied", "git_commit"}
+        missing = expected - types
+        if missing:
+            errors.append(f"MarkdownPreParser missing event types: {missing}")
+
+        # Validate end-to-end through MappedJsonAdapter
+        import json
+        from tracemill.adapters.mapped_json import MappedJsonAdapter
+        from pathlib import Path
+
+        yaml_path = Path(__file__).resolve().parent.parent / "src" / "tracemill" / "mappings" / "aider_markdown.yaml"
+        adapter = MappedJsonAdapter.from_yaml(str(yaml_path), session_id="compat-test")
+        unmapped = []
+        for event_dict in events:
+            line = json.dumps(event_dict)
+            session_events = list(adapter.parse(line))
+            if not session_events:
+                unmapped.append(event_dict["type"])
+        if unmapped:
+            errors.append(f"Events not mapped by aider_markdown.yaml: {set(unmapped)}")
+
+    except Exception as e:
+        errors.append(f"MarkdownPreParser failed: {e}")
+    return errors
+
+
+def _validate_mapping_with_sample(framework: str, sample_event: dict) -> list[str]:
+    """Validate a YAML mapping can parse a sample event and produce output."""
+    import json
+    from pathlib import Path
+
+    errors: list[str] = []
+    yaml_path = Path(__file__).resolve().parent.parent / "src" / "tracemill" / "mappings" / f"{framework}.yaml"
+    if not yaml_path.exists():
+        errors.append(f"Mapping file {framework}.yaml not found")
+        return errors
+
+    try:
+        from tracemill.adapters.mapped_json import MappedJsonAdapter
+
+        adapter = MappedJsonAdapter.from_yaml(str(yaml_path), session_id="compat-test")
+        line = json.dumps(sample_event)
+        events = list(adapter.parse(line))
+        if not events:
+            errors.append(f"{framework}.yaml: sample event produced no output (mapping may be stale)")
+        else:
+            event = events[0]
+            if event.kind == "raw":
+                errors.append(f"{framework}.yaml: sample event mapped to 'raw' (type_field mismatch?)")
+    except Exception as e:
+        errors.append(f"{framework}.yaml: failed to parse sample event: {e}")
     return errors
 
 
@@ -136,6 +257,7 @@ _CHECKERS = {
     "smolagents": check_smolagents,
     "autogen": check_autogen,
     "maf": check_maf,
+    "aider": check_aider,
 }
 
 

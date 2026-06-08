@@ -20,6 +20,7 @@ from tracemill.classify import (
     normalize_tool_name,
 )
 from tracemill.enricher import Enricher
+from tracemill.parsers.markdown import MarkdownPreParser
 from tracemill.pipeline import EventPipeline
 from tracemill.sinks.base import StorageSink
 from tracemill.sinks.callback import CallbackSink
@@ -40,6 +41,7 @@ __all__ = [
     "CopilotAdapter",
     "ClaudeAdapter",
     "MappedJsonAdapter",
+    "MarkdownPreParser",
     "OtelSpanAdapter",
     # Classification
     "CallbackSink",

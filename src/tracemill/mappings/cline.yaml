@@ -1,18 +1,20 @@
 # Cline / Roo Code event mapping for MappedJsonAdapter
-# Cline stores conversation history as JSON in VS Code globalStorage.
+# Targets: cline >= 3.0 (VS Code extension globalStorage JSON format)
 # Source: cline/cline VS Code extension storage format.
 
 framework: cline
+framework_version: ">=3.0"
 ingestion_mode: file_watch
 type_field: type
 timestamp_field: ts
 
 events:
+  # ── Messages ──
   say:
     kind: message.assistant
     payload:
       content: text
-      tool_name: say
+      say_type: say
   ask:
     kind: input.requested
     payload:
@@ -23,22 +25,32 @@ events:
     payload:
       content: text
 
-  # Tool operations
+  # ── Tool operations ──
+  tool_use:
+    kind: tool.call.started
+    payload:
+      tool_name: tool
+      tool_call_id: ts
+      arguments: content
+  tool_result:
+    kind: tool.call.completed
+    payload:
+      tool_call_id: tool_use_ts
+      result: content
+      success: approved
+
+  # ── Command execution ──
   command:
     kind: command.started
     payload:
       command: text
   command_output:
-    kind: command.output
+    kind: command.completed
     payload:
       content: text
-  tool:
-    kind: tool.call.started
-    payload:
-      tool_name: tool
-      arguments: content
+      exit_code: exitCode
 
-  # File operations
+  # ── File operations ──
   write_to_file:
     kind: file.edited
     payload:
@@ -48,8 +60,35 @@ events:
     kind: file.read
     payload:
       path: path
+  replace_in_file:
+    kind: file.edited
+    payload:
+      path: path
+      old_str: search
+      new_str: replace
+  search_files:
+    kind: file.read
+    payload:
+      path: path
+      content: regex
+  list_files:
+    kind: file.read
+    payload:
+      path: path
 
-  # API/LLM
+  # ── Browser ──
+  browser_action:
+    kind: browser.action
+    payload:
+      action: action
+      url: url
+  browser_result:
+    kind: browser.result
+    payload:
+      content: text
+      url: url
+
+  # ── API/LLM ──
   api_req_started:
     kind: llm.call.started
     payload:
@@ -62,8 +101,29 @@ events:
       input_tokens: tokensIn
       output_tokens: tokensOut
       cost: cost
+      cache_read_tokens: cacheReads
+      cache_write_tokens: cacheWrites
 
-  # Errors
+  # ── MCP ──
+  mcp_server_request:
+    kind: mcp.connection.started
+    payload:
+      server_name: serverName
+      tool_name: toolName
+  mcp_server_response:
+    kind: mcp.connection.completed
+    payload:
+      server_name: serverName
+      result: content
+
+  # ── Completion / session ──
+  completion_result:
+    kind: session.ended
+    payload:
+      output: text
+      command: command
+
+  # ── Errors ──
   error:
     kind: error
     payload:

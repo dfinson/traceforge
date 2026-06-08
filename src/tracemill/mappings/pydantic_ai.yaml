@@ -1,0 +1,117 @@
+# PydanticAI event mapping for MappedJsonAdapter
+# Targets: pydantic-ai >= 0.0.36 (structured event callbacks)
+# Source: pydantic/pydantic-ai agent run events.
+# Note: PydanticAI emits events via its streaming interface. Use a
+# serializer that writes events to JSONL for file_watch ingestion.
+
+framework: pydantic_ai
+framework_version: ">=0.0.36"
+ingestion_mode: file_watch
+type_field: type
+timestamp_field: timestamp
+
+events:
+  # ── Agent lifecycle ──
+  agent_run_start:
+    kind: session.started
+    payload:
+      agent_name: agent_name
+      model: model_name
+  agent_run_end:
+    kind: session.ended
+    payload:
+      agent_name: agent_name
+      result: result
+  agent_run_error:
+    kind: error
+    payload:
+      agent_name: agent_name
+      message: error
+
+  # ── Model calls ──
+  model_request_start:
+    kind: llm.call.started
+    payload:
+      model: model_name
+      request_id: request_id
+  model_response:
+    kind: llm.call.completed
+    payload:
+      model: model_name
+      request_id: request_id
+      input_tokens: usage.request_tokens
+      output_tokens: usage.response_tokens
+      cost_usd: usage.total_cost
+  model_request_error:
+    kind: llm.call.failed
+    payload:
+      model: model_name
+      error: error
+
+  # ── Tool calls ──
+  tool_call_start:
+    kind: tool.call.started
+    payload:
+      tool_name: tool_name
+      tool_call_id: call_id
+      arguments: args
+  tool_call_end:
+    kind: tool.call.completed
+    payload:
+      tool_call_id: call_id
+      tool_name: tool_name
+      result: result
+  tool_call_error:
+    kind: tool.call.failed
+    payload:
+      tool_call_id: call_id
+      tool_name: tool_name
+      error: error
+
+  # ── Messages ──
+  user_message:
+    kind: message.user
+    payload:
+      content: content
+  model_text_response:
+    kind: message.assistant
+    payload:
+      content: content
+  model_structured_response:
+    kind: message.assistant
+    payload:
+      content: data
+
+  # ── Streaming ──
+  model_response_chunk:
+    kind: llm.output.chunk
+    payload:
+      content: chunk
+
+  # ── Retries / validation ──
+  validation_error:
+    kind: tool.validation.failed
+    payload:
+      tool_name: tool_name
+      error: error
+      retry_count: retry_count
+  retry:
+    kind: error
+    payload:
+      message: reason
+      attempt: attempt
+
+  # ── Result validation ──
+  result_validation_start:
+    kind: guardrail.started
+    payload:
+      validator: validator_name
+  result_validation_pass:
+    kind: guardrail.passed
+    payload:
+      validator: validator_name
+  result_validation_fail:
+    kind: guardrail.failed
+    payload:
+      validator: validator_name
+      reason: error

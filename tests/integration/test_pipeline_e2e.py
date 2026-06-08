@@ -263,7 +263,7 @@ class TestMappedJsonFullPipeline:
         assert kinds[2] == "llm.call.completed"
         assert kinds[3] == "file.edited"
         assert kinds[4] == "command.started"
-        assert kinds[5] == "command.output"
+        assert kinds[5] == "command.completed"
 
         # LLM usage extracted
         assert all_events[2].payload["output_tokens"] == 200
@@ -527,7 +527,7 @@ class TestAdapterRobustness:
         assert list(adapter.parse("null")) == []
 
     def test_mapped_json_missing_type_field(self):
-        mapping = FrameworkMapping(framework="test", ingestion_mode="file_watch", events={})
+        mapping = FrameworkMapping(framework="test", framework_version=">=1.0", ingestion_mode="file_watch", events={})
         adapter = MappedJsonAdapter(mapping, session_id="test-session")
         # No "type" field in the JSON — should still produce RAW event
         events = list(adapter.parse(json.dumps({"data": "hello"})))
@@ -539,6 +539,7 @@ class TestAdapterRobustness:
         """Large payloads don't crash the adapter."""
         mapping = FrameworkMapping(
             framework="test",
+            framework_version=">=1.0",
             ingestion_mode="file_watch",
             events={"big": EventMapping(kind="message.user", payload={"content": "data"})},
         )
@@ -573,6 +574,7 @@ class TestAdapterRobustness:
         """Missing payload paths produce None (not crash)."""
         mapping = FrameworkMapping(
             framework="test",
+            framework_version=">=1.0",
             ingestion_mode="file_watch",
             events={
                 "evt": EventMapping(

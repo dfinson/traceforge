@@ -1,14 +1,15 @@
 # CrewAI event mapping for MappedJsonAdapter
-# CrewAI serializes BaseEvent subclasses as JSON with `type` field.
+# Targets: crewai >= 0.86 (BaseEvent subclasses serialized as JSON)
 # Source: crewAI-inc/crewAI lib/crewai/src/crewai/events/
 
 framework: crewai
+framework_version: ">=0.86"
 ingestion_mode: file_watch
 type_field: type
 timestamp_field: timestamp
 
 events:
-  # Agent lifecycle
+  # ── Agent lifecycle ──
   AgentExecutionStartedEvent:
     kind: agent.spawned
     payload:
@@ -27,7 +28,7 @@ events:
       agent_id: agent_id
       error: error
 
-  # Task lifecycle
+  # ── Task lifecycle ──
   TaskStartedEvent:
     kind: task.started
     payload:
@@ -46,7 +47,7 @@ events:
       task_id: task_id
       error: error
 
-  # Tool usage
+  # ── Tool usage ──
   ToolUsageStartedEvent:
     kind: tool.call.started
     payload:
@@ -66,7 +67,7 @@ events:
       tool_name: tool_name
       error: error
 
-  # LLM calls
+  # ── LLM calls ──
   LLMCallStartedEvent:
     kind: llm.call.started
     payload:
@@ -85,7 +86,7 @@ events:
       error: error
       model: model
 
-  # Crew lifecycle
+  # ── Crew lifecycle ──
   CrewStartedEvent:
     kind: session.started
     payload:
@@ -100,7 +101,21 @@ events:
     payload:
       message: error
 
-  # Memory
+  # ── Delegation ──
+  AgentDelegationStartedEvent:
+    kind: agent.spawned
+    payload:
+      from_agent: from_agent_role
+      to_agent: to_agent_role
+      task: task_description
+  AgentDelegationCompletedEvent:
+    kind: agent.completed
+    payload:
+      from_agent: from_agent_role
+      to_agent: to_agent_role
+      output: output
+
+  # ── Memory ──
   MemoryQueryStartedEvent:
     kind: memory.query.started
     payload:
@@ -109,8 +124,28 @@ events:
     kind: memory.query.completed
     payload:
       results: results
+  MemorySaveStartedEvent:
+    kind: memory.save.started
+    payload:
+      content: content
+  MemorySaveCompletedEvent:
+    kind: memory.save.completed
+    payload:
+      success: success
 
-  # Flow/workflow
+  # ── Knowledge/RAG ──
+  KnowledgeQueryStartedEvent:
+    kind: knowledge.query.started
+    payload:
+      query: query
+      source: source
+  KnowledgeQueryCompletedEvent:
+    kind: knowledge.query.completed
+    payload:
+      results: results
+      source: source
+
+  # ── Flow/workflow ──
   FlowStartedEvent:
     kind: workflow.started
     payload:
@@ -120,3 +155,23 @@ events:
     payload:
       flow_name: flow_name
       output: output
+  FlowFailedEvent:
+    kind: workflow.failed
+    payload:
+      flow_name: flow_name
+      error: error
+
+  # ── Guardrails ──
+  GuardrailStartedEvent:
+    kind: guardrail.started
+    payload:
+      guardrail_name: name
+  GuardrailPassedEvent:
+    kind: guardrail.passed
+    payload:
+      guardrail_name: name
+  GuardrailFailedEvent:
+    kind: guardrail.failed
+    payload:
+      guardrail_name: name
+      reason: reason

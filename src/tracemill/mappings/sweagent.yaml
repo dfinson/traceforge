@@ -1,14 +1,15 @@
 # SWE-agent trajectory mapping for MappedJsonAdapter
-# SWE-agent writes trajectory JSON files with action/observation pairs.
+# Targets: sweagent >= 0.7 (trajectory JSON files with action/observation pairs)
 # Source: princeton-nlp/SWE-agent trajectory format.
 
 framework: sweagent
+framework_version: ">=0.7"
 ingestion_mode: file_watch
 type_field: role
 timestamp_field: timestamp
 
 events:
-  # Agent actions
+  # ── Agent actions ──
   assistant:
     kind: message.assistant
     payload:
@@ -16,20 +17,20 @@ events:
       thought: thought
       action: action
 
-  # Environment observations
+  # ── Environment observations ──
   system:
     kind: command.completed
     payload:
       content: content
       exit_code: exit_code
 
-  # User/task setup
+  # ── User/task setup ──
   user:
     kind: message.user
     payload:
       content: content
 
-  # Subroutine events
+  # ── Subroutine/agent delegation ──
   subroutine_start:
     kind: agent.spawned
     payload:
@@ -39,3 +40,50 @@ events:
     payload:
       agent_id: subroutine_name
       output: output
+
+  # ── Tool/command execution ──
+  tool_call:
+    kind: tool.call.started
+    payload:
+      tool_name: tool
+      tool_call_id: call_id
+      arguments: args
+  tool_response:
+    kind: tool.call.completed
+    payload:
+      tool_call_id: call_id
+      result: output
+      success: success
+
+  # ── File operations ──
+  edit:
+    kind: file.edited
+    payload:
+      path: file
+      content: replacement
+  open:
+    kind: file.read
+    payload:
+      path: file
+
+  # ── Session lifecycle ──
+  instance_start:
+    kind: session.started
+    payload:
+      instance_id: instance_id
+      model: model_name
+  instance_end:
+    kind: session.ended
+    payload:
+      instance_id: instance_id
+      exit_status: exit_status
+      submission: submission
+
+  # ── Cost/usage ──
+  model_stats:
+    kind: usage
+    payload:
+      input_tokens: api_calls.total_tokens_sent
+      output_tokens: api_calls.total_tokens_received
+      cost_usd: api_calls.total_cost
+      model: model_name

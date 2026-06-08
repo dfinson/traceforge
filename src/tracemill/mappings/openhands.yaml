@@ -1,14 +1,15 @@
 # OpenHands event mapping for MappedJsonAdapter
-# OpenHands writes one JSON file per event in the workspace.
+# Targets: openhands >= 0.30 (JSON event files in workspace)
 # Source: All-Hands-AI/OpenHands runtime event format.
 
 framework: openhands
+framework_version: ">=0.30"
 ingestion_mode: file_watch
 type_field: event_type
 timestamp_field: timestamp
 
 events:
-  # Agent actions
+  # ── Agent actions ──
   AgentThinkAction:
     kind: reasoning.started
     payload:
@@ -22,19 +23,24 @@ events:
     payload:
       agent_id: agent
       task: inputs.task
+  AgentRejectAction:
+    kind: error
+    payload:
+      message: outputs.reason
 
-  # Tool/command execution
+  # ── Command execution ──
   CmdRunAction:
     kind: command.started
     payload:
       command: command
+      timeout: timeout
   CmdOutputObservation:
     kind: command.completed
     payload:
       content: content
       exit_code: exit_code
 
-  # File operations
+  # ── File operations ──
   FileReadAction:
     kind: file.read
     payload:
@@ -44,8 +50,24 @@ events:
     payload:
       path: path
       content: content
+  FileEditAction:
+    kind: file.edited
+    payload:
+      path: path
+      old_str: old_str
+      new_str: new_str
 
-  # Browser
+  # ── IPython / code execution ──
+  IPythonRunCellAction:
+    kind: command.started
+    payload:
+      command: code
+  IPythonRunCellObservation:
+    kind: command.completed
+    payload:
+      content: content
+
+  # ── Browser ──
   BrowseURLAction:
     kind: browser.launched
     payload:
@@ -60,7 +82,7 @@ events:
       content: content
       url: url
 
-  # Messages
+  # ── Messages ──
   MessageAction:
     kind: message.user
     payload:
@@ -71,8 +93,34 @@ events:
     payload:
       content: content
 
-  # Errors
+  # ── Memory/recall ──
+  AgentRecallAction:
+    kind: memory.query.started
+    payload:
+      query: query
+  AgentRecallObservation:
+    kind: memory.query.completed
+    payload:
+      content: memories
+
+  # ── Checkpoints ──
+  AgentStateCheckpoint:
+    kind: checkpoint.created
+    payload:
+      checkpoint_id: id
+
+  # ── Errors ──
   ErrorObservation:
     kind: error
     payload:
       message: content
+  AgentStuckObservation:
+    kind: error
+    payload:
+      message: content
+
+  # ── Delegation results ──
+  AgentDelegateObservation:
+    kind: agent.completed
+    payload:
+      output: outputs.content

@@ -51,17 +51,18 @@ class TestResolvePath:
 
 class TestFrameworkMapping:
     def test_minimal(self):
-        m = FrameworkMapping(framework="test", ingestion_mode="file_watch")
+        m = FrameworkMapping(framework="test", framework_version=">=1.0", ingestion_mode="file_watch")
         assert m.type_field == "type"
         assert m.default_kind == EventKind.RAW
 
     def test_extra_field_rejected(self):
         with pytest.raises(Exception):  # pydantic ValidationError
-            FrameworkMapping(framework="test", ingestion_mode="file_watch", bogus_field="x")
+            FrameworkMapping(framework="test", framework_version=">=1.0", ingestion_mode="file_watch", bogus_field="x")
 
     def test_full_config(self):
         m = FrameworkMapping(
             framework="crewai",
+            framework_version=">=0.86",
             ingestion_mode="file_watch",
             type_field="type",
             timestamp_field="timestamp",
@@ -83,6 +84,7 @@ class TestMappedJsonAdapter:
     def crewai_adapter(self):
         mapping = FrameworkMapping(
             framework="crewai",
+            framework_version=">=0.86",
             ingestion_mode="file_watch",
             type_field="type",
             timestamp_field="timestamp",
@@ -144,6 +146,7 @@ class TestMappedJsonAdapter:
     def test_nested_payload_extraction(self):
         mapping = FrameworkMapping(
             framework="test",
+            framework_version=">=1.0",
             ingestion_mode="file_watch",
             type_field="event_type",
             events={
@@ -171,6 +174,7 @@ class TestMappedJsonAdapter:
     def test_session_id_from_constructor(self):
         mapping = FrameworkMapping(
             framework="test",
+            framework_version=">=1.0",
             ingestion_mode="file_watch",
             type_field="type",
             events={"msg": EventMapping(kind="message.user", payload={"content": "text"})},
@@ -182,6 +186,7 @@ class TestMappedJsonAdapter:
     def test_timestamp_parsing_iso(self):
         mapping = FrameworkMapping(
             framework="test",
+            framework_version=">=1.0",
             ingestion_mode="file_watch",
             type_field="type",
             timestamp_field="ts",
@@ -196,6 +201,7 @@ class TestMappedJsonAdapter:
     def test_timestamp_parsing_epoch(self):
         mapping = FrameworkMapping(
             framework="test",
+            framework_version=">=1.0",
             ingestion_mode="file_watch",
             type_field="type",
             timestamp_field="ts",

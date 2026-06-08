@@ -1,16 +1,17 @@
 # Aider event mapping for MappedJsonAdapter
-# Aider writes structured JSON events to .aider.events.json (when enabled).
+# Targets: aider >= 0.70 (structured JSON events in .aider.events.json)
 # Source: paul-gauthier/aider event logging format.
 # Note: Aider's primary logs are markdown (.aider.chat.history.md) which
 # require a separate MarkdownPreParser before feeding into this adapter.
 
 framework: aider
+framework_version: ">=0.70"
 ingestion_mode: file_watch
 type_field: event
 timestamp_field: timestamp
 
 events:
-  # Message events
+  # ── Message events ──
   message_send:
     kind: message.user
     payload:
@@ -22,7 +23,7 @@ events:
       content: content
       model: model
 
-  # LLM calls
+  # ── LLM calls ──
   llm_start:
     kind: llm.call.started
     payload:
@@ -35,8 +36,13 @@ events:
       input_tokens: input_tokens
       output_tokens: output_tokens
       cost: cost
+  llm_error:
+    kind: llm.call.failed
+    payload:
+      error: error
+      model: model
 
-  # File operations
+  # ── File operations ──
   file_edit:
     kind: file.edited
     payload:
@@ -46,8 +52,12 @@ events:
     kind: file.created
     payload:
       path: fname
+  file_drop:
+    kind: file.deleted
+    payload:
+      path: fname
 
-  # Commands
+  # ── Commands ──
   command_run:
     kind: command.started
     payload:
@@ -58,7 +68,59 @@ events:
       content: output
       exit_code: exit_code
 
-  # Session
+  # ── Git operations ──
+  git_commit:
+    kind: tool.call.completed
+    payload:
+      tool_name: git
+      result: commit_hash
+      message: commit_message
+  git_diff:
+    kind: file.read
+    payload:
+      content: diff
+
+  # ── Linting / testing ──
+  lint_run:
+    kind: tool.call.started
+    payload:
+      tool_name: linter
+      arguments: files
+  lint_result:
+    kind: tool.call.completed
+    payload:
+      tool_name: linter
+      result: output
+      success: passed
+  test_run:
+    kind: tool.call.started
+    payload:
+      tool_name: test_runner
+      arguments: command
+  test_result:
+    kind: tool.call.completed
+    payload:
+      tool_name: test_runner
+      result: output
+      success: passed
+
+  # ── Repo map ──
+  repo_map:
+    kind: knowledge.query.completed
+    payload:
+      content: map_content
+
+  # ── Architect mode ──
+  architect_plan:
+    kind: planning.started
+    payload:
+      content: plan
+  architect_edit:
+    kind: planning.completed
+    payload:
+      content: edits
+
+  # ── Session ──
   session_start:
     kind: session.started
     payload:
@@ -67,3 +129,9 @@ events:
   session_end:
     kind: session.ended
     payload: {}
+
+  # ── Errors ──
+  error:
+    kind: error
+    payload:
+      message: message

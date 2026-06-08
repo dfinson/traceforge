@@ -1,0 +1,164 @@
+name: Weekly Framework Compatibility Audit
+
+on:
+  schedule:
+    - cron: "0 8 * * 1"  # Every Monday at 08:00 UTC
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  audit-frameworks:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        framework:
+          - name: copilot
+            package: github-copilot-sdk
+          - name: claude
+            package: claude-agent-sdk
+          - name: langgraph
+            package: langgraph
+          - name: pydantic-ai
+            package: pydantic-ai-slim
+          - name: smolagents
+            package: smolagents
+          - name: autogen
+            package: autogen-agentchat
+          - name: maf
+            package: microsoft-agents-hosting-core
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install tracemill + framework SDK
+        run: |
+          pip install -e ".[dev]"
+          pip install "${{ matrix.framework.package }}" --upgrade
+
+      - name: Run adapter tests
+        id: test
+        continue-on-error: true
+        run: |
+          pytest tests/ -q --tb=short \
+            -k "${{ matrix.framework.name }}" \
+            2>&1 | tee test-output.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Check for breaking SDK changes
+        id: check
+        run: |
+          python scripts/check_framework_compat.py \
+            --framework "${{ matrix.framework.name }}" \
+            --package "${{ matrix.framework.package }}" \
+            2>&1 | tee compat-output.txt
+
+      - name: File issue on failure
+        if: steps.test.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const testOutput = fs.readFileSync('test-output.txt', 'utf8');
+            const framework = '${{ matrix.framework.name }}';
+            const pkg = '${{ matrix.framework.package }}';
+            const title = `[Compat] ${framework}: tests failing against latest ${pkg}`;
+            const body = [
+              `## Framework Compatibility Failure`,
+              ``,
+              `**Framework:** ${framework}`,
+              `**Package:** ${pkg}`,
+              `**Detected:** ${new Date().toISOString().split('T')[0]}`,
+              `**Workflow run:** ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              ``,
+              `### Test Output`,
+              '```',
+              testOutput.slice(-3000),
+              '```',
+              ``,
+              `### Action Required`,
+              `Update the adapter/mapping for \`${framework}\` to handle the breaking change.`,
+            ].join('\n');
+
+            // Check if an open issue already exists
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'compat-failure',
+            });
+            const alreadyFiled = existing.data.some(i => i.title.includes(framework));
+            if (!alreadyFiled) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['compat-failure', 'automated'],
+              });
+            }
+
+  audit-yaml-mappings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install tracemill
+        run: pip install -e ".[dev]"
+
+      - name: Validate all YAML mappings load
+        run: |
+          python -c "
+          from pathlib import Path
+          from tracemill.adapters.mapped_json import MappedJsonAdapter
+
+          mappings_dir = Path('src/tracemill/mappings')
+          failures = []
+          for yaml_file in sorted(mappings_dir.glob('*.yaml')):
+              try:
+                  adapter = MappedJsonAdapter.from_yaml(str(yaml_file), session_id='audit')
+                  print(f'✓ {yaml_file.stem}: {len(adapter._mapping.events)} events mapped')
+              except Exception as e:
+                  failures.append((yaml_file.stem, str(e)))
+                  print(f'✗ {yaml_file.stem}: {e}')
+
+          if failures:
+              raise SystemExit(f'{len(failures)} mapping(s) failed to load')
+          "
+
+      - name: Run mapping integration tests
+        run: pytest tests/integration/test_new_mappings.py tests/integration/test_pipeline_e2e.py -q --tb=short
+
+      - name: Check event kind coverage
+        run: |
+          python -c "
+          from pathlib import Path
+          import yaml
+          from tracemill.types import KNOWN_KINDS
+
+          mappings_dir = Path('src/tracemill/mappings')
+          all_mapped_kinds: set[str] = set()
+          for yaml_file in sorted(mappings_dir.glob('*.yaml')):
+              with open(yaml_file) as f:
+                  data = yaml.safe_load(f)
+              for evt in data.get('events', {}).values():
+                  all_mapped_kinds.add(evt['kind'])
+
+          unmapped = KNOWN_KINDS - all_mapped_kinds - {'raw'}
+          covered = len(all_mapped_kinds & KNOWN_KINDS)
+          total = len(KNOWN_KINDS) - 1  # exclude 'raw'
+          print(f'Event kind coverage: {covered}/{total} ({100*covered/total:.0f}%)')
+          if unmapped:
+              print(f'Unmapped canonical kinds: {sorted(unmapped)[:20]}')
+          "

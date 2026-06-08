@@ -1,0 +1,106 @@
+# LangGraph event mapping for MappedJsonAdapter
+# Targets: langgraph >= 0.2 (callback-based event streaming)
+# Source: langchain-ai/langgraph event format from astream_events().
+# Note: LangGraph emits events via LangChain's callback system. Use
+# a CallbackHandler that serializes to JSONL for file_watch ingestion.
+
+framework: langgraph
+framework_version: ">=0.2"
+ingestion_mode: file_watch
+type_field: event
+timestamp_field: metadata.timestamp
+
+events:
+  # ── Chain/graph lifecycle ──
+  on_chain_start:
+    kind: workflow.started
+    payload:
+      run_id: run_id
+      name: name
+      inputs: data.input
+  on_chain_end:
+    kind: workflow.completed
+    payload:
+      run_id: run_id
+      name: name
+      output: data.output
+  on_chain_error:
+    kind: workflow.failed
+    payload:
+      run_id: run_id
+      error: data.error
+
+  # ── LLM calls ──
+  on_llm_start:
+    kind: llm.call.started
+    payload:
+      model: metadata.ls_model_name
+      run_id: run_id
+      input_tokens: metadata.ls_input_tokens
+  on_llm_end:
+    kind: llm.call.completed
+    payload:
+      model: metadata.ls_model_name
+      run_id: run_id
+      output: data.output.content
+      input_tokens: metadata.ls_input_tokens
+      output_tokens: metadata.ls_output_tokens
+  on_llm_error:
+    kind: llm.call.failed
+    payload:
+      run_id: run_id
+      error: data.error
+  on_llm_new_token:
+    kind: llm.output.chunk
+    payload:
+      content: data.chunk
+
+  # ── Tool calls ──
+  on_tool_start:
+    kind: tool.call.started
+    payload:
+      tool_name: name
+      tool_call_id: run_id
+      arguments: data.input
+  on_tool_end:
+    kind: tool.call.completed
+    payload:
+      tool_call_id: run_id
+      tool_name: name
+      result: data.output
+  on_tool_error:
+    kind: tool.call.failed
+    payload:
+      tool_call_id: run_id
+      tool_name: name
+      error: data.error
+
+  # ── Chat messages ──
+  on_chat_model_stream:
+    kind: message.assistant.chunk
+    payload:
+      content: data.chunk.content
+
+  # ── Retriever ──
+  on_retriever_start:
+    kind: knowledge.query.started
+    payload:
+      query: data.input.query
+  on_retriever_end:
+    kind: knowledge.query.completed
+    payload:
+      results: data.output
+
+  # ── Node transitions (graph-specific) ──
+  on_chain_stream:
+    kind: task.started
+    payload:
+      node: name
+      data: data.chunk
+
+  # ── Checkpoints ──
+  on_checkpoint:
+    kind: checkpoint.created
+    payload:
+      checkpoint_id: data.checkpoint_id
+      thread_id: data.thread_id

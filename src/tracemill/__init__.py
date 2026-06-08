@@ -1,6 +1,10 @@
 """tracemill — Agent event observation pipeline with pluggable storage backends."""
 
 from tracemill.adapters.base import Adapter
+from tracemill.adapters.claude_jsonl import ClaudeJsonlAdapter
+from tracemill.adapters.claude_sdk import ClaudeSDKAdapter
+from tracemill.adapters.cli_jsonl import CLIJsonlAdapter
+from tracemill.adapters.copilot_sdk import CopilotSDKAdapter
 from tracemill.classify import (
     ClassificationEngine,
     Classification,
@@ -23,10 +27,14 @@ from tracemill.types import EventKind, EventMetadata, SessionEvent, TelemetrySpa
 
 __all__ = [
     "Adapter",
+    "CLIJsonlAdapter",
     "CallbackSink",
     "Classification",
     "ClassificationEngine",
     "ClassifyConfig",
+    "ClaudeJsonlAdapter",
+    "ClaudeSDKAdapter",
+    "CopilotSDKAdapter",
     "Enricher",
     "EventKind",
     "EventMetadata",

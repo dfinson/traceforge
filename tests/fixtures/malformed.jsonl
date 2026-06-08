@@ -1,0 +1,6 @@
+{"type":"session.start","data":{"sessionId":"sess-x","selectedModel":"gpt-4"
+ 
+{"no_type_here": true, "data": {"content": "missing type"}}
+{"type":"unknown.future.event","data":{"foo":"bar"},"id":"evt-x","timestamp":"2024-01-01T00:00:00Z"}
+{"type":"user.message","id":"evt-y","timestamp":"2024-01-01T00:00:01Z"}
+not json at all! @#$%

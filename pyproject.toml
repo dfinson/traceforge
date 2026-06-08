@@ -15,8 +15,12 @@ dependencies = [
     "tree-sitter>=0.23",
     "tree-sitter-bash>=0.23",
     "tree-sitter-powershell>=0.23",
-    "github-copilot-sdk>=0.3.0,<0.4",
-    "claude-code-sdk>=0.0.25,<0.1",
+    "github-copilot-sdk>=1.0.0,<2",
+    "claude-agent-sdk>=0.2.93,<1",
+    "langgraph>=1.2.4,<2",
+    "pydantic-ai-slim>=1.106.0,<2",
+    "smolagents>=1.26.0,<2",
+    "autogen-agentchat>=0.7.5,<1",
 ]
 
 [project.optional-dependencies]

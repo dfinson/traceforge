@@ -201,14 +201,21 @@ class CLIJsonlAdapter(Adapter):
                 ),
                 "cost_usd": data.cost,
                 "model": data.model,
-                "duration_ms": data.duration,
+                "duration_ms": (
+                    int(data.duration.total_seconds() * 1000)
+                    if hasattr(data.duration, "total_seconds")
+                    else data.duration
+                ),
             }
 
         if isinstance(data, SessionShutdownData):
             return {
                 "shutdown_type": (data.shutdown_type.value if data.shutdown_type else None),
-                "total_premium_requests": int(data.total_premium_requests),
-                "total_api_duration_ms": data.total_api_duration_ms,
+                "total_api_duration_ms": (
+                    int(data.total_api_duration.total_seconds() * 1000)
+                    if hasattr(data.total_api_duration, "total_seconds")
+                    else data.total_api_duration
+                ),
             }
 
         # Fallback: preserve all data via to_dict() + original_type for RAW events

@@ -12,7 +12,7 @@ from collections.abc import Iterator
 from datetime import datetime, timezone
 from typing import Any
 
-from claude_code_sdk import (
+from claude_agent_sdk import (
     AssistantMessage,
     Message,
     ResultMessage,
@@ -23,7 +23,7 @@ from claude_code_sdk import (
     ToolUseBlock,
     UserMessage,
 )
-from claude_code_sdk._internal.message_parser import MessageParseError, parse_message
+from claude_agent_sdk._internal.message_parser import MessageParseError, parse_message
 
 from tracemill.adapters.base import Adapter
 from tracemill.types import EventKind, EventMetadata, SessionEvent

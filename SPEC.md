@@ -260,8 +260,12 @@ Each adapter handles one agent SDK's output format. Adapters leverage their resp
 
 | Package | Version | Purpose |
 | --- | --- | --- |
-| `github-copilot-sdk` | `>=0.3.0,<0.4` | Typed deserialization of Copilot events via `SessionEvent.from_dict()` |
-| `claude-code-sdk` | `>=0.0.25,<0.1` | Typed deserialization of Claude messages via `parse_message()` |
+| `github-copilot-sdk` | `>=1.0.0,<2` | Typed deserialization of Copilot events via `SessionEvent.from_dict()` |
+| `claude-agent-sdk` | `>=0.2.93,<1` | Typed deserialization of Claude messages via `parse_message()` |
+| `langgraph` | `>=1.2.4,<2` | StreamChannel subscription for LangGraph agents |
+| `pydantic-ai-slim` | `>=1.106.0,<2` | AgentEventStream types for Pydantic AI agents |
+| `smolagents` | `>=1.26.0,<2` | Callback registry types for HuggingFace smolagents |
+| `autogen-agentchat` | `>=0.7.5,<1` | Event bus subscription for Microsoft Agent Framework |
 
 ### Adapter Table
 

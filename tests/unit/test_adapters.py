@@ -38,11 +38,11 @@ class TestCLIJsonlAdapter:
         line = _copilot_event(
             "session.start",
             {
-                "sessionId": "s1",
+                "sessionId": _uid(),
                 "selectedModel": "gpt-4",
                 "copilotVersion": "1.0",
                 "startTime": "2024-01-01T00:00:00Z",
-                "version": 1.0,
+                "version": 1,
                 "producer": "copilot-cli",
                 "context": {"cwd": "/tmp"},
             },
@@ -51,7 +51,6 @@ class TestCLIJsonlAdapter:
         assert len(events) == 1
         ev = events[0]
         assert ev.kind == EventKind.SESSION_STARTED
-        assert ev.session_id == "s1"
         assert ev.payload["model"] == "gpt-4"
         assert ev.payload["cwd"] == "/tmp"
         assert ev.payload["version"] == "1.0"
@@ -137,7 +136,7 @@ class TestCLIJsonlAdapter:
                 "totalApiDurationMs": 8000,
                 "codeChanges": {"filesModified": [], "linesAdded": 0, "linesRemoved": 0},
                 "modelMetrics": {},
-                "sessionStartTime": 1717232400.0,
+                "sessionStartTime": 1717232400,
             },
         )
         events = list(adapter.parse(line))
@@ -171,14 +170,15 @@ class TestCLIJsonlAdapter:
 
     def test_retains_session_id_across_calls(self):
         adapter = CLIJsonlAdapter()
+        sid = _uid()
         start_line = _copilot_event(
             "session.start",
             {
-                "sessionId": "persistent-id",
+                "sessionId": sid,
                 "selectedModel": "gpt-4",
                 "copilotVersion": "1.0",
                 "startTime": "2024-01-01T00:00:00Z",
-                "version": 1.0,
+                "version": 1,
                 "producer": "copilot-cli",
                 "context": {"cwd": "/tmp"},
             },
@@ -187,7 +187,7 @@ class TestCLIJsonlAdapter:
 
         list(adapter.parse(start_line))
         events = list(adapter.parse(msg_line))
-        assert events[0].session_id == "persistent-id"
+        assert events[0].session_id == sid
 
     def test_full_fixture_roundtrip(self):
         adapter = CLIJsonlAdapter()
@@ -213,7 +213,7 @@ class TestCLIJsonlAdapter:
         assert kinds[-1] == EventKind.SESSION_ENDED
 
         for ev in all_events:
-            assert ev.session_id == "sess-abc-123"
+            assert ev.session_id == "550e8400-e29b-41d4-a716-446655440001"
 
 
 # ─── ClaudeJsonlAdapter ──────────────────────────────────────────────────────
@@ -453,7 +453,7 @@ class TestClaudeSDKAdapter:
 
     def test_parse_message_typed_interface(self):
         """Test the typed parse_message() interface with SDK objects."""
-        from claude_code_sdk import UserMessage
+        from claude_agent_sdk import UserMessage
 
         adapter = ClaudeSDKAdapter()
         msg = UserMessage(content="typed hello")

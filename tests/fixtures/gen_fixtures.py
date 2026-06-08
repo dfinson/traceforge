@@ -9,7 +9,7 @@ def uid():
 
 # --- Copilot session fixture ---
 copilot_lines = [
-    {"type": "session.start", "id": uid(), "timestamp": "2024-06-01T10:00:00Z", "data": {"sessionId": "sess-abc-123", "producer": "copilot-cli", "copilotVersion": "1.2.3", "startTime": "2024-06-01T10:00:00Z", "version": 1.0, "selectedModel": "claude-sonnet-4-20250514", "context": {"cwd": "/home/user/project"}}},
+    {"type": "session.start", "id": uid(), "timestamp": "2024-06-01T10:00:00Z", "data": {"sessionId": uid(), "producer": "copilot-cli", "copilotVersion": "1.2.3", "startTime": "2024-06-01T10:00:00Z", "version": 1, "selectedModel": "claude-sonnet-4-20250514", "context": {"cwd": "/home/user/project"}}},
     {"type": "user.message", "id": uid(), "timestamp": "2024-06-01T10:00:05Z", "data": {"content": "Create a hello world function in Python"}},
     {"type": "assistant.turn_start", "id": uid(), "timestamp": "2024-06-01T10:00:06Z", "data": {"turnId": "turn-1", "interactionId": "int-1"}},
     {"type": "assistant.message", "id": uid(), "timestamp": "2024-06-01T10:00:07Z", "data": {"messageId": "msg-1", "content": "I will create a hello world function for you."}},
@@ -23,7 +23,7 @@ copilot_lines = [
     {"type": "hook.start", "id": uid(), "timestamp": "2024-06-01T10:00:14Z", "data": {"hookInvocationId": "hook-1", "hookType": "pre-commit"}},
     {"type": "hook.end", "id": uid(), "timestamp": "2024-06-01T10:00:15Z", "data": {"hookInvocationId": "hook-1", "hookType": "pre-commit", "success": True}},
     {"type": "session.info", "id": uid(), "timestamp": "2024-06-01T10:00:16Z", "data": {"infoType": "notification", "message": "Session saved"}},
-    {"type": "session.shutdown", "id": uid(), "timestamp": "2024-06-01T10:00:17Z", "data": {"shutdownType": "routine", "totalPremiumRequests": 3, "totalApiDurationMs": 3500, "codeChanges": {"filesModified": ["hello.py"], "linesAdded": 2, "linesRemoved": 0}, "modelMetrics": {}, "sessionStartTime": 1717232400.0}},
+    {"type": "session.shutdown", "id": uid(), "timestamp": "2024-06-01T10:00:17Z", "data": {"shutdownType": "routine", "totalPremiumRequests": 3, "totalApiDurationMs": 3500, "codeChanges": {"filesModified": ["hello.py"], "linesAdded": 2, "linesRemoved": 0}, "modelMetrics": {}, "sessionStartTime": 1717232400}},
 ]
 
 with open("tests/fixtures/copilot_session.jsonl", "w") as f:
@@ -62,7 +62,7 @@ with open("tests/fixtures/copilot_session.jsonl") as f:
             print(f"  Line {i} FAIL: {e}")
 print("  Copilot fixture OK")
 
-from claude_code_sdk._internal.message_parser import parse_message
+from claude_agent_sdk._internal.message_parser import parse_message
 
 print("Verifying claude fixture...")
 with open("tests/fixtures/claude_session.jsonl") as f:

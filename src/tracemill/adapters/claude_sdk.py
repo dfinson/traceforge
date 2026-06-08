@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from claude_code_sdk import Message
+from claude_agent_sdk import Message
 
 from tracemill.adapters.claude_jsonl import ClaudeJsonlAdapter
 from tracemill.types import SessionEvent

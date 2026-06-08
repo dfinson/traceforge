@@ -1,0 +1,106 @@
+# Aider Markdown Pre-Parser output mapping for MappedJsonAdapter
+# Maps event dicts emitted by MarkdownPreParser → canonical event kinds.
+# Input: MarkdownPreParser.parse_text() output, serialized as JSONL
+# Source format: .aider.chat.history.md (append-only markdown session log)
+#
+# This mapping handles the pre-parser's output types. For aider's native
+# structured JSON events (.aider.events.json), use aider.yaml instead.
+
+framework: aider_markdown
+framework_version: ">=0.70"
+ingestion_mode: file_watch
+type_field: type
+timestamp_field: timestamp
+
+events:
+  # ── Session lifecycle ──
+  session_start:
+    kind: session.started
+    payload:
+      session_id: session_id
+      started_at: started_at
+
+  # ── Messages ──
+  user_message:
+    kind: message.user
+    payload:
+      content: content
+
+  assistant_message:
+    kind: message.assistant
+    payload:
+      content: content
+
+  # ── Commands ──
+  slash_command:
+    kind: command.started
+    payload:
+      command: command
+      arguments: args
+
+  # ── File operations ──
+  file_edit:
+    kind: file.edited
+    payload:
+      path: file_path
+      search: search
+      replace: replace
+
+  file_edit_applied:
+    kind: file.edited
+    payload:
+      path: file_path
+
+  file_add:
+    kind: file.read
+    payload:
+      path: file_path
+
+  # ── Git ──
+  git_commit:
+    kind: tool.call.completed
+    payload:
+      tool_name: git
+      result: commit_sha
+      message: commit_message
+
+  # ── Telemetry / info ──
+  token_usage:
+    kind: telemetry.usage
+    payload:
+      tokens_sent: tokens_sent
+      tokens_received: tokens_received
+
+  version_info:
+    kind: session.info
+    payload:
+      version: version
+
+  model_info:
+    kind: session.info
+    payload:
+      model: model
+      edit_format: edit_format
+
+  repo_info:
+    kind: session.info
+    payload:
+      repo_path: repo_path
+      file_count: file_count
+
+  repo_map:
+    kind: knowledge.query.completed
+    payload:
+      content: repo_map_info
+
+  # ── Errors ──
+  error:
+    kind: session.error
+    payload:
+      message: message
+
+  # ── Generic tool output ──
+  tool_output:
+    kind: tool.output
+    payload:
+      text: text

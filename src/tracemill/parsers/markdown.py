@@ -119,7 +119,7 @@ def classify_tool_output(text: str) -> ToolOutputResult:
 # ─── SEARCH/REPLACE block extraction ────────────────────────────────────────
 
 _SEARCH_REPLACE_RE = re.compile(
-    r"^(.+?)\n"
+    r"^([^\n]+)\n"
     r"<<<<<<< SEARCH\n"
     r"(.*?)\n"
     r"=======\n"

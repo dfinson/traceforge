@@ -2,27 +2,41 @@
 
 ## Purpose
 
-Automated weekly job that detects breaking changes in upstream framework SDKs before they silently corrupt tracemill's event pipeline. Runs as a scheduled CI agent task.
+Automated weekly job that detects breaking changes in upstream framework SDKs before they silently corrupt tracemill's event pipeline. Runs as a scheduled Copilot workflow (Sunday 02:00 UTC, autopilot mode).
 
-## Scope — Breakable Surfaces
+## Scope — Dynamic Discovery
+
+The audit dynamically discovers ALL `.yaml` files in `src/tracemill/mappings/` (excluding `__init__.py`). Each YAML's header comments declare:
+- `framework:` — the framework name
+- `framework_version:` — version constraint
+- Source repo and files (in comment block)
+
+New frameworks added to the mappings folder are automatically picked up and audited.
+
+## Known Breakable Surfaces (as of 2026-06-08)
 
 | Framework | Source Repository | Files to Monitor | Breakable Surface |
 |-----------|-------------------|------------------|-------------------|
-| LangGraph | `langchain-ai/langchain` | `libs/core/langchain_core/tracers/event_stream.py`, `runnables/schema.py` | Event names, data shapes, callback method signatures |
-| CrewAI | `crewAIInc/crewAI` | `lib/crewai/src/crewai/events/types/*.py`, `base_events.py` | `type` Literal values, field names on event classes |
+| LangGraph | `langchain-ai/langchain` | `libs/core/langchain_core/tracers/event_stream.py` | Event names, data shapes, callback method signatures |
+| CrewAI | `crewAIInc/crewAI` | `lib/crewai/src/crewai/events/types/*.py` | `type` Literal values, field names on event classes |
 | Cline | `cline/cline` | `apps/vscode/src/shared/ExtensionMessage.ts` | `ClineSay`/`ClineAsk` union values, `ClineApiReqInfo` fields |
 | smolagents | `huggingface/smolagents` | `src/smolagents/memory.py`, `monitoring.py` | Step dataclass fields, Timing/TokenUsage shapes, ToolCall.dict() |
 | PydanticAI | `pydantic/pydantic-ai` | `pydantic_ai_slim/pydantic_ai/messages.py`, `usage.py` | Stream event types, Part/Delta shapes, Usage fields |
-| Goose | `block/goose` | `crates/goose-providers/src/conversation/message.rs` | MessageContent enum variants, serde attributes, DDL schema |
+| Goose | `block/goose` | `crates/goose-providers/src/conversation/message.rs` | MessageContent enum variants, serde attributes, struct fields |
 | OpenHands | `All-Hands-AI/OpenHands` | `openhands/events/action/*.py`, `observation/*.py`, `serialization/` | Action/Observation types, field names, serialization logic |
 | SWE-agent | `SWE-agent/SWE-agent` | `sweagent/types.py`, `sweagent/agent/agents.py` | HistoryItem TypedDict, role values, message_type literals |
 
-## Audit Steps (Per Framework)
+## Audit Steps (Per YAML file discovered)
+
+### 0. Discovery
+- List all `*.yaml` files in `src/tracemill/mappings/`
+- Parse each YAML's header comments to extract: source repo, source files, version constraint
+- If a YAML has no identifiable source repo in its comments, flag it for manual review
 
 ### 1. Version Check
 - Fetch latest stable release tag/version from PyPI (Python) or GitHub releases (Rust/TS)
-- Compare against `framework_version` floor in our YAML
-- **ALERT** if latest version is BELOW our floor (impossible state → something is wrong)
+- Compare against `framework_version` constraint in the YAML
+- **ALERT** if latest version exceeds an upper bound (e.g. OpenHands `<1.0` and 1.x released)
 - **ALERT** if a new MAJOR version was released (potential breaking changes)
 
 ### 2. Type Discriminator Audit
@@ -93,9 +107,11 @@ Automated weekly job that detects breaking changes in upstream framework SDKs be
 ## Scheduling
 
 - **Frequency**: Weekly (Sunday 02:00 UTC)
+- **Mode**: Autopilot (Copilot workflow, runs autonomously)
+- **Scope**: Dynamically discovers all `src/tracemill/mappings/*.yaml` files
 - **Timeout**: 15 minutes per framework, 30 minutes total
-- **Notification**: Post to configured alert channel on any ⚠️ or 🔴
-- **Auto-PR**: On 🔴 findings, auto-create a branch with failing test stubs
+- **On 🔴 BREAKING**: Create GitHub issue per framework with title "🔴 YAML Drift Detected: [framework]"
+- **On ⚠️ NEW**: Create single GitHub issue "⚠️ New upstream events available" listing all additions
 
 ## Test Integration
 

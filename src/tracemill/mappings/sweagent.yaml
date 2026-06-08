@@ -81,7 +81,7 @@ events:
 
   # ── Cost/usage ──
   model_stats:
-    kind: usage
+    kind: telemetry.usage
     payload:
       input_tokens: api_calls.total_tokens_sent
       output_tokens: api_calls.total_tokens_received

@@ -132,6 +132,6 @@ events:
 
   # ── Errors ──
   error:
-    kind: error
+    kind: session.error
     payload:
       message: message

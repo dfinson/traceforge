@@ -4,6 +4,7 @@ from tracemill.adapters.base import Adapter, JsonLineAdapter
 from tracemill.adapters.claude import ClaudeAdapter
 from tracemill.adapters.copilot import CopilotAdapter
 from tracemill.adapters.mapped_json import MappedJsonAdapter
+from tracemill.adapters.otel import OtelSpanAdapter
 from tracemill.classify import (
     ClassificationEngine,
     Classification,
@@ -39,6 +40,7 @@ __all__ = [
     "CopilotAdapter",
     "ClaudeAdapter",
     "MappedJsonAdapter",
+    "OtelSpanAdapter",
     # Classification
     "CallbackSink",
     "Classification",

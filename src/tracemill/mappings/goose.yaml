@@ -74,14 +74,14 @@ events:
 
   # ── Errors ──
   error:
-    kind: error
+    kind: session.error
     payload:
       message: content
       error_type: type
 
   # ── Usage/cost ──
   usage:
-    kind: usage
+    kind: telemetry.usage
     payload:
       input_tokens: input_tokens
       output_tokens: output_tokens

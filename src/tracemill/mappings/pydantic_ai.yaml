@@ -23,7 +23,7 @@ events:
       agent_name: agent_name
       result: result
   agent_run_error:
-    kind: error
+    kind: session.error
     payload:
       agent_name: agent_name
       message: error
@@ -96,7 +96,7 @@ events:
       error: error
       retry_count: retry_count
   retry:
-    kind: error
+    kind: session.error
     payload:
       message: reason
       attempt: attempt

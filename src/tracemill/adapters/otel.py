@@ -120,6 +120,7 @@ class OtelSpanAdapter(Adapter):
             timestamp=end_time,
             payload=payload,
             metadata=metadata,
+            raw_event=span,
         )
 
     def parse(self, raw: str) -> Iterator[SessionEvent]:

@@ -113,12 +113,19 @@ class CopilotAdapter(JsonLineAdapter):
             raw_kind=sdk_event.type.value,
         )
 
+        # Preserve raw event — try SDK serialization, fallback to __dict__
+        try:
+            raw = sdk_event.to_dict() if hasattr(sdk_event, "to_dict") else vars(sdk_event)
+        except Exception:
+            raw = {"type": sdk_event.type.value}
+
         yield SessionEvent(
             kind=kind,
             session_id=self._session_id,
             timestamp=timestamp,
             payload=payload,
             metadata=metadata,
+            raw_event=raw,
         )
 
     def _extract_payload(
@@ -173,13 +180,13 @@ def _extract_tool_complete(data: ToolExecutionCompleteData) -> dict[str, Any]:
 
 def _extract_usage(data: AssistantUsageData) -> dict[str, Any]:
     return {
-        "input_tokens": (int(data.input_tokens) if data.input_tokens else None),
-        "output_tokens": (int(data.output_tokens) if data.output_tokens else None),
+        "input_tokens": (int(data.input_tokens) if data.input_tokens is not None else None),
+        "output_tokens": (int(data.output_tokens) if data.output_tokens is not None else None),
         "cache_read_tokens": (
-            int(data.cache_read_tokens) if data.cache_read_tokens else None
+            int(data.cache_read_tokens) if data.cache_read_tokens is not None else None
         ),
         "cache_write_tokens": (
-            int(data.cache_write_tokens) if data.cache_write_tokens else None
+            int(data.cache_write_tokens) if data.cache_write_tokens is not None else None
         ),
         "cost_usd": data.cost,
         "model": data.model,

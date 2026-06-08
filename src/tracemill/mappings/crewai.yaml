@@ -97,7 +97,7 @@ events:
       crew_name: crew_name
       output: output
   CrewFailedEvent:
-    kind: error
+    kind: session.error
     payload:
       message: error
 

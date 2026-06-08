@@ -278,7 +278,7 @@ class TestAllYAMLMappingsLoadable:
             data = yaml.safe_load(f)
         for raw_type, event_map in data.get("events", {}).items():
             kind = event_map["kind"]
-            assert "." in kind or kind in ("raw", "error", "usage", "abort"), (
+            assert "." in kind or kind == "raw", (
                 f"{mapping_file.stem}: {raw_type} kind '{kind}' doesn't follow dot-notation"
             )
 

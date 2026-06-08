@@ -50,7 +50,6 @@ jobs:
           pytest tests/ -q --tb=short \
             -k "${{ matrix.framework.name }}" \
             2>&1 | tee test-output.txt
-          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
 
       - name: Check for breaking SDK changes
         id: check

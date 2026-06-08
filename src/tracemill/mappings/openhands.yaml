@@ -24,7 +24,7 @@ events:
       agent_id: agent
       task: inputs.task
   AgentRejectAction:
-    kind: error
+    kind: session.error
     payload:
       message: outputs.reason
 
@@ -111,11 +111,11 @@ events:
 
   # ── Errors ──
   ErrorObservation:
-    kind: error
+    kind: session.error
     payload:
       message: content
   AgentStuckObservation:
-    kind: error
+    kind: session.error
     payload:
       message: content
 

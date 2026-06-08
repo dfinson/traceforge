@@ -65,9 +65,14 @@ class ClaudeAdapter(JsonLineAdapter):
         yield from self._convert_message(message)
 
     def _convert_message(self, message: Message) -> Iterator[SessionEvent]:
+        raw = self._raw_from_message(message)
         handler = _MESSAGE_HANDLERS.get(type(message))
         if handler is not None:
-            yield from handler(self, message)
+            for event in handler(self, message):
+                if event.raw_event is None:
+                    yield event.model_copy(update={"raw_event": raw})
+                else:
+                    yield event
         else:
             logger.debug("ClaudeAdapter: skipping unknown message type %s", type(message).__name__)
 
@@ -77,6 +82,13 @@ class ClaudeAdapter(JsonLineAdapter):
             ingestion_mode=self._ingestion_mode,
             raw_kind=raw_kind,
         )
+
+    def _raw_from_message(self, message: Message) -> dict[str, Any]:
+        """Serialize an SDK message to a raw dict for preservation."""
+        try:
+            return message.to_dict() if hasattr(message, "to_dict") else vars(message)
+        except Exception:
+            return {"type": type(message).__name__}
 
     def _handle_user(self, message: UserMessage) -> Iterator[SessionEvent]:
         if isinstance(message.content, str):

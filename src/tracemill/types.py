@@ -144,9 +144,9 @@ class EventKind:
     TASK_FAILED: Final = "task.failed"
 
     # --- Telemetry ---
-    USAGE: Final = "usage"
-    ERROR: Final = "error"
-    ABORT: Final = "abort"
+    USAGE: Final = "telemetry.usage"
+    ERROR: Final = "session.error"
+    ABORT: Final = "session.abort"
 
     # --- Catch-all ---
     RAW: Final = "raw"

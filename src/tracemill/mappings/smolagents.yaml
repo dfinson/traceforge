@@ -24,7 +24,7 @@ events:
       agent_name: agent_name
       output: final_answer
   AgentError:
-    kind: error
+    kind: session.error
     payload:
       message: error
       agent_name: agent_name
@@ -112,7 +112,7 @@ events:
 
   # ── Usage ──
   TokenUsage:
-    kind: usage
+    kind: telemetry.usage
     payload:
       input_tokens: input_tokens
       output_tokens: output_tokens

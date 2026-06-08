@@ -24,6 +24,7 @@ framework_version: ">=0.30"
 ingestion_mode: file_watch
 type_field: action
 timestamp_field: timestamp
+preprocessor: openhands
 
 events:
   # ── Action events (real — discriminated by "action" field value) ──
@@ -96,6 +97,62 @@ events:
       query: args.query
       source: source
 
-  # NOTE: Observation events (observation: "run", "browse", etc.) will NOT
-  # match because they lack an "action" field. They fall to default_kind=raw.
-  # This is a known limitation requiring an OpenHandsPreProcessor.
+  # ── Observation events (preprocessor synthesizes action: "observation.<value>") ──
+  observation.run:
+    kind: command.completed
+    payload:
+      content: content
+      exit_code: extras.metadata.exit_code
+      source: source
+  observation.run_ipython:
+    kind: command.completed
+    payload:
+      content: content
+      source: source
+  observation.browse:
+    kind: browser.result
+    payload:
+      content: content
+      url: url
+      source: source
+  observation.read:
+    kind: file.read
+    payload:
+      path: extras.path
+      content: content
+      source: source
+  observation.write:
+    kind: file.edited
+    payload:
+      path: extras.path
+      source: source
+  observation.edit:
+    kind: file.edited
+    payload:
+      path: extras.path
+      source: source
+  observation.error:
+    kind: session.error
+    payload:
+      message: content
+      source: source
+  observation.agent_state_changed:
+    kind: session.info
+    payload:
+      content: content
+      source: source
+  observation.delegate:
+    kind: agent.completed
+    payload:
+      output: content
+      source: source
+  observation.recall:
+    kind: memory.query.completed
+    payload:
+      content: content
+      source: source
+  observation.success:
+    kind: session.ended
+    payload:
+      output: content
+      source: source

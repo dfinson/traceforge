@@ -122,7 +122,7 @@ class TestPydanticAIMapping:
         """Model request start → response with usage."""
         events_raw = [
             {"type": "model_request_start", "timestamp": "2024-06-01T10:00:01Z", "model_name": "claude-3", "request_id": "req-1"},
-            {"type": "model_response", "timestamp": "2024-06-01T10:00:02Z", "model_name": "claude-3", "request_id": "req-1", "usage": {"request_tokens": 200, "response_tokens": 100, "total_cost": 0.005}},
+            {"type": "model_response", "timestamp": "2024-06-01T10:00:02Z", "model_name": "claude-3", "request_id": "req-1", "usage": {"input_tokens": 200, "output_tokens": 100}},
         ]
         all_events = []
         for raw in events_raw:
@@ -131,7 +131,6 @@ class TestPydanticAIMapping:
         assert all_events[1].kind == EventKind.LLM_CALL_COMPLETED
         assert all_events[1].payload["input_tokens"] == 200
         assert all_events[1].payload["output_tokens"] == 100
-        assert all_events[1].payload["cost_usd"] == 0.005
 
     def test_tool_calls(self, adapter):
         """Tool call lifecycle."""

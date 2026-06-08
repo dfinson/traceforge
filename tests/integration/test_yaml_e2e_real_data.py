@@ -144,7 +144,7 @@ class TestOpenHandsRealData:
 
     def test_cmd_output_observation(self):
         """Real CmdOutputObservation — has "observation" key, not "action".
-        With type_field: action, observation events fall to raw."""
+        Preprocessor synthesizes action: "observation.run" → maps to command.completed."""
         event = {
             "id": 5,
             "timestamp": "2025-01-15T12:34:57.456789",
@@ -163,10 +163,11 @@ class TestOpenHandsRealData:
             "llm_metrics": None,
         }
         results = _parse_event("openhands.yaml", event)
-        # No "action" field → type resolves to "unknown" → raw
         assert len(results) == 1
-        assert results[0].kind == EventKind.RAW
-        assert results[0].payload["original_type"] == "unknown"
+        assert results[0].kind == EventKind.COMMAND_COMPLETED
+        assert results[0].payload["content"] == "file1.txt\nfile2.txt\n"
+        assert results[0].payload["exit_code"] == 0
+        assert results[0].payload["source"] == "environment"
 
     def test_agent_think_action(self):
         """Real AgentThinkAction — action: "think" now correctly maps."""
@@ -253,11 +254,12 @@ class TestGooseRealData:
             "created_at": "2025-02-21T18:19:27Z",
         }
         results = _parse_event("goose.yaml", event)
-        # Maps to message.assistant — the nested tool call is invisible
-        assert len(results) == 1
+        # Preprocessor splits into text message + tool_use event
+        assert len(results) == 2
         assert results[0].kind == EventKind.MESSAGE_ASSISTANT
-        # The entire content_json string is captured — contains tool call data
-        assert "toolRequest" in results[0].payload["content"]
+        assert "help you with that" in results[0].payload["content"]
+        assert results[1].kind == EventKind.TOOL_CALL_STARTED
+        assert results[1].payload["tool_name"] == "bash"
 
     def test_tool_use_role_fictional(self):
         """Goose YAML maps 'tool_use' as if it's a role value — it's NOT.
@@ -383,9 +385,10 @@ class TestClineRealData:
             "conversationHistoryIndex": 0,
         }
         results = _parse_event("cline.yaml", event)
-        # "say" maps to message.assistant in current YAML
+        # Preprocessor synthesizes "say.task" → maps to session.started
         assert len(results) == 1
-        assert results[0].kind == EventKind.MESSAGE_ASSISTANT
+        assert results[0].kind == EventKind.SESSION_STARTED
+        assert results[0].payload["content"] == "Create a Python script that reads a CSV and outputs a summary"
 
     def test_say_api_req_started(self):
         """Real API request event — metrics are JSON-encoded in text field."""
@@ -408,10 +411,9 @@ class TestClineRealData:
             },
         }
         results = _parse_event("cline.yaml", event)
-        # Current YAML maps "say" → message.assistant (all say events collapse)
-        # The real api_req_started subtype is lost
+        # Preprocessor synthesizes "say.api_req_started" → maps to llm.call.started
         assert len(results) == 1
-        assert results[0].kind == EventKind.MESSAGE_ASSISTANT
+        assert results[0].kind == EventKind.LLM_CALL_STARTED
 
     def test_say_tool_usage(self):
         """Real tool usage message (say: "tool" with ClineSayTool JSON in text)."""
@@ -426,9 +428,10 @@ class TestClineRealData:
             }),
         }
         results = _parse_event("cline.yaml", event)
-        # All "say" events map to message.assistant — tool info is lost
+        # Preprocessor synthesizes "say.tool" → maps to tool.call.completed
         assert len(results) == 1
-        assert results[0].kind == EventKind.MESSAGE_ASSISTANT
+        assert results[0].kind == EventKind.TOOL_CALL_COMPLETED
+        assert results[0].payload["tool_name"] == "newFileCreated"
 
     def test_ask_tool_approval(self):
         """Real tool approval request (ask: "tool")."""
@@ -440,12 +443,14 @@ class TestClineRealData:
             "conversationHistoryIndex": 1,
         }
         results = _parse_event("cline.yaml", event)
-        # "ask" maps to input.requested
+        # Preprocessor synthesizes "ask.tool" → maps to permission.requested
         assert len(results) == 1
-        assert results[0].kind == EventKind.INPUT_REQUESTED
+        assert results[0].kind == EventKind.PERMISSION_REQUESTED
+        assert results[0].payload["tool_name"] == "newFileCreated"
 
     def test_api_req_started_subtype_not_reachable(self):
-        """The YAML maps "api_req_started" as if it's a type value — but type is only ask/say."""
+        """A fictional event with type="api_req_started" directly — never happens in real Cline.
+        Preprocessor won't fire (type isn't "ask"/"say"), falls to raw."""
         event = {
             "ts": 1718123457100,
             "type": "api_req_started",  # THIS NEVER HAPPENS in real Cline
@@ -453,9 +458,9 @@ class TestClineRealData:
             "tokensIn": 500,
         }
         results = _parse_event("cline.yaml", event)
-        # YAML has api_req_started as event key — but real Cline never emits type=api_req_started
+        # Not "ask" or "say" → preprocessor passes through → "api_req_started" not in YAML events → raw
         assert len(results) == 1
-        assert results[0].kind == EventKind.LLM_CALL_STARTED
+        assert results[0].kind == EventKind.RAW
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -668,13 +673,14 @@ class TestPydanticAIRealData:
             "state": "complete",
         }
         results = _parse_event("pydantic_ai.yaml", event)
-        # No "type" field → type resolves to "unknown" → raw
+        # Preprocessor synthesizes type="model_response" → maps to llm.call.completed
         assert len(results) == 1
-        assert results[0].kind == EventKind.RAW
-        assert results[0].payload["original_type"] == "unknown"
+        assert results[0].kind == EventKind.LLM_CALL_COMPLETED
+        assert results[0].payload["input_tokens"] == 56
+        assert results[0].payload["output_tokens"] == 7
 
     def test_model_request_message(self):
-        """Real ModelRequest serialized shape — no "type" field."""
+        """Real ModelRequest serialized shape — preprocessor maps kind→type."""
         event = {
             "kind": "request",
             "parts": [
@@ -684,11 +690,13 @@ class TestPydanticAIRealData:
             "timestamp": "2025-01-15T10:00:00.000000Z",
         }
         results = _parse_event("pydantic_ai.yaml", event)
+        # Preprocessor synthesizes type="model_request" → maps to message.user
         assert len(results) == 1
-        assert results[0].kind == EventKind.RAW
+        assert results[0].kind == EventKind.MESSAGE_USER
+        assert results[0].payload["content"] == "What is 2+2?"
 
     def test_stream_event_part_delta(self):
-        """Real stream event (PartDeltaEvent) shape — no "type" field."""
+        """Real stream event (PartDeltaEvent) — preprocessor maps event_kind→type."""
         event = {
             "event_kind": "part_delta",
             "index": 0,
@@ -698,8 +706,9 @@ class TestPydanticAIRealData:
             },
         }
         results = _parse_event("pydantic_ai.yaml", event)
+        # Preprocessor synthesizes type="stream.part_delta" → maps to llm.output.chunk
         assert len(results) == 1
-        assert results[0].kind == EventKind.RAW
+        assert results[0].kind == EventKind.LLM_OUTPUT_CHUNK
 
     def test_fictional_type_field_works(self):
         """The current YAML works IF someone preprocesses to this shape."""
@@ -725,8 +734,8 @@ class TestSmolagentsRealData:
     """Tests using actual smolagents step.dict() output."""
 
     def test_action_step(self):
-        """Real ActionStep.dict() output — has step_number, no step_type field.
-        YAML has type_field: step_type which doesn't exist → "unknown" → raw."""
+        """Real ActionStep.dict() output — preprocessor infers step_type="ActionStep".
+        Also emits a separate ToolCall event for each tool call in the step."""
         event = {
             "step_number": 1,
             "timing": {"start_time": 1718123456.0, "end_time": 1718123460.0},
@@ -747,12 +756,16 @@ class TestSmolagentsRealData:
             "is_final_answer": False,
         }
         results = _parse_event("smolagents.yaml", event)
-        assert len(results) == 1
-        assert results[0].kind == EventKind.RAW
-        assert results[0].payload["original_type"] == "unknown"
+        # ActionStep + 1 ToolCall = 2 events
+        assert len(results) == 2
+        assert results[0].kind == EventKind.MESSAGE_ASSISTANT
+        assert results[0].payload["content"] == "I'll search for the weather."
+        assert results[0].payload["observations"] == "Found results for weather"
+        assert results[1].kind == EventKind.TOOL_CALL_STARTED
+        assert results[1].payload["tool_name"] == "web_search"
 
     def test_planning_step(self):
-        """Real PlanningStep.dict() output — has 'plan' field, no step_type."""
+        """Real PlanningStep.dict() output — preprocessor infers step_type="PlanningStep"."""
         event = {
             "model_input_messages": [],
             "model_output_message": None,
@@ -762,17 +775,19 @@ class TestSmolagentsRealData:
         }
         results = _parse_event("smolagents.yaml", event)
         assert len(results) == 1
-        assert results[0].kind == EventKind.RAW
+        assert results[0].kind == EventKind.PLANNING_STARTED
+        assert "facts I know" in results[0].payload["content"]
 
     def test_task_step(self):
-        """Real TaskStep from dataclasses.asdict() — no step_type field."""
+        """Real TaskStep from dataclasses.asdict() — preprocessor infers step_type="TaskStep"."""
         event = {
             "task": "What is the weather in Paris?",
             "task_images": None,
         }
         results = _parse_event("smolagents.yaml", event)
         assert len(results) == 1
-        assert results[0].kind == EventKind.RAW
+        assert results[0].kind == EventKind.SESSION_STARTED
+        assert results[0].payload["task"] == "What is the weather in Paris?"
 
     def test_fictional_step_type_works(self):
         """The current YAML works IF someone preprocesses to add step_type."""

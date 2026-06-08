@@ -28,9 +28,55 @@ framework_version: ">=1.0"
 ingestion_mode: file_watch
 type_field: step_type
 timestamp_field: timestamp
+preprocessor: smolagents
 
 events:
-  # ── Agent lifecycle ──
+  # ── Real step types (preprocessor infers from field presence) ──
+  ActionStep:
+    kind: message.assistant
+    payload:
+      content: model_output
+      observations: observations
+      step_number: step_number
+      input_tokens: token_usage.input_tokens
+      output_tokens: token_usage.output_tokens
+  PlanningStep:
+    kind: planning.started
+    payload:
+      content: plan
+  TaskStep:
+    kind: session.started
+    payload:
+      task: task
+  SystemPromptStep:
+    kind: message.system
+    payload:
+      content: system_prompt
+  FinalAnswer:
+    kind: session.ended
+    payload:
+      output: action_output
+
+  # ── Thinking (callback wrappers emit this directly) ──
+  ThinkingStep:
+    kind: reasoning.started
+    payload:
+      content: thought
+      model: model_id
+
+  # ── Code execution (CodeAgent) ──
+  CodeExecutionStep:
+    kind: command.started
+    payload:
+      command: code
+      language: language
+  CodeExecutionResult:
+    kind: command.completed
+    payload:
+      content: output
+      exit_code: return_code
+
+  # ── Agent lifecycle (from callback wrappers) ──
   AgentStart:
     kind: session.started
     payload:
@@ -48,19 +94,7 @@ events:
       message: error
       agent_name: agent_name
 
-  # ── Planning / thinking ──
-  ThinkingStep:
-    kind: reasoning.started
-    payload:
-      content: thought
-      model: model_id
-  PlanningStep:
-    kind: planning.started
-    payload:
-      content: plan
-      facts: facts
-
-  # ── Tool calls ──
+  # ── Tool calls (preprocessor emits from nested tool_calls array) ──
   ToolCall:
     kind: tool.call.started
     payload:
@@ -79,18 +113,6 @@ events:
       tool_call_id: call_id
       tool_name: tool_name
       error: error
-
-  # ── Code execution (CodeAgent) ──
-  CodeExecutionStep:
-    kind: command.started
-    payload:
-      command: code
-      language: language
-  CodeExecutionResult:
-    kind: command.completed
-    payload:
-      content: output
-      exit_code: return_code
 
   # ── LLM calls ──
   LLMCall:

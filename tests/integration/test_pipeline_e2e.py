@@ -242,12 +242,12 @@ class TestMappedJsonFullPipeline:
             session_id="test-session",
         )
         events_raw = [
-            {"type": "say", "ts": "2024-06-01T10:00:00Z", "taskId": "cline-1", "text": "I'll fix that for you"},
-            {"type": "api_req_started", "ts": "2024-06-01T10:00:01Z", "taskId": "cline-1", "model": "claude-sonnet", "tokensIn": 500},
-            {"type": "api_req_finished", "ts": "2024-06-01T10:00:03Z", "taskId": "cline-1", "model": "claude-sonnet", "tokensIn": 500, "tokensOut": 200, "cost": 0.003},
-            {"type": "write_to_file", "ts": "2024-06-01T10:00:04Z", "taskId": "cline-1", "path": "src/main.ts", "content": "fixed"},
-            {"type": "command", "ts": "2024-06-01T10:00:05Z", "taskId": "cline-1", "text": "npm test"},
-            {"type": "command_output", "ts": "2024-06-01T10:00:06Z", "taskId": "cline-1", "text": "All tests pass"},
+            {"type": "say", "say": "text", "ts": "2024-06-01T10:00:00Z", "text": "I'll fix that for you"},
+            {"type": "say", "say": "api_req_started", "ts": "2024-06-01T10:00:01Z", "text": json.dumps({"model": "claude-sonnet", "tokensIn": 500})},
+            {"type": "say", "say": "api_req_finished", "ts": "2024-06-01T10:00:03Z", "text": json.dumps({"model": "claude-sonnet", "tokensIn": 500, "tokensOut": 200, "cost": 0.003})},
+            {"type": "say", "say": "tool", "ts": "2024-06-01T10:00:04Z", "text": json.dumps({"tool": "write_to_file", "path": "src/main.ts", "content": "fixed"})},
+            {"type": "say", "say": "command", "ts": "2024-06-01T10:00:05Z", "text": "npm test"},
+            {"type": "say", "say": "command_output", "ts": "2024-06-01T10:00:06Z", "text": "All tests pass"},
         ]
 
         all_events = []
@@ -259,11 +259,11 @@ class TestMappedJsonFullPipeline:
         assert kinds[0] == "message.assistant"
         assert kinds[1] == "llm.call.started"
         assert kinds[2] == "llm.call.completed"
-        assert kinds[3] == "file.edited"
+        assert kinds[3] == "tool.call.completed"
         assert kinds[4] == "command.started"
         assert kinds[5] == "command.completed"
 
-        # LLM usage extracted
+        # LLM usage extracted from parsed JSON in text field
         assert all_events[2].payload["output_tokens"] == 200
         assert all_events[2].payload["cost_usd"] == 0.003
 

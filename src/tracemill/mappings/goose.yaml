@@ -19,21 +19,20 @@ framework_version: ">=1.0"
 ingestion_mode: poll
 type_field: role
 timestamp_field: created_at
+preprocessor: goose
 
 events:
-  # ── REAL messages (confirmed — these are the ONLY role values) ──
+  # ── REAL messages (preprocessor extracts text from content_json) ──
   user:
     kind: message.user
     payload:
-      content: content_json
+      content: content
   assistant:
     kind: message.assistant
     payload:
-      content: content_json
+      content: content
 
-  # ── FICTIONAL roles below — these NEVER fire in real Goose.
-  # Kept for forward compatibility if Goose adds a preprocessor layer.
-  # The weekly CI audit will flag if these are still dead code. ──
+  # ── Tool events (preprocessor extracts from nested content_json) ──
   tool_use:
     kind: tool.call.started
     payload:
@@ -47,7 +46,7 @@ events:
       result: content
       success: is_success
 
-  # ── Session lifecycle (fictional — would need poll metadata) ──
+  # ── Session lifecycle (from poll metadata) ──
   session_start:
     kind: session.started
     payload:
@@ -58,7 +57,7 @@ events:
     payload:
       reason: reason
 
-  # ── Usage/cost (fictional — real data is on session table) ──
+  # ── Usage/cost (from session table aggregates) ──
   usage:
     kind: telemetry.usage
     payload:

@@ -22,6 +22,7 @@ framework_version: ">=0.0.36"
 ingestion_mode: file_watch
 type_field: type
 timestamp_field: timestamp
+preprocessor: pydantic_ai
 
 events:
   # ── Agent lifecycle ──
@@ -47,14 +48,17 @@ events:
     payload:
       model: model_name
       request_id: request_id
+  model_request:
+    kind: message.user
+    payload:
+      content: content
   model_response:
     kind: llm.call.completed
     payload:
       model: model_name
-      request_id: request_id
-      input_tokens: usage.request_tokens
-      output_tokens: usage.response_tokens
-      cost_usd: usage.total_cost
+      input_tokens: usage.input_tokens
+      output_tokens: usage.output_tokens
+      content: content
   model_request_error:
     kind: llm.call.failed
     payload:
@@ -95,7 +99,19 @@ events:
     payload:
       content: data
 
-  # ── Streaming ──
+  # ── Streaming (preprocessor synthesizes "stream.<event_kind>") ──
+  stream.part_start:
+    kind: llm.output.chunk
+    payload:
+      content: delta.content_delta
+  stream.part_delta:
+    kind: llm.output.chunk
+    payload:
+      content: delta.content_delta
+  stream.part_end:
+    kind: message.assistant
+    payload:
+      content: content
   model_response_chunk:
     kind: llm.output.chunk
     payload:
@@ -118,9 +134,8 @@ events:
   token_usage:
     kind: telemetry.usage
     payload:
-      input_tokens: usage.request_tokens
-      output_tokens: usage.response_tokens
-      cost_usd: usage.total_cost
+      input_tokens: usage.input_tokens
+      output_tokens: usage.output_tokens
       model: model_name
 
   # ── Result validation ──

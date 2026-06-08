@@ -26,133 +26,100 @@ framework_version: ">=3.0"
 ingestion_mode: file_watch
 type_field: type
 timestamp_field: ts
+preprocessor: cline
 
 events:
-  # ── Messages ──
+  # ── Say subtypes (preprocessor synthesizes "say.<subtype>") ──
+  say.task:
+    kind: session.started
+    payload:
+      content: text
+  say.text:
+    kind: message.assistant
+    payload:
+      content: text
+  say.tool:
+    kind: tool.call.completed
+    payload:
+      tool_name: parsed.tool
+      result: text
+      path: parsed.path
+  say.api_req_started:
+    kind: llm.call.started
+    payload:
+      model: parsed.model
+      input_tokens: parsed.tokensIn
+  say.api_req_finished:
+    kind: llm.call.completed
+    payload:
+      model: parsed.model
+      input_tokens: parsed.tokensIn
+      output_tokens: parsed.tokensOut
+      cost_usd: parsed.cost
+      cache_read_tokens: parsed.cacheReads
+      cache_write_tokens: parsed.cacheWrites
+  say.command:
+    kind: command.started
+    payload:
+      command: text
+  say.command_output:
+    kind: command.completed
+    payload:
+      content: text
+  say.browser_action:
+    kind: browser.action
+    payload:
+      content: text
+  say.browser_action_result:
+    kind: browser.result
+    payload:
+      content: text
+  say.mcp_server_request_started:
+    kind: mcp.connection.started
+    payload:
+      content: text
+  say.mcp_server_response:
+    kind: mcp.connection.completed
+    payload:
+      content: text
+  say.error:
+    kind: session.error
+    payload:
+      message: text
+  say.completion_result:
+    kind: session.ended
+    payload:
+      output: text
+
+  # ── Ask subtypes (preprocessor synthesizes "ask.<subtype>") ──
+  ask.followup:
+    kind: input.requested
+    payload:
+      content: text
+  ask.tool:
+    kind: permission.requested
+    payload:
+      tool_name: parsed.tool
+      content: text
+  ask.command:
+    kind: permission.requested
+    payload:
+      command: text
+  ask.completion_result:
+    kind: input.requested
+    payload:
+      content: text
+  ask.resume_task:
+    kind: input.requested
+    payload:
+      content: text
+
+  # ── Fallback for unknown subtypes ──
   say:
     kind: message.assistant
     payload:
       content: text
-      say_type: say
   ask:
     kind: input.requested
     payload:
       content: text
-      ask_type: askType
-  user_feedback:
-    kind: input.received
-    payload:
-      content: text
-
-  # ── Tool operations ──
-  tool_use:
-    kind: tool.call.started
-    payload:
-      tool_name: tool
-      tool_call_id: ts
-      arguments: content
-  tool_result:
-    kind: tool.call.completed
-    payload:
-      tool_call_id: tool_use_ts
-      result: content
-      success: approved
-
-  # ── Command execution ──
-  command:
-    kind: command.started
-    payload:
-      command: text
-  command_output:
-    kind: command.completed
-    payload:
-      content: text
-      exit_code: exitCode
-
-  # ── File operations ──
-  write_to_file:
-    kind: file.edited
-    payload:
-      path: path
-      content: content
-  read_file:
-    kind: file.read
-    payload:
-      path: path
-  replace_in_file:
-    kind: file.edited
-    payload:
-      path: path
-      old_str: search
-      new_str: replace
-  search_files:
-    kind: file.read
-    payload:
-      path: path
-      content: regex
-  list_files:
-    kind: file.read
-    payload:
-      path: path
-
-  # ── Browser ──
-  browser_action:
-    kind: browser.action
-    payload:
-      action: action
-      url: url
-  browser_result:
-    kind: browser.result
-    payload:
-      content: text
-      url: url
-
-  # ── API/LLM ──
-  api_req_started:
-    kind: llm.call.started
-    payload:
-      model: model
-      input_tokens: tokensIn
-  api_req_finished:
-    kind: llm.call.completed
-    payload:
-      model: model
-      input_tokens: tokensIn
-      output_tokens: tokensOut
-      cost_usd: cost
-      cache_read_tokens: cacheReads
-      cache_write_tokens: cacheWrites
-
-  # ── Telemetry (from API request totals) ──
-  api_usage:
-    kind: telemetry.usage
-    payload:
-      input_tokens: tokensIn
-      output_tokens: tokensOut
-      cost_usd: cost
-      model: model
-
-  # ── MCP ──
-  mcp_server_request:
-    kind: mcp.connection.started
-    payload:
-      server_name: serverName
-      tool_name: toolName
-  mcp_server_response:
-    kind: mcp.connection.completed
-    payload:
-      server_name: serverName
-      result: content
-
-  # ── Completion / session ──
-  completion_result:
-    kind: session.ended
-    payload:
-      output: text
-      command: command
-
-  # ── Errors ──
-  error:
-    kind: session.error
-    payload:
-      message: text

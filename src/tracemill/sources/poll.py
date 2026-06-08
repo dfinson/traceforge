@@ -15,9 +15,9 @@ from tracemill.sources.base import RawRecord, Source
 def _load_httpx():
     try:
         return importlib.import_module("httpx")
-    except ImportError as exc:  # pragma: no cover - exercised in environments without httpx
+    except ImportError as exc:
         raise ImportError(
-            "PollSource URL mode requires the optional httpx dependency. Install tracemill[sse]."
+            "PollSource URL mode requires httpx. Install it with: pip install httpx"
         ) from exc
 
 

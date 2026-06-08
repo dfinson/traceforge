@@ -15,6 +15,9 @@ from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from tracemill.classify.core import Classification
+from tracemill.classify.workflow import Phase, Visibility
+
 
 # ─── EventKind: Open String Registry ────────────────────────────────────────
 #
@@ -197,9 +200,9 @@ class EventMetadata(BaseModel):
 
     repo: str | None = None
     turn_id: str | None = None
-    visibility: Literal["visible", "system", "collapsed"] = "visible"
-    phases: frozenset[str] | None = None
-    classification: Any = None
+    visibility: Visibility = Visibility.VISIBLE
+    phases: frozenset[Phase] | None = None
+    classification: Classification | None = None
     tool_display: str | None = None
     tool_intent: str | None = None
     duration_ms: float | None = None

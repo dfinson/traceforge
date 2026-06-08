@@ -231,7 +231,7 @@ events:
     payload:
       session_id: properties.sessionID
       call_id: properties.callID
-      tool: shell
+      tool: "literal:shell"
       input: properties.command
 
   session.next.shell.ended:

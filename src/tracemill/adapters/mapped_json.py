@@ -139,11 +139,12 @@ class MappedJsonAdapter(JsonLineAdapter):
         # Extract payload
         payload: dict[str, Any] = {}
         if event_mapping and event_mapping.payload:
-            has_properties_paths = any(path.startswith("properties.") for path in event_mapping.payload.values())
             for field_name, dot_path in event_mapping.payload.items():
-                value = _resolve_path(obj, dot_path)
-                if value is None and has_properties_paths and not dot_path.startswith("properties."):
-                    value = dot_path
+                if dot_path.startswith("literal:"):
+                    # Explicit literal value (not a path resolution)
+                    value = dot_path[len("literal:"):]
+                else:
+                    value = _resolve_path(obj, dot_path)
                 if value is not None:
                     payload[field_name] = value
 

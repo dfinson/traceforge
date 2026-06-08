@@ -52,7 +52,7 @@ events:
       path: file_path
 
   file_add:
-    kind: file.read
+    kind: input.received
     payload:
       path: file_path
 

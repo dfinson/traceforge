@@ -267,7 +267,7 @@ class TestMappedJsonFullPipeline:
 
         # LLM usage extracted
         assert all_events[2].payload["output_tokens"] == 200
-        assert all_events[2].payload["cost"] == 0.003
+        assert all_events[2].payload["cost_usd"] == 0.003
 
         for ev in all_events:
             assert ev.session_id == "test-session"
@@ -304,7 +304,7 @@ class TestMappedJsonFullPipeline:
 
         # Payload extraction
         assert all_events[0].payload["model"] == "gpt-4"
-        assert all_events[3].payload["cost"] == 0.05
+        assert all_events[3].payload["cost_usd"] == 0.05
         assert all_events[4].payload["path"] == "tests/test_new.py"
 
     def test_goose_session(self):

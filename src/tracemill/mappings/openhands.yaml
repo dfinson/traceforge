@@ -9,6 +9,13 @@ type_field: event_type
 timestamp_field: timestamp
 
 events:
+  # ── Session lifecycle ──
+  AgentStartAction:
+    kind: session.started
+    payload:
+      agent_id: agent
+      model: model
+
   # ── Agent actions ──
   AgentThinkAction:
     kind: reasoning.started
@@ -24,7 +31,7 @@ events:
       agent_id: agent
       task: inputs.task
   AgentRejectAction:
-    kind: session.error
+    kind: session.abort
     payload:
       message: outputs.reason
 
@@ -124,3 +131,12 @@ events:
     kind: agent.completed
     payload:
       output: outputs.content
+
+  # ── Telemetry ──
+  LLMCompletionObservation:
+    kind: telemetry.usage
+    payload:
+      input_tokens: input_tokens
+      output_tokens: output_tokens
+      cost_usd: cost
+      model: model

@@ -39,10 +39,10 @@ spans:
     kind: session.resumed
 
   agents.adapter.create_connector_client:
-    kind: mcp.connection.started
+    kind: session.info
 
   agents.adapter.create_user_token_client:
-    kind: mcp.connection.started
+    kind: session.info
 
   agents.adapter.write_response:
     kind: message.assistant
@@ -81,7 +81,7 @@ spans:
       key_count: storage.keys.count
 
   agents.storage.delete:
-    kind: file.deleted
+    kind: memory.save.completed
     attributes:
       key_count: storage.keys.count
 

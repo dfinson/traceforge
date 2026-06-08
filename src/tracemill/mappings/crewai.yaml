@@ -103,7 +103,7 @@ events:
 
   # ── Delegation ──
   AgentDelegationStartedEvent:
-    kind: agent.spawned
+    kind: agent.handoff
     payload:
       from_agent: from_agent_role
       to_agent: to_agent_role
@@ -175,3 +175,12 @@ events:
     payload:
       guardrail_name: name
       reason: reason
+
+  # ── Telemetry (aggregate) ──
+  TokenUsageEvent:
+    kind: telemetry.usage
+    payload:
+      input_tokens: prompt_tokens
+      output_tokens: completion_tokens
+      cost_usd: total_cost
+      model: model

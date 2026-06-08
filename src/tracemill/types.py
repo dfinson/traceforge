@@ -54,6 +54,7 @@ class EventKind:
     TOOL_CALL_COMPLETED: Final = "tool.call.completed"
     TOOL_CALL_FAILED: Final = "tool.call.failed"
     TOOL_RESULT_CHUNK: Final = "tool.result.chunk"
+    TOOL_OUTPUT: Final = "tool.output"
     TOOL_PROGRESS: Final = "tool.progress"
     TOOL_VALIDATION_FAILED: Final = "tool.validation.failed"
 

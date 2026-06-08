@@ -100,9 +100,18 @@ events:
       model: model
       input_tokens: tokensIn
       output_tokens: tokensOut
-      cost: cost
+      cost_usd: cost
       cache_read_tokens: cacheReads
       cache_write_tokens: cacheWrites
+
+  # ── Telemetry (from API request totals) ──
+  api_usage:
+    kind: telemetry.usage
+    payload:
+      input_tokens: tokensIn
+      output_tokens: tokensOut
+      cost_usd: cost
+      model: model
 
   # ── MCP ──
   mcp_server_request:

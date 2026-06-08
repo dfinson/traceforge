@@ -55,6 +55,25 @@ events:
     payload:
       content: data.chunk
 
+  # ── Chat model calls (modern LangGraph) ──
+  on_chat_model_start:
+    kind: llm.call.started
+    payload:
+      model: metadata.ls_model_name
+      run_id: run_id
+  on_chat_model_end:
+    kind: llm.call.completed
+    payload:
+      model: metadata.ls_model_name
+      run_id: run_id
+      output: data.output.content
+      input_tokens: data.output.usage_metadata.input_tokens
+      output_tokens: data.output.usage_metadata.output_tokens
+  on_chat_model_stream:
+    kind: message.assistant.chunk
+    payload:
+      content: data.chunk.content
+
   # ── Tool calls ──
   on_tool_start:
     kind: tool.call.started
@@ -75,12 +94,6 @@ events:
       tool_name: name
       error: data.error
 
-  # ── Chat messages ──
-  on_chat_model_stream:
-    kind: message.assistant.chunk
-    payload:
-      content: data.chunk.content
-
   # ── Retriever ──
   on_retriever_start:
     kind: knowledge.query.started
@@ -93,7 +106,7 @@ events:
 
   # ── Node transitions (graph-specific) ──
   on_chain_stream:
-    kind: task.started
+    kind: workflow.completed
     payload:
       node: name
       data: data.chunk
@@ -104,3 +117,11 @@ events:
     payload:
       checkpoint_id: data.checkpoint_id
       thread_id: data.thread_id
+
+  # ── Telemetry (from chat model usage metadata) ──
+  on_chat_model_usage:
+    kind: telemetry.usage
+    payload:
+      input_tokens: data.usage_metadata.input_tokens
+      output_tokens: data.usage_metadata.output_tokens
+      model: metadata.ls_model_name

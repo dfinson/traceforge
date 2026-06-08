@@ -19,10 +19,9 @@ events:
 
   # ── Environment observations ──
   system:
-    kind: command.completed
+    kind: message.system
     payload:
       content: content
-      exit_code: exit_code
 
   # ── User/task setup ──
   user:

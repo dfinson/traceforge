@@ -101,6 +101,15 @@ events:
       message: reason
       attempt: attempt
 
+  # ── Telemetry (from model response usage) ──
+  token_usage:
+    kind: telemetry.usage
+    payload:
+      input_tokens: usage.request_tokens
+      output_tokens: usage.response_tokens
+      cost_usd: usage.total_cost
+      model: model_name
+
   # ── Result validation ──
   result_validation_start:
     kind: guardrail.started

@@ -65,14 +65,9 @@ class ClaudeAdapter(JsonLineAdapter):
         yield from self._convert_message(message)
 
     def _convert_message(self, message: Message) -> Iterator[SessionEvent]:
-        if isinstance(message, UserMessage):
-            yield from self._handle_user(message)
-        elif isinstance(message, AssistantMessage):
-            yield from self._handle_assistant(message)
-        elif isinstance(message, ResultMessage):
-            yield from self._handle_result(message)
-        elif isinstance(message, SystemMessage):
-            logger.debug("ClaudeAdapter: skipping system message (subtype=%s)", message.subtype)
+        handler = _MESSAGE_HANDLERS.get(type(message))
+        if handler is not None:
+            yield from handler(self, message)
         else:
             logger.debug("ClaudeAdapter: skipping unknown message type %s", type(message).__name__)
 
@@ -94,72 +89,15 @@ class ClaudeAdapter(JsonLineAdapter):
             )
         elif isinstance(message.content, list):
             for block in message.content:
-                if isinstance(block, ToolResultBlock):
-                    yield SessionEvent(
-                        kind=EventKind.TOOL_CALL_COMPLETED,
-                        session_id=self._session_id,
-                        timestamp=datetime.now(timezone.utc),
-                        payload={
-                            "tool_call_id": block.tool_use_id,
-                            "success": not (block.is_error or False),
-                            "result": self._extract_result_text(block.content),
-                        },
-                        metadata=self._make_metadata("user.tool_result"),
-                    )
-                elif isinstance(block, TextBlock):
-                    yield SessionEvent(
-                        kind=EventKind.MESSAGE_USER,
-                        session_id=self._session_id,
-                        timestamp=datetime.now(timezone.utc),
-                        payload={"content": block.text},
-                        metadata=self._make_metadata("user.text"),
-                    )
+                handler = _BLOCK_HANDLERS.get(type(block))
+                if handler is not None:
+                    yield from handler(self, block, "user")
 
     def _handle_assistant(self, message: AssistantMessage) -> Iterator[SessionEvent]:
         for block in message.content:
-            if isinstance(block, TextBlock):
-                yield SessionEvent(
-                    kind=EventKind.MESSAGE_ASSISTANT,
-                    session_id=self._session_id,
-                    timestamp=datetime.now(timezone.utc),
-                    payload={"content": block.text},
-                    metadata=self._make_metadata("assistant.text"),
-                )
-
-            elif isinstance(block, ToolUseBlock):
-                yield SessionEvent(
-                    kind=EventKind.TOOL_CALL_STARTED,
-                    session_id=self._session_id,
-                    timestamp=datetime.now(timezone.utc),
-                    payload={
-                        "tool_call_id": block.id,
-                        "tool_name": block.name,
-                        "arguments": block.input,
-                    },
-                    metadata=self._make_metadata("assistant.tool_use"),
-                )
-
-            elif isinstance(block, ToolResultBlock):
-                yield SessionEvent(
-                    kind=EventKind.TOOL_CALL_COMPLETED,
-                    session_id=self._session_id,
-                    timestamp=datetime.now(timezone.utc),
-                    payload={
-                        "tool_call_id": block.tool_use_id,
-                        "success": not (block.is_error or False),
-                        "result": self._extract_result_text(block.content),
-                    },
-                    metadata=self._make_metadata("assistant.tool_result"),
-                )
-
-            elif isinstance(block, ThinkingBlock):
-                yield SessionEvent(
-                    kind=EventKind.LLM_THINKING_CHUNK,
-                    session_id=self._session_id,
-                    timestamp=datetime.now(timezone.utc),
-                    payload={"content": block.thinking if hasattr(block, "thinking") else ""},
-                    metadata=self._make_metadata("assistant.thinking"),
-                )
+            handler = _BLOCK_HANDLERS.get(type(block))
+            if handler is not None:
+                yield from handler(self, block, "assistant")
 
     def _handle_result(self, message: ResultMessage) -> Iterator[SessionEvent]:
         usage_payload: dict[str, Any] = {
@@ -190,6 +128,58 @@ class ClaudeAdapter(JsonLineAdapter):
                 metadata=self._make_metadata("result.error"),
             )
 
+    def _handle_system(self, message: SystemMessage) -> Iterator[SessionEvent]:
+        logger.debug("ClaudeAdapter: skipping system message (subtype=%s)", message.subtype)
+        return
+        yield  # make this a generator
+
+    # ─── Block handlers ───────────────────────────────────────────────────────
+
+    def _handle_text_block(self, block: TextBlock, context: str) -> Iterator[SessionEvent]:
+        kind = EventKind.MESSAGE_ASSISTANT if context == "assistant" else EventKind.MESSAGE_USER
+        yield SessionEvent(
+            kind=kind,
+            session_id=self._session_id,
+            timestamp=datetime.now(timezone.utc),
+            payload={"content": block.text},
+            metadata=self._make_metadata(f"{context}.text"),
+        )
+
+    def _handle_tool_use_block(self, block: ToolUseBlock, context: str) -> Iterator[SessionEvent]:
+        yield SessionEvent(
+            kind=EventKind.TOOL_CALL_STARTED,
+            session_id=self._session_id,
+            timestamp=datetime.now(timezone.utc),
+            payload={
+                "tool_call_id": block.id,
+                "tool_name": block.name,
+                "arguments": block.input,
+            },
+            metadata=self._make_metadata(f"{context}.tool_use"),
+        )
+
+    def _handle_tool_result_block(self, block: ToolResultBlock, context: str) -> Iterator[SessionEvent]:
+        yield SessionEvent(
+            kind=EventKind.TOOL_CALL_COMPLETED,
+            session_id=self._session_id,
+            timestamp=datetime.now(timezone.utc),
+            payload={
+                "tool_call_id": block.tool_use_id,
+                "success": not (block.is_error or False),
+                "result": self._extract_result_text(block.content),
+            },
+            metadata=self._make_metadata(f"{context}.tool_result"),
+        )
+
+    def _handle_thinking_block(self, block: ThinkingBlock, context: str) -> Iterator[SessionEvent]:
+        yield SessionEvent(
+            kind=EventKind.LLM_THINKING_CHUNK,
+            session_id=self._session_id,
+            timestamp=datetime.now(timezone.utc),
+            payload={"content": block.thinking if hasattr(block, "thinking") else ""},
+            metadata=self._make_metadata(f"{context}.thinking"),
+        )
+
     @staticmethod
     def _extract_result_text(content: str | list[Any] | None) -> str | None:
         if isinstance(content, str):
@@ -203,3 +193,20 @@ class ClaudeAdapter(JsonLineAdapter):
                     parts.append(item)
             return "\n".join(parts) if parts else None
         return None
+
+
+# ─── Dispatch tables ─────────────────────────────────────────────────────────
+
+_MESSAGE_HANDLERS: dict[type, Any] = {
+    UserMessage: ClaudeAdapter._handle_user,
+    AssistantMessage: ClaudeAdapter._handle_assistant,
+    ResultMessage: ClaudeAdapter._handle_result,
+    SystemMessage: ClaudeAdapter._handle_system,
+}
+
+_BLOCK_HANDLERS: dict[type, Any] = {
+    TextBlock: ClaudeAdapter._handle_text_block,
+    ToolUseBlock: ClaudeAdapter._handle_tool_use_block,
+    ToolResultBlock: ClaudeAdapter._handle_tool_result_block,
+    ThinkingBlock: ClaudeAdapter._handle_thinking_block,
+}

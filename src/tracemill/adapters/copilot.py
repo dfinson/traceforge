@@ -125,68 +125,89 @@ class CopilotAdapter(JsonLineAdapter):
         self, data: Any, event_type: SessionEventType, kind: str
     ) -> dict[str, Any]:
         """Extract a normalized payload dict from a typed SDK data object."""
-        if isinstance(data, SessionStartData):
-            cwd = data.context.cwd if data.context else None
-            return {
-                "model": data.selected_model,
-                "cwd": cwd,
-                "version": data.copilot_version,
-            }
-
-        if isinstance(data, UserMessageData):
-            return {"content": data.content}
-
-        if isinstance(data, AssistantMessageData):
-            return {"content": data.content}
-
-        if isinstance(data, ToolExecutionStartData):
-            return {
-                "tool_call_id": data.tool_call_id,
-                "tool_name": data.tool_name,
-                "arguments": data.arguments,
-            }
-
-        if isinstance(data, ToolExecutionCompleteData):
-            result_content: str | None = None
-            if data.result:
-                result_content = data.result.detailed_content or data.result.content
-            return {
-                "tool_call_id": data.tool_call_id,
-                "success": data.success,
-                "result": result_content,
-            }
-
-        if isinstance(data, AssistantUsageData):
-            return {
-                "input_tokens": (int(data.input_tokens) if data.input_tokens else None),
-                "output_tokens": (int(data.output_tokens) if data.output_tokens else None),
-                "cache_read_tokens": (
-                    int(data.cache_read_tokens) if data.cache_read_tokens else None
-                ),
-                "cache_write_tokens": (
-                    int(data.cache_write_tokens) if data.cache_write_tokens else None
-                ),
-                "cost_usd": data.cost,
-                "model": data.model,
-                "duration_ms": (
-                    int(data.duration.total_seconds() * 1000)
-                    if hasattr(data.duration, "total_seconds")
-                    else data.duration
-                ),
-            }
-
-        if isinstance(data, SessionShutdownData):
-            return {
-                "shutdown_type": (data.shutdown_type.value if data.shutdown_type else None),
-                "total_api_duration_ms": (
-                    int(data.total_api_duration.total_seconds() * 1000)
-                    if hasattr(data.total_api_duration, "total_seconds")
-                    else data.total_api_duration
-                ),
-            }
+        extractor = _PAYLOAD_EXTRACTORS.get(type(data))
+        if extractor is not None:
+            return extractor(data)
 
         # Fallback: preserve original_type for RAW events
         payload: dict[str, Any] = {}
         if kind == EventKind.RAW:
             payload["original_type"] = event_type.value
         return payload
+
+
+# ─── Payload extractors (type → dict builder) ────────────────────────────────
+
+
+def _extract_session_start(data: SessionStartData) -> dict[str, Any]:
+    cwd = data.context.cwd if data.context else None
+    return {"model": data.selected_model, "cwd": cwd, "version": data.copilot_version}
+
+
+def _extract_user_message(data: UserMessageData) -> dict[str, Any]:
+    return {"content": data.content}
+
+
+def _extract_assistant_message(data: AssistantMessageData) -> dict[str, Any]:
+    return {"content": data.content}
+
+
+def _extract_tool_start(data: ToolExecutionStartData) -> dict[str, Any]:
+    return {
+        "tool_call_id": data.tool_call_id,
+        "tool_name": data.tool_name,
+        "arguments": data.arguments,
+    }
+
+
+def _extract_tool_complete(data: ToolExecutionCompleteData) -> dict[str, Any]:
+    result_content: str | None = None
+    if data.result:
+        result_content = data.result.detailed_content or data.result.content
+    return {
+        "tool_call_id": data.tool_call_id,
+        "success": data.success,
+        "result": result_content,
+    }
+
+
+def _extract_usage(data: AssistantUsageData) -> dict[str, Any]:
+    return {
+        "input_tokens": (int(data.input_tokens) if data.input_tokens else None),
+        "output_tokens": (int(data.output_tokens) if data.output_tokens else None),
+        "cache_read_tokens": (
+            int(data.cache_read_tokens) if data.cache_read_tokens else None
+        ),
+        "cache_write_tokens": (
+            int(data.cache_write_tokens) if data.cache_write_tokens else None
+        ),
+        "cost_usd": data.cost,
+        "model": data.model,
+        "duration_ms": (
+            int(data.duration.total_seconds() * 1000)
+            if hasattr(data.duration, "total_seconds")
+            else data.duration
+        ),
+    }
+
+
+def _extract_shutdown(data: SessionShutdownData) -> dict[str, Any]:
+    return {
+        "shutdown_type": (data.shutdown_type.value if data.shutdown_type else None),
+        "total_api_duration_ms": (
+            int(data.total_api_duration.total_seconds() * 1000)
+            if hasattr(data.total_api_duration, "total_seconds")
+            else data.total_api_duration
+        ),
+    }
+
+
+_PAYLOAD_EXTRACTORS: dict[type, Any] = {
+    SessionStartData: _extract_session_start,
+    UserMessageData: _extract_user_message,
+    AssistantMessageData: _extract_assistant_message,
+    ToolExecutionStartData: _extract_tool_start,
+    ToolExecutionCompleteData: _extract_tool_complete,
+    AssistantUsageData: _extract_usage,
+    SessionShutdownData: _extract_shutdown,
+}

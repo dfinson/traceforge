@@ -16,6 +16,7 @@ dependencies = [
     "tree-sitter-bash>=0.24",
     "tree-sitter-markdown>=0.5",
     "tree-sitter-powershell>=0.24",
+    "watchdog>=4.0",
 ]
 
 [project.optional-dependencies]

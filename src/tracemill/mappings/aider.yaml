@@ -1,0 +1,70 @@
+# Aider event mapping for MappedJsonAdapter
+# Aider writes structured JSON events to .aider.events.json (when enabled).
+# Source: paul-gauthier/aider event logging format.
+# Note: Aider's primary logs are markdown (.aider.chat.history.md) which
+# require a separate MarkdownPreParser before feeding into this adapter.
+
+framework: aider
+ingestion_mode: file_watch
+type_field: event
+timestamp_field: timestamp
+session_field: session_id
+
+events:
+  # Message events
+  message_send:
+    kind: message.user
+    payload:
+      content: content
+      role: role
+  message_received:
+    kind: message.assistant
+    payload:
+      content: content
+      model: model
+
+  # LLM calls
+  llm_start:
+    kind: llm.call.started
+    payload:
+      model: model
+      input_tokens: input_tokens
+  llm_completion:
+    kind: llm.call.completed
+    payload:
+      model: model
+      input_tokens: input_tokens
+      output_tokens: output_tokens
+      cost: cost
+
+  # File operations
+  file_edit:
+    kind: file.edited
+    payload:
+      path: fname
+      content: content
+  file_add:
+    kind: file.created
+    payload:
+      path: fname
+
+  # Commands
+  command_run:
+    kind: command.started
+    payload:
+      command: command
+  command_output:
+    kind: command.completed
+    payload:
+      content: output
+      exit_code: exit_code
+
+  # Session
+  session_start:
+    kind: session.started
+    payload:
+      model: main_model
+      cwd: cwd
+  session_end:
+    kind: session.ended
+    payload: {}

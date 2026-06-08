@@ -1,0 +1,35 @@
+# Goose event mapping for MappedJsonAdapter
+# Goose stores events in SQLite (messages table) serialized as JSON.
+# Source: block/goose session storage format.
+
+framework: goose
+ingestion_mode: poll
+type_field: role
+timestamp_field: created_at
+session_field: session_id
+
+events:
+  user:
+    kind: message.user
+    payload:
+      content: content
+  assistant:
+    kind: message.assistant
+    payload:
+      content: content
+  tool_use:
+    kind: tool.call.started
+    payload:
+      tool_name: name
+      tool_call_id: id
+      arguments: input
+  tool_result:
+    kind: tool.call.completed
+    payload:
+      tool_call_id: tool_use_id
+      result: content
+      success: is_error
+  system:
+    kind: message.system
+    payload:
+      content: content

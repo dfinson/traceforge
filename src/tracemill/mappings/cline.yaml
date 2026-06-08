@@ -1,0 +1,71 @@
+# Cline / Roo Code event mapping for MappedJsonAdapter
+# Cline stores conversation history as JSON in VS Code globalStorage.
+# Source: cline/cline VS Code extension storage format.
+
+framework: cline
+ingestion_mode: file_watch
+type_field: type
+timestamp_field: ts
+session_field: taskId
+
+events:
+  say:
+    kind: message.assistant
+    payload:
+      content: text
+      tool_name: say
+  ask:
+    kind: input.requested
+    payload:
+      content: text
+      ask_type: askType
+  user_feedback:
+    kind: input.received
+    payload:
+      content: text
+
+  # Tool operations
+  command:
+    kind: command.started
+    payload:
+      command: text
+  command_output:
+    kind: command.output
+    payload:
+      content: text
+  tool:
+    kind: tool.call.started
+    payload:
+      tool_name: tool
+      arguments: content
+
+  # File operations
+  write_to_file:
+    kind: file.edited
+    payload:
+      path: path
+      content: content
+  read_file:
+    kind: file.read
+    payload:
+      path: path
+
+  # API/LLM
+  api_req_started:
+    kind: llm.call.started
+    payload:
+      model: model
+      input_tokens: tokensIn
+  api_req_finished:
+    kind: llm.call.completed
+    payload:
+      model: model
+      input_tokens: tokensIn
+      output_tokens: tokensOut
+      cost: cost
+
+  # Errors
+  error:
+    kind: error
+    payload:
+      message: text

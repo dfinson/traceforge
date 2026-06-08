@@ -1,0 +1,42 @@
+# SWE-agent trajectory mapping for MappedJsonAdapter
+# SWE-agent writes trajectory JSON files with action/observation pairs.
+# Source: princeton-nlp/SWE-agent trajectory format.
+
+framework: sweagent
+ingestion_mode: file_watch
+type_field: role
+timestamp_field: timestamp
+session_field: trajectory_id
+
+events:
+  # Agent actions
+  assistant:
+    kind: message.assistant
+    payload:
+      content: content
+      thought: thought
+      action: action
+
+  # Environment observations
+  system:
+    kind: command.completed
+    payload:
+      content: content
+      exit_code: exit_code
+
+  # User/task setup
+  user:
+    kind: message.user
+    payload:
+      content: content
+
+  # Subroutine events
+  subroutine_start:
+    kind: agent.spawned
+    payload:
+      agent_id: subroutine_name
+  subroutine_end:
+    kind: agent.completed
+    payload:
+      agent_id: subroutine_name
+      output: output

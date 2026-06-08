@@ -1,0 +1,79 @@
+# OpenHands event mapping for MappedJsonAdapter
+# OpenHands writes one JSON file per event in the workspace.
+# Source: All-Hands-AI/OpenHands runtime event format.
+
+framework: openhands
+ingestion_mode: file_watch
+type_field: event_type
+timestamp_field: timestamp
+session_field: session_id
+
+events:
+  # Agent actions
+  AgentThinkAction:
+    kind: reasoning.started
+    payload:
+      content: thought
+  AgentFinishAction:
+    kind: session.ended
+    payload:
+      output: outputs.content
+  AgentDelegateAction:
+    kind: agent.spawned
+    payload:
+      agent_id: agent
+      task: inputs.task
+
+  # Tool/command execution
+  CmdRunAction:
+    kind: command.started
+    payload:
+      command: command
+  CmdOutputObservation:
+    kind: command.completed
+    payload:
+      content: content
+      exit_code: exit_code
+
+  # File operations
+  FileReadAction:
+    kind: file.read
+    payload:
+      path: path
+  FileWriteAction:
+    kind: file.edited
+    payload:
+      path: path
+      content: content
+
+  # Browser
+  BrowseURLAction:
+    kind: browser.launched
+    payload:
+      url: url
+  BrowseInteractiveAction:
+    kind: browser.action
+    payload:
+      browser_actions: browser_actions
+  BrowserOutputObservation:
+    kind: browser.result
+    payload:
+      content: content
+      url: url
+
+  # Messages
+  MessageAction:
+    kind: message.user
+    payload:
+      content: content
+      role: role
+  AgentMessageAction:
+    kind: message.assistant
+    payload:
+      content: content
+
+  # Errors
+  ErrorObservation:
+    kind: error
+    payload:
+      message: content

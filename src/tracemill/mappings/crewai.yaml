@@ -1,0 +1,123 @@
+# CrewAI event mapping for MappedJsonAdapter
+# CrewAI serializes BaseEvent subclasses as JSON with `type` field.
+# Source: crewAI-inc/crewAI lib/crewai/src/crewai/events/
+
+framework: crewai
+ingestion_mode: file_watch
+type_field: type
+timestamp_field: timestamp
+session_field: event_id
+
+events:
+  # Agent lifecycle
+  AgentExecutionStartedEvent:
+    kind: agent.spawned
+    payload:
+      agent_id: agent_id
+      agent_role: agent_role
+      task_name: task_name
+  AgentExecutionCompletedEvent:
+    kind: agent.completed
+    payload:
+      agent_id: agent_id
+      agent_role: agent_role
+      output: output
+  AgentExecutionErrorEvent:
+    kind: agent.failed
+    payload:
+      agent_id: agent_id
+      error: error
+
+  # Task lifecycle
+  TaskStartedEvent:
+    kind: task.started
+    payload:
+      task_id: task_id
+      task_name: task_name
+      agent_role: agent_role
+  TaskCompletedEvent:
+    kind: task.completed
+    payload:
+      task_id: task_id
+      task_name: task_name
+      output: output
+  TaskFailedEvent:
+    kind: task.failed
+    payload:
+      task_id: task_id
+      error: error
+
+  # Tool usage
+  ToolUsageStartedEvent:
+    kind: tool.call.started
+    payload:
+      tool_name: tool_name
+      tool_call_id: event_id
+      arguments: tool_input
+  ToolUsageFinishedEvent:
+    kind: tool.call.completed
+    payload:
+      tool_call_id: started_event_id
+      tool_name: tool_name
+      result: tool_output
+      success: success
+  ToolUsageErrorEvent:
+    kind: tool.call.failed
+    payload:
+      tool_name: tool_name
+      error: error
+
+  # LLM calls
+  LLMCallStartedEvent:
+    kind: llm.call.started
+    payload:
+      model: model
+      agent_role: agent_role
+  LLMCallCompletedEvent:
+    kind: llm.call.completed
+    payload:
+      model: model
+      output: response
+      input_tokens: token_usage.prompt_tokens
+      output_tokens: token_usage.completion_tokens
+  LLMCallFailedEvent:
+    kind: llm.call.failed
+    payload:
+      error: error
+      model: model
+
+  # Crew lifecycle
+  CrewStartedEvent:
+    kind: session.started
+    payload:
+      crew_name: crew_name
+  CrewCompletedEvent:
+    kind: session.ended
+    payload:
+      crew_name: crew_name
+      output: output
+  CrewFailedEvent:
+    kind: error
+    payload:
+      message: error
+
+  # Memory
+  MemoryQueryStartedEvent:
+    kind: memory.query.started
+    payload:
+      query: query
+  MemoryQueryCompletedEvent:
+    kind: memory.query.completed
+    payload:
+      results: results
+
+  # Flow/workflow
+  FlowStartedEvent:
+    kind: workflow.started
+    payload:
+      flow_name: flow_name
+  FlowFinishedEvent:
+    kind: workflow.completed
+    payload:
+      flow_name: flow_name
+      output: output

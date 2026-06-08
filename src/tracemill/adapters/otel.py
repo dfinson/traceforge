@@ -74,12 +74,15 @@ class OtelSpanAdapter(Adapter):
     def parse_span(self, span: dict[str, Any]) -> Iterator[SessionEvent]:
         """Convert a single OTel span dict to SessionEvent(s).
 
-        For completed spans (with both start and end time), emits a pair:
-        - A "started" event at span start time
-        - A "completed" event at span end time (with duration)
-
-        For short-lived spans, emits just the completed event.
+        Handles both snake_case (simplified) and camelCase (OTLP JSON) keys.
+        Never raises — logs and skips malformed spans.
         """
+        try:
+            yield from self._parse_span_inner(span)
+        except Exception as exc:
+            logger.debug("OtelSpanAdapter: skipping malformed span: %s", exc)
+
+    def _parse_span_inner(self, span: dict[str, Any]) -> Iterator[SessionEvent]:
         span_name = span.get("name", "")
         if not span_name:
             return
@@ -89,15 +92,28 @@ class OtelSpanAdapter(Adapter):
         status = span.get("status", {})
         status_code = status.get("status_code", _STATUS_OK) if isinstance(status, dict) else _STATUS_OK
 
-        # Timestamps
-        start_ns = span.get("start_time_unix_nano") or span.get("start_time")
-        end_ns = span.get("end_time_unix_nano") or span.get("end_time")
+        # Timestamps — support both snake_case and camelCase keys, coerce strings
+        start_ns = (
+            span.get("start_time_unix_nano")
+            or span.get("startTimeUnixNano")
+            or span.get("start_time")
+        )
+        end_ns = (
+            span.get("end_time_unix_nano")
+            or span.get("endTimeUnixNano")
+            or span.get("end_time")
+        )
+        if start_ns is not None:
+            start_ns = int(start_ns)
+        if end_ns is not None:
+            end_ns = int(end_ns)
+
         start_time = _ns_to_datetime(start_ns) if start_ns else datetime.now(timezone.utc)
         end_time = _ns_to_datetime(end_ns) if end_ns else start_time
 
         duration_ms: float | None = None
         if start_ns and end_ns:
-            duration_ms = (end_ns - start_ns) / 1_000_000
+            duration_ms = max(0.0, (end_ns - start_ns) / 1_000_000)
 
         # Determine if this is an error
         is_error = status_code == _STATUS_ERROR

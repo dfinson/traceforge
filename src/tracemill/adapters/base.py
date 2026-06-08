@@ -70,8 +70,11 @@ class JsonLineAdapter(Adapter):
             logger.warning("%s: expected JSON object, got %s", self.__class__.__name__, type(obj).__name__)
             return
 
-        for event in self.parse_dict(obj):
-            if event.raw_event is None:
-                yield event.model_copy(update={"raw_event": obj})
-            else:
-                yield event
+        try:
+            for event in self.parse_dict(obj):
+                if event.raw_event is None:
+                    yield event.model_copy(update={"raw_event": obj})
+                else:
+                    yield event
+        except Exception as exc:
+            logger.warning("%s: parse_dict raised: %s", self.__class__.__name__, exc)

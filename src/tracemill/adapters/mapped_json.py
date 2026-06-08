@@ -140,7 +140,15 @@ class MappedJsonAdapter(JsonLineAdapter):
         if isinstance(value, datetime):
             return value
         if isinstance(value, (int, float)):
-            return datetime.fromtimestamp(value, tz=timezone.utc)
+            try:
+                # Heuristic: >1e15 = nanoseconds, >1e12 = milliseconds
+                if value > 1e15:
+                    value = value / 1_000_000_000
+                elif value > 1e12:
+                    value = value / 1_000
+                return datetime.fromtimestamp(value, tz=timezone.utc)
+            except (OSError, OverflowError, ValueError):
+                return datetime.now(timezone.utc)
         if isinstance(value, str):
             # Try ISO format
             try:

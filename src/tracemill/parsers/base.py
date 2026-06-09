@@ -98,7 +98,7 @@ class MarkdownPreParser(ABC):
 
     @property
     def current_offset(self) -> int:
-        """Current byte offset — persist this for incremental mode."""
+        """Current byte offset of accumulated content (informational)."""
         return self._offset
 
     # ─── Public API ──────────────────────────────────────────────────────
@@ -126,7 +126,8 @@ class MarkdownPreParser(ABC):
         Accumulates text, re-parses the full tree with tree-sitter,
         and emits only events beyond what was previously emitted.
         The last event is held back until the next chunk confirms
-        it is structurally closed.
+        it is structurally closed. Call ``flush()`` when the stream
+        ends to emit any held-back final event.
         """
         self._accumulated += chunk
         source = self._accumulated.encode("utf-8")
@@ -141,6 +142,26 @@ class MarkdownPreParser(ABC):
         self._offset = len(source)
 
         yield from new_events
+
+    def flush(self) -> Iterator[dict[str, Any]]:
+        """Emit any held-back final event from incremental parsing.
+
+        Call this when the stream/file is complete to ensure no events
+        are lost. Safe to call multiple times (idempotent after first).
+        """
+        if not self._accumulated:
+            return
+
+        source = self._accumulated.encode("utf-8")
+        tree = self._ts_parser.parse(source)
+
+        self._reset_state()
+        all_events = list(self._process_tree(tree, source))
+
+        remaining = all_events[self._emitted_count :]
+        self._emitted_count = len(all_events)
+
+        yield from remaining
 
     # ─── Template methods for subclasses ─────────────────────────────────
 

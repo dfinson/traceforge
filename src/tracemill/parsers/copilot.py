@@ -46,6 +46,7 @@ _BLOCK_QUERY = ts.Query(
     (pipe_table) @table
     (block_quote) @blockquote
     (thematic_break) @hr
+    (list) @list_block
     """,
 )
 
@@ -58,6 +59,7 @@ _PAT_PARA = 4
 _PAT_TABLE = 5
 _PAT_BQ = 6
 _PAT_HR = 7
+_PAT_LIST = 8
 
 # ─── Log line patterns ───────────────────────────────────────────────────────
 
@@ -100,6 +102,7 @@ class CopilotPreParser(MarkdownPreParser):
         super().__init__()
         self._log_buffer: list[str] = []
         self._in_json_block = False
+        self._log_block_timestamp: str = ""
         self._turn_state: _TurnState | None = None
 
     # ─── Base class hooks (for markdown AST parsing) ─────────────────────
@@ -178,6 +181,18 @@ class CopilotPreParser(MarkdownPreParser):
             hr_nodes = captures.get("hr", [])
             for node in hr_nodes:
                 blocks.append(Block(role="hr", byte_pos=node.start_byte))
+        elif pattern_index == _PAT_LIST:
+            list_nodes = captures.get("list_block", [])
+            for node in list_nodes:
+                if node.parent and node.parent.type in ("document", "section"):
+                    blocks.append(
+                        Block(
+                            role="list",
+                            byte_pos=node.start_byte,
+                            text=node_text(node, source).strip(),
+                            node=node,
+                        )
+                    )
 
         return blocks
 
@@ -246,6 +261,9 @@ class CopilotPreParser(MarkdownPreParser):
             yield self._turn_event(state, "table_output", {"content": block.text})
         elif block.role == "quote":
             yield self._turn_event(state, "quoted_output", {"content": block.text})
+        elif block.role == "list":
+            if block.text:
+                yield self._turn_event(state, "assistant_text", {"content": block.text})
 
     # ─── Mode 1: Parse a turn row from SQLite ────────────────────────────
 
@@ -304,7 +322,7 @@ class CopilotPreParser(MarkdownPreParser):
             if parsed is not None:
                 self._in_json_block = False
                 self._log_buffer = []
-                yield from self._process_messages_array(parsed)
+                yield from self._process_messages_array(parsed, self._log_block_timestamp)
                 return
             if len(self._log_buffer) > 5000:
                 self._in_json_block = False
@@ -324,9 +342,10 @@ class CopilotPreParser(MarkdownPreParser):
             json_start = message[api_match.end() - 1 :]
             parsed = try_parse_json(json_start)
             if parsed is not None:
-                yield from self._process_messages_array(parsed)
+                yield from self._process_messages_array(parsed, timestamp)
             else:
                 self._in_json_block = True
+                self._log_block_timestamp = timestamp
                 self._log_buffer = [json_start]
             return
 
@@ -352,7 +371,7 @@ class CopilotPreParser(MarkdownPreParser):
             }
 
     def _process_messages_array(
-        self, messages: list[Any] | dict[str, Any]
+        self, messages: list[Any] | dict[str, Any], timestamp: str = ""
     ) -> Iterator[dict[str, Any]]:
         """Extract structured events from a parsed messages array."""
         if isinstance(messages, dict):
@@ -365,7 +384,12 @@ class CopilotPreParser(MarkdownPreParser):
             content = msg.get("content", [])
 
             if isinstance(content, str):
-                yield {"type": f"api_{role}_text", "role": role, "content": content}
+                yield {
+                    "type": f"api_{role}_text",
+                    "timestamp": timestamp,
+                    "role": role,
+                    "content": content,
+                }
                 continue
 
             if not isinstance(content, list):
@@ -379,12 +403,14 @@ class CopilotPreParser(MarkdownPreParser):
                 if block_type == "text":
                     yield {
                         "type": f"api_{role}_text",
+                        "timestamp": timestamp,
                         "role": role,
                         "content": block.get("text", ""),
                     }
                 elif block_type == "tool_use":
                     yield {
                         "type": "api_tool_use",
+                        "timestamp": timestamp,
                         "tool_use_id": block.get("id", ""),
                         "tool_name": block.get("name", ""),
                         "input": block.get("input", {}),
@@ -392,6 +418,7 @@ class CopilotPreParser(MarkdownPreParser):
                 elif block_type == "tool_result":
                     yield {
                         "type": "api_tool_result",
+                        "timestamp": timestamp,
                         "tool_use_id": block.get("tool_use_id", ""),
                         "content": block.get("content", ""),
                     }

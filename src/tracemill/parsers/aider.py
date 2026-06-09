@@ -44,6 +44,7 @@ _BLOCK_QUERY = ts.Query(
     (paragraph) @para
     (setext_heading) @setext
     (fenced_code_block) @fenced
+    (list) @list_block
     """,
 )
 
@@ -53,6 +54,7 @@ _ROLE_BQ = 2
 _ROLE_PARA = 3
 _ROLE_SETEXT = 4
 _ROLE_FENCED = 5
+_ROLE_LIST = 6
 
 _STRUCTURAL_PARENTS = frozenset({"section", "document"})
 _REPLACE_FOOTER_RE = re.compile(r"^>{7}\s*REPLACE\s*$")
@@ -265,10 +267,13 @@ class AiderPreParser(MarkdownPreParser):
                 else:
                     blocks.append(Block(role=_BLOCK_TOOL, byte_pos=node.start_byte, node=node))
 
-        elif pattern_index in (_ROLE_PARA, _ROLE_SETEXT, _ROLE_FENCED):
-            cap_name = {_ROLE_PARA: "para", _ROLE_SETEXT: "setext", _ROLE_FENCED: "fenced"}[
-                pattern_index
-            ]
+        elif pattern_index in (_ROLE_PARA, _ROLE_SETEXT, _ROLE_FENCED, _ROLE_LIST):
+            cap_name = {
+                _ROLE_PARA: "para",
+                _ROLE_SETEXT: "setext",
+                _ROLE_FENCED: "fenced",
+                _ROLE_LIST: "list_block",
+            }[pattern_index]
             content_nodes = captures.get(cap_name, [])
             for node in content_nodes:
                 if node.parent and node.parent.type not in _STRUCTURAL_PARENTS:

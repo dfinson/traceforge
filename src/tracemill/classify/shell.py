@@ -78,6 +78,18 @@ def _words_from_command_node(node: ts.Node) -> list[str]:
     return words
 
 
+# Wrapper flags that consume exactly one argument (e.g., sudo -u <user>)
+_WRAPPER_FLAGS_WITH_ARG: dict[str, frozenset[str]] = {
+    "sudo": frozenset({"-u", "--user", "-g", "--group", "-C", "-D", "-R", "--role", "-t", "--type"}),
+    "env": frozenset({"-u", "--unset", "-S", "--split-string"}),
+    "timeout": frozenset({"--signal", "-s", "-k", "--kill-after"}),
+    "nice": frozenset({"-n", "--adjustment"}),
+    "ionice": frozenset({"-c", "--class", "-n", "--classdata", "-p", "--pid"}),
+    "chroot": frozenset({"--userspec", "--groups"}),
+    "runuser": frozenset({"-u", "--user", "-g", "--group", "-G", "--supp-group"}),
+}
+
+
 def _looks_like_command(token: str) -> bool:
     return bool(token) and not token[0].isdigit() and "/" not in token
 
@@ -109,17 +121,22 @@ def _unwrap_binary(
         if binary == "sudo":
             wrapper_caps.add("elevated_privilege")
 
+        known_arg_flags = _WRAPPER_FLAGS_WITH_ARG.get(binary, frozenset())
         idx += 1
         # Skip env-style VAR=val assignments
         while idx < len(words) and "=" in words[idx] and not words[idx].startswith("-"):
             idx += 1
-        # Skip wrapper flags — be conservative: only consume one argument
-        # for flags, not arbitrary tokens that might be the real command
+        # Skip wrapper flags
         while idx < len(words) and words[idx].startswith("-"):
             flag = words[idx]
             idx += 1
             # Flags with = already have their value inline (e.g., --timeout=5)
             if "=" in flag:
+                continue
+            # Known flags that take an argument: always consume next token
+            if flag in known_arg_flags:
+                if idx < len(words) and not words[idx].startswith("-"):
+                    idx += 1
                 continue
             # Short flags that take an argument: consume next token if it
             # doesn't look like another flag or a command name
@@ -129,6 +146,12 @@ def _unwrap_binary(
                 and "=" not in words[idx]
                 and not _looks_like_command(words[idx])
             ):
+                idx += 1
+        # For 'timeout', consume the duration positional before the command
+        if binary == "timeout" and idx < len(words) and not words[idx].startswith("-"):
+            # Duration arg: skip if it looks like a number/duration (e.g., 5, 5s, 10m)
+            token = words[idx]
+            if token and (token[0].isdigit() or token in ("infinity",)):
                 idx += 1
         limit -= 1
 

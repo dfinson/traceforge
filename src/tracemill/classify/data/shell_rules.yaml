@@ -51,6 +51,47 @@ shell_rules:
     role: orchestrator.package_manager
     effect: mutating
 
+  # Package removal — destructive
+  - id: pip-pip3-uninstall-destructive
+    binaries: [pip, pip3]
+    subcmds: [uninstall]
+    activity: implementation
+    role: orchestrator.package_manager
+    effect: destructive
+    action: remove.delete
+
+  - id: npm-pnpm-yarn-uninstall-remove-destructive
+    binaries: [npm, pnpm, yarn]
+    subcmds: [uninstall, remove]
+    activity: implementation
+    role: orchestrator.package_manager
+    effect: destructive
+    action: remove.delete
+
+  - id: apt-apt-get-remove-purge-destructive
+    binaries: [apt, apt-get]
+    subcmds: [remove, purge, autoremove]
+    activity: implementation
+    role: orchestrator.package_manager
+    effect: destructive
+    action: remove.delete
+
+  - id: brew-uninstall-destructive
+    binaries: [brew]
+    subcmds: [uninstall, remove]
+    activity: implementation
+    role: orchestrator.package_manager
+    effect: destructive
+    action: remove.delete
+
+  - id: cargo-remove-destructive
+    binaries: [cargo]
+    subcmds: [remove]
+    activity: implementation
+    role: orchestrator.package_manager
+    effect: destructive
+    action: remove.delete
+
   - id: bats-jest-mocha-nox-pest-phpunit-playwright-pytest-rspec-tox-vitest-test-runner
     binaries: [bats, jest, mocha, nox, pest, phpunit, playwright, pytest, rspec, tox, vitest]
     activity: verification

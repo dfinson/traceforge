@@ -548,3 +548,52 @@ class TestRedTeamRegressions:
         """sort -o writes to file — must be mutating."""
         c = classify_shell("sort -o out.txt in.txt")
         assert c.effect == "mutating"
+
+    # --- Round 3 regression tests ---
+
+    def test_sudo_u_flag_unwraps_correctly(self):
+        """sudo -u <user> must unwrap to the inner command, not the user."""
+        c = classify_shell("sudo -u deploy rm -rf /")
+        assert c.effect == "destructive"
+        assert "rm" in c.binaries
+        assert "elevated_privilege" in c.capability
+
+    def test_timeout_unwraps_correctly(self):
+        """timeout <duration> must unwrap to the inner command."""
+        c = classify_shell("timeout 5 pytest")
+        assert "pytest" in c.binaries
+
+    def test_env_u_flag_unwraps_correctly(self):
+        """env -u VAR must unwrap correctly to inner command."""
+        c = classify_shell("env -u FOO pytest tests/")
+        assert "pytest" in c.binaries
+
+    def test_apt_get_remove_is_destructive(self):
+        """apt-get remove is destructive — it removes packages."""
+        c = classify_shell("apt-get remove nginx")
+        assert c.effect == "destructive"
+
+    def test_pip_uninstall_is_destructive(self):
+        """pip uninstall is destructive — it removes packages."""
+        c = classify_shell("pip uninstall flask")
+        assert c.effect == "destructive"
+
+    def test_npm_uninstall_is_destructive(self):
+        """npm uninstall is destructive — it removes packages."""
+        c = classify_shell("npm uninstall express")
+        assert c.effect == "destructive"
+
+    def test_mkfs_ext4_is_destructive(self):
+        """mkfs.ext4 formats a disk — must be destructive."""
+        c = classify_shell("mkfs.ext4 /dev/sda1")
+        assert c.effect == "destructive"
+
+    def test_pkill_is_destructive(self):
+        """pkill kills processes — must be destructive."""
+        c = classify_shell("pkill -9 nginx")
+        assert c.effect == "destructive"
+
+    def test_killall_is_destructive(self):
+        """killall kills processes — must be destructive."""
+        c = classify_shell("killall node")
+        assert c.effect == "destructive"

@@ -21,20 +21,22 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from pathlib import Path
 from typing import Any
 
 import tree_sitter as ts
-import tree_sitter_markdown as tsmd
 
-_MD_LANGUAGE = ts.Language(tsmd.language())
+from tracemill.parsers.base import (
+    MD_LANGUAGE,
+    Block,
+    MarkdownPreParser,
+    node_text,
+    strip_blockquote_markers,
+)
 
 # ─── Tree-sitter queries ─────────────────────────────────────────────────────
-# A single multi-pattern query captures all structural blocks.  Pattern index
-# determines the block role; document-order iteration comes from matches().
 
 _BLOCK_QUERY = ts.Query(
-    _MD_LANGUAGE,
+    MD_LANGUAGE,
     """
     (atx_heading (atx_h1_marker) (inline) @h1_text) @h1
     (atx_heading (atx_h4_marker) (inline) @h4_text) @h4
@@ -45,18 +47,22 @@ _BLOCK_QUERY = ts.Query(
     """,
 )
 
-_ROLE_SESSION = 0  # pattern index for h1 heading
-_ROLE_USER = 1  # pattern index for h4 heading
-_ROLE_BQ = 2  # pattern index for block_quote
-_ROLE_PARA = 3  # pattern index for paragraph
-_ROLE_SETEXT = 4  # pattern index for setext_heading
-_ROLE_FENCED = 5  # pattern index for fenced_code_block
+_ROLE_SESSION = 0
+_ROLE_USER = 1
+_ROLE_BQ = 2
+_ROLE_PARA = 3
+_ROLE_SETEXT = 4
+_ROLE_FENCED = 5
 
-# Parents that indicate a structural block (not content inside a block_quote)
 _STRUCTURAL_PARENTS = frozenset({"section", "document"})
-
-# Marker that tree-sitter-markdown misparses as nested block_quotes
 _REPLACE_FOOTER_RE = re.compile(r"^>{7}\s*REPLACE\s*$")
+
+# ─── Block roles ─────────────────────────────────────────────────────────────
+
+_BLOCK_SESSION = "session"
+_BLOCK_USER = "user"
+_BLOCK_TOOL = "tool"
+_BLOCK_AI = "ai"
 
 
 # ─── Tool output sub-classification ──────────────────────────────────────────
@@ -169,50 +175,13 @@ def extract_edits(ai_text: str) -> list[FileEdit]:
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 
-def _node_text(node: ts.Node, source: bytes) -> str:
-    return source[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
-
-
 def _is_replace_footer(node: ts.Node, source: bytes) -> bool:
     """True if this block_quote is a >>>>>>> REPLACE footer."""
-    first_line = _node_text(node, source).split("\n", 1)[0]
+    first_line = node_text(node, source).split("\n", 1)[0]
     return bool(_REPLACE_FOOTER_RE.match(first_line))
 
 
-def _strip_blockquote_markers(raw: str) -> list[str]:
-    """Strip leading '> ' or '>' from each line of a block quote."""
-    lines: list[str] = []
-    for line in raw.splitlines():
-        if line.startswith("> "):
-            lines.append(line[2:])
-        elif line.startswith(">"):
-            lines.append(line[1:])
-        else:
-            lines.append(line)
-    return lines
-
-
-# ─── Typed block produced by query classification ───────────────────────────
-
-_BLOCK_SESSION = "session"
-_BLOCK_USER = "user"
-_BLOCK_TOOL = "tool"
-_BLOCK_AI = "ai"
-
-
-@dataclass(slots=True)
-class _Block:
-    """A classified structural block extracted from query matches."""
-
-    role: str  # one of _BLOCK_*
-    byte_pos: int
-    # For session/user: the heading inline text
-    text: str = ""
-    # For tool/ai: the AST node (used to extract raw bytes)
-    node: ts.Node | None = None
-
-
-# ─── Main parser ─────────────────────────────────────────────────────────────
+# ─── Session state ───────────────────────────────────────────────────────────
 
 
 @dataclass
@@ -230,7 +199,10 @@ class _SessionState:
         return self.start_time + timedelta(seconds=self.sequence)
 
 
-class AiderPreParser:
+# ─── Main parser ─────────────────────────────────────────────────────────────
+
+
+class AiderPreParser(MarkdownPreParser):
     """Converts Aider .aider.chat.history.md into structured event dicts.
 
     Uses a tree-sitter query to capture all structural blocks in one pass,
@@ -242,119 +214,71 @@ class AiderPreParser:
     """
 
     def __init__(self, offset: int = 0) -> None:
+        super().__init__()
         self._offset = offset
         self._state: _SessionState | None = None
-        self._ts_parser = ts.Parser(_MD_LANGUAGE)
-        # Incremental state
-        self._accumulated: str = ""
-        self._emitted_count: int = 0
 
-    @property
-    def current_offset(self) -> int:
-        """Current byte offset — persist this for incremental mode."""
-        return self._offset
+    # ─── Base class hooks ────────────────────────────────────────────────
 
-    def parse_file(self, path: str | Path) -> Iterator[dict[str, Any]]:
-        """Parse an entire .aider.chat.history.md file."""
-        text = Path(path).read_text(encoding="utf-8", errors="replace")
-        yield from self.parse_text(text)
+    def _get_query(self) -> ts.Query:
+        return _BLOCK_QUERY
 
-    def parse_text(self, text: str) -> Iterator[dict[str, Any]]:
-        """Parse markdown text and yield event dicts."""
-        self._offset = 0
+    def _reset_state(self) -> None:
         self._state = None
-        self._accumulated = ""
-        self._emitted_count = 0
 
-        source = text.encode("utf-8")
-        tree = self._ts_parser.parse(source)
-        yield from self._process_tree(tree, source)
-        self._offset = len(source)
+    def _classify_match(
+        self, pattern_index: int, captures: dict[str, list[ts.Node]], source: bytes
+    ) -> list[Block]:
+        blocks: list[Block] = []
 
-    def parse_chunk(self, chunk: str) -> Iterator[dict[str, Any]]:
-        """Parse an incremental chunk (for file-watch mode).
-
-        Accumulates text, re-parses the full tree with tree-sitter,
-        and emits only events beyond what was previously emitted.
-        The last event is held back until the next chunk confirms
-        it is structurally closed.
-        """
-        self._accumulated += chunk
-        source = self._accumulated.encode("utf-8")
-        tree = self._ts_parser.parse(source)
-
-        self._state = None
-        all_events = list(self._process_tree(tree, source))
-
-        safe_end = max(len(all_events) - 1, 0)
-        new_events = all_events[self._emitted_count : safe_end]
-        self._emitted_count = safe_end
-        self._offset = len(source)
-
-        yield from new_events
-
-    # ─── Query-based block extraction ────────────────────────────────────
-
-    def _extract_blocks(self, tree: ts.Tree, source: bytes) -> list[_Block]:
-        """Run the structural query and classify each match into a _Block."""
-        cursor = ts.QueryCursor(_BLOCK_QUERY)
-        blocks: list[_Block] = []
-
-        for pat_idx, captures in cursor.matches(tree.root_node):
-            if pat_idx == _ROLE_SESSION:
-                heading_nodes = captures.get("h1", [])
-                text_nodes = captures.get("h1_text", [])
-                if heading_nodes and text_nodes:
-                    blocks.append(
-                        _Block(
-                            role=_BLOCK_SESSION,
-                            byte_pos=heading_nodes[0].start_byte,
-                            text=_node_text(text_nodes[0], source).strip(),
-                        )
+        if pattern_index == _ROLE_SESSION:
+            heading_nodes = captures.get("h1", [])
+            text_nodes = captures.get("h1_text", [])
+            if heading_nodes and text_nodes:
+                blocks.append(
+                    Block(
+                        role=_BLOCK_SESSION,
+                        byte_pos=heading_nodes[0].start_byte,
+                        text=node_text(text_nodes[0], source).strip(),
                     )
+                )
 
-            elif pat_idx == _ROLE_USER:
-                heading_nodes = captures.get("h4", [])
-                text_nodes = captures.get("h4_text", [])
-                if heading_nodes and text_nodes:
-                    blocks.append(
-                        _Block(
-                            role=_BLOCK_USER,
-                            byte_pos=heading_nodes[0].start_byte,
-                            text=_node_text(text_nodes[0], source).strip(),
-                        )
+        elif pattern_index == _ROLE_USER:
+            heading_nodes = captures.get("h4", [])
+            text_nodes = captures.get("h4_text", [])
+            if heading_nodes and text_nodes:
+                blocks.append(
+                    Block(
+                        role=_BLOCK_USER,
+                        byte_pos=heading_nodes[0].start_byte,
+                        text=node_text(text_nodes[0], source).strip(),
                     )
+                )
 
-            elif pat_idx == _ROLE_BQ:
-                bq_nodes = captures.get("bq", [])
-                for node in bq_nodes:
-                    # Skip paragraphs/content inside block_quotes
-                    if node.parent and node.parent.type not in _STRUCTURAL_PARENTS:
-                        continue
-                    if _is_replace_footer(node, source):
-                        blocks.append(_Block(role=_BLOCK_AI, byte_pos=node.start_byte, node=node))
-                    else:
-                        blocks.append(_Block(role=_BLOCK_TOOL, byte_pos=node.start_byte, node=node))
+        elif pattern_index == _ROLE_BQ:
+            bq_nodes = captures.get("bq", [])
+            for node in bq_nodes:
+                if node.parent and node.parent.type not in _STRUCTURAL_PARENTS:
+                    continue
+                if _is_replace_footer(node, source):
+                    blocks.append(Block(role=_BLOCK_AI, byte_pos=node.start_byte, node=node))
+                else:
+                    blocks.append(Block(role=_BLOCK_TOOL, byte_pos=node.start_byte, node=node))
 
-            elif pat_idx in (_ROLE_PARA, _ROLE_SETEXT, _ROLE_FENCED):
-                cap_name = {_ROLE_PARA: "para", _ROLE_SETEXT: "setext", _ROLE_FENCED: "fenced"}[
-                    pat_idx
-                ]
-                content_nodes = captures.get(cap_name, [])
-                for node in content_nodes:
-                    # Only structural-level paragraphs, not those inside block_quotes
-                    if node.parent and node.parent.type not in _STRUCTURAL_PARENTS:
-                        continue
-                    blocks.append(_Block(role=_BLOCK_AI, byte_pos=node.start_byte, node=node))
+        elif pattern_index in (_ROLE_PARA, _ROLE_SETEXT, _ROLE_FENCED):
+            cap_name = {_ROLE_PARA: "para", _ROLE_SETEXT: "setext", _ROLE_FENCED: "fenced"}[
+                pattern_index
+            ]
+            content_nodes = captures.get(cap_name, [])
+            for node in content_nodes:
+                if node.parent and node.parent.type not in _STRUCTURAL_PARENTS:
+                    continue
+                blocks.append(Block(role=_BLOCK_AI, byte_pos=node.start_byte, node=node))
 
-        blocks.sort(key=lambda b: b.byte_pos)
         return blocks
 
-    # ─── Event generation ────────────────────────────────────────────────
-
-    def _process_tree(self, tree: ts.Tree, source: bytes) -> Iterator[dict[str, Any]]:
-        """Extract blocks via query, group contiguous AI nodes, emit events."""
-        blocks = self._extract_blocks(tree, source)
+    def _process_blocks(self, blocks: list[Block], source: bytes) -> Iterator[dict[str, Any]]:
+        """Group contiguous AI nodes, emit events in document order."""
         ai_nodes: list[ts.Node] = []
 
         for block in blocks:
@@ -363,7 +287,6 @@ class AiderPreParser:
                     ai_nodes.append(block.node)
                 continue
 
-            # Non-AI block: flush any accumulated AI content first
             if ai_nodes:
                 yield from self._emit_ai_from_nodes(ai_nodes, source)
                 ai_nodes = []
@@ -376,7 +299,6 @@ class AiderPreParser:
                 if block.node:
                     yield from self._handle_block_quote(block.node, source)
 
-        # Flush trailing AI content
         if ai_nodes:
             yield from self._emit_ai_from_nodes(ai_nodes, source)
 
@@ -414,8 +336,8 @@ class AiderPreParser:
             yield self._make_event("user_message", {"content": content})
 
     def _handle_block_quote(self, node: ts.Node, source: bytes) -> Iterator[dict[str, Any]]:
-        raw = _node_text(node, source)
-        lines = _strip_blockquote_markers(raw)
+        raw = node_text(node, source)
+        lines = strip_blockquote_markers(raw)
         for line_text in lines:
             if not line_text.strip():
                 continue

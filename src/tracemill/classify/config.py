@@ -22,10 +22,11 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from tracemill.classify.core import Classification
 from tracemill.classify.phases import with_phase_map
+from tracemill.models import StrictModel
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ logger = logging.getLogger(__name__)
 # ── Pydantic config models ──
 
 
-class McpToolOverrideConfig(BaseModel):
+class McpToolOverrideConfig(StrictModel):
     """Per-tool classification override within an MCP server profile."""
 
     effect: str | None = None
@@ -44,7 +45,7 @@ class McpToolOverrideConfig(BaseModel):
     capability: list[str] | None = None
 
 
-class McpProfileConfig(BaseModel):
+class McpProfileConfig(StrictModel):
     """Classification profile for a known MCP server."""
 
     id: str | None = None
@@ -59,7 +60,7 @@ class McpProfileConfig(BaseModel):
     tool_overrides: dict[str, McpToolOverrideConfig] = Field(default_factory=dict)
 
 
-class ShellRuleConfig(BaseModel):
+class ShellRuleConfig(StrictModel):
     """Declarative classification rule for shell commands."""
 
     id: str | None = None
@@ -76,7 +77,7 @@ class ShellRuleConfig(BaseModel):
     phase: str = ""
 
 
-class BinaryInfoConfig(BaseModel):
+class BinaryInfoConfig(StrictModel):
     """Static metadata about a known binary."""
 
     role: str
@@ -85,7 +86,7 @@ class BinaryInfoConfig(BaseModel):
     destructive: bool = False
 
 
-class ToolClassificationConfig(BaseModel):
+class ToolClassificationConfig(StrictModel):
     """Classification for a known native tool."""
 
     mechanism: str
@@ -96,14 +97,14 @@ class ToolClassificationConfig(BaseModel):
     capability: list[str] = Field(default_factory=list)
 
 
-class VerbInferenceEntry(BaseModel):
+class VerbInferenceEntry(StrictModel):
     """Verb prefix → (effect, action) mapping."""
 
     effect: str
     action: str
 
 
-class FlagEffectConfig(BaseModel):
+class FlagEffectConfig(StrictModel):
     """Flag-based effect override."""
 
     flags: list[str]
@@ -111,7 +112,7 @@ class FlagEffectConfig(BaseModel):
     mode: str = "any_present"
 
 
-class EffectOverrideConfig(BaseModel):
+class EffectOverrideConfig(StrictModel):
     """Effect override rules for a specific binary."""
 
     flag_effects: list[FlagEffectConfig] = Field(default_factory=list)
@@ -119,7 +120,7 @@ class EffectOverrideConfig(BaseModel):
     default_effect: str | None = None
 
 
-class ClassifyConfig(BaseModel):
+class ClassifyConfig(StrictModel):
     """Top-level config for all externalized classification data.
 
     Users supply partial configs — only the sections they want to override.
@@ -349,7 +350,12 @@ def load_config(
     for layer in layers:
         merged = _merge_raw(merged, layer)
 
-    config = ClassifyConfig.model_validate(merged)
+    # Filter to only ClassifyConfig fields (shared config files may contain
+    # top-level keys for other tracemill subsystems like log_level, sdk, etc.)
+    valid_keys = set(ClassifyConfig.model_fields.keys())
+    filtered = {k: v for k, v in merged.items() if k in valid_keys}
+
+    config = ClassifyConfig.model_validate(filtered)
     config = _apply_disabled_entries(config)
     return config
 

@@ -13,7 +13,10 @@ import uuid
 from datetime import datetime
 from typing import Any, Final, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import Field, field_validator
+
+from tracemill.models import FrozenModel
+
 
 from tracemill.classify.core import Classification
 from tracemill.classify.workflow import Phase, Visibility
@@ -176,10 +179,8 @@ def _uuid4_str() -> str:
     return str(uuid.uuid4())
 
 
-class EventMetadata(BaseModel):
+class EventMetadata(FrozenModel):
     """Contextual information attached to every event."""
-
-    model_config = ConfigDict(frozen=True)
 
     # --- Source provenance ---
     source_framework: str | None = None  # "copilot", "claude", "aider", "cline", etc.
@@ -217,10 +218,8 @@ class EventMetadata(BaseModel):
 # ─── Session Event ───────────────────────────────────────────────────────────
 
 
-class SessionEvent(BaseModel):
+class SessionEvent(FrozenModel):
     """The universal event type. Every adapter produces these."""
-
-    model_config = ConfigDict(frozen=True)
 
     id: str = Field(default_factory=_uuid4_str)
     kind: str  # Open string — use EventKind constants for canonical kinds
@@ -234,9 +233,7 @@ class SessionEvent(BaseModel):
 # ─── Telemetry Span ──────────────────────────────────────────────────────────
 
 
-class TelemetrySpan(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class TelemetrySpan(FrozenModel):
     name: str
     session_id: str
     start_time: datetime
@@ -247,9 +244,7 @@ class TelemetrySpan(BaseModel):
 # ─── Usage Record ────────────────────────────────────────────────────────────
 
 
-class UsageRecord(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class UsageRecord(FrozenModel):
     session_id: str
     timestamp: datetime
     model: str

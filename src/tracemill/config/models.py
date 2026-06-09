@@ -17,16 +17,16 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import Field, field_validator
+
+from tracemill.models import StrictModel
 
 
 # ─── Source Configs ──────────────────────────────────────────────────────────
 
 
-class FileWatchSourceConfig(BaseModel):
+class FileWatchSourceConfig(StrictModel):
     """Watch a file for appended content (OS-native events via watchdog)."""
-
-    model_config = ConfigDict(extra="forbid")
 
     type: Literal["file_watch"] = "file_watch"
     path: Path
@@ -34,10 +34,8 @@ class FileWatchSourceConfig(BaseModel):
     encoding: str = "utf-8"
 
 
-class FilePollSourceConfig(BaseModel):
+class FilePollSourceConfig(StrictModel):
     """Poll a file for changes at a fixed interval."""
-
-    model_config = ConfigDict(extra="forbid")
 
     type: Literal["file_poll"] = "file_poll"
     path: Path
@@ -53,10 +51,8 @@ class FilePollSourceConfig(BaseModel):
         return v
 
 
-class HttpPollSourceConfig(BaseModel):
+class HttpPollSourceConfig(StrictModel):
     """Poll an HTTP endpoint at a fixed interval."""
-
-    model_config = ConfigDict(extra="forbid")
 
     type: Literal["http_poll"] = "http_poll"
     url: str
@@ -74,10 +70,8 @@ class HttpPollSourceConfig(BaseModel):
         return v
 
 
-class SSESourceConfig(BaseModel):
+class SSESourceConfig(StrictModel):
     """Connect to a Server-Sent Events stream."""
-
-    model_config = ConfigDict(extra="forbid")
 
     type: Literal["sse"] = "sse"
     url: str
@@ -86,10 +80,8 @@ class SSESourceConfig(BaseModel):
     timeout: float = 60.0
 
 
-class ReplaySourceConfig(BaseModel):
+class ReplaySourceConfig(StrictModel):
     """Replay a previously-captured file (one-shot, no watching)."""
-
-    model_config = ConfigDict(extra="forbid")
 
     type: Literal["replay"] = "replay"
     path: Path
@@ -110,20 +102,16 @@ SourceConfig = Annotated[
 # ─── Adapter Configs ─────────────────────────────────────────────────────────
 
 
-class MappedJsonAdapterConfig(BaseModel):
+class MappedJsonAdapterConfig(StrictModel):
     """Data-driven adapter using a YAML framework mapping."""
-
-    model_config = ConfigDict(extra="forbid")
 
     type: Literal["mapped_json"] = "mapped_json"
     mapping: str  # framework name (resolved from bundled + user mappings)
     mapping_file: Path | None = None  # explicit path override
 
 
-class OtelSpanAdapterConfig(BaseModel):
+class OtelSpanAdapterConfig(StrictModel):
     """Adapter for OpenTelemetry span JSON."""
-
-    model_config = ConfigDict(extra="forbid")
 
     type: Literal["otel_span"] = "otel_span"
 
@@ -138,30 +126,24 @@ AdapterConfig = Annotated[
 # ─── Sink Configs ────────────────────────────────────────────────────────────
 
 
-class SqliteSinkConfig(BaseModel):
+class SqliteSinkConfig(StrictModel):
     """SQLite storage sink."""
-
-    model_config = ConfigDict(extra="forbid")
 
     type: Literal["sqlite"] = "sqlite"
     path: Path
     journal_mode: Literal["wal", "delete", "truncate"] = "wal"
 
 
-class JsonlSinkConfig(BaseModel):
+class JsonlSinkConfig(StrictModel):
     """Append-only JSONL file sink."""
-
-    model_config = ConfigDict(extra="forbid")
 
     type: Literal["jsonl"] = "jsonl"
     path: Path
     rotate_size_mb: float | None = None
 
 
-class S3SinkConfig(BaseModel):
+class S3SinkConfig(StrictModel):
     """S3-compatible object store sink."""
-
-    model_config = ConfigDict(extra="forbid")
 
     type: Literal["s3"] = "s3"
     bucket: str
@@ -180,10 +162,8 @@ SinkConfig = Annotated[
 # ─── Pipeline Config ─────────────────────────────────────────────────────────
 
 
-class PipelineConfig(BaseModel):
+class PipelineConfig(StrictModel):
     """A single ingestion pipeline: source → adapter → sinks."""
-
-    model_config = ConfigDict(extra="forbid")
 
     name: str
     source: SourceConfig
@@ -201,10 +181,8 @@ class PipelineConfig(BaseModel):
 # ─── SDK Config ──────────────────────────────────────────────────────────────
 
 
-class SDKConfig(BaseModel):
+class SDKConfig(StrictModel):
     """Configuration for tracemill SDK (in-process push mode)."""
-
-    model_config = ConfigDict(extra="forbid")
 
     batch_size: int = Field(default=64, ge=1)
     flush_interval: float = Field(default=5.0, gt=0)
@@ -214,7 +192,7 @@ class SDKConfig(BaseModel):
 # ─── Root Config ─────────────────────────────────────────────────────────────
 
 
-class TracemillConfig(BaseModel):
+class TracemillConfig(StrictModel):
     """Root tracemill configuration.
 
     Loaded from (in precedence order):
@@ -226,8 +204,6 @@ class TracemillConfig(BaseModel):
 
     Config file location override: TRACEMILL_CONFIG env var.
     """
-
-    model_config = ConfigDict(extra="forbid")
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 

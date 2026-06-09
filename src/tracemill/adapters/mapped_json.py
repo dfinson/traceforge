@@ -16,9 +16,10 @@ from collections.abc import Iterator
 from datetime import datetime, timezone
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 
 from tracemill.adapters.base import JsonLineAdapter
+from tracemill.models import StrictModel
 from tracemill.preprocessors import get_preprocessor
 from tracemill.types import EventKind, EventMetadata, IngestionMode, SessionEvent
 
@@ -53,19 +54,15 @@ def _resolve_path(obj: Any, path: str) -> Any:
 # ─── Mapping Config ──────────────────────────────────────────────────────────
 
 
-class EventMapping(BaseModel):
+class EventMapping(StrictModel):
     """Mapping for a single raw event type → canonical kind + payload extraction."""
-
-    model_config = ConfigDict(extra="forbid")
 
     kind: str  # canonical EventKind string
     payload: dict[str, str] = Field(default_factory=dict)  # field_name → dot-path
 
 
-class FrameworkMapping(BaseModel):
+class FrameworkMapping(StrictModel):
     """Declarative mapping config for a framework's JSON events."""
-
-    model_config = ConfigDict(extra="forbid")
 
     framework: str  # e.g. "crewai", "openhands"
     framework_version: str  # version of the framework's event format this mapping targets

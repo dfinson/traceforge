@@ -10,23 +10,17 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
+    "httpx>=0.25",
     "pydantic>=2.0",
     "pyyaml>=6.0",
-    "tree-sitter>=0.23",
-    "tree-sitter-bash>=0.23",
-    "tree-sitter-powershell>=0.23",
+    "tree-sitter>=0.24",
+    "tree-sitter-bash>=0.24",
+    "tree-sitter-markdown>=0.5",
+    "tree-sitter-powershell>=0.24",
+    "watchdog>=4.0",
 ]
 
 [project.optional-dependencies]
-sqlite = ["aiosqlite>=0.19"]
-otel = [
-    "opentelemetry-api>=1.20",
-    "opentelemetry-sdk>=1.20",
-]
-all = [
-    "tracemill[sqlite]",
-    "tracemill[otel]",
-]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

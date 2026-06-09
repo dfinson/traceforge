@@ -1,0 +1,81 @@
+# smolagents (HuggingFace) event mapping for MappedJsonAdapter
+# Targets: smolagents >= 1.0 (preprocessor-emitted JSONL)
+# Source: huggingface/smolagents src/smolagents/memory.py, agents.py
+#
+# CRITICAL: smolagents does NOT have a "step_type" discriminator field.
+# Step type is inferred from FIELD PRESENCE in the serialized dict:
+#   - has "step_number" → ActionStep
+#   - has "plan" → PlanningStep
+#   - has "task" (and no step_number) → TaskStep
+#   - has "system_prompt" → SystemPromptStep
+#   - has ONLY "output" key → FinalAnswerStep
+#
+# Real ActionStep.dict() keys:
+#   step_number, timing (start_time, end_time, duration), model_input_messages,
+#   tool_calls, error, model_output_message, model_output, observations,
+#   action_output, code_action, observations_images, token_usage, is_final_answer
+#
+# Real ToolCall dict: {id, type: "function", function: {name, arguments}}
+# Real TokenUsage: {input_tokens, output_tokens, total_tokens}
+#
+# FinalAnswer: When is_final_answer=true on ActionStep, the action_output IS the answer.
+# There is also a bare FinalAnswerStep with only {"output": value}.
+#
+# ManagedAgent does NOT exist as a class. Multi-agent calls appear as regular ToolCalls.
+#
+# This YAML assumes a SmolagentsPreProcessor that adds a "step_type" field:
+#   {"step_type": "ActionStep", "step_number": 1, ...}
+#   {"step_type": "ToolCall", "tool_name": "web_search", ...}
+
+framework: smolagents
+framework_version: ">=1.0"
+ingestion_mode: file_watch
+type_field: step_type
+timestamp_field: timestamp
+preprocessor: smolagents
+
+events:
+  # ── Real step types (preprocessor infers from field presence) ──
+  ActionStep:
+    kind: message.assistant
+    payload:
+      content: model_output
+      observations: observations
+      step_number: step_number
+      code_action: code_action
+      error: error
+      action_output: action_output
+      input_tokens: token_usage.input_tokens
+      output_tokens: token_usage.output_tokens
+      start_time: timing.start_time
+      end_time: timing.end_time
+      duration: timing.duration
+  PlanningStep:
+    kind: planning.started
+    payload:
+      content: plan
+      input_tokens: token_usage.input_tokens
+      output_tokens: token_usage.output_tokens
+      start_time: timing.start_time
+      end_time: timing.end_time
+      duration: timing.duration
+  TaskStep:
+    kind: session.started
+    payload:
+      task: task
+  SystemPromptStep:
+    kind: message.system
+    payload:
+      content: system_prompt
+  FinalAnswer:
+    kind: session.ended
+    payload:
+      output: output
+
+  # ── Tool calls (preprocessor splits from ActionStep.tool_calls array) ──
+  ToolCall:
+    kind: tool.call.started
+    payload:
+      tool_name: tool_name
+      tool_call_id: call_id
+      arguments: tool_input

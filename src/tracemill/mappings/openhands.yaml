@@ -1,0 +1,205 @@
+# OpenHands event mapping for MappedJsonAdapter
+# Targets: openhands >= 0.30, < 1.0 (JSON event files in workspace)
+# Source: All-Hands-AI/OpenHands openhands/events/serialization/event.py
+#
+# NOTE: v1.0+ is INCOMPATIBLE — openhands/events/ was extracted to
+# OpenHands/software-agent-sdk with a completely different Pydantic model.
+# This mapping covers the 0.x compound-discriminator JSON format only.
+#
+# CRITICAL: OpenHands uses a COMPOUND discriminator:
+#   - Action events have: {"action": "run", "args": {...}}
+#   - Observation events have: {"observation": "run", "content": "...", "extras": {...}}
+#
+# An OpenHandsPreProcessor synthesizes compound types:
+#   "action" key → type = action value (e.g. "run")
+#   "observation" key → type = "observation.<value>" (e.g. "observation.run")
+#
+# Serialization rules (event_to_dict):
+#   - TOP_KEYS hoisted: id, timestamp, source, message, cause, action/observation,
+#     tool_call_metadata, llm_metrics
+#   - Actions: all dataclass fields → "args" dict
+#   - Observations: "content" hoisted to top-level, remaining fields → "extras" dict
+#   - CmdOutputMetadata: serialized via model_dump() into extras.metadata
+
+framework: openhands
+framework_version: ">=0.30,<1.0"
+ingestion_mode: file_watch
+type_field: action
+timestamp_field: timestamp
+preprocessor: openhands
+
+events:
+  # ── Action events (real — discriminated by "action" field value) ──
+  run:
+    kind: command.started
+    payload:
+      command: args.command
+      thought: args.thought
+      source: source
+  run_ipython:
+    kind: command.started
+    payload:
+      command: args.code
+      source: source
+  think:
+    kind: reasoning.started
+    payload:
+      content: args.thought
+      source: source
+  finish:
+    kind: session.ended
+    payload:
+      output: args.outputs.content
+      source: source
+  message:
+    kind: message.user
+    payload:
+      content: args.content
+      source: source
+  delegate:
+    kind: agent.spawned
+    payload:
+      agent_id: args.agent
+      task: args.inputs.task
+      source: source
+  reject:
+    kind: session.abort
+    payload:
+      message: args.outputs.reason
+      source: source
+  browse:
+    kind: browser.launched
+    payload:
+      url: args.url
+      source: source
+  browse_interactive:
+    kind: browser.action
+    payload:
+      actions: args.browser_actions
+      source: source
+  read:
+    kind: file.read
+    payload:
+      path: args.path
+      source: source
+  write:
+    kind: file.edited
+    payload:
+      path: args.path
+      content: args.content
+      source: source
+  edit:
+    kind: file.edited
+    payload:
+      path: args.path
+      source: source
+  recall:
+    kind: memory.query.started
+    payload:
+      query: args.query
+      source: source
+  call_tool_mcp:
+    kind: mcp.tool.started
+    payload:
+      tool_name: args.name
+      arguments: args.arguments
+      thought: args.thought
+      source: source
+  condensation:
+    kind: session.info
+    payload:
+      summary: args.summary
+      source: source
+  change_agent_state:
+    kind: agent.state_changed
+    payload:
+      agent_state: args.agent_state
+      thought: args.thought
+      source: source
+  system:
+    kind: message.system
+    payload:
+      content: args.content
+      agent_class: args.agent_class
+      source: source
+
+  # ── Observation events (preprocessor synthesizes action: "observation.<value>") ──
+  observation.run:
+    kind: command.completed
+    payload:
+      content: content
+      exit_code: extras.metadata.exit_code
+      source: source
+  observation.run_ipython:
+    kind: command.completed
+    payload:
+      content: content
+      source: source
+  observation.browse:
+    kind: browser.result
+    payload:
+      content: content
+      url: extras.url
+      source: source
+  observation.read:
+    kind: file.read
+    payload:
+      path: extras.path
+      content: content
+      source: source
+  observation.write:
+    kind: file.edited
+    payload:
+      path: extras.path
+      source: source
+  observation.edit:
+    kind: file.edited
+    payload:
+      path: extras.path
+      source: source
+  observation.error:
+    kind: session.error
+    payload:
+      message: content
+      source: source
+  observation.agent_state_changed:
+    kind: session.info
+    payload:
+      content: content
+      source: source
+  observation.delegate:
+    kind: agent.completed
+    payload:
+      output: content
+      source: source
+  observation.recall:
+    kind: memory.query.completed
+    payload:
+      content: content
+      source: source
+  observation.success:
+    kind: session.ended
+    payload:
+      output: content
+      source: source
+  observation.think:
+    kind: reasoning.completed
+    payload:
+      content: content
+      source: source
+  observation.user_rejected:
+    kind: session.abort
+    payload:
+      message: content
+      source: source
+  observation.condense:
+    kind: session.info
+    payload:
+      content: content
+      source: source
+  observation.mcp:
+    kind: mcp.tool.completed
+    payload:
+      content: content
+      source: source
+

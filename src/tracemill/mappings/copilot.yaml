@@ -1,0 +1,204 @@
+# Copilot (GitHub Copilot CLI) — YAML mapping for tracemill
+#
+# Wire format: JSONL lines, each with shape:
+#   {type: "session.start", id: "uuid", timestamp: "ISO8601", data: {...}}
+#
+# The `type` field is the event discriminator.
+# The `data` object contains event-specific fields in camelCase.
+# Timestamps are ISO 8601 strings in the `timestamp` top-level field.
+#
+# Source: github-copilot-sdk session event types
+# Verified against: copilot_session.jsonl fixture
+
+framework: copilot
+framework_version: "1.x"
+ingestion_mode: file_watch
+type_field: type
+timestamp_field: timestamp
+default_kind: raw
+
+events:
+  # ── Session lifecycle ──────────────────────────────────────────────────────
+  session.start:
+    kind: session.started
+    payload:
+      model: data.selectedModel
+      cwd: data.context.cwd
+      version: data.copilotVersion
+
+  session.resume:
+    kind: session.resumed
+    payload: {}
+
+  session.shutdown:
+    kind: session.ended
+    payload:
+      shutdown_type: data.shutdownType
+      total_api_duration_ms: data.totalApiDurationMs
+
+  session.error:
+    kind: session.error
+    payload:
+      message: data.message
+
+  session.info:
+    kind: session.info
+    payload:
+      message: data.message
+
+  session.warning:
+    kind: session.warning
+    payload:
+      message: data.message
+
+  session.idle:
+    kind: session.idle
+    payload: {}
+
+  # ── Messages ───────────────────────────────────────────────────────────────
+  user.message:
+    kind: message.user
+    payload:
+      content: data.content
+
+  assistant.message:
+    kind: message.assistant
+    payload:
+      content: data.content
+
+  system.message:
+    kind: message.system
+    payload:
+      content: data.content
+
+  # ── Turn lifecycle ─────────────────────────────────────────────────────────
+  assistant.turn_start:
+    kind: turn.started
+    payload:
+      turn_id: data.turnId
+
+  assistant.turn_end:
+    kind: turn.ended
+    payload:
+      turn_id: data.turnId
+
+  # ── Reasoning ──────────────────────────────────────────────────────────────
+  assistant.intent:
+    kind: planning.started
+    payload:
+      content: data.content
+
+  assistant.reasoning:
+    kind: reasoning.started
+    payload:
+      content: data.content
+
+  # ── Tool lifecycle ─────────────────────────────────────────────────────────
+  tool.execution_start:
+    kind: tool.call.started
+    payload:
+      tool_call_id: data.toolCallId
+      tool_name: data.toolName
+      arguments: data.arguments
+
+  tool.execution_complete:
+    kind: tool.call.completed
+    payload:
+      tool_call_id: data.toolCallId
+      success: data.success
+      result: data.result.content
+
+  tool.execution_partial_result:
+    kind: tool.result.chunk
+    payload:
+      tool_call_id: data.toolCallId
+      content: data.content
+
+  tool.execution_progress:
+    kind: tool.progress
+    payload:
+      tool_call_id: data.toolCallId
+
+  # ── Usage ──────────────────────────────────────────────────────────────────
+  assistant.usage:
+    kind: telemetry.usage
+    payload:
+      model: data.model
+      input_tokens: data.inputTokens
+      output_tokens: data.outputTokens
+      cache_read_tokens: data.cacheReadTokens
+      cache_write_tokens: data.cacheWriteTokens
+      cost_usd: data.cost
+      duration_ms: data.duration
+
+  # ── Hooks ──────────────────────────────────────────────────────────────────
+  hook.start:
+    kind: hook.started
+    payload:
+      hook_id: data.hookInvocationId
+      hook_type: data.hookType
+
+  hook.end:
+    kind: hook.completed
+    payload:
+      hook_id: data.hookInvocationId
+      hook_type: data.hookType
+      success: data.success
+
+  # ── External tools (MCP) ───────────────────────────────────────────────────
+  external.tool_requested:
+    kind: tool.call.started
+    payload:
+      tool_name: data.toolName
+
+  external.tool_completed:
+    kind: tool.call.completed
+    payload:
+      tool_name: data.toolName
+      success: data.success
+
+  # ── Agent orchestration ────────────────────────────────────────────────────
+  subagent.started:
+    kind: agent.spawned
+    payload:
+      agent_id: data.agentId
+
+  subagent.completed:
+    kind: agent.completed
+    payload:
+      agent_id: data.agentId
+
+  subagent.failed:
+    kind: agent.failed
+    payload:
+      agent_id: data.agentId
+      message: data.message
+
+  # ── Skills ─────────────────────────────────────────────────────────────────
+  skill.invoked:
+    kind: skill.invoked
+    payload:
+      skill_name: data.skillName
+
+  # ── Permissions ────────────────────────────────────────────────────────────
+  permission.requested:
+    kind: permission.requested
+    payload: {}
+
+  permission.completed:
+    kind: permission.granted
+    payload: {}
+
+  # ── User input ─────────────────────────────────────────────────────────────
+  user_input.requested:
+    kind: input.requested
+    payload: {}
+
+  user_input.completed:
+    kind: input.received
+    payload: {}
+
+  # ── Abort ──────────────────────────────────────────────────────────────────
+  abort:
+    kind: session.abort
+    payload: {}

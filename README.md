@@ -1,6 +1,6 @@
 # tracemill
 
-A pluggable event observation pipeline for agent sessions.
+A pluggable event observation pipeline for AI agent sessions.
 
 tracemill normalizes, enriches, and routes agent session events into storage backends. It handles the boring plumbing so consumers can focus on what to do with the data — memory, analytics, debugging, compliance.
 
@@ -13,70 +13,65 @@ Agent session events → Adapter → Enricher → Pipeline → Storage Sinks
 1. **Adapters** parse raw agent output into a common `SessionEvent` type
 2. **Enricher** adds metadata: timing, token deltas, density classification, conversation threading
 3. **Pipeline** routes enriched events to one or more storage sinks
-4. **Sinks** write to SQLite, export via OTEL, or feed into custom backends (like Graphiti)
+4. **Sinks** write to storage backends or call custom handlers
 
 ## Install
 
 ```bash
-pip install tracemill                    # core only
-pip install tracemill[sqlite]            # with SQLite sink
-pip install tracemill[otel]              # with OpenTelemetry export
-pip install tracemill[all]               # everything
+pip install tracemill
 ```
 
 ## Quick start
 
 ```python
-from tracemill import EventPipeline, Enricher
-from tracemill.adapters import CLIJsonlAdapter
-from tracemill.sinks import SQLiteSink
+from tracemill import EventPipeline, Enricher, MappedJsonAdapter, CallbackSink
 
 # Create pipeline
-sink = SQLiteSink("events.db")
+sink = CallbackSink(on_event=lambda e: print(e.kind, e.payload))
 enricher = Enricher()
-pipeline = EventPipeline(enricher=enricher, sinks=[sink])
+pipeline = EventPipeline(sinks=[sink], enricher=enricher)
 
-# Parse and process events
-adapter = CLIJsonlAdapter()
+# Parse and process events (any framework — just point at its YAML mapping)
+adapter = MappedJsonAdapter.from_yaml("src/tracemill/mappings/copilot.yaml", session_id="my-session")
 for line in session_lines:
-    event = adapter.parse(line)
-    if event:
-        pipeline.process(event)
+    for event in adapter.parse(line):
+        await pipeline.push(event)
 
 # Flush and close
-pipeline.close()
+await pipeline.close()
 ```
 
 ## Core types
 
 ```python
-@dataclass
-class SessionEvent:
-    id: str                      # UUID
+class SessionEvent(BaseModel):
+    id: str                          # UUID
+    kind: str                        # dot-notation event kind (open string)
     session_id: str
     timestamp: datetime
-    kind: EventKind              # user_message, assistant_chunk, tool_call, etc.
-    data: dict[str, Any]
-    source: str                  # adapter identifier
-    metadata: dict[str, Any]     # enrichment adds fields here
+    payload: dict[str, Any]          # adapter-extracted structured fields
+    raw_event: dict[str, Any] | None # original event data, verbatim
+    metadata: EventMetadata          # enrichment adds fields here
 ```
 
-**EventKind** covers the full agent interaction lifecycle:
+**EventKind** uses a `<domain>[.<object>].<phase>` grammar:
 
 | Kind | What |
 | --- | --- |
-| `user_message` | User prompt |
-| `assistant_chunk` | Streaming response fragment |
-| `assistant_message` | Complete response |
-| `tool_call` | Tool invocation request |
-| `tool_result` | Tool execution result |
-| `file_read` | File access |
-| `file_write` | File modification |
-| `command_exec` | Shell command |
-| `git_commit` | Git commit |
-| `session_start` / `session_end` | Session lifecycle |
-| `error` | Error event |
-| `usage` | Token/cost metrics |
+| `message.user` | User prompt |
+| `message.assistant` | Complete assistant response |
+| `message.assistant.chunk` | Streaming response fragment |
+| `message.system` | System message |
+| `llm.call.started` / `.completed` / `.failed` | LLM invocation lifecycle |
+| `llm.output.chunk` / `llm.thinking.chunk` | LLM streaming output |
+| `tool.call.started` / `.completed` / `.failed` | Tool invocation lifecycle |
+| `tool.progress` / `tool.output` | Tool intermediate output |
+| `file.read` / `file.edited` / `file.created` / `file.deleted` | File operations |
+| `command.started` / `.completed` / `.failed` | Shell commands |
+| `session.started` / `session.ended` / `session.error` | Session lifecycle |
+| `workflow.started` / `.completed` / `.failed` | Workflow/graph lifecycle |
+| `telemetry.usage` | Token/cost metrics |
+| `raw` | Unmapped event (fallback) |
 
 ## Adapters
 
@@ -84,25 +79,41 @@ Adapters parse raw agent output formats into `SessionEvent`:
 
 | Adapter | Input format | Agent |
 | --- | --- | --- |
-| `CLIJsonlAdapter` | JSONL session files | Copilot CLI |
-| `CopilotSDKAdapter` | SDK event stream | Copilot extensions |
+| `MappedJsonAdapter` | YAML-driven JSON mapping | Any framework (see below) |
+| `OtelSpanAdapter` | OTEL span JSON | Any OTEL-instrumented agent |
 
-Adapters are stateless parsers. They don't manage files or processes — consumers handle I/O.
+### YAML-mapped frameworks (via `MappedJsonAdapter`)
+
+| Framework | Source |
+| --- | --- |
+| GitHub Copilot | `github/copilot-sdk` |
+| Claude Code | Anthropic Claude Agent SDK |
+| Cline / Roo Code | `cline/cline` (VS Code extension) |
+| CrewAI | `crewAIInc/crewAI` |
+| LangGraph | `langchain-ai/langchain` |
+| OpenHands | `All-Hands-AI/OpenHands` |
+| PydanticAI | `pydantic/pydantic-ai` |
+| smolagents | `huggingface/smolagents` |
+| Goose | `block/goose` |
+| SWE-agent | `SWE-agent/SWE-agent` |
+| OpenCode | `anomalyco/opencode` |
+
+Each framework has a YAML file in `src/tracemill/mappings/` defining event type → kind mapping and payload field extraction. Frameworks with complex event formats use **preprocessors** (`src/tracemill/preprocessors/`) to normalize raw data before mapping.
 
 ### Writing a custom adapter
 
 ```python
-from tracemill.adapters import AdapterInterface
+from tracemill.adapters import JsonLineAdapter
 from tracemill.types import SessionEvent
 
-class MyAdapter(AdapterInterface):
-    @property
-    def source_id(self) -> str:
-        return "my-agent"
-
-    def parse(self, raw: dict | str) -> SessionEvent | None:
-        # Parse your agent's event format into SessionEvent
-        ...
+class MyAdapter(JsonLineAdapter):
+    def parse_dict(self, obj: dict) -> Iterator[SessionEvent]:
+        yield SessionEvent(
+            kind="message.assistant",
+            session_id=self._session_id,
+            timestamp=datetime.now(timezone.utc),
+            payload={"content": obj.get("text", "")},
+        )
 ```
 
 ## Enricher
@@ -122,9 +133,9 @@ Sinks receive enriched events and write them somewhere:
 
 | Sink | Output | Install extra |
 | --- | --- | --- |
-| `SQLiteSink` | Local SQLite database | `[sqlite]` |
-| `OTELSink` | OpenTelemetry spans + metrics | `[otel]` |
 | `CallbackSink` | Custom function | (built-in) |
+| `SQLiteSink` | Local SQLite database | `[sqlite]` (planned) |
+| `OTELSink` | OpenTelemetry spans + metrics | `[otel]` (planned) |
 
 ### Writing a custom sink
 
@@ -137,31 +148,22 @@ class MySink(StorageSink):
         # Write event somewhere
         ...
 
+    async def on_span(self, span: TelemetrySpan) -> None:
+        # Handle telemetry span (optional)
+        ...
+
+    async def on_usage(self, usage: UsageRecord) -> None:
+        # Handle usage record (optional)
+        ...
+
     async def flush(self) -> None:
-        # Flush buffered writes
+        # Flush buffered writes (optional)
         ...
 
     async def close(self) -> None:
-        # Cleanup resources
+        # Cleanup resources (optional)
         ...
 ```
-
-The `StorageSink` ABC also has optional `on_span()` and `on_usage()` hooks for structured telemetry data.
-
-## OpenTelemetry
-
-tracemill emits standard OTEL instruments for agent session metrics:
-
-| Type | Name | What |
-| --- | --- | --- |
-| Counter | `tracemill.tokens.input` | Input tokens consumed |
-| Counter | `tracemill.tokens.output` | Output tokens generated |
-| Counter | `tracemill.cost.usd` | Estimated cost |
-| Histogram | `tracemill.llm.duration_ms` | LLM response latency |
-| Histogram | `tracemill.tool.duration_ms` | Tool execution time |
-| Gauge | `tracemill.context.tokens` | Current context window usage |
-
-Telemetry is opt-in. Without setup, instruments are no-ops (zero overhead).
 
 ## Consumers
 
@@ -176,13 +178,13 @@ tracemill is a library, not a standalone application. Known consumers:
 
 tracemill is extracted from [CodePlane](https://github.com/dfinson/codeplane)'s event processing internals. The pipeline, enricher, density classification, and OTEL instrumentation all exist and work in CodePlane today — tracemill packages them as a standalone, reusable library.
 
-See [SPEC.md](SPEC.md) §8 for the detailed extraction mapping.
+See [SPEC.md](SPEC.md) for the full implementation plan.
 
 ## Design principles
 
 - **Library, not framework** — import what you need, no runtime to manage
 - **Pluggable sinks** — write to anything by implementing `StorageSink`
-- **Zero dependencies in core** — SQLite, OTEL, and other extras are optional
+- **YAML-driven mappings** — add new frameworks without writing Python code
 - **Deterministic enrichment** — same events in, same metadata out
 - **Extracted, not invented** — every component has a working CodePlane ancestor
 

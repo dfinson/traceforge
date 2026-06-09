@@ -1,0 +1,74 @@
+# SWE-agent trajectory mapping for MappedJsonAdapter
+# Targets: sweagent >= 1.0 (trajectory JSON files with history[] array)
+# Source: SWE-agent/SWE-agent sweagent/types.py, sweagent/agent/agents.py
+#
+# SWE-agent stores two arrays in .traj files:
+#   - trajectory[]: action/observation pairs (unmapped — no role discriminator)
+#   - history[]: chat messages with role (system/user/assistant/tool)
+#
+# This YAML maps the history[] format (role-discriminated).
+#
+# IMPORTANT: history entries have NO per-entry timestamps.
+# Each entry has: role, content, agent, message_type, and optionally
+# tool_calls (OpenAI format), tool_call_ids, is_demo, tags, cache_control.
+# NOTE: thinking_blocks exists in unreleased HEAD but NOT in v1.1.0 stable.
+#
+# message_type values: "action" (assistant), "observation" (user/tool),
+#   "system_prompt" (system), "demonstration" (user)
+#
+# Top-level .traj also has info.model_stats (InstanceStats) with:
+#   instance_cost, tokens_sent, tokens_received, api_calls
+# These require a preprocessor to extract (not role-discriminated history entries).
+
+framework: sweagent
+framework_version: ">=1.0"
+ingestion_mode: file_watch
+type_field: role
+timestamp_field: null
+
+events:
+  # ── Agent actions (assistant entries always have message_type="action") ──
+  assistant:
+    kind: message.assistant
+    payload:
+      content: content
+      thought: thought
+      action: action
+      tool_calls: tool_calls
+      agent: agent
+      message_type: message_type
+      is_demo: is_demo
+      tags: tags
+      cache_control: cache_control
+
+  # ── Tool responses (role: tool — OpenAI function-calling responses) ──
+  tool:
+    kind: tool.output
+    payload:
+      content: content
+      tool_call_ids: tool_call_ids
+      agent: agent
+      message_type: message_type
+      is_demo: is_demo
+      tags: tags
+      cache_control: cache_control
+
+  # ── System prompt (role: system, message_type="system_prompt") ──
+  system:
+    kind: message.system
+    payload:
+      content: content
+      agent: agent
+      message_type: message_type
+      cache_control: cache_control
+
+  # ── User messages (task setup, observations in non-FC mode, demos) ──
+  user:
+    kind: message.user
+    payload:
+      content: content
+      message_type: message_type
+      agent: agent
+      is_demo: is_demo
+      tags: tags
+      cache_control: cache_control

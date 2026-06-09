@@ -1,0 +1,174 @@
+# PydanticAI event mapping for MappedJsonAdapter
+# Targets: pydantic-ai >= 1.0.0 (preprocessor-emitted JSONL)
+# Source: pydantic/pydantic-ai pydantic_ai_slim/pydantic_ai/messages.py
+#
+# CRITICAL: PydanticAI does NOT emit flat JSON events with a "type" field.
+# Its native format uses multi-level discrimination:
+#   - Messages: "kind" = "request" | "response"
+#   - Parts: "part_kind" = "system-prompt" | "user-prompt" | "text" | "tool-call" | ...
+#   - Stream events: "event_kind" = "part_start" | "part_delta" | "part_end" | ...
+#   - Usage: ModelResponse.usage = {input_tokens, output_tokens, ...}
+#
+# This YAML assumes a PydanticAIPreProcessor normalizes the native format to
+# flat JSONL with a "type" discriminator. The preprocessor MUST synthesize:
+#   {"type": "model_response", "usage": {...}, ...}
+#   {"type": "stream.part_start", "part": {...}, ...}
+#   {"type": "stream.part_delta", "delta": {...}, ...}
+#
+# Real UsageMetadata fields: input_tokens, output_tokens,
+#   cache_write_tokens, cache_read_tokens
+# NOTE: total_tokens is a @property (input+output), NOT a stored field.
+#   It will NOT appear in model_dump() unless explicitly computed by preprocessor.
+# Real tool call field: tool_call_id (not call_id — call_id is deprecated alias)
+
+framework: pydantic_ai
+framework_version: ">=1.0.0"
+ingestion_mode: file_watch
+type_field: type
+timestamp_field: timestamp
+preprocessor: pydantic_ai
+
+events:
+  # ── Agent lifecycle ──
+  agent_run_start:
+    kind: session.started
+    payload:
+      agent_name: agent_name
+      model: model_name
+  agent_run_end:
+    kind: session.ended
+    payload:
+      agent_name: agent_name
+      result: result
+  agent_run_error:
+    kind: session.error
+    payload:
+      agent_name: agent_name
+      message: error
+
+  # ── Model calls ──
+  model_request_start:
+    kind: llm.call.started
+    payload:
+      model: model_name
+      request_id: request_id
+  model_request:
+    kind: message.user
+    payload:
+      content: content
+  model_response:
+    kind: llm.call.completed
+    payload:
+      model: model_name
+      input_tokens: usage.input_tokens
+      output_tokens: usage.output_tokens
+      cache_read_tokens: usage.cache_read_tokens
+      cache_write_tokens: usage.cache_write_tokens
+      content: content
+  model_request_error:
+    kind: llm.call.failed
+    payload:
+      model: model_name
+      error: error
+
+  # ── Tool calls ──
+  tool_call_start:
+    kind: tool.call.started
+    payload:
+      tool_name: tool_name
+      tool_call_id: tool_call_id
+      arguments: args
+  tool_call_end:
+    kind: tool.call.completed
+    payload:
+      tool_call_id: tool_call_id
+      tool_name: tool_name
+      result: result
+  tool_call_error:
+    kind: tool.call.failed
+    payload:
+      tool_call_id: tool_call_id
+      tool_name: tool_name
+      error: error
+
+  # ── Messages ──
+  user_message:
+    kind: message.user
+    payload:
+      content: content
+  model_text_response:
+    kind: message.assistant
+    payload:
+      content: content
+  model_structured_response:
+    kind: message.assistant
+    payload:
+      content: data
+
+  # ── Streaming (preprocessor synthesizes "stream.<event_kind>") ──
+  # PartStartEvent has .part (the part object), NOT .delta
+  stream.part_start:
+    kind: llm.output.chunk
+    payload:
+      content: part.content
+      part_kind: part.part_kind
+  # PartDeltaEvent has .delta with content_delta
+  # PartDeltaEvent: TextPartDelta has .content_delta; ToolCallPartDelta has .args_delta
+  # Discriminator: delta.part_delta_kind ("text" vs "tool_call")
+  stream.part_delta:
+    kind: llm.output.chunk
+    payload:
+      content: delta.content_delta
+      args_delta: delta.args_delta
+      part_delta_kind: delta.part_delta_kind
+  stream.part_end:
+    kind: message.assistant
+    payload:
+      content: content
+  # FinalResultEvent (event_kind="final_result") — signal-only, no content payload.
+  # Indicates which tool call produced the final result; actual data was in prior PartStart/Delta.
+  stream.final_result:
+    kind: session.ended
+    payload:
+      tool_name: tool_name
+      tool_call_id: tool_call_id
+  model_response_chunk:
+    kind: llm.output.chunk
+    payload:
+      content: chunk
+
+  # ── Retries / validation ──
+  validation_error:
+    kind: tool.validation.failed
+    payload:
+      tool_name: tool_name
+      error: error
+      retry_count: retry_count
+  retry:
+    kind: session.error
+    payload:
+      message: reason
+      attempt: attempt
+
+  # ── Telemetry (from model response usage) ──
+  token_usage:
+    kind: telemetry.usage
+    payload:
+      input_tokens: usage.input_tokens
+      output_tokens: usage.output_tokens
+      model: model_name
+
+  # ── Output validation (SDK calls this "output_validator") ──
+  output_validation_start:
+    kind: guardrail.started
+    payload:
+      validator: validator_name
+  output_validation_pass:
+    kind: guardrail.passed
+    payload:
+      validator: validator_name
+  output_validation_fail:
+    kind: guardrail.failed
+    payload:
+      validator: validator_name
+      reason: error

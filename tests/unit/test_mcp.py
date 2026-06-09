@@ -1,6 +1,6 @@
-from functools import partial
-
 """Tests for MCP tool classification module."""
+
+from functools import partial
 
 from tracemill.classify import get_default_engine
 from tracemill.classify.mcp import (
@@ -53,13 +53,35 @@ class TestVerbInference:
     """Verb → (effect, action) inference."""
 
     def test_read_verbs(self):
-        for verb in ("get", "list", "read", "search", "query", "fetch", "browse", "find", "show", "view"):
+        for verb in (
+            "get",
+            "list",
+            "read",
+            "search",
+            "query",
+            "fetch",
+            "browse",
+            "find",
+            "show",
+            "view",
+        ):
             effect, action = _infer_from_verb(f"{verb}_something")
             assert effect == "read_only", f"Expected read_only for {verb}"
             assert action is not None, f"Expected action for {verb}"
 
     def test_mutating_verbs(self):
-        for verb in ("create", "update", "write", "set", "add", "apply", "run", "execute", "push", "deploy"):
+        for verb in (
+            "create",
+            "update",
+            "write",
+            "set",
+            "add",
+            "apply",
+            "run",
+            "execute",
+            "push",
+            "deploy",
+        ):
             effect, action = _infer_from_verb(f"{verb}_something")
             assert effect == "mutating", f"Expected mutating for {verb}"
 

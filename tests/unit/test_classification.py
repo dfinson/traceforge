@@ -89,19 +89,25 @@ class TestClassification:
         assert restored.binaries == original.binaries
 
     def test_has_role_exact(self):
-        c = Classification(mechanism="shell", effect="read_only", role=frozenset({"validator.linter"}))
+        c = Classification(
+            mechanism="shell", effect="read_only", role=frozenset({"validator.linter"})
+        )
         assert c.has_role("validator.linter")
         assert c.has_role("validator")
         assert not c.has_role("transformer")
 
     def test_has_action_hierarchy(self):
-        c = Classification(mechanism="shell", effect="read_only", action=frozenset({"validate.test"}))
+        c = Classification(
+            mechanism="shell", effect="read_only", action=frozenset({"validate.test"})
+        )
         assert c.has_action("validate.test")
         assert c.has_action("validate")
         assert not c.has_action("transform")
 
     def test_has_scope_hierarchy(self):
-        c = Classification(mechanism="filesystem", effect="mutating", scope=frozenset({"artifact.source_code"}))
+        c = Classification(
+            mechanism="filesystem", effect="mutating", scope=frozenset({"artifact.source_code"})
+        )
         assert c.has_scope("artifact.source_code")
         assert c.has_scope("artifact")
         assert not c.has_scope("data")
@@ -380,5 +386,3 @@ class TestCoreEnums:
         for v in CodingScope:
             parent = v.value.rsplit(".", 1)[0]
             assert parent in [s.value for s in Scope], f"{v.value} has invalid parent {parent}"
-
-

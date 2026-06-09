@@ -1,0 +1,503 @@
+# CrewAI event mapping for MappedJsonAdapter
+# Targets: crewai >= 1.0.0 (crewai_event_bus with BaseEventListener)
+# Source: crewAIInc/crewAI lib/crewai/src/crewai/events/
+#
+# CrewAI 1.x ships a full event bus (crewai_event_bus) with 60+ typed events.
+# All events inherit from BaseEvent which provides:
+#   type (Literal[...]), timestamp, event_id, parent_event_id, previous_event_id,
+#   triggered_by_event_id, emission_sequence, source_fingerprint, source_type,
+#   fingerprint_metadata, task_id, task_name, agent_id, agent_role
+#
+# Events are subscribed via BaseEventListener + @on(EventType) decorator.
+# The event bus is a singleton: `from crewai.events import crewai_event_bus`
+#
+# NOTE: crewAI-inc/crewAI (hyphenated, 0.86) is a FROZEN FORK.
+# The active repo is crewAIInc/crewAI (capital Inc) at 1.10+.
+
+framework: crewai
+framework_version: ">=1.0.0"
+ingestion_mode: file_watch
+type_field: type
+timestamp_field: timestamp
+
+events:
+  # ── Flow lifecycle (lib/crewai/src/crewai/events/types/flow_events.py) ──
+  flow_created:
+    kind: workflow.created
+    payload:
+      flow_name: flow_name
+  flow_started:
+    kind: workflow.started
+    payload:
+      flow_name: flow_name
+      inputs: inputs
+  flow_finished:
+    kind: workflow.completed
+    payload:
+      flow_name: flow_name
+      result: result
+      state: state
+  flow_paused:
+    kind: workflow.paused
+    payload:
+      flow_name: flow_name
+  method_execution_started:
+    kind: task.started
+    payload:
+      flow_name: flow_name
+      task_name: method_name
+      state: state
+      params: params
+  method_execution_finished:
+    kind: task.completed
+    payload:
+      flow_name: flow_name
+      task_name: method_name
+      result: result
+      state: state
+  method_execution_failed:
+    kind: task.failed
+    payload:
+      flow_name: flow_name
+      task_name: method_name
+      error: error
+  method_execution_paused:
+    kind: task.paused
+    payload:
+      flow_name: flow_name
+      task_name: method_name
+
+  # ── Crew lifecycle ──
+  crew_kickoff_started:
+    kind: session.started
+    payload:
+      crew_name: crew_name
+      event_id: event_id
+  crew_kickoff_completed:
+    kind: session.ended
+    payload:
+      crew_name: crew_name
+      output: output
+  crew_kickoff_failed:
+    kind: session.error
+    payload:
+      crew_name: crew_name
+      error: error
+
+  # ── Agent execution ──
+  agent_execution_started:
+    kind: agent.spawned
+    payload:
+      agent_id: agent_id
+      agent_role: agent_role
+      task_name: task_name
+  agent_execution_completed:
+    kind: agent.completed
+    payload:
+      agent_id: agent_id
+      agent_role: agent_role
+      output: output
+  agent_execution_error:
+    kind: agent.failed
+    payload:
+      agent_id: agent_id
+      agent_role: agent_role
+      error: error
+
+  # ── Task lifecycle ──
+  task_started:
+    kind: task.started
+    payload:
+      task_id: task_id
+      task_name: task_name
+      agent_role: agent_role
+  task_completed:
+    kind: task.completed
+    payload:
+      task_id: task_id
+      task_name: task_name
+      output: output
+  task_failed:
+    kind: task.failed
+    payload:
+      task_id: task_id
+      task_name: task_name
+      error: error
+
+  # ── Tool usage ──
+  tool_usage_started:
+    kind: tool.call.started
+    payload:
+      tool_name: tool_name
+      tool_call_id: event_id
+      arguments: tool_args
+  tool_usage_finished:
+    kind: tool.call.completed
+    payload:
+      tool_name: tool_name
+      result: output
+  tool_usage_error:
+    kind: tool.call.failed
+    payload:
+      tool_name: tool_name
+      error: error
+
+  # ── LLM calls ──
+  llm_call_started:
+    kind: llm.call.started
+    payload:
+      model: model
+      agent_role: agent_role
+      event_id: event_id
+  llm_call_completed:
+    kind: llm.call.completed
+    payload:
+      model: model
+      output: response
+      input_tokens: usage.prompt_tokens
+      output_tokens: usage.completion_tokens
+  llm_call_failed:
+    kind: llm.call.failed
+    payload:
+      model: model
+      error: error
+  llm_stream_chunk:
+    kind: llm.output.chunk
+    payload:
+      content: chunk
+
+  # ── Memory operations ──
+  memory_save_started:
+    kind: memory.save.started
+    payload:
+      event_id: event_id
+  memory_save_completed:
+    kind: memory.save.completed
+    payload:
+      event_id: event_id
+  memory_query_started:
+    kind: memory.query.started
+    payload:
+      event_id: event_id
+  memory_query_completed:
+    kind: memory.query.completed
+    payload:
+      event_id: event_id
+
+  # ── Knowledge retrieval ──
+  knowledge_search_query_started:
+    kind: knowledge.query.started
+    payload:
+      event_id: event_id
+  knowledge_search_query_completed:
+    kind: knowledge.query.completed
+    payload:
+      event_id: event_id
+
+  # ── MCP connections ──
+  mcp_connection_started:
+    kind: mcp.connection.started
+    payload:
+      event_id: event_id
+  mcp_connection_completed:
+    kind: mcp.connection.completed
+    payload:
+      event_id: event_id
+  mcp_connection_failed:
+    kind: mcp.connection.failed
+    payload:
+      error: error
+  mcp_tool_execution_started:
+    kind: mcp.tool.started
+    payload:
+      event_id: event_id
+  mcp_tool_execution_completed:
+    kind: mcp.tool.completed
+    payload:
+      event_id: event_id
+  mcp_tool_execution_failed:
+    kind: mcp.tool.failed
+    payload:
+      error: error
+
+  # ── Human feedback / conversation ──
+  flow_input_requested:
+    kind: input.requested
+    payload:
+      flow_name: flow_name
+  flow_input_received:
+    kind: input.received
+    payload:
+      flow_name: flow_name
+  human_feedback_requested:
+    kind: input.requested
+    payload:
+      event_id: event_id
+  human_feedback_received:
+    kind: input.received
+    payload:
+      event_id: event_id
+  conversation_message_added:
+    kind: message.user
+    payload:
+      event_id: event_id
+
+  # ── Checkpoints ──
+  checkpoint_started:
+    kind: checkpoint.started
+    payload:
+      event_id: event_id
+  checkpoint_completed:
+    kind: checkpoint.created
+    payload:
+      event_id: event_id
+  checkpoint_failed:
+    kind: checkpoint.failed
+    payload:
+      event_id: event_id
+      error: error
+  checkpoint_pruned:
+    kind: checkpoint.pruned
+    payload:
+      event_id: event_id
+  checkpoint_fork_started:
+    kind: checkpoint.fork.started
+    payload:
+      event_id: event_id
+  checkpoint_fork_completed:
+    kind: checkpoint.fork.completed
+    payload:
+      event_id: event_id
+  checkpoint_restore_started:
+    kind: checkpoint.restore.started
+    payload:
+      event_id: event_id
+  checkpoint_restore_completed:
+    kind: checkpoint.restore.completed
+    payload:
+      event_id: event_id
+  checkpoint_restore_failed:
+    kind: checkpoint.restore.failed
+    payload:
+      event_id: event_id
+      error: error
+
+  # ── Crew training/testing ──
+  crew_train_started:
+    kind: session.started
+    payload:
+      crew_name: crew_name
+  crew_train_completed:
+    kind: session.ended
+    payload:
+      crew_name: crew_name
+  crew_train_failed:
+    kind: session.error
+    payload:
+      crew_name: crew_name
+      error: error
+  crew_test_started:
+    kind: session.started
+    payload:
+      crew_name: crew_name
+  crew_test_completed:
+    kind: session.ended
+    payload:
+      crew_name: crew_name
+  crew_test_failed:
+    kind: session.error
+    payload:
+      crew_name: crew_name
+      error: error
+  crew_test_result:
+    kind: session.info
+    payload:
+      crew_name: crew_name
+      event_id: event_id
+
+  # ── Lite agent execution ──
+  lite_agent_execution_started:
+    kind: agent.spawned
+    payload:
+      agent_id: agent_id
+      agent_role: agent_role
+  lite_agent_execution_completed:
+    kind: agent.completed
+    payload:
+      agent_id: agent_id
+      output: output
+  lite_agent_execution_error:
+    kind: agent.failed
+    payload:
+      agent_id: agent_id
+      error: error
+
+  # ── Agent evaluation ──
+  agent_evaluation_started:
+    kind: agent.evaluation.started
+    payload:
+      agent_id: agent_id
+      event_id: event_id
+  agent_evaluation_completed:
+    kind: agent.evaluation.completed
+    payload:
+      agent_id: agent_id
+      event_id: event_id
+  agent_evaluation_failed:
+    kind: agent.evaluation.failed
+    payload:
+      agent_id: agent_id
+      error: error
+
+  # ── Agent reasoning ──
+  agent_reasoning_started:
+    kind: reasoning.started
+    payload:
+      agent_id: agent_id
+      event_id: event_id
+  agent_reasoning_completed:
+    kind: reasoning.completed
+    payload:
+      agent_id: agent_id
+      event_id: event_id
+  agent_reasoning_failed:
+    kind: reasoning.failed
+    payload:
+      agent_id: agent_id
+      error: error
+
+  # ── Tool errors (granular) ──
+  tool_validate_input_error:
+    kind: tool.validation.failed
+    payload:
+      tool_name: tool_name
+      error: error
+  tool_selection_error:
+    kind: tool.call.failed
+    payload:
+      error: error
+  tool_execution_error:
+    kind: tool.call.failed
+    payload:
+      tool_name: tool_name
+      error: error
+
+  # ── Memory failures ──
+  memory_save_failed:
+    kind: memory.save.failed
+    payload:
+      event_id: event_id
+      error: error
+  memory_query_failed:
+    kind: memory.query.failed
+    payload:
+      event_id: event_id
+      error: error
+  memory_retrieval_started:
+    kind: memory.query.started
+    payload:
+      event_id: event_id
+  memory_retrieval_completed:
+    kind: memory.query.completed
+    payload:
+      event_id: event_id
+  memory_retrieval_failed:
+    kind: memory.query.failed
+    payload:
+      event_id: event_id
+      error: error
+
+  # ── Knowledge failures ──
+  knowledge_query_started:
+    kind: knowledge.query.started
+    payload:
+      event_id: event_id
+  knowledge_query_completed:
+    kind: knowledge.query.completed
+    payload:
+      event_id: event_id
+  knowledge_query_failed:
+    kind: knowledge.query.failed
+    payload:
+      event_id: event_id
+      error: error
+  knowledge_search_query_failed:
+    kind: knowledge.query.failed
+    payload:
+      event_id: event_id
+      error: error
+
+  # ── LLM guardrails ──
+  llm_thinking_chunk:
+    kind: reasoning.chunk
+    payload:
+      content: chunk
+  llm_guardrail_started:
+    kind: guardrail.started
+    payload:
+      event_id: event_id
+  llm_guardrail_completed:
+    kind: guardrail.passed
+    payload:
+      event_id: event_id
+
+  # ── MCP config failure ──
+  mcp_config_fetch_failed:
+    kind: mcp.connection.failed
+    payload:
+      error: error
+
+  # ── Task evaluation ──
+  task_evaluation:
+    kind: task.evaluation
+    payload:
+      task_id: task_id
+      event_id: event_id
+
+  # ── Observation/planning events ──
+  step_observation_started:
+    kind: task.observation.started
+    payload:
+      event_id: event_id
+  step_observation_completed:
+    kind: task.observation.completed
+    payload:
+      event_id: event_id
+  step_observation_failed:
+    kind: task.observation.failed
+    payload:
+      event_id: event_id
+      error: error
+  plan_refinement:
+    kind: planning.updated
+    payload:
+      event_id: event_id
+  plan_replan_triggered:
+    kind: planning.restarted
+    payload:
+      event_id: event_id
+  goal_achieved_early:
+    kind: session.ended
+    payload:
+      event_id: event_id
+
+  # ── Flow routing ──
+  flow_plot:
+    kind: workflow.info
+    payload:
+      flow_name: flow_name
+  conversation_route_selected:
+    kind: workflow.routed
+    payload:
+      flow_name: flow_name
+      event_id: event_id
+
+  # ── Agent logging ──
+  agent_logs_started:
+    kind: agent.log.started
+    payload:
+      event_id: event_id
+  agent_logs_execution:
+    kind: agent.log.entry
+    payload:
+      event_id: event_id

@@ -27,9 +27,19 @@ if TYPE_CHECKING:
 
 _DEFAULT_SENSITIVITY_BONUSES: dict[str, int] = {"secrets": 20, "system": 14}
 
-_EXECUTION_SINKS = frozenset({
-    "bash", "sh", "zsh", "python", "python3", "perl", "ruby", "node", "eval",
-})
+_EXECUTION_SINKS = frozenset(
+    {
+        "bash",
+        "sh",
+        "zsh",
+        "python",
+        "python3",
+        "perl",
+        "ruby",
+        "node",
+        "eval",
+    }
+)
 _NETWORK_SINKS = frozenset({"curl", "wget", "nc", "ncat", "socat", "telnet"})
 _EXECUTION_EFFECTS = frozenset({"destructive", "mutating"})
 _NETWORK_SOURCES = frozenset({"curl", "wget", "fetch"})
@@ -88,8 +98,12 @@ def assess_risk(
     risk_cfg = engine.risk_config
     if risk_cfg is None:
         return RiskAssessment(
-            score=0, level="safe", confidence=Confidence.LOW,
-            factors=(), mitre=(), version="risk-v2",
+            score=0,
+            level="safe",
+            confidence=Confidence.LOW,
+            factors=(),
+            mitre=(),
+            version="risk-v2",
         )
 
     factors: list[str] = []
@@ -194,8 +208,12 @@ def assess_tool_risk(
     risk_cfg = engine.risk_config
     if risk_cfg is None:
         return RiskAssessment(
-            score=0, level="safe", confidence=Confidence.LOW,
-            factors=(), mitre=(), version="risk-v2",
+            score=0,
+            level="safe",
+            confidence=Confidence.LOW,
+            factors=(),
+            mitre=(),
+            version="risk-v2",
         )
 
     factors: list[str] = []
@@ -381,9 +399,7 @@ def _compute_scope_bonus(
     return scope_bonus
 
 
-def _check_sensitive_paths(
-    targets: list[str], sensitive_paths: dict[str, list[str]]
-) -> str | None:
+def _check_sensitive_paths(targets: list[str], sensitive_paths: dict[str, list[str]]) -> str | None:
     """Check if any target matches a sensitive path pattern. Returns category or None.
 
     Builds a flat (pattern, category) index on first call per invocation to
@@ -445,9 +461,7 @@ def _compute_taint_bonus(
     return best_escalation
 
 
-def _classify_taint_source(
-    segment: dict[str, Any], sensitive_paths: dict[str, list[str]]
-) -> str:
+def _classify_taint_source(segment: dict[str, Any], sensitive_paths: dict[str, list[str]]) -> str:
     """Classify a pipe source segment."""
     targets = segment.get("targets", [])
     if targets:
@@ -512,11 +526,19 @@ def _compute_context_adjustment(
                 return max(adj, adjustments.get("escapes_project", 20))
             adj = min(adj, adjustments.get("inside_project", -10))
             if any(d in norm_target.split(os.sep) for d in _BUILD_DIRS):
-                adj = min(adj, adjustments.get("inside_build_dir", -5) + adjustments.get("inside_project", -10))
+                adj = min(
+                    adj,
+                    adjustments.get("inside_build_dir", -5)
+                    + adjustments.get("inside_project", -10),
+                )
         elif norm_root and norm_target.startswith(norm_root):
             adj = min(adj, adjustments.get("inside_project", -10))
             if any(d in norm_target.split(os.sep) for d in _BUILD_DIRS):
-                adj = min(adj, adjustments.get("inside_build_dir", -5) + adjustments.get("inside_project", -10))
+                adj = min(
+                    adj,
+                    adjustments.get("inside_build_dir", -5)
+                    + adjustments.get("inside_project", -10),
+                )
         else:
             return max(adj, adjustments.get("escapes_project", 20))
 

@@ -43,7 +43,7 @@ def _make_tool_start(
     **extra_payload,
 ) -> SessionEvent:
     return SessionEvent(
-        kind=EventKind.TOOL_START,
+        kind=EventKind.TOOL_CALL_STARTED,
         session_id=session_id,
         timestamp=ts or datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
         payload={"tool_call_id": tool_call_id, "tool_name": tool_name, **extra_payload},
@@ -58,7 +58,7 @@ def _make_tool_complete(
     **extra_payload,
 ) -> SessionEvent:
     return SessionEvent(
-        kind=EventKind.TOOL_COMPLETE,
+        kind=EventKind.TOOL_CALL_COMPLETED,
         session_id=session_id,
         timestamp=ts or datetime(2024, 1, 1, 12, 0, 5, tzinfo=timezone.utc),
         payload={"tool_call_id": tool_call_id, "tool_name": tool_name, **extra_payload},
@@ -103,7 +103,7 @@ class TestToolPairing:
         flushed = enricher.flush()
         assert len(flushed) == 1
         assert flushed[0].metadata.duration_ms is None
-        assert flushed[0].kind == EventKind.TOOL_START
+        assert flushed[0].kind == EventKind.TOOL_CALL_STARTED
 
     def test_unmatched_complete_passed_through(self):
         enricher = Enricher()
@@ -256,14 +256,14 @@ class TestVisibility:
 
     def test_session_start_is_internal(self):
         enricher = Enricher()
-        event = _make_event(EventKind.SESSION_START)
+        event = _make_event(EventKind.SESSION_STARTED)
         result = enricher.process(event)
         assert result is not None
         assert result.metadata.visibility == "system"
 
     def test_session_end_is_internal(self):
         enricher = Enricher()
-        event = _make_event(EventKind.SESSION_END)
+        event = _make_event(EventKind.SESSION_ENDED)
         result = enricher.process(event)
         assert result is not None
         assert result.metadata.visibility == "system"
@@ -277,7 +277,7 @@ class TestVisibility:
 
     def test_user_message_is_visible(self):
         enricher = Enricher()
-        event = _make_event(EventKind.USER_MESSAGE)
+        event = _make_event(EventKind.MESSAGE_USER)
         result = enricher.process(event)
         assert result is not None
         assert result.metadata.visibility == "visible"
@@ -291,13 +291,13 @@ class TestVisibility:
 class TestPhaseDetection:
     def test_user_message_is_planning(self):
         enricher = Enricher()
-        event = _make_event(EventKind.USER_MESSAGE)
+        event = _make_event(EventKind.MESSAGE_USER)
         result = enricher.process(event)
         assert result.metadata.phases == frozenset({"planning"})
 
     def test_assistant_message_is_planning(self):
         enricher = Enricher()
-        event = _make_event(EventKind.ASSISTANT_MESSAGE)
+        event = _make_event(EventKind.MESSAGE_ASSISTANT)
         result = enricher.process(event)
         assert result.metadata.phases == frozenset({"planning"})
 
@@ -357,7 +357,6 @@ class TestPhaseDetection:
 
     def test_compound_command_phase_map_groups_labels(self):
         """phase_map preserves which actions belong to which phase."""
-        from tracemill.classify import classify_shell
 
         cls = _classify_shell("pytest tests/ && git push origin main")
         # Both actions present in aggregate
@@ -432,7 +431,7 @@ class TestEdgeCases:
         enricher = Enricher()
         start = _make_tool_start(tool_name="report_intent")
         complete = SessionEvent(
-            kind=EventKind.TOOL_COMPLETE,
+            kind=EventKind.TOOL_CALL_COMPLETED,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 2, tzinfo=timezone.utc),
             payload={"tool_call_id": "tc-1", "result": "ok"},
@@ -472,7 +471,7 @@ class TestEdgeCases:
         """Bug #9: _enrichment that's not a dict should not crash."""
         enricher = Enricher()
         event = SessionEvent(
-            kind=EventKind.USER_MESSAGE,
+            kind=EventKind.MESSAGE_USER,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
             payload={"content": "hi", "_enrichment": "invalid_string"},
@@ -485,7 +484,7 @@ class TestEdgeCases:
         """_enrichment: None should not crash."""
         enricher = Enricher()
         event = SessionEvent(
-            kind=EventKind.USER_MESSAGE,
+            kind=EventKind.MESSAGE_USER,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
             payload={"content": "hi", "_enrichment": None},
@@ -520,7 +519,7 @@ class TestEdgeCases:
         """TOOL_START with no tool_call_id should not be buffered."""
         enricher = Enricher()
         event = SessionEvent(
-            kind=EventKind.TOOL_START,
+            kind=EventKind.TOOL_CALL_STARTED,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
             payload={"tool_name": "edit"},
@@ -532,7 +531,7 @@ class TestEdgeCases:
         """TOOL_COMPLETE with no tool_call_id should pass through."""
         enricher = Enricher()
         event = SessionEvent(
-            kind=EventKind.TOOL_COMPLETE,
+            kind=EventKind.TOOL_CALL_COMPLETED,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
             payload={"tool_name": "edit", "result": "ok"},
@@ -547,14 +546,14 @@ class TestEdgeCases:
 
         enricher = Enricher()
         start = SessionEvent(
-            kind=EventKind.TOOL_START,
+            kind=EventKind.TOOL_CALL_STARTED,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
             payload={"tool_call_id": "tc-m", "tool_name": "edit"},
             metadata=EventMetadata(turn_id="turn-42", repo="my/repo"),
         )
         complete = SessionEvent(
-            kind=EventKind.TOOL_COMPLETE,
+            kind=EventKind.TOOL_CALL_COMPLETED,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 1, tzinfo=timezone.utc),
             payload={"tool_call_id": "tc-m", "result": "done"},
@@ -592,7 +591,7 @@ class TestEdgeCases:
         enricher = Enricher()
         pipeline = EventPipeline(sinks=[recorder.sink], enricher=enricher)
 
-        event = _make_event(EventKind.USER_MESSAGE)
+        event = _make_event(EventKind.MESSAGE_USER)
 
         with patch.object(enricher, "process", side_effect=RuntimeError("boom")):
             await pipeline.push(event)
@@ -650,7 +649,7 @@ class TestIDStabilityAndRobustness:
         )
         # Create a complete with naive timestamp that will cause TypeError in subtraction
         complete = SessionEvent(
-            kind=EventKind.TOOL_COMPLETE,
+            kind=EventKind.TOOL_CALL_COMPLETED,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 1),  # naive — will fail on subtract
             payload={"tool_call_id": "tc-fail", "tool_name": "edit"},
@@ -682,7 +681,7 @@ class TestIDStabilityAndRobustness:
         )
         # Complete has no arguments — merged payload should still contain start's
         complete = SessionEvent(
-            kind=EventKind.TOOL_COMPLETE,
+            kind=EventKind.TOOL_CALL_COMPLETED,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 2, tzinfo=timezone.utc),
             payload={"tool_call_id": "tc-phase", "result": "0 failures"},
@@ -697,7 +696,7 @@ class TestIDStabilityAndRobustness:
         """Non-string tool_call_id should not crash or buffer."""
         enricher = Enricher()
         event = SessionEvent(
-            kind=EventKind.TOOL_START,
+            kind=EventKind.TOOL_CALL_STARTED,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
             payload={"tool_call_id": 12345, "tool_name": "edit"},
@@ -711,14 +710,13 @@ class TestIDStabilityAndRobustness:
         """Empty string tool_call_id should not buffer."""
         enricher = Enricher()
         event = SessionEvent(
-            kind=EventKind.TOOL_START,
+            kind=EventKind.TOOL_CALL_STARTED,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
             payload={"tool_call_id": "", "tool_name": "edit"},
         )
         result = enricher.process(event)
         assert result is not None
-
 
 
 # =============================================================================
@@ -785,113 +783,96 @@ class TestShellDeepClassification:
 
 class TestNewBinaryRules:
     def test_docker_build(self):
-        from tracemill.classify import classify_shell
         cls = _classify_shell("docker build -t myapp .")
         assert cls.has_role("executor.container_runtime")
         assert cls.has_action("validate.build_check")
 
     def test_docker_push(self):
-        from tracemill.classify import classify_shell
         cls = _classify_shell("docker push myapp:latest")
         assert cls.has_action("deliver.push")
 
     def test_kubectl_apply(self):
-        from tracemill.classify import classify_shell
         cls = _classify_shell("kubectl apply -f deployment.yaml")
         assert cls.has_action("deliver.deploy")
         assert cls.has_scope("state.deployment")
 
     def test_kubectl_delete(self):
-        from tracemill.classify import classify_shell
         cls = _classify_shell("kubectl delete pod my-pod")
         assert cls.effect == "destructive"
 
     def test_terraform_plan(self):
-        from tracemill.classify import classify_shell
         cls = _classify_shell("terraform plan")
         assert cls.effect == "read_only"
         assert cls.has_scope("configuration.infrastructure")
 
     def test_terraform_apply(self):
-        from tracemill.classify import classify_shell
         cls = _classify_shell("terraform apply")
         assert cls.effect == "mutating"
         assert cls.has_action("deliver.deploy")
 
     def test_terraform_destroy(self):
-        from tracemill.classify import classify_shell
         cls = _classify_shell("terraform destroy")
         assert cls.effect == "destructive"
 
     def test_curl_get(self):
-        from tracemill.classify import classify_shell
         cls = _classify_shell("curl https://api.example.com")
         assert cls.effect == "read_only"
 
     def test_curl_post(self):
-        from tracemill.classify import classify_shell
         cls = _classify_shell("curl -X POST https://api.example.com -d '{}'")
         assert cls.effect == "mutating"
 
     def test_curl_data_flag(self):
-        from tracemill.classify import classify_shell
         cls = _classify_shell("curl --data 'payload' https://api.example.com")
         assert cls.effect == "mutating"
 
     def test_sed_inplace(self):
-        from tracemill.classify import classify_shell
         cls = _classify_shell("sed -i 's/foo/bar/g' file.txt")
         assert cls.effect == "mutating"
 
     def test_sed_stdout(self):
-        from tracemill.classify import classify_shell
         cls = _classify_shell("sed 's/foo/bar/g' file.txt")
         assert cls.effect == "read_only"
 
     def test_rm_is_destructive(self):
-        from tracemill.classify import classify_shell
         cls = _classify_shell("rm -rf temp/")
         assert cls.effect == "destructive"
 
     def test_cp_is_mutating(self):
-        from tracemill.classify import classify_shell
         cls = _classify_shell("cp src.txt dst.txt")
         assert cls.effect == "mutating"
 
     def test_cat_is_read_only(self):
-        from tracemill.classify import classify_shell
         cls = _classify_shell("cat file.txt")
         assert cls.effect == "read_only"
 
     def test_grep_is_investigation(self):
-        from tracemill.classify.rules import classify_binary, SHELL_INVESTIGATION
+        from tracemill.classify.rules import SHELL_INVESTIGATION
+
         act = _classify_binary("grep", None, [], ["grep", "pattern", "file"])
         assert act == SHELL_INVESTIGATION
 
     def test_bandit_security_scanner(self):
-        from tracemill.classify import classify_shell
         cls = _classify_shell("bandit -r src/")
         assert cls.has_role("validator.security_scanner")
         assert cls.has_action("validate.security_scan")
 
     def test_helm_install(self):
-        from tracemill.classify import classify_shell
         cls = _classify_shell("helm install myapp ./chart")
         assert cls.has_action("deliver.deploy")
         assert cls.has_scope("state.deployment")
 
     def test_gh_pr(self):
-        from tracemill.classify import classify_shell
         cls = _classify_shell("gh pr create --title 'fix'")
         assert cls.has_role("persistence.version_control")
 
     def test_ls_is_investigation(self):
-        from tracemill.classify.rules import classify_binary, SHELL_INVESTIGATION
+        from tracemill.classify.rules import SHELL_INVESTIGATION
+
         act = _classify_binary("ls", None, ["-la"], ["ls", "-la"])
         assert act == SHELL_INVESTIGATION
 
     def test_jq_is_read_only(self):
-        from tracemill.classify import classify_shell
         cls = _classify_shell("jq '.name' package.json")
         assert cls.effect == "read_only"
 
@@ -903,48 +884,39 @@ class TestNewBinaryRules:
 
 class TestMCPHeuristics:
     def test_mcp_filesystem_tool(self):
-        from tracemill.classify.tools import classify_tool
         cls = _classify_tool("mcp__myfs__read_file")
         assert cls.mechanism == "filesystem"
 
     def test_mcp_database_tool(self):
-        from tracemill.classify.tools import classify_tool
         cls = _classify_tool("mcp__database__query")
         assert cls.mechanism.startswith("database")
 
     def test_mcp_github_tool(self):
-        from tracemill.classify.tools import classify_tool
         cls = _classify_tool("mcp__github__list_repos")
         assert cls.mechanism.startswith("network")
 
     def test_mcp_unknown_namespace(self):
-        from tracemill.classify.tools import classify_tool
         cls = _classify_tool("mcp__randomserver__do_stuff")
         # Falls back to communication but that's OK
         assert cls.mechanism is not None
 
     def test_verb_effect_get(self):
-        from tracemill.classify.tools import classify_tool
         cls = _classify_tool("mcp__myserver__get_items")
         assert cls.effect == "read_only"
 
     def test_verb_effect_delete(self):
-        from tracemill.classify.tools import classify_tool
         cls = _classify_tool("mcp__myserver__delete_item")
         assert cls.effect == "destructive"
 
     def test_verb_effect_create(self):
-        from tracemill.classify.tools import classify_tool
         cls = _classify_tool("mcp__myserver__create_item")
         assert cls.effect == "mutating"
 
     def test_mcp_redis_tool(self):
-        from tracemill.classify.tools import classify_tool
         cls = _classify_tool("mcp__redis__get_key")
         assert cls.mechanism.startswith("database")
 
     def test_mcp_browser_tool(self):
-        from tracemill.classify.tools import classify_tool
         cls = _classify_tool("mcp__browser__navigate")
         assert cls.mechanism.startswith("network")
 
@@ -1120,7 +1092,7 @@ class TestEnrichmentTypeGuard:
         """If _enrichment is a string/int/None, enricher should not crash."""
         enricher = Enricher()
         event = SessionEvent(
-            kind=EventKind.TOOL_START,
+            kind=EventKind.TOOL_CALL_STARTED,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
             payload={
@@ -1140,7 +1112,7 @@ class TestEnrichmentTypeGuard:
     def test_none_enrichment_in_payload(self):
         enricher = Enricher()
         event = SessionEvent(
-            kind=EventKind.TOOL_START,
+            kind=EventKind.TOOL_CALL_STARTED,
             session_id="sess-1",
             timestamp=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
             payload={
@@ -1164,10 +1136,10 @@ class TestPayloadMergePreservesEnrichment:
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         t2 = t1 + timedelta(seconds=2)
 
-        start = _make_tool_start(tool_call_id="merge1", tool_name="bash", ts=t1,
-                                  arguments={"command": "pytest"})
-        complete = _make_tool_complete(tool_call_id="merge1", tool_name="bash", ts=t2,
-                                       result="ok")
+        start = _make_tool_start(
+            tool_call_id="merge1", tool_name="bash", ts=t1, arguments={"command": "pytest"}
+        )
+        complete = _make_tool_complete(tool_call_id="merge1", tool_name="bash", ts=t2, result="ok")
 
         assert enricher.process(start) is None
         result = enricher.process(complete)

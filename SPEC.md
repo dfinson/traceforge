@@ -31,7 +31,7 @@ The library doesn't decide what to do with agent events. It parses them, enriche
 ┌─────────────────────────────────────────────────────────────┐
 │                    INPUT ADAPTERS                            │
 │                                                             │
-│  CopilotSDKAdapter   ClaudeSDKAdapter   CLIJsonlAdapter     │
+│  MappedJsonAdapter (YAML-driven)    OtelSpanAdapter (MAF spans)  │
 │                                                             │
 │  Each adapter: raw bytes/files → SessionEvent stream        │
 │  Defensive parsing. Unknown fields ignored. Never crash.    │
@@ -84,62 +84,64 @@ The library doesn't decide what to do with agent events. It parses them, enriche
 ```python
 # --- Events ---
 
-@dataclass
-class SessionEvent:
+class SessionEvent(BaseModel):
     """The universal event type. Every adapter produces these."""
-    kind: EventKind              # message, tool_start, tool_complete, usage, file_change, ...
+    id: str                      # UUID4
+    kind: str                    # open string — use EventKind.* constants
     session_id: str
     timestamp: datetime
-    payload: dict[str, Any]      # kind-specific data
-    metadata: EventMetadata      # repo, agent_sdk, turn_id, visibility
+    payload: dict[str, Any]      # kind-specific data (see §3.1)
+    metadata: EventMetadata
 
-class EventKind(str, Enum):
-    """All recognized event types."""
-    USER_MESSAGE = "user_message"
-    ASSISTANT_MESSAGE = "assistant_message"
-    TOOL_START = "tool_start"
-    TOOL_COMPLETE = "tool_complete"
-    FILE_CHANGE = "file_change"
+class EventKind:
+    """Open string registry with canonical constants.
+    Grammar: <domain>[.<object>].<phase>
+    Any string is valid — adapters may emit custom kinds."""
+
+    SESSION_STARTED = "session.started"
+    SESSION_ENDED = "session.ended"
+    MESSAGE_USER = "message.user"
+    MESSAGE_ASSISTANT = "message.assistant"
+    TOOL_CALL_STARTED = "tool.call.started"
+    TOOL_CALL_COMPLETED = "tool.call.completed"
     USAGE = "usage"
     ERROR = "error"
-    SESSION_START = "session_start"
-    SESSION_END = "session_end"
+    RAW = "raw"
+    # ... 50+ canonical kinds (see §3.2)
 
-@dataclass
-class EventMetadata:
+class EventMetadata(BaseModel):
     """Contextual information attached to every event."""
-    repo: str | None = None
-    agent_sdk: str | None = None     # "copilot", "claude", etc.
-    turn_id: str | None = None
-    visibility: str = "visible"      # "visible", "internal", "collapsed"
-    tool_category: str | None = None # "file_write", "shell", "git", "search", etc.
-    tool_display: str | None = None  # Human-readable tool name
-    tool_intent: str | None = None   # What the tool call is trying to do
-    duration_ms: float | None = None # For completed tool calls
 
-@dataclass
-class TelemetrySpan:
-    """A measured span of work (e.g., one tool execution, one LLM call)."""
-    name: str
-    session_id: str
-    start_time: datetime
-    end_time: datetime
-    attributes: dict[str, Any]
+    # Provenance
+    source_framework: str | None     # "copilot", "claude", "aider", "cline", etc.
+    source_adapter: str | None       # adapter class that produced this event
+    ingestion_mode: IngestionMode    # "stream" | "file_watch" | "poll" | "replay"
+    raw_kind: str | None             # original framework event type
 
-@dataclass
-class UsageRecord:
-    """Token usage from an LLM call."""
-    session_id: str
-    timestamp: datetime
-    model: str
-    input_tokens: int
-    output_tokens: int
-    cost_usd: float | None = None
+    # Correlation
+    span_id: str | None              # unique ID for this lifecycle span
+    parent_id: str | None            # links child events to parent
+    correlation_id: str | None       # groups related events
+    run_id: str | None               # top-level run/session identifier
+
+    # Ordering
+    sequence: int | None             # monotonic ordering within a stream
+    namespace: tuple[str, ...] | None  # scope path (subgraph, subagent)
+    partial: bool = False            # True if streaming chunk
+
+    # Classification (populated by Enricher)
+    visibility: str = "visible"      # "visible", "system", "collapsed"
+    phases: frozenset[str] | None
+    classification: Classification | None
+    tool_display: str | None
+    tool_intent: str | None
+    duration_ms: float | None
 
 # --- Adapters ---
 
 class Adapter(ABC):
-    """Parses raw agent output into SessionEvents. Stateless."""
+    """Parses raw agent output into SessionEvents.
+    May track session_id across calls (stateful for session context)."""
 
     @abstractmethod
     def parse(self, raw: bytes | str) -> Iterator[SessionEvent]:
@@ -191,48 +193,156 @@ class EventBus:
     async def publish(self, event: SessionEvent) -> None: ...
 ```
 
+### §3.1 — Event Kind Taxonomy
+
+Event kinds use dot-notation: `<domain>[.<object>].<phase>`. Any string is valid (forward-compatible), but canonical kinds are registered in `KNOWN_KINDS`.
+
+| Domain | Canonical Kinds |
+|---|---|
+| **session** | `session.started`, `session.ended`, `session.paused`, `session.resumed`, `session.idle`, `session.info`, `session.warning` |
+| **turn** | `turn.started`, `turn.ended`, `turn.skipped` |
+| **message** | `message.user`, `message.assistant`, `message.system`, `message.assistant.chunk` |
+| **tool** | `tool.call.started`, `tool.call.completed`, `tool.call.failed`, `tool.result.chunk`, `tool.progress`, `tool.validation.failed` |
+| **llm** | `llm.call.started`, `llm.call.completed`, `llm.call.failed`, `llm.output.chunk`, `llm.thinking.chunk` |
+| **planning** | `planning.started`, `planning.completed`, `planning.failed`, `reasoning.started`, `reasoning.completed` |
+| **agent** | `agent.spawned`, `agent.completed`, `agent.failed`, `agent.handoff` |
+| **file** | `file.created`, `file.edited`, `file.deleted`, `file.read` |
+| **command** | `command.started`, `command.output`, `command.completed`, `command.failed` |
+| **mcp** | `mcp.connection.started`, `mcp.connection.completed`, `mcp.connection.failed` |
+| **hook** | `hook.started`, `hook.completed`, `hook.failed` |
+| **permission** | `permission.requested`, `permission.granted`, `permission.denied` |
+| **input** | `input.requested`, `input.received` |
+| **checkpoint** | `checkpoint.created`, `checkpoint.restored` |
+| **memory** | `memory.query.started`, `memory.query.completed`, `memory.save.started`, `memory.save.completed` |
+| **knowledge** | `knowledge.query.started`, `knowledge.query.completed` |
+| **browser** | `browser.launched`, `browser.action`, `browser.result` |
+| **guardrail** | `guardrail.started`, `guardrail.passed`, `guardrail.failed` |
+| **skill** | `skill.invoked` |
+| **workflow** | `workflow.started`, `workflow.completed`, `workflow.failed`, `task.started`, `task.completed`, `task.failed` |
+| **telemetry** | `usage`, `error`, `abort` |
+| **catch-all** | `raw` (unmapped events with `payload["original_type"]`) |
+
+Unknown/unmapped event types from any framework are emitted as `raw` with the original type preserved in `payload["original_type"]`.
+
+### §3.2 — Payload Contracts
+
+Each event family has minimum expected payload keys:
+
+| Kind Family | Required Payload Keys |
+|---|---|
+| `tool.call.started` | `tool_call_id`, `tool_name`, `arguments` |
+| `tool.call.completed` | `tool_call_id`, `success`, `result` |
+| `message.*` | `content` |
+| `usage` | `input_tokens`, `output_tokens` |
+| `session.started` | `model` |
+| `error` | `message` |
+| `agent.spawned` | `agent_id` or `extras` |
+| `raw` | `original_type`, `extras` |
+
+Additional keys are optional and framework-specific. Sinks must handle missing keys gracefully.
+
+### §3.3 — Ingestion Modes
+
+| Mode | Description | Guarantees |
+|---|---|---|
+| `stream` | Live SDK callback/async stream | Real-time timestamps, strong ordering |
+| `file_watch` | Tailing JSONL/SQLite on disk | File-provided timestamps, per-file ordering |
+| `poll` | Periodic API/DB checks | Possible gaps, need dedup watermarks |
+| `replay` | Historical playback of recorded events | Original timestamps preserved |
+
 ---
 
 ## §4 — Adapters
 
-Each adapter handles one agent SDK's output format. Adapters are **stateless pure transforms** — they don't manage processes, connections, or files. A consumer feeds raw data to the adapter and receives structured events back.
+Each adapter handles one agent SDK's output format. Adapters leverage their respective **SDK packages** for deserialization — avoiding fragile hand-rolled JSON parsing. A consumer feeds raw data to the adapter and receives structured events back.
 
-| Adapter | Input Format | What It Parses |
+### Dependencies
+
+| Package | Version | Purpose |
 | --- | --- | --- |
-| `CopilotSDKAdapter` | Copilot SDK subprocess stdout (JSON lines) | Tool calls, messages, usage, errors |
-| `ClaudeSDKAdapter` | Claude SDK subprocess stdout (JSON lines) | Tool calls, messages, usage, errors |
-| `CLIJsonlAdapter` | `events.jsonl` files from Copilot CLI sessions on disk | Same event types, different wire format |
-| `ClaudeJsonlAdapter` | Claude `session_state/` files on disk | Session transcripts, tool history |
+| `pydantic` | `>=2.0` | Data models, config validation |
+| `pyyaml` | `>=6.0` | YAML mapping and config parsing |
+| `tree-sitter` | `>=0.24` | Shell command classification |
+| `tree-sitter-bash` | `>=0.24` | Bash grammar for classifier |
+| `tree-sitter-powershell` | `>=0.24` | PowerShell grammar for classifier |
 
-New adapters (Gemini, custom agents) are added by implementing `Adapter.parse()`. The pipeline doesn't care where events come from.
+No framework SDK dependencies. All frameworks are parsed via declarative YAML mappings.
+
+### Adapter Table
+
+| Adapter | Input | Mechanism | Interface |
+| --- | --- | --- | --- |
+| `MappedJsonAdapter` + `copilot.yaml` | Copilot `events.jsonl` | YAML dot-path extraction | `parse(raw)` |
+| `MappedJsonAdapter` + `claude.yaml` | Claude session JSONL | YAML + `claude` preprocessor | `parse(raw)` |
+| `MappedJsonAdapter` + `*.yaml` | Any YAML-mapped framework | YAML dot-path extraction | `parse(raw)` |
+| `OtelSpanAdapter` | OTel span JSON | YAML span mapping (`maf.yaml`) | `parse(raw)` / `parse_span(dict)` |
+
+### Unified Interface
+
+Adapters expose one usage pattern:
+
+- **`parse(raw: bytes | str)`** -- Accepts a raw JSON line, maps via YAML dot-paths, and yields `SessionEvent`s.
+
+New frameworks are added by writing a YAML mapping file (no Python code required). Complex event shapes (e.g., Claude's nested content blocks) use a preprocessor to flatten into individual dicts before YAML mapping.
 
 ### Adapter Contract
 
-- **Never crash.** Unknown fields are ignored. Missing fields produce partial events with a warning logged. Completely unparseable input is skipped with a warning.
-- **Stateless.** No buffering, no memory of previous calls. Each `parse()` call is independent.
-- **Yield zero or more events.** A single line of input may produce zero events (if it's noise) or multiple events (if the format bundles them).
+- **Never crash.** JSON parse failures are caught and logged at debug level. Unknown event types map to `default_kind` (either `raw` or silently skipped when `default_kind: ""`). Completely unparseable input yields zero events.
+- **Constructor session_id.** The `session_id` is set at construction time and applied to all events.
+- **Yield zero or more events.** A single line of input may produce zero events (noise/skipped) or multiple events (Claude assistant messages with multiple content blocks, via preprocessor).
 
-### Reference Implementation: CLIJsonlAdapter
+### Copilot Event Type Mapping
 
-The CLIJsonlAdapter parses Copilot CLI `events.jsonl` files. Each line is a JSON object with a `type` field. Known types and their mappings:
+Defined in `mappings/copilot.yaml`. Wire format: `{type, id, timestamp, data: {...}}`.
 
-```python
-EVENT_TYPE_MAP = {
-    "user.message": EventKind.USER_MESSAGE,
-    "assistant.message": EventKind.ASSISTANT_MESSAGE,
-    "tool.start": EventKind.TOOL_START,
-    "tool.complete": EventKind.TOOL_COMPLETE,
-    "file.change": EventKind.FILE_CHANGE,
-    "usage": EventKind.USAGE,
-    "error": EventKind.ERROR,
-}
-```
+| Wire Type | Canonical Kind |
+| --- | --- |
+| `session.start` | `session.started` |
+| `session.shutdown` | `session.ended` |
+| `user.message` | `message.user` |
+| `assistant.message` | `message.assistant` |
+| `tool.execution_start` | `tool.call.started` |
+| `tool.execution_complete` | `tool.call.completed` |
+| `assistant.usage` | `telemetry.usage` |
+| `session.error` | `session.error` |
 
-Unknown `type` values are logged and skipped. The adapter extracts:
-- `timestamp` from the JSON `timestamp` field (ISO 8601)
-- `session_id` from the JSON `session_id` field or filename context
-- Tool name, arguments, results from nested `tool` objects
-- Token counts from `usage` objects
+Plus 20+ additional mappings for turn, hook, agent, permission, skill, and input events. Unmapped types emit as `raw`.
+
+### Claude Message Type Mapping
+
+Defined in `mappings/claude.yaml` with `claude` preprocessor. Wire format varies by message type.
+
+| Preprocessed Block Type | Canonical Kind |
+| --- | --- |
+| `user.text` | `message.user` |
+| `assistant.text` | `message.assistant` |
+| `assistant.tool_use` | `tool.call.started` |
+| `assistant.tool_result` | `tool.call.completed` |
+| `assistant.thinking` | `llm.thinking.chunk` |
+| `result` | `telemetry.usage` |
+| `system` | Silently skipped (`default_kind: ""`) |
+
+### §4.1 — Target Framework Coverage
+
+The event taxonomy is designed to accommodate all major agent frameworks:
+
+| Framework | Ingestion Mode | Status |
+|---|---|---|
+| **GitHub Copilot** | `file_watch` (events.jsonl) | ✅ YAML-mapped (`copilot.yaml`) |
+| **Claude Code** | `file_watch` (session JSONL) | ✅ YAML-mapped (`claude.yaml` + preprocessor) |
+| **Aider** | `file_watch` (markdown logs) | ✅ YAML-mapped (`aider_markdown.yaml` + AiderPreParser) |
+| **OpenHands** | `file_watch` (JSON per event) | ✅ YAML-mapped (`openhands.yaml` + preprocessor) |
+| **SWE-agent** | `file_watch` (trajectory JSON) | ✅ YAML-mapped (`sweagent.yaml`) |
+| **Cline / Roo Code** | `file_watch` (VS Code storage) | ✅ YAML-mapped (`cline.yaml` + preprocessor) |
+| **CrewAI** | `file_watch` (event logs) | ✅ YAML-mapped (`crewai.yaml`) |
+| **LangGraph** | `file_watch` (event logs) | ✅ YAML-mapped (`langgraph.yaml`) |
+| **MS Agent Framework** | `stream` (OTel spans) | ✅ YAML-mapped (`maf.yaml` + OtelSpanAdapter) |
+| **Pydantic AI** | `file_watch` (event logs) | ✅ YAML-mapped (`pydantic_ai.yaml` + preprocessor) |
+| **Goose** | `file_watch` (session logs) | ✅ YAML-mapped (`goose.yaml` + preprocessor) |
+| **Smolagents** | `file_watch` (step logs) | ✅ YAML-mapped (`smolagents.yaml` + preprocessor) |
+| **OpenCode** | `file_watch` (SSE logs) | ✅ YAML-mapped (`opencode.yaml`) |
+
+New adapters implement `Adapter.parse()` and map framework events → canonical `EventKind` strings.
 
 ---
 
@@ -484,8 +594,8 @@ This library is extracted from [CodePlane](https://github.com/dfinson/codeplane)
 | `Enricher` | `backend/services/events/event_enricher.py` | None — already a pure stateful class |
 | `EventPipeline` | `backend/services/events/event_pipeline.py` | Remove `_db_*` methods, inject `StorageSink` list |
 | `density.py` | `backend/services/events/story/review.py` | None — pure functions |
-| `CopilotSDKAdapter` | `backend/services/adapters/copilot_adapter.py` `.stream_events()` parsing | Decouple from subprocess management |
-| `CLIJsonlAdapter` | `backend/services/watcher/copilot.py` `._process_new_events()` | Decouple from file tailing |
+| `MappedJsonAdapter` + `copilot.yaml` | `backend/services/adapters/copilot_adapter.py` `.stream_events()` parsing | Decouple from subprocess management |
+| `MappedJsonAdapter` + `copilot.yaml` | `backend/services/watcher/copilot.py` `._process_new_events()` | Decouple from file tailing |
 | `EventBus` | `backend/services/events/event_bus.py` | None — already fully generic |
 | OTEL instruments | `backend/services/analytics/telemetry.py` | None — already standard OTEL |
 | `SQLiteSink` | `backend/persistence/telemetry_*_repo.py` | Consolidate into single sink, remove SQLAlchemy |
@@ -496,7 +606,7 @@ CodePlane then depends on tracemill instead of owning the code. Its EventProcess
 
 ### §8.1 — Relationship to memrelay
 
-[memrelay](https://github.com/dfinson/memrelay) is the first standalone consumer of tracemill. It implements a `GraphitiSink` (a `StorageSink` subclass) that feeds enriched events into a Graphiti knowledge graph for persistent memory. memrelay also uses tracemill's `CLIJsonlAdapter` to parse Copilot CLI session files.
+[memrelay](https://github.com/dfinson/memrelay) is the first standalone consumer of tracemill. It implements a `GraphitiSink` (a `StorageSink` subclass) that feeds enriched events into a Graphiti knowledge graph for persistent memory. memrelay uses tracemill's `MappedJsonAdapter` with `copilot.yaml` to parse Copilot CLI session files.
 
 The boundary is clean: tracemill handles parsing, enrichment, and pipeline orchestration. memrelay handles daemon lifecycle, Graphiti integration, MCP tools, and memory retrieval.
 
@@ -584,8 +694,7 @@ otel = [
     "opentelemetry-sdk>=1.20",
 ]
 all = [
-    "tracemill[sqlite]",
-    "tracemill[otel]",
+    "tracemill",
 ]
 dev = [
     "pytest>=8.0",
@@ -800,10 +909,10 @@ steps:
 
 ### Step 3: Adapters
 
-- `CLIJsonlAdapter` — extract from CodePlane's `SessionStateWatcher._process_new_events()`
-- `CopilotSDKAdapter` — extract from CodePlane's `CopilotAdapter.stream_events()` parsing
-- `ClaudeSDKAdapter` — extract from CodePlane's `ClaudeAdapter` parsing
-- `ClaudeJsonlAdapter` — extract from CodePlane's `ClaudeSessionStateWatcher`
+- `MappedJsonAdapter` + `copilot.yaml` -- extract from CodePlane's `SessionStateWatcher._process_new_events()`
+- `MappedJsonAdapter` + `copilot.yaml` -- extract from CodePlane's `CopilotAdapter.stream_events()` parsing
+- `MappedJsonAdapter` + `claude.yaml` -- extract from CodePlane's `ClaudeAdapter` parsing
+- `MappedJsonAdapter` + `claude.yaml` -- extract from CodePlane's `ClaudeSessionStateWatcher`
 - Capture real session fixtures for each format
 - Defensive parsing tests (malformed input)
 

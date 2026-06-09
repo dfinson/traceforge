@@ -1,0 +1,276 @@
+# Cline / Roo Code event mapping for MappedJsonAdapter
+# Targets: cline >= 3.88 (VS Code extension globalStorage JSON format)
+# Source: cline/cline apps/vscode/src/shared/ExtensionMessage.ts (commit 9d59de4)
+#
+# IMPORTANT: Real Cline uses a COMPOUND discriminator:
+#   - type_field "type" has ONLY two values: "ask" or "say"
+#   - The actual sub-type is in the "ask" or "say" field:
+#     {type: "say", say: "api_req_started", text: JSON.stringify({tokensIn, tokensOut, cost})}
+#     {type: "ask", ask: "tool", text: JSON.stringify({tool, path})}
+#
+# Events like "say.api_req_started" will NEVER fire against raw Cline data
+# because type is always "ask" or "say". They are here for ClinePreProcessor output
+# that flattens: {type: "say", say: "api_req_started"} → {type: "say.api_req_started"}.
+#
+# Real ClineMessage structure:
+#   {ts: number, type: "ask"|"say", ask?: ClineAsk, say?: ClineSay, text?: string, ...}
+# API metrics: JSON.parse(text) on say="api_req_started" → {tokensIn, tokensOut, cost, ...}
+#   ClineApiReqInfo fields: request, tokensIn, tokensOut, cacheWrites, cacheReads,
+#   cost, cancelReason, streamingFailedMessage, retryStatus
+#   NOTE: There is NO "model" field in ClineApiReqInfo.
+# Tool info: JSON.parse(text) on say="tool" → {tool, path, content, diff}
+
+framework: cline
+framework_version: ">=3.88"
+ingestion_mode: file_watch
+type_field: type
+timestamp_field: ts
+preprocessor: cline
+
+events:
+  # ── Say subtypes (preprocessor synthesizes "say.<subtype>") ──
+  # Verified against ClineSay type in ExtensionMessage.ts (38 values)
+  say.task:
+    kind: session.started
+    payload:
+      content: text
+  say.text:
+    kind: message.assistant
+    payload:
+      content: text
+  say.tool:
+    kind: tool.call.completed
+    payload:
+      tool_name: parsed.tool
+      result: text
+      path: parsed.path
+  say.api_req_started:
+    kind: llm.call.started
+    payload:
+      input_tokens: parsed.tokensIn
+  say.api_req_finished:
+    kind: llm.call.completed
+    payload:
+      input_tokens: parsed.tokensIn
+      output_tokens: parsed.tokensOut
+      cost_usd: parsed.cost
+      cache_read_tokens: parsed.cacheReads
+      cache_write_tokens: parsed.cacheWrites
+  say.api_req_retried:
+    kind: llm.call.retried
+    payload:
+      content: text
+  say.error:
+    kind: session.error
+    payload:
+      message: text
+  say.error_retry:
+    kind: llm.call.retried
+    payload:
+      content: text
+  say.reasoning:
+    kind: reasoning.started
+    payload:
+      content: text
+  say.completion_result:
+    kind: session.ended
+    payload:
+      output: text
+  say.user_feedback:
+    kind: message.user
+    payload:
+      content: text
+  say.user_feedback_diff:
+    kind: message.user
+    payload:
+      content: text
+  say.command:
+    kind: command.started
+    payload:
+      command: text
+  say.command_output:
+    kind: command.completed
+    payload:
+      content: text
+  say.shell_integration_warning:
+    kind: session.warning
+    payload:
+      message: text
+  say.shell_integration_warning_with_suggestion:
+    kind: session.warning
+    payload:
+      message: text
+  say.browser_action_launch:
+    kind: browser.action
+    payload:
+      content: text
+  say.browser_action:
+    kind: browser.action
+    payload:
+      content: text
+  say.browser_action_result:
+    kind: browser.result
+    payload:
+      content: text
+  say.mcp_server_request_started:
+    kind: mcp.connection.started
+    payload:
+      content: text
+  say.mcp_server_response:
+    kind: mcp.tool.completed
+    payload:
+      content: text
+  say.mcp_notification:
+    kind: mcp.info
+    payload:
+      content: text
+  say.use_mcp_server:
+    kind: mcp.tool.started
+    payload:
+      content: text
+  say.load_mcp_documentation:
+    kind: mcp.info
+    payload:
+      content: text
+  say.diff_error:
+    kind: session.error
+    payload:
+      message: text
+  say.deleted_api_reqs:
+    kind: session.info
+    payload:
+      content: text
+  say.clineignore_error:
+    kind: session.error
+    payload:
+      message: text
+  say.command_permission_denied:
+    kind: permission.denied
+    payload:
+      content: text
+  say.checkpoint_created:
+    kind: checkpoint.created
+    payload:
+      content: text
+  say.generate_explanation:
+    kind: reasoning.started
+    payload:
+      content: text
+  say.info:
+    kind: session.info
+    payload:
+      content: text
+  say.task_progress:
+    kind: session.info
+    payload:
+      content: text
+  say.hook_status:
+    kind: command.completed
+    payload:
+      content: text
+  say.hook_output_stream:
+    kind: command.completed
+    payload:
+      content: text
+  say.subagent:
+    kind: agent.status
+    payload:
+      content: text
+  say.use_subagents:
+    kind: agent.spawned
+    payload:
+      content: text
+  say.subagent_usage:
+    kind: agent.completed
+    payload:
+      content: text
+  say.conditional_rules_applied:
+    kind: session.info
+    payload:
+      content: text
+
+  # ── Ask subtypes (preprocessor synthesizes "ask.<subtype>") ──
+  # Verified against ClineAsk type in ExtensionMessage.ts (18 values)
+  ask.followup:
+    kind: input.requested
+    payload:
+      content: text
+  ask.tool:
+    kind: permission.requested
+    payload:
+      tool_name: parsed.tool
+      content: text
+  ask.command:
+    kind: permission.requested
+    payload:
+      command: text
+  ask.command_output:
+    kind: permission.requested
+    payload:
+      content: text
+  ask.completion_result:
+    kind: input.requested
+    payload:
+      content: text
+  ask.resume_task:
+    kind: input.requested
+    payload:
+      content: text
+  ask.resume_completed_task:
+    kind: input.requested
+    payload:
+      content: text
+  ask.plan_mode_respond:
+    kind: input.requested
+    payload:
+      content: text
+  ask.act_mode_respond:
+    kind: input.requested
+    payload:
+      content: text
+  ask.api_req_failed:
+    kind: llm.call.failed
+    payload:
+      content: text
+  ask.mistake_limit_reached:
+    kind: input.requested
+    payload:
+      content: text
+  ask.browser_action_launch:
+    kind: permission.requested
+    payload:
+      content: text
+  ask.use_mcp_server:
+    kind: permission.requested
+    payload:
+      content: text
+  ask.new_task:
+    kind: input.requested
+    payload:
+      content: text
+  ask.condense:
+    kind: input.requested
+    payload:
+      content: text
+  ask.summarize_task:
+    kind: input.requested
+    payload:
+      content: text
+  ask.report_bug:
+    kind: input.requested
+    payload:
+      content: text
+  ask.use_subagents:
+    kind: permission.requested
+    payload:
+      content: text
+
+  # ── Fallback for unknown subtypes ──
+  say:
+    kind: message.assistant
+    payload:
+      content: text
+  ask:
+    kind: input.requested
+    payload:
+      content: text

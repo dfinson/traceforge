@@ -1,6 +1,8 @@
 """tracemill — Agent event observation pipeline with pluggable storage backends."""
 
-from tracemill.adapters.base import Adapter
+from tracemill.adapters.base import Adapter, JsonLineAdapter
+from tracemill.adapters.mapped_json import MappedJsonAdapter
+from tracemill.adapters.otel import OtelSpanAdapter
 from tracemill.classify import (
     ClassificationEngine,
     Classification,
@@ -16,13 +18,28 @@ from tracemill.classify import (
     normalize_tool_name,
 )
 from tracemill.enricher import Enricher
+from tracemill.parsers.aider import AiderPreParser
 from tracemill.pipeline import EventPipeline
 from tracemill.sinks.base import StorageSink
 from tracemill.sinks.callback import CallbackSink
-from tracemill.types import EventKind, EventMetadata, SessionEvent, TelemetrySpan, UsageRecord
+from tracemill.types import (
+    KNOWN_KINDS,
+    EventKind,
+    EventMetadata,
+    IngestionMode,
+    SessionEvent,
+    TelemetrySpan,
+    UsageRecord,
+    is_known_kind,
+)
 
 __all__ = [
     "Adapter",
+    "JsonLineAdapter",
+    "MappedJsonAdapter",
+    "AiderPreParser",
+    "OtelSpanAdapter",
+    # Classification
     "CallbackSink",
     "Classification",
     "ClassificationEngine",
@@ -31,6 +48,8 @@ __all__ = [
     "EventKind",
     "EventMetadata",
     "EventPipeline",
+    "IngestionMode",
+    "KNOWN_KINDS",
     "Phase",
     "SessionEvent",
     "StorageSink",
@@ -42,6 +61,7 @@ __all__ = [
     "classify_shell",
     "classify_tool",
     "get_default_registry",
+    "is_known_kind",
     "load_config",
     "normalize_tool_name",
 ]

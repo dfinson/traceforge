@@ -1,0 +1,117 @@
+# Goose event mapping for MappedJsonAdapter
+# Targets: goose >= 1.0 (SQLite messages table, JSON-serialized rows)
+# Source: block/goose crates/goose-providers/src/conversation/message.rs
+#
+# IMPORTANT: Real Goose only has TWO role values: "user" and "assistant".
+# Tool calls are NESTED inside content_json as {"type": "toolRequest", ...}
+# items within the assistant message array. They are NOT separate rows.
+# Tool results are {"type": "toolResponse", ...} nested in user messages.
+#
+# The flat type_field: role approach can ONLY distinguish user/assistant.
+# A GoosePreProcessor is needed to extract nested tool calls into separate events.
+#
+# Real schema: messages table columns:
+#   id, message_id, session_id, role, content_json, created_timestamp,
+#   timestamp, tokens, metadata_json
+# Session table has: total_tokens, input_tokens, output_tokens,
+#   accumulated_total_tokens, accumulated_input_tokens, accumulated_output_tokens,
+#   accumulated_cost
+#
+# MessageContent variants (all in content_json array, serde tag="type" camelCase):
+#   text, image, toolRequest, toolResponse, toolConfirmationRequest,
+#   actionRequired, frontendToolRequest, thinking, redactedThinking,
+#   systemNotification
+#
+# Struct field serialization:
+#   ToolRequest: {type, id, toolCall: {status, value: {name, arguments}}}
+#   ToolResponse: {type, id, toolResult: {status, value: {content: [...]}}}
+#   ToolConfirmationRequest: {type, id, toolName, arguments, prompt}
+#   FrontendToolRequest: {type, id, toolCall: {status, value: {name, arguments}}}
+#   ActionRequired: {type, data: {actionType: "elicitation"|"toolConfirmation"|"elicitationResponse", ...}}
+#   SystemNotification: {type, notificationType, msg, data}
+
+framework: goose
+framework_version: ">=1.0"
+ingestion_mode: poll
+type_field: role
+timestamp_field: created_timestamp
+preprocessor: goose
+
+events:
+  # ── REAL messages (preprocessor extracts text from content_json) ──
+  user:
+    kind: message.user
+    payload:
+      content: content
+  assistant:
+    kind: message.assistant
+    payload:
+      content: content
+
+  # ── Tool events (preprocessor extracts from nested content_json) ──
+  tool_use:
+    kind: tool.call.started
+    payload:
+      tool_name: name
+      tool_call_id: id
+      arguments: input
+  tool_result:
+    kind: tool.call.completed
+    payload:
+      tool_call_id: tool_use_id
+      result: content
+      success: is_success
+
+  # ── Additional MessageContent variants (preprocessor extracts from content_json) ──
+  thinking:
+    kind: reasoning.started
+    payload:
+      content: thinking
+  image:
+    kind: message.attachment
+    payload:
+      content: data
+  tool_confirmation_request:
+    kind: permission.requested
+    payload:
+      content: content
+      tool_name: name
+  action_required:
+    kind: input.requested
+    payload:
+      content: content
+      action_type: action_type
+  frontend_tool_request:
+    kind: tool.call.started
+    payload:
+      tool_name: name
+      tool_call_id: id
+      arguments: input
+  redacted_thinking:
+    kind: reasoning.redacted
+    payload:
+      data: data
+  system_notification:
+    kind: session.info
+    payload:
+      message: content
+
+  # ── Session lifecycle (from poll metadata) ──
+  session_start:
+    kind: session.started
+    payload:
+      model: model
+      provider: provider
+  session_end:
+    kind: session.ended
+    payload:
+      reason: reason
+
+  # ── Usage/cost (from session table aggregates) ──
+  usage:
+    kind: telemetry.usage
+    payload:
+      input_tokens: input_tokens
+      output_tokens: output_tokens
+      cost_usd: cost_usd
+      model: model

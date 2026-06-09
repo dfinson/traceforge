@@ -1,0 +1,165 @@
+# LangGraph event mapping for MappedJsonAdapter
+# Targets: langgraph >= 1.0 / langchain-core >= 1.4.0 (astream_events version="v2")
+# Source: langchain-ai/langchain libs/core/langchain_core/tracers/event_stream.py
+#
+# astream_events(version="v2") emits flat dicts:
+#   {event, run_id, name, tags, metadata, data, parent_ids}
+#
+# Events confirmed emitted by _AstreamEventsCallbackHandler:
+#   on_chain_start/end/stream, on_chat_model_start/stream/end,
+#   on_llm_start/end/stream, on_tool_start/end/error,
+#   on_retriever_start/end, on_custom_event,
+#   on_prompt_start/end/stream, on_parser_start/end/stream
+#
+# NOT emitted (callback methods exist but handler does NOT override them):
+#   on_chain_error, on_llm_error, on_retriever_error
+#   (errors silently drop from the stream)
+#
+# "on_llm_new_token" is an INTERNAL callback name. The handler translates it to
+# "on_chat_model_stream" (run_type=chat_model) or "on_llm_stream" (run_type=llm).
+#
+# Token usage: on_chat_model_end → data.output.usage_metadata =
+#   {input_tokens, output_tokens, total_tokens, input_token_details?, output_token_details?}
+# Model name: metadata.ls_model_name (from LangSmithParams, merged into inheritable_metadata)
+
+framework: langgraph
+framework_version: ">=1.0"
+ingestion_mode: file_watch
+type_field: event
+timestamp_field: null
+
+events:
+  # ── Chain/graph lifecycle ──
+  on_chain_start:
+    kind: workflow.started
+    payload:
+      run_id: run_id
+      name: name
+      inputs: data.input
+  on_chain_end:
+    kind: workflow.completed
+    payload:
+      run_id: run_id
+      name: name
+      output: data.output
+
+  # ── LLM calls (non-chat models, e.g. completion LLMs) ──
+  on_llm_start:
+    kind: llm.call.started
+    payload:
+      model: metadata.ls_model_name
+      run_id: run_id
+  on_llm_end:
+    kind: llm.call.completed
+    payload:
+      model: metadata.ls_model_name
+      run_id: run_id
+      output: data.output
+  on_llm_stream:
+    kind: llm.output.chunk
+    payload:
+      content: data.chunk.text
+
+  # ── Chat model calls (primary path for modern LangGraph) ──
+  on_chat_model_start:
+    kind: llm.call.started
+    payload:
+      model: metadata.ls_model_name
+      run_id: run_id
+  on_chat_model_end:
+    kind: llm.call.completed
+    payload:
+      model: metadata.ls_model_name
+      run_id: run_id
+      output: data.output.content
+      input_tokens: data.output.usage_metadata.input_tokens
+      output_tokens: data.output.usage_metadata.output_tokens
+      total_tokens: data.output.usage_metadata.total_tokens
+  on_chat_model_stream:
+    kind: message.assistant.chunk
+    payload:
+      content: data.chunk.content
+
+  # ── Tool calls ──
+  on_tool_start:
+    kind: tool.call.started
+    payload:
+      tool_name: name
+      tool_call_id: run_id
+      arguments: data.input
+  on_tool_end:
+    kind: tool.call.completed
+    payload:
+      tool_call_id: run_id
+      tool_name: name
+      result: data.output
+  on_tool_error:
+    kind: tool.call.failed
+    payload:
+      tool_call_id: data.tool_call_id
+      run_id: run_id
+      tool_name: name
+      error: data.error
+      input: data.input
+
+  # ── Retriever ──
+  on_retriever_start:
+    kind: knowledge.query.started
+    payload:
+      query: data.input.query
+  on_retriever_end:
+    kind: knowledge.query.completed
+    payload:
+      results: data.output
+
+  # ── Node transitions (intermediate stream chunks) ──
+  on_chain_stream:
+    kind: workflow.stream
+    payload:
+      node: name
+      data: data.chunk
+
+  # ── Prompt template events (same shape as chain, run_type="prompt") ──
+  on_prompt_start:
+    kind: workflow.started
+    payload:
+      run_id: run_id
+      name: name
+      inputs: data.input
+  on_prompt_end:
+    kind: workflow.completed
+    payload:
+      run_id: run_id
+      name: name
+      output: data.output
+  on_prompt_stream:
+    kind: workflow.stream
+    payload:
+      node: name
+      data: data.chunk
+
+  # ── Parser events (same shape as chain, run_type="parser") ──
+  on_parser_start:
+    kind: workflow.started
+    payload:
+      run_id: run_id
+      name: name
+      inputs: data.input
+  on_parser_end:
+    kind: workflow.completed
+    payload:
+      run_id: run_id
+      name: name
+      output: data.output
+  on_parser_stream:
+    kind: workflow.stream
+    payload:
+      node: name
+      data: data.chunk
+
+  # ── Custom events (user-defined via adispatch_custom_event) ──
+  on_custom_event:
+    kind: custom.event
+    payload:
+      name: name
+      data: data

@@ -12,7 +12,7 @@ from tracemill.classify.config import ClassificationEngine, ClassifyConfig, load
 from tracemill.classify.core import Classification, PhaseSegment
 from tracemill.classify.coding import CodingMechanism, CodingScope
 from tracemill.classify.powershell import classify_powershell_command
-from tracemill.classify.risk import RiskAssessment, assess_risk, assess_tool_risk
+from tracemill.classify.risk import assess_risk, assess_tool_risk
 from tracemill.classify.tools import normalize_tool_name
 from tracemill.classify.workflow import Phase, Visibility
 from tracemill.types import EventKind, EventMetadata, SessionEvent
@@ -52,7 +52,7 @@ class Enricher:
         """Enrich a single event. Returns None if event is buffered (tool_start waiting
         for its tool_complete pair). Returns enriched event when ready. May return a list
         if a displaced orphan start needs to be emitted alongside buffering a new start."""
-        if event.kind == EventKind.TOOL_START:
+        if event.kind == EventKind.TOOL_CALL_STARTED:
             event = self._classify(event)
             event = self._set_visibility(event)
             event = self._set_phase(event)
@@ -70,7 +70,7 @@ class Enricher:
                 return None
             return event
 
-        if event.kind == EventKind.TOOL_COMPLETE:
+        if event.kind == EventKind.TOOL_CALL_COMPLETED:
             tool_call_id = _extract_tool_call_id(event)
             start_event = self._pending.get(tool_call_id) if tool_call_id else None
 
@@ -232,7 +232,7 @@ class Enricher:
         """Set metadata.visibility based on event kind and classification."""
         visibility = Visibility.VISIBLE
 
-        if event.kind in (EventKind.SESSION_START, EventKind.SESSION_END):
+        if event.kind in (EventKind.SESSION_STARTED, EventKind.SESSION_ENDED):
             visibility = Visibility.SYSTEM
         elif event.metadata.classification is not None:
             cls: Classification = event.metadata.classification
@@ -254,13 +254,13 @@ class Enricher:
 
     def _detect_phases(self, event: SessionEvent) -> frozenset[str]:
         """Determine the phase(s) for an event from its Classification."""
-        if event.kind in (EventKind.USER_MESSAGE, EventKind.ASSISTANT_MESSAGE):
+        if event.kind in (EventKind.MESSAGE_USER, EventKind.MESSAGE_ASSISTANT):
             return frozenset({Phase.PLANNING})
 
         cls: Classification | None = event.metadata.classification
 
         if cls is None:
-            if event.kind in (EventKind.TOOL_START, EventKind.TOOL_COMPLETE):
+            if event.kind in (EventKind.TOOL_CALL_STARTED, EventKind.TOOL_CALL_COMPLETED):
                 return frozenset({Phase.IMPLEMENTATION})
             return frozenset({Phase.PLANNING})
 
@@ -317,23 +317,47 @@ def _phases_from_classification(cls: Classification) -> frozenset[str]:
 _TEST_SEGMENTS = frozenset({"tests", "test", "spec", "specs", "__tests__", "__test__"})
 _TEST_FILE_PATTERNS = ("_test.", "test_", ".test.", ".spec.")
 _DOC_SEGMENTS = frozenset({"docs", "doc", "documentation"})
-_CI_FILES = frozenset({
-    "jenkinsfile", ".travis.yml", ".circleci", "azure-pipelines.yml",
-    "bitbucket-pipelines.yml", "cloudbuild.yaml",
-})
+_CI_FILES = frozenset(
+    {
+        "jenkinsfile",
+        ".travis.yml",
+        ".circleci",
+        "azure-pipelines.yml",
+        "bitbucket-pipelines.yml",
+        "cloudbuild.yaml",
+    }
+)
 
-_DEP_FILES = frozenset({
-    "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
-    "requirements.txt", "setup.py", "setup.cfg", "pyproject.toml", "poetry.lock",
-    "cargo.toml", "cargo.lock", "go.mod", "go.sum", "gemfile", "gemfile.lock",
-    "composer.json", "composer.lock", "pom.xml", "build.gradle",
-})
+_DEP_FILES = frozenset(
+    {
+        "package.json",
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "requirements.txt",
+        "setup.py",
+        "setup.cfg",
+        "pyproject.toml",
+        "poetry.lock",
+        "cargo.toml",
+        "cargo.lock",
+        "go.mod",
+        "go.sum",
+        "gemfile",
+        "gemfile.lock",
+        "composer.json",
+        "composer.lock",
+        "pom.xml",
+        "build.gradle",
+    }
+)
 _ENV_FILES = frozenset({".env", ".envrc", ".env.local", ".env.development", ".env.production"})
 _INFRA_EXTENSIONS = (".tf", ".tfvars", ".hcl")
 _INFRA_DIRS = frozenset({"helm", "charts", "k8s", "kubernetes", "terraform", "infra"})
 _CONTAINER_FILES = frozenset({"docker-compose.yml", "docker-compose.yaml", ".dockerignore"})
 _DOC_FILES = frozenset({"readme.md", "contributing.md", "changelog.md", "license.md"})
 _PAYLOAD_PATH_KEYS = ("path", "file_path", "file", "filename")
+
 
 def _infer_scope_from_path(path: str) -> str | None:
     """Infer a CodingScope from a file path. Returns None if no pattern matches."""
@@ -425,7 +449,8 @@ def _refine_scope_from_payload(cls: Classification, payload: dict) -> Classifica
             phase=seg.phase,
             actions=seg.actions,
             scopes=(seg.scopes - {CodingScope.SOURCE_CODE}) | {inferred}
-                   if CodingScope.SOURCE_CODE in seg.scopes else seg.scopes | {inferred},
+            if CodingScope.SOURCE_CODE in seg.scopes
+            else seg.scopes | {inferred},
             roles=seg.roles,
         )
         for seg in cls.phase_map

@@ -10,7 +10,7 @@ from tracemill import CallbackSink, EventKind, SessionEvent, TelemetrySpan, Usag
 
 
 def make_event(
-    kind: EventKind = EventKind.USER_MESSAGE,
+    kind: str = EventKind.MESSAGE_USER,
     session_id: str = "test-session",
     payload: dict | None = None,
     **kwargs,

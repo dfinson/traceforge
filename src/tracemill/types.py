@@ -169,7 +169,7 @@ def is_known_kind(kind: str) -> bool:
 
 # ─── Ingestion Mode ──────────────────────────────────────────────────────────
 
-IngestionMode = Literal["stream", "file_watch", "poll", "replay"]
+IngestionMode = Literal["stream", "file_watch", "poll", "replay", "sqlite"]
 
 
 # ─── Event Metadata ──────────────────────────────────────────────────────────

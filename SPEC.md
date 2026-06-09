@@ -679,6 +679,8 @@ class EventPipeline:
 
 ## §12 — Storage Sinks
 
+Sinks are the output layer. Users select and configure sinks entirely via YAML -- no code required. The `StorageSink` ABC exists for internal implementation; end users never subclass it.
+
 ### StorageSink ABC (`sinks/base.py`)
 
 `python
@@ -695,11 +697,26 @@ class StorageSink(ABC):
 
 | Sink | Status | Description |
 |------|--------|-------------|
-| `CallbackSink` | ✅ Done | Delegates to user-provided async callables. Full implementation. |
-| `SqliteSink` | ⬜ Planned | Config model exists (`SqliteSinkConfig`). No implementation yet. |
-| `JsonlSink` | ⬜ Planned | Config model exists (`JsonlSinkConfig`). No implementation yet. |
-| `S3Sink` | ⬜ Planned | Config model exists (`S3SinkConfig`). No implementation yet. |
-| `OtelSink` | ⬜ Planned | No config model or implementation. |
+| `CallbackSink` | ✅ Done | Delegates to user-provided async callables. For SDK/library consumers that embed tracemill in Python. |
+| `SqliteSink` | ⬜ Planned | Local SQLite storage with WAL mode, schema migration, batch inserts. Configured via `type: sqlite` in YAML. |
+| `JsonlSink` | ⬜ Planned | Append-only JSONL files with optional size-based rotation. Configured via `type: jsonl` in YAML. |
+| `S3Sink` | ⬜ Planned | Cloud object storage with buffered upload and key formatting. Configured via `type: s3` in YAML. |
+| `OtelSink` | ⬜ Planned | Export spans to an OpenTelemetry collector. Configured via `type: otel` in YAML. |
+
+### Configuration examples
+
+`yaml
+sinks:
+  - type: sqlite
+    path: ./events.db
+  - type: jsonl
+    path: ./output/events.jsonl
+    rotate_mb: 100
+  - type: s3
+    bucket: my-traces
+    prefix: agents/
+    region: us-east-1
+`
 
 ---
 
@@ -971,7 +988,7 @@ tracemill/
 
 1. **Pure observation** — tracemill observes, enriches, and delivers. It never modifies agent behavior, injects prompts, or manages processes.
 
-2. **Framework-agnostic** — new framework support = new YAML file. No Python code changes required for standard JSON-line formats.
+2. **Zero-code configuration** — users configure tracemill entirely through YAML and environment variables. Adding a framework = new YAML mapping. Choosing sinks = YAML config. No Python code required for normal operation.
 
 3. **Defensive parsing** — adapters/parsers never crash. Unknown fields are ignored. Malformed input is logged and skipped.
 

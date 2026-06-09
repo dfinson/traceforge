@@ -85,10 +85,15 @@ def _looks_like_command(token: str) -> bool:
 def _unwrap_binary(
     words: list[str],
     engine: ClassificationEngine,
-) -> tuple[str, str | None, list[str]]:
-    """Extract binary, subcmd, and flags from a word list, unwrapping wrappers."""
+) -> tuple[str, str | None, list[str], frozenset[str]]:
+    """Extract binary, subcmd, flags, and wrapper capabilities from a word list.
+
+    Returns (binary, subcmd, flags, wrapper_caps) where wrapper_caps contains
+    capabilities derived from stripped wrappers (e.g., elevated_privilege from sudo).
+    """
     transparent = engine.transparent_wrappers
     idx = 0
+    wrapper_caps: set[str] = set()
 
     while idx < len(words) and _IS_ENV_VAR.match(words[idx]):
         idx += 1
@@ -99,6 +104,10 @@ def _unwrap_binary(
 
         if binary not in transparent:
             break
+
+        # Track capabilities from wrappers
+        if binary == "sudo":
+            wrapper_caps.add("elevated_privilege")
 
         idx += 1
         # Skip env-style VAR=val assignments
@@ -124,14 +133,14 @@ def _unwrap_binary(
         limit -= 1
 
     if idx >= len(words):
-        return "", None, []
+        return "", None, [], frozenset(wrapper_caps)
 
     binary = _STRIP_BINARY_EXT.sub("", os.path.basename(words[idx]).lower())
 
     remaining = words[idx + 1 :]
     subcmd = remaining[0] if remaining and not remaining[0].startswith("-") else None
     flags = [w for w in remaining if w.startswith("-")]
-    return binary, subcmd, flags
+    return binary, subcmd, flags, frozenset(wrapper_caps)
 
 
 # ── Public API ──
@@ -245,11 +254,11 @@ def classify_single_command(
     if binary == "sudo":
         caps.add("elevated_privilege")
 
-    # Effect
-    effect = effect_for_binary(binary, subcmd, flags, engine=engine)
-    # Rule effect override (if rule matched and has explicit effect)
-    if rule and rule.effect and effect is None:
+    # Effect: rule override > effect_overrides > binary_info
+    if rule and rule.effect:
         effect = rule.effect
+    else:
+        effect = effect_for_binary(binary, subcmd, flags, engine=engine, all_words=words)
 
     return _CommandClassification(
         binary=binary,
@@ -353,10 +362,27 @@ def _detect_structure(tree: ts.Tree) -> frozenset[str]:
     return frozenset(structures)
 
 
+_OUTPUT_REDIRECT_OPS = frozenset({">", ">>", ">&", "&>", "&>>"})
+
+
+def _has_output_redirect(node: ts.Node) -> bool:
+    """Check if a redirected_statement contains an output redirect (not input-only)."""
+    for child in node.children:
+        if child.type == "file_redirect":
+            for op in child.children:
+                if op.type in _OUTPUT_REDIRECT_OPS:
+                    return True
+        elif child.type == "heredoc_redirect":
+            # Heredocs are input, not output
+            continue
+    return False
+
+
 def _check_tree_structure(node: ts.Node, structures: set[str]) -> None:
     """Recursively check for structural patterns."""
     if node.type == "redirected_statement":
-        structures.add(ShellStructure.REDIRECTED)
+        if _has_output_redirect(node):
+            structures.add(ShellStructure.REDIRECTED)
     elif node.type == "pipeline" and node.child_count > 1:
         structures.add(ShellStructure.PIPED)
     elif node.type in ("if_statement", "case_statement"):
@@ -395,6 +421,7 @@ def classify_shell(
         )
 
     command_results: list[_CommandClassification] = []
+    all_wrapper_caps: set[str] = set()
 
     for _pattern_idx, captures in matches:
         for node in captures.get("cmd", []):
@@ -405,7 +432,8 @@ def classify_shell(
             if not words:
                 continue
 
-            binary, subcmd, flags = _unwrap_binary(words, engine=engine)
+            binary, subcmd, flags, wrapper_caps = _unwrap_binary(words, engine=engine)
+            all_wrapper_caps.update(wrapper_caps)
             if not binary:
                 continue
 
@@ -416,8 +444,35 @@ def classify_shell(
         return Classification(
             mechanism=CodingMechanism.PROCESS_SHELL,
             effect=None,
-            capability=frozenset({"subprocess"}),
+            capability=frozenset({"subprocess"} | all_wrapper_caps),
         )
 
     structure = _detect_structure(tree)
-    return build_classification_from_commands(command_results, structure, "bash")
+    cls = build_classification_from_commands(command_results, structure, "bash")
+    # Merge wrapper capabilities (e.g., elevated_privilege from sudo)
+    extra_caps: set[str] = set(all_wrapper_caps)
+    extra_effect: str | None = None
+    # Redirections (>, >>, 2>) indicate filesystem writes
+    if ShellStructure.REDIRECTED in structure:
+        extra_caps.add("filesystem_write")
+        extra_effect = "mutating"
+    if extra_caps or extra_effect:
+        from tracemill.classify.core import aggregate_effect as _agg
+
+        merged_effect = cls.effect
+        if extra_effect:
+            effects = [e for e in (cls.effect, extra_effect) if e]
+            merged_effect = _agg(*effects) if effects else cls.effect
+        cls = Classification(
+            mechanism=cls.mechanism,
+            effect=merged_effect,
+            scope=cls.scope,
+            role=cls.role,
+            action=cls.action,
+            capability=cls.capability | frozenset(extra_caps),
+            structure=cls.structure,
+            shell_dialect=cls.shell_dialect,
+            binaries=cls.binaries,
+            phase_map=cls.phase_map,
+        )
+    return cls

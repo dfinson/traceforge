@@ -103,7 +103,7 @@ tool_classifications:
     effect: mutating
     scope: [artifact.repository]
     role: [persistence.version_control]
-    action: [persist.merge]
+    action: [modify.merge]
     capability: [filesystem_write]
 
   git_rebase:
@@ -111,7 +111,7 @@ tool_classifications:
     effect: mutating
     scope: [artifact.repository]
     role: [persistence.version_control]
-    action: [persist.rebase]
+    action: [modify.rebase]
     capability: [filesystem_write]
 
   git_checkout:

@@ -160,6 +160,81 @@ shell_rules:
     role: persistence.version_control
     effect: mutating
 
+  - id: git-checkout-switch-mutating
+    binaries: [git]
+    subcmds: [checkout, switch]
+    activity: implementation
+    role: persistence.version_control
+    effect: mutating
+
+  - id: git-clean-destructive
+    binaries: [git]
+    subcmds: [clean]
+    activity: implementation
+    role: persistence.version_control
+    effect: destructive
+    action: remove.clean
+
+  - id: git-branch-delete-destructive
+    binaries: [git]
+    subcmds: [branch]
+    flags_require: ["-D"]
+    activity: implementation
+    role: persistence.version_control
+    effect: destructive
+    action: remove.delete
+
+  - id: git-branch-delete-lowercase-destructive
+    binaries: [git]
+    subcmds: [branch]
+    flags_require: ["-d"]
+    activity: implementation
+    role: persistence.version_control
+    effect: destructive
+    action: remove.delete
+
+  - id: git-branch-move-mutating
+    binaries: [git]
+    subcmds: [branch]
+    flags_require: ["-m"]
+    activity: implementation
+    role: persistence.version_control
+    effect: mutating
+    action: modify.rename
+
+  - id: git-branch-move-force-mutating
+    binaries: [git]
+    subcmds: [branch]
+    flags_require: ["-M"]
+    activity: implementation
+    role: persistence.version_control
+    effect: mutating
+    action: modify.rename
+
+  - id: git-pull-mutating
+    binaries: [git]
+    subcmds: [pull]
+    activity: implementation
+    role: persistence.version_control
+    effect: mutating
+    action: modify.merge
+
+  - id: git-clone-mutating
+    binaries: [git]
+    subcmds: [clone]
+    activity: setup
+    role: persistence.version_control
+    effect: mutating
+    action: persist.write
+
+  - id: git-restore-mutating
+    binaries: [git]
+    subcmds: [restore]
+    activity: implementation
+    role: persistence.version_control
+    effect: mutating
+    action: modify.overwrite
+
   - id: git-blame-branch-diff-log-show-status
     binaries: [git]
     subcmds: [blame, branch, diff, log, show, status]
@@ -184,6 +259,14 @@ shell_rules:
     activity: investigation
     role: retriever.file_browser
     effect: read_only
+
+  - id: find-delete-destructive
+    binaries: [find]
+    flags_require: ["-delete"]
+    activity: implementation
+    role: executor.script_runner
+    effect: destructive
+    action: remove.delete
 
   - id: dir-find-findstr-set-tree-type-where-file-browser
     binaries: [dir, find, findstr, set, tree, type, where]
@@ -236,14 +319,22 @@ shell_rules:
     scope: state.process
     action: retrieve.browse
 
-  - id: docker-podman-prune-rm-rmi-system
+  - id: docker-podman-prune-rm-rmi
     binaries: [docker, podman]
-    subcmds: [prune, rm, rmi, system]
+    subcmds: [prune, rm, rmi]
     activity: implementation
     role: executor.container_runtime
     effect: destructive
     scope: artifact.container_image
     action: remove.delete
+
+  - id: docker-podman-system
+    binaries: [docker, podman]
+    subcmds: [system]
+    activity: investigation
+    role: executor.container_runtime
+    scope: state.process
+    action: retrieve.browse
 
   - id: docker-compose-restart-start-up
     binaries: [docker-compose]
@@ -433,6 +524,14 @@ shell_rules:
     effect: mutating
     action: execute.run_script
 
+  - id: curl-require-request
+    binaries: [curl]
+    flags_require: ["--request"]
+    activity: implementation
+    role: retriever.api_client
+    effect: mutating
+    action: execute.run_script
+
   - id: curl-require-d
     binaries: [curl]
     flags_require: ["-d"]
@@ -480,6 +579,30 @@ shell_rules:
     role: retriever.api_client
     effect: mutating
     action: execute.run_script
+
+  - id: curl-require-o-output
+    binaries: [curl]
+    flags_require: ["-o"]
+    activity: implementation
+    role: retriever.api_client
+    effect: mutating
+    action: persist.write
+
+  - id: curl-require-O-output
+    binaries: [curl]
+    flags_require: ["-O"]
+    activity: implementation
+    role: retriever.api_client
+    effect: mutating
+    action: persist.write
+
+  - id: curl-require-output
+    binaries: [curl]
+    flags_require: ["--output"]
+    activity: implementation
+    role: retriever.api_client
+    effect: mutating
+    action: persist.write
 
   - id: curl-api-client
     binaries: [curl]
@@ -589,8 +712,23 @@ shell_rules:
     effect: read_only
     action: retrieve.browse
 
-  - id: comm-cut-diff-paste-sort-tee-tr-uniq-wc-xargs-search-index
-    binaries: [comm, cut, diff, paste, sort, tee, tr, uniq, wc, xargs]
+  - id: tee-mutating
+    binaries: [tee]
+    activity: implementation
+    role: modifier.file_editor
+    effect: mutating
+    action: persist.write
+
+  - id: sort-output-mutating
+    binaries: [sort]
+    flags_require: ["-o"]
+    activity: implementation
+    role: modifier.file_editor
+    effect: mutating
+    action: persist.write
+
+  - id: comm-cut-diff-paste-sort-tr-uniq-wc-xargs-search-index
+    binaries: [comm, cut, diff, paste, sort, tr, uniq, wc, xargs]
     activity: investigation
     role: retriever.search_index
     effect: read_only

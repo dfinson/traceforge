@@ -34,7 +34,7 @@ PII_PATTERNS: dict[PIICategory, re.Pattern[str]] = {
         r'\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b'
     ),
     PIICategory.API_KEY: re.compile(
-        r'\b(?:sk|pk|api|key|token|secret)[-_]?[A-Za-z0-9-_]{20,}\b', re.IGNORECASE
+        r'\b(?:sk|pk|api|key|token|secret)[-_][A-Za-z0-9-_]{20,}\b', re.IGNORECASE
     ),
     PIICategory.PRIVATE_KEY: re.compile(r'-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'),
     PIICategory.AWS_KEY: re.compile(r'\b(?:AKIA|ASIA)[A-Z0-9]{16}\b'),

@@ -162,6 +162,7 @@ class GovernancePipeline:
         self._write_failures: dict[str, int] = {}  # session_id → consecutive failure count
         self._MAX_WRITE_FAILURES = 10
         self._phase23_attempts: dict[str, int] = {}  # source_event_key → attempt count
+        self._phase23_session_keys: dict[str, set[str]] = {}  # session_id → set of event keys with attempts
         self._MAX_PHASE23_ATTEMPTS = 3
 
     def get_or_create_state(self, session_id: str) -> "SessionState":
@@ -190,10 +191,8 @@ class GovernancePipeline:
             self._states.pop(session_id, None)
             self._write_failures.pop(session_id, None)
             # Clean up any lingering phase23 attempts for this session's events
-            stale_keys = [k for k, _ in self._phase23_attempts.items()
-                          if k.startswith(f"{session_id}:") or k.startswith(f"{session_id}/")]
-            for k in stale_keys:
-                del self._phase23_attempts[k]
+            for key in self._phase23_session_keys.pop(session_id, set()):
+                self._phase23_attempts.pop(key, None)
 
         snapshot = state.snapshot()
         return SessionMeta(
@@ -286,6 +285,8 @@ class GovernancePipeline:
             # Increment attempt counter and dead-letter after max retries
             attempts = self._phase23_attempts.get(event.source_event_key, 0) + 1
             self._phase23_attempts[event.source_event_key] = attempts
+            # Track which session owns this key for cleanup on session_end
+            self._phase23_session_keys.setdefault(session_id, set()).add(event.source_event_key)
             if attempts >= self._MAX_PHASE23_ATTEMPTS:
                 logger.error(
                     "Event %s failed Phase 2/3 %d times — dead-lettering: %s",

@@ -88,19 +88,41 @@ class IFCChecker:
     def _infer_clearance(self, ctx: "EnrichmentContext") -> Clearance | None:
         """Infer clearance level from event context."""
         from tracemill.governance.types import ToolCallEvent
+        import json as json_mod
 
         if not isinstance(ctx.event, ToolCallEvent):
             return None
 
-        args = ctx.event.tool_args_json.lower()
+        # Try structured path extraction first
+        try:
+            args_dict = json_mod.loads(ctx.event.tool_args_json)
+            file_path = args_dict.get("path") or args_dict.get("file") or args_dict.get("filename") or ""
+            if isinstance(file_path, str):
+                # Check path segments and basename for sensitive file matches
+                path_lower = file_path.lower()
+                basename = path_lower.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+                for sensitive_path in _SENSITIVE_PATHS:
+                    if basename == sensitive_path or path_lower.endswith(f"/{sensitive_path}") or path_lower.endswith(f"\\{sensitive_path}"):
+                        return PATH_LABEL_RULES.get(sensitive_path, Clearance.SECRET)
+                for ext in _SENSITIVE_EXTENSIONS:
+                    if basename.endswith(ext):
+                        return Clearance.CONFIDENTIAL
+        except (json_mod.JSONDecodeError, TypeError, AttributeError):
+            pass
 
-        # Check tool arguments for sensitive file access
+        # Fallback: boundary-aware text search on raw args
+        args = ctx.event.tool_args_json.lower()
         for path in _SENSITIVE_PATHS:
-            if path in args:
-                return Clearance.SECRET
+            # Require path separator or string boundary before the sensitive name
+            import re
+            pattern = r'(?:^|[/\\\s"\':])' + re.escape(path) + r'(?:$|[/\\\s"\',})\]])'
+            if re.search(pattern, args):
+                return PATH_LABEL_RULES.get(path, Clearance.SECRET)
 
         for ext in _SENSITIVE_EXTENSIONS:
-            if ext in args:
+            # Extension must be at word boundary
+            import re
+            if re.search(re.escape(ext) + r'(?:$|["\s,}\]\)])', args):
                 return Clearance.CONFIDENTIAL
 
         # Check MCP profile clearance if available

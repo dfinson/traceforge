@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import shlex
 import time
@@ -55,49 +54,70 @@ def _is_shell_tool(tool_name: str, classification: "Classification") -> bool:
     mech_str = mech.value if hasattr(mech, "value") else str(mech)
     if "shell" in mech_str.lower() or "process" in mech_str.lower():
         return True
-    # Fallback: known shell tool names
-    shell_names = {"bash", "shell", "execute_command", "run_command", "terminal", "exec", "run_shell"}
+    # Fallback: known shell tool names (includes dialect-specific names)
+    shell_names = {
+        "bash", "shell", "execute_command", "run_command", "terminal",
+        "exec", "run_shell", "powershell", "pwsh", "cmd",
+    }
     return tool_name.lower() in shell_names
 
 
 def _build_command_analysis(command: str) -> "CommandAnalysis | None":
-    """Build CommandAnalysis from a shell command string using shlex."""
+    """Build CommandAnalysis from a shell command string.
+
+    Uses simple tokenization for the primary binary/flags/targets.
+    Pipe segments are only populated when unambiguous single-pipe separators exist
+    (avoids misinterpreting ||, |&, or pipes inside quotes).
+    """
     from tracemill.governance.types import CommandAnalysis, PipeSegment
 
     if not command or not command.strip():
         return None
 
-    # Split on pipe for pipe_segments
-    pipe_parts = command.split("|")
-    segments: list[PipeSegment] = []
+    # Tokenize the full command for top-level binary/flags/targets
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = command.split()
 
-    for part in pipe_parts:
-        part = part.strip()
-        if not part:
-            continue
-        try:
-            tokens = shlex.split(part)
-        except ValueError:
-            # Malformed quoting — fall back to simple split
-            tokens = part.split()
-        if not tokens:
-            continue
-        binary = tokens[0]
-        flags = tuple(t for t in tokens[1:] if t.startswith("-"))
-        targets = tuple(t for t in tokens[1:] if not t.startswith("-"))
-        segments.append(PipeSegment(binary=binary, flags=flags, targets=targets))
-
-    if not segments:
+    if not tokens:
         return None
 
-    # Top-level analysis uses the first segment
-    first = segments[0]
+    binary = tokens[0]
+    flags = tuple(t for t in tokens[1:] if t.startswith("-"))
+    targets = tuple(t for t in tokens[1:] if not t.startswith("-"))
+
+    # Only attempt pipe splitting if no ambiguous operators exist
+    pipe_segments: tuple[PipeSegment, ...] | None = None
+    if "|" in command and "||" not in command and "|&" not in command:
+        # Check that pipes are not inside quotes by comparing shlex parse
+        # against naive split — if they disagree, skip pipe segmentation
+        raw_parts = command.split("|")
+        if len(raw_parts) > 1:
+            segments: list[PipeSegment] = []
+            for part in raw_parts:
+                part = part.strip()
+                if not part:
+                    continue
+                try:
+                    seg_tokens = shlex.split(part)
+                except ValueError:
+                    seg_tokens = part.split()
+                if not seg_tokens:
+                    continue
+                seg_binary = seg_tokens[0]
+                seg_flags = tuple(t for t in seg_tokens[1:] if t.startswith("-"))
+                seg_targets = tuple(t for t in seg_tokens[1:] if not t.startswith("-"))
+                segments.append(PipeSegment(binary=seg_binary, flags=seg_flags, targets=seg_targets))
+            if len(segments) > 1:
+                pipe_segments = tuple(segments)
+
     return CommandAnalysis(
         command=command,
-        binary=first.binary,
-        flags=first.flags,
-        targets=first.targets,
-        pipe_segments=tuple(segments) if len(segments) > 1 else None,
+        binary=binary,
+        flags=flags,
+        targets=targets,
+        pipe_segments=pipe_segments,
     )
 
 
@@ -166,7 +186,10 @@ def assess(pipeline, payload: dict) -> AssessmentResult:
     tool_name, tool_input, session_id = _validate_payload(payload)
     server_namespace = payload.get("server_namespace")
     project_root = payload.get("project_root") or getattr(pipeline, "_project_root", None)
-    tool_args_json = json.dumps(tool_input)
+    try:
+        tool_args_json = json.dumps(tool_input)
+    except (TypeError, ValueError) as exc:
+        raise AssessmentPayloadError(f"'tool_input' is not JSON-serializable: {exc}") from exc
 
     # Build ToolCallEvent with UUID-based source_event_key (collision-proof)
     event_id = f"gate-{uuid.uuid4().hex[:12]}"
@@ -213,7 +236,20 @@ def assess(pipeline, payload: dict) -> AssessmentResult:
     )
 
     # Run governance pipeline (Phase 1/2/3)
-    meta = pipeline.process_event(ctx)
+    try:
+        meta = pipeline.process_event(ctx)
+    except Exception as exc:
+        # Fail closed: internal errors → ESCALATE with diagnostic reason
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        return AssessmentResult(
+            governance_assessment=GovernanceAssessment.ESCALATE,
+            risk_score=0,
+            reason=f"assessment_internal_error: {type(exc).__name__}",
+            matched_rule=None,
+            classification=classification,
+            meta=None,
+            elapsed_ms=round(elapsed_ms, 2),
+        )
 
     elapsed_ms = (time.perf_counter() - t0) * 1000
 
@@ -223,6 +259,7 @@ def assess(pipeline, payload: dict) -> AssessmentResult:
     matched_rule: str | None = None
 
     if meta.recommendation is not None:
+        # Convert via string value — pipeline and assess use separate StrEnum definitions
         governance_assessment = GovernanceAssessment(meta.recommendation.recommended_action.value)
         reason = meta.recommendation.reason_code
         if meta.evidence and meta.evidence.pointers:

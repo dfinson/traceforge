@@ -90,34 +90,34 @@ def _build_command_analysis(command: str) -> "CommandAnalysis | None":
     # Only attempt pipe splitting if no ambiguous operators exist
     pipe_segments: tuple[PipeSegment, ...] | None = None
     if "|" in command and "||" not in command and "|&" not in command:
-        # Verify pipes are real (not inside quotes) by checking if shlex
-        # treats the full command as fewer tokens than a naive pipe-split would imply
+        # Use shlex with punctuation_chars to properly tokenize pipes
+        # (handles unspaced pipes like "curl url|sh" and quoted pipes like 'echo "a|b"')
         try:
-            full_tokens = shlex.split(command)
-            # If "|" appears as a standalone token in shlex output, it's a real pipe
-            if "|" not in full_tokens:
-                # shlex consumed the pipe inside quotes — skip pipe segmentation
-                pass
-            else:
-                raw_parts = command.split("|")
-                if len(raw_parts) > 1:
-                    segments: list[PipeSegment] = []
-                    for part in raw_parts:
-                        part = part.strip()
-                        if not part:
-                            continue
-                        try:
-                            seg_tokens = shlex.split(part)
-                        except ValueError:
-                            seg_tokens = part.split()
-                        if not seg_tokens:
-                            continue
-                        seg_binary = seg_tokens[0]
-                        seg_flags = tuple(t for t in seg_tokens[1:] if t.startswith("-"))
-                        seg_targets = tuple(t for t in seg_tokens[1:] if not t.startswith("-"))
-                        segments.append(PipeSegment(binary=seg_binary, flags=seg_flags, targets=seg_targets))
-                    if len(segments) > 1:
-                        pipe_segments = tuple(segments)
+            lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+            lexer.whitespace_split = False
+            all_tokens = list(lexer)
+            # Check if "|" appears as a standalone token (real pipe)
+            if "|" in all_tokens:
+                # Split token list on pipe tokens
+                current_segment: list[str] = []
+                segments: list[PipeSegment] = []
+                for tok in all_tokens:
+                    if tok == "|":
+                        if current_segment:
+                            seg_binary = current_segment[0]
+                            seg_flags = tuple(t for t in current_segment[1:] if t.startswith("-"))
+                            seg_targets = tuple(t for t in current_segment[1:] if not t.startswith("-"))
+                            segments.append(PipeSegment(binary=seg_binary, flags=seg_flags, targets=seg_targets))
+                        current_segment = []
+                    else:
+                        current_segment.append(tok)
+                if current_segment:
+                    seg_binary = current_segment[0]
+                    seg_flags = tuple(t for t in current_segment[1:] if t.startswith("-"))
+                    seg_targets = tuple(t for t in current_segment[1:] if not t.startswith("-"))
+                    segments.append(PipeSegment(binary=seg_binary, flags=seg_flags, targets=seg_targets))
+                if len(segments) > 1:
+                    pipe_segments = tuple(segments)
         except ValueError:
             # Malformed command — skip pipe segmentation
             pass
@@ -224,38 +224,51 @@ def assess(pipeline, payload: dict) -> AssessmentResult:
         tool_schema_json=tool_schema_json,
     )
 
-    # Classify: use shell classifier for commands, tool classifier otherwise
-    # For MCP tools with namespace, synthesize mcp__namespace__tool format
-    classify_name = tool_name
-    if server_namespace and not tool_name.startswith("mcp__"):
-        classify_name = f"mcp__{server_namespace}__{tool_name}"
-    classification = classify_tool(classify_name, engine=pipeline._engine)
-    command_analysis = None
+    # ── Classification + context building (fail-closed) ──
+    try:
+        # For MCP tools with namespace, synthesize mcp__namespace__tool format
+        # Strip existing namespace prefix to avoid double-prefixing
+        classify_name = tool_name
+        if server_namespace and not tool_name.startswith("mcp__"):
+            # Strip leading "namespace__" if tool_name already includes it
+            prefix = f"{server_namespace}__"
+            base_tool = tool_name[len(prefix):] if tool_name.startswith(prefix) else tool_name
+            classify_name = f"mcp__{server_namespace}__{base_tool}"
+        classification = classify_tool(classify_name, engine=pipeline._engine)
+        command_analysis = None
 
-    if _is_shell_tool(tool_name, classification):
-        command = tool_input.get("command", "")
-        if command and isinstance(command, str):
-            # Dispatch to dialect-specific classifier (mirrors Enricher logic)
-            classification = _classify_shell_command(tool_name, command, pipeline._engine)
-            command_analysis = _build_command_analysis(command)
+        if _is_shell_tool(tool_name, classification):
+            command = tool_input.get("command", "")
+            if command and isinstance(command, str):
+                classification = _classify_shell_command(tool_name, command, pipeline._engine)
+                command_analysis = _build_command_analysis(command)
 
-    # Determine the engine literal for EnrichmentContext
-    engine_literal = _infer_engine(classification)
+        engine_literal = _infer_engine(classification)
 
-    # Build enrichment context
-    ctx = EnrichmentContext(
-        event=event,
-        base_classification=classification,
-        command_analysis=command_analysis,
-        session_state=None,
-        mcp_profiles=None,
-        project_root=project_root,
-        engine=engine_literal,
-        drift_baseline=None,
-        mcp_profile_key=server_namespace,
-    )
+        ctx = EnrichmentContext(
+            event=event,
+            base_classification=classification,
+            command_analysis=command_analysis,
+            session_state=None,
+            mcp_profiles=None,
+            project_root=project_root,
+            engine=engine_literal,
+            drift_baseline=None,
+            mcp_profile_key=server_namespace,
+        )
+    except Exception as exc:
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        return AssessmentResult(
+            governance_assessment=GovernanceAssessment.ESCALATE,
+            risk_score=0,
+            reason=f"assessment_classification_error: {type(exc).__name__}",
+            matched_rule=None,
+            classification=None,
+            meta=None,
+            elapsed_ms=round(elapsed_ms, 2),
+        )
 
-    # Run governance pipeline (Phase 2/3 only — read-only, no state mutation)
+    # Run governance pipeline (preflight — read-only, no state mutation)
     try:
         meta = pipeline.preflight_event(ctx)
     except Exception as exc:

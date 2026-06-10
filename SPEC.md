@@ -1107,17 +1107,45 @@ tracemill/
 
 ## §22 — Gate Module
 
-*Real-time tool call scoring and policy enforcement via framework hook protocols.*
+*The governance pipeline (§ governance extensions) made actionable — same logic, enforceable verdicts.*
 
 ### What It Is
 
-The gate is not a separate system — it is a **stage** in the existing pipeline. The pipeline is:
+The gate is not a separate system. It is the **governance pipeline operating in enforcement mode**.
+
+The governance pipeline already runs: classify → score → evaluate rules → produce `RecommendedAction` (allow/warn/escalate/deny/transform). Today this is informational — the recommendation is attached to the event for audit and reporting. The gate module makes it actionable: when a framework blocks waiting for a permission decision, tracemill's governance pipeline runs and the `RecommendedAction` becomes a **binding verdict** delivered back to the framework.
 
 ```
-Source → Parse → Enrich → Gate → Sink(s)
+Source → Parse → GovernancePipeline → Sink(s)
+                      │
+                      ├── observation mode: recommendation attached as metadata (informational)
+                      └── gate mode: recommendation becomes verdict (enforcement)
 ```
 
-The Gate stage evaluates policy rules (defined in `tracemill.yaml` under the pipeline's `gate:` key) against the enrichment output and attaches a binary verdict (`allow` or `deny`) to the event. No `gate:` key = no verdict, stage is a no-op pass-through. What varies by framework is the Source (where events come from) and the Sink (what acts on the verdict). The Parse → Enrich → Gate core is always the same.
+**Same rules. Same classification. Same risk scoring. Same recommendation_rules.yaml.** The only difference is whether the downstream consumer treats the output as advisory or authoritative.
+
+### How Gate Mode Works
+
+In observation mode, the governance pipeline processes events post-hoc and attaches `SessionMeta` with a `RecommendedAction`. Nobody blocks on it.
+
+In gate mode, a framework is blocking — waiting for tracemill to say allow or deny. The governance pipeline runs identically, but the `RecommendedAction` output is **collapsed to a binary verdict** and delivered synchronously:
+
+| `RecommendedAction` | Verdict | Rationale |
+|---------------------|---------|-----------|
+| `allow` | **allow** | No risk concern |
+| `warn` | **allow** | Risk noted but not blocking — logged for audit |
+| `escalate` | configurable | Default: **deny** (fail-closed). Consumer can override to allow-with-alert |
+| `deny` | **deny** | Risk unacceptable |
+| `transform` | **deny** | Original form blocked; agent told why and can retry with safer form |
+
+The `escalate_policy` config key controls what happens on escalate:
+
+```yaml
+pipelines:
+  copilot:
+    gate:
+      escalate_policy: deny    # "deny" (default, fail-closed) or "allow" (log + permit)
+```
 
 ### Framework × Deployment Matrix
 
@@ -1144,38 +1172,41 @@ tracemill supports 13 platforms across 16 deployment permutations. Each maps to 
 
 **What varies is plumbing. The pipeline core is identical in all 16 cases.**
 
-### The Pipeline (Unified)
+### The Pipeline
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────┐
-│                          THE PIPELINE (always)                              │
+│                     GovernancePipeline (always the same)                    │
 │                                                                            │
-│   Source ──→ Parser ──→ Enricher ──→ GateStage ──→ Sink(s)                 │
+│   Source ──→ Parser ──→ GovernancePipeline.process_event() ──→ Sink(s)     │
+│                              │                                             │
+│                              ├── Phase 1: state mutation, taint, IFC       │
+│                              ├── Phase 2: labeling, drift, MCP scan        │
+│                              └── Phase 3: risk + rules → RecommendedAction │
 │                                                                            │
-│   • Parser: selects mapping YAML by framework, normalizes to SessionEvent  │
-│   • Enricher: classifies, scores, attaches FACTS to event metadata         │
-│   • GateStage: evaluates policy YAML against facts, attaches verdict       │
-│   • If no policy configured: GateStage is a no-op pass-through             │
+│   • Observation mode: SessionMeta attached, sinks write to storage         │
+│   • Gate mode: RecommendedAction collapsed to verdict, delivered to caller │
 │                                                                            │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
-The GateStage is trivial:
+The governance pipeline already exists and handles all the hard work (classification, risk scoring, rule evaluation, state tracking, drift detection). The gate module adds only:
+
+1. **Verdict collapse** — map `RecommendedAction` → binary allow/deny
+2. **I/O adapters** — deliver the verdict to the framework (stdin/stdout for sidecar, return value for SDK)
+3. **A `gate:` config key** — enables enforcement mode for a pipeline
 
 ```python
-class GateStage:
-    """Pipeline stage that evaluates policy and attaches verdict to event."""
-
-    def __init__(self, policy: PolicyEngine | None = None):
-        self._policy = policy
-
-    def process(self, event: SessionEvent) -> SessionEvent:
-        if self._policy:
-            event.gate_result = self._policy.evaluate(event.enrichment)
-        return event
+# This is all the gate-specific logic. Everything else is GovernancePipeline.
+def collapse_to_verdict(action: RecommendedAction, escalate_policy: str = "deny") -> Verdict:
+    if action in (RecommendedAction.ALLOW, RecommendedAction.WARN):
+        return Verdict.ALLOW
+    if action == RecommendedAction.ESCALATE:
+        return Verdict.DENY if escalate_policy == "deny" else Verdict.ALLOW
+    return Verdict.DENY  # DENY, TRANSFORM
 ```
 
-If no `gate:` key is present in the pipeline config, the stage is a no-op pass-through. The pipeline still works for pure observation. When gate rules ARE configured, every event gets a verdict — what differs is whether something blocks on that verdict.
+No separate rule engine. No separate classification. No duplicated logic. The `recommendation_rules.yaml` that already exists IS the gate policy.
 
 ### How the Source and Sink Vary
 
@@ -1254,12 +1285,13 @@ from tracemill import Pipeline
 
 pipeline = Pipeline.for_gate(framework="goose")
 
-# One call — runs Parse → Enrich → Gate → returns result
+# One call — runs full governance pipeline → returns GateResult
 result = pipeline.score(payload)
-result.verdict    # Verdict.ALLOW or Verdict.DENY
-result.score      # 92
-result.reason     # "Destructive shell command (risk 92/100)"
-result.event      # Full SessionEvent with enrichment + verdict attached
+result.verdict              # Verdict.ALLOW or Verdict.DENY
+result.recommended_action   # RecommendedAction.DENY (raw, before collapse)
+result.meta.risk_assessment.score  # 92
+result.reason               # "destructive_host_or_network"
+result.matched_rule         # "destructive_host_network"
 ```
 
 **Copilot SDK integration:**
@@ -1338,17 +1370,26 @@ This is not preventive for ungated frameworks (the tool already fired) but the c
 ### Separation of Concerns
 
 ```
-Parser (mappings/)    → normalizes raw framework JSON/events into SessionEvent
-Enricher (classify/)  → attaches FACTS (risk_score, effect, mechanism, scope, mitre...)
-GateStage (gate/)     → evaluates policy against facts, attaches VERDICT (allow/deny)
-Sink(s)               → acts on the enriched+gated event (store, emit, exit, return)
+Parser (mappings/)             → normalizes raw framework JSON into SessionEvent
+GovernancePipeline (governance/) → classifies, scores, evaluates rules → RecommendedAction
+Verdict collapse (gate/)       → maps RecommendedAction to binary allow/deny
+Sink(s)                        → delivers verdict (stdout/exit, return value, callback)
 ```
 
-The enricher **never** produces `recommended_action`, `suggested_verdict`, or any decision-implying field. It outputs measurements and classifications only. The GateStage is the sole place where facts become a verdict.
+The governance pipeline produces `RecommendedAction` which is a 5-valued assessment (allow/warn/escalate/deny/transform). In observation mode this is informational metadata. In gate mode the verdict collapse reduces it to binary enforcement. The same `recommendation_rules.yaml` drives both modes.
 
 ### Core Types
 
 ```python
+# Already exists in governance/rules.py:
+class RecommendedAction(StrEnum):
+    ALLOW = "allow"
+    WARN = "warn"
+    ESCALATE = "escalate"
+    DENY = "deny"
+    TRANSFORM = "transform"
+
+# New — gate-specific:
 class Verdict(Enum):
     ALLOW = "allow"
     DENY = "deny"
@@ -1356,18 +1397,18 @@ class Verdict(Enum):
 @dataclass(frozen=True, slots=True)
 class GateResult:
     verdict: Verdict
-    reason: str | None           # human-readable explanation
+    recommended_action: RecommendedAction  # the raw governance output (before collapse)
+    reason: str | None           # reason_code from matched rule
     matched_rule: str | None     # rule ID that triggered
-    event: SessionEvent          # the enriched event (full classifications)
-    score: int                   # 0-100 risk score
+    meta: SessionMeta            # full governance pipeline output
     elapsed_ms: float            # scoring latency
 ```
 
-No `ESCALATE` verdict. If a consumer wants human-in-the-loop they read the `GateResult` and implement escalation themselves. tracemill always commits to a binary allow/deny based on the policy YAML.
+The `GateResult` carries both the binary verdict (for enforcement) and the full `SessionMeta` (for logging/audit). Consumers who want richer information (drift status, budget, taint) read `meta`.
 
 ### Gate Configuration (in `tracemill.yaml`)
 
-The gate is configured per-pipeline as a `gate:` key. Declarative rules, evaluated top-to-bottom, first match wins:
+The gate is enabled per-pipeline with a `gate:` key. The rules are the existing `recommendation_rules.yaml` — no separate rule set:
 
 ```yaml
 # tracemill.yaml
@@ -1378,152 +1419,100 @@ pipelines:
       path: ~/.config/github-copilot/chat.db
     framework: copilot
     gate:
-      default: allow                    # verdict when no rule matches
-      rules:
-        - id: critical-risk
-          when:
-            risk_score: ">80"
-          verdict: deny
-          reason: "Risk score exceeds critical threshold"
-
-        - id: destructive-shell
-          when:
-            effect: destructive
-            mechanism: shell
-          verdict: deny
-
-        - id: network-exfil
-          when:
-            capability: [network_outbound]
-            scope: [system.secrets, system.os]
-          verdict: deny
-          reason: "Network access to sensitive scope"
-
-        - id: mitre-flagged
-          when:
-            mitre_tactic: [T1485, T1070, T1059]
-          verdict: deny
-
-        - id: unknown-mcp-mutate
-          when:
-            mcp_server: "*"
-            effect: [mutating, destructive]
-          verdict: deny
+      enabled: true
+      escalate_policy: deny       # what to do on RecommendedAction.ESCALATE
+      # Rules come from recommendation_rules.yaml (same as observation mode)
+      # Override per-pipeline if needed:
+      # rules_path: ./custom-rules.yaml
     sinks:
       - type: jsonl
         path: ./traces/copilot.jsonl
 ```
 
-No `gate:` key = GateStage is a no-op. Same pipeline, same config file, no separate policy file.
-
-**`when` clause vocabulary** — matches against enricher output dimensions:
-
-| Field | Type | Source |
-|-------|------|--------|
-| `risk_score` | `">N"`, `"<N"`, `">=N"` | RiskAssessment.score (0-100, compared as int) |
-| `risk_label` | `safe | caution | danger | critical` | RiskAssessment.level |
-| `effect` | str or list | Classification.effect |
-| `mechanism` | str or list | Classification.mechanism |
-| `scope` | str or list | Classification.scope (dotted: `system.os`) |
-| `role` | str or list | Classification.role |
-| `action` | str or list | Classification.action |
-| `capability` | str or list | Classification.capabilities |
-| `mitre_tactic` | str or list | RiskAssessment.mitre |
-| `tool` | str or list (glob) | SessionEvent.payload.tool_name (canonical) |
-| `mcp_server` | str or list (glob) | SessionEvent.payload.mcp_server |
-| `kind` | str or list | SessionEvent.kind |
-| `framework` | str or list | EventMetadata.source_framework |
-
-**Matching semantics:**
-- String fields: exact match or glob (`*` wildcard)
-- List fields: event value must contain at least one listed item (OR)
-- Multiple fields in one `when`: all must match (AND)
-- `risk_score` comparisons: `">80"` means score > 80
+No `gate:` key (or `gate.enabled: false`) = observation-only mode. The governance pipeline still runs and attaches `SessionMeta` to events, but no enforcement happens.
 
 ### Pipeline API
 
-The gate is accessed through the same `Pipeline` class, configured differently depending on mode:
+The gate is accessed through the same `Pipeline` class. In gate mode, it constructs a `GovernancePipeline` internally and collapses the output:
 
 ```python
 class Pipeline:
-    """Unified pipeline: Source → Parse → Enrich → Gate → Sink(s)."""
+    """Unified pipeline: Source → Parse → GovernancePipeline → Sink(s)."""
 
     @classmethod
     def from_config(cls, config_path: Path, pipeline_name: str) -> "Pipeline":
-        """Load pipeline from tracemill.yaml. Gate stage activates if gate: key present."""
+        """Load pipeline from tracemill.yaml. Gate activates if gate.enabled: true."""
         ...
 
     @classmethod
-    def for_gate(cls, config_path: Path, framework: str) -> "Pipeline":
-        """Create a pipeline configured for single-shot gate scoring (SDK mode).
-        Reads gate rules from the framework's pipeline config in tracemill.yaml.
-        No source or sinks — caller provides payload via .score() method."""
+    def for_gate(cls, framework: str) -> "Pipeline":
+        """Create a pipeline for single-shot gate scoring (SDK mode).
+        Reads config from tracemill.yaml resolution chain.
+        No source or sinks — caller provides payload via .score()."""
         ...
 
-    def score(self, payload: dict, framework: str | None = None) -> GateResult:
-        """Run the full pipeline synchronously on a single event (SDK mode).
+    def score(self, payload: dict) -> GateResult:
+        """Run governance pipeline synchronously on a single event.
 
-        1. Parser selects mapping for framework, normalizes to SessionEvent
-        2. Enricher classifies + scores → attaches facts
-        3. GateStage evaluates rules → attaches verdict
-        4. Returns GateResult (verdict + enriched event)
+        1. Parser normalizes payload → SessionEvent (using framework mapping)
+        2. GovernancePipeline.process_event() → SessionMeta with RecommendedAction
+        3. Collapse RecommendedAction → Verdict (binary)
+        4. Returns GateResult
         """
         ...
 
     async def run(self) -> None:
-        """Run the pipeline as a long-lived stream (observation mode).
-        Source emits events → each passes through Parse → Enrich → Gate → Sink(s).
-        """
+        """Run as long-lived stream (observation mode, optionally with gate)."""
         ...
 ```
 
-For sidecar mode, the CLI (`tracemill gate --stdin`) constructs a pipeline with `StdinSource` + `VerdictSink` and calls `run()` on a single event. It reads gate rules from the same `tracemill.yaml` config resolution chain (project-local → user-global → defaults).
+For sidecar mode, `tracemill gate --stdin --framework copilot` constructs a pipeline with `StdinSource` + `VerdictSink`, runs `.score()` on the single stdin event, exits with code based on verdict.
 
 ### CLI Interface
 
 ```bash
-# Sidecar mode: used as hook script (stdin → pipeline → exit code)
-# Reads gate rules from ./tracemill.yaml (or ~/.tracemill/config.yaml)
+# Sidecar mode: used as hook script (stdin → governance pipeline → exit code)
 tracemill gate --stdin --framework copilot
 
-# Observation mode with gate enabled (gate: key in config activates it):
+# Observation mode (gate.enabled in config controls enforcement):
 tracemill run --config tracemill.yaml
 
 # Debugging: score a payload without acting
 echo '{"toolName":"bash","toolArgs":{"command":"rm -rf /"}}' | \
   tracemill gate score --framework copilot
-# Output: {"verdict":"deny","score":92,"reason":"...","rule":"critical-risk"}
+# Output: {"verdict":"deny","recommended_action":"deny","score":92,"rule":"destructive_host_network","reason":"destructive_host_or_network"}
 ```
 
 ### Design Constraints
 
-1. **One pipeline** — gate is a stage, not a separate system. Same code path for observation and enforcement.
-2. **No framework dependencies** — `gate/` never imports Claude Code, Copilot, LangGraph, etc. It speaks their wire formats via mappings.
-3. **No network calls from scoring** — `pipeline.score()` is pure computation. No HTTP, no DB, no LLM.
-4. **Deterministic** — same payload + same policy = same verdict. Always.
-5. **Fast** — target <10ms p99 for `pipeline.score()`. Pre-built indexes at init; scoring is lookup + arithmetic.
-6. **Stateless** — no session memory between calls. Each call is independent.
-7. **Policy is data** — no code in policy files. YAML only. Turing-incomplete by design.
-8. **Binary verdicts** — allow or deny. No "escalate" or "maybe." Consumer implements escalation if they want it.
-9. **Fail-closed** — in sidecar mode, any crash or unhandled error exits non-zero = deny.
-10. **Enricher purity** — the enricher (§9) produces only classifications and scores. Never verdicts.
+1. **No new rule engine** — gate uses `governance/rules.py` and `recommendation_rules.yaml` directly. Zero duplication.
+2. **No framework dependencies** — `gate/` never imports Claude Code, Copilot, LangGraph, etc. Wire format handling is in mappings.
+3. **No network calls from scoring** — `.score()` is pure computation. No HTTP, no DB, no LLM.
+4. **Deterministic** — same payload + same rules = same verdict. Always.
+5. **Fast** — target <10ms p99 for `.score()`. The governance pipeline is already optimized for this.
+6. **Governance pipeline is stateful** — it tracks session state, taint, drift, budget. For sidecar mode (single-shot, no session context), Phase 1 state mutations are skipped and only Phase 2/3 (classification + rules) run.
+7. **Policy is data** — `recommendation_rules.yaml`. YAML only. Turing-incomplete by design.
+8. **Binary enforcement** — governance produces 5-valued `RecommendedAction`; gate collapses to binary allow/deny.
+9. **Fail-closed** — in sidecar mode, any crash exits non-zero = deny.
 
 ### File Structure
 
 ```
 src/tracemill/
-├── pipeline/
-│   ├── __init__.py          # Pipeline class (unified: .run(), .score(), .for_gate())
-│   ├── stages.py            # ParseStage, EnrichStage, GateStage
-│   ├── sources/             # StdinSource, FunctionCallSource, FileWatchSource, SSESource...
-│   └── sinks/               # VerdictSink, JsonlSink, SqliteSink, CallbackSink...
-├── gate/
-│   ├── __init__.py          # Public API: GateResult, Verdict
-│   ├── types.py             # Verdict, GateResult dataclasses
-│   ├── policy.py            # PolicyEngine (rule loading from config + first-match evaluation)
-│   └── io.py                # VerdictSink (stdout JSON + exit code for sidecar mode)
-├── classify/                # shared — enricher logic
-└── mappings/                # shared — framework YAML definitions
+├── governance/              # EXISTING — the engine (unchanged)
+│   ├── pipeline.py          # GovernancePipeline (Phase 1/2/3)
+│   ├── rules.py             # Rule, Predicate, evaluate_rules()
+│   ├── labeler.py           # GovernanceLabeler
+│   ├── state.py             # SessionState (taint, budget, drift)
+│   └── ...                  # IFC, PII, MCP drift, etc.
+├── gate/                    # NEW — thin enforcement layer
+│   ├── __init__.py          # Public API: GateResult, Verdict, collapse_to_verdict
+│   ├── types.py             # Verdict enum, GateResult dataclass
+│   ├── collapse.py          # RecommendedAction → Verdict logic (5 lines)
+│   └── io.py                # VerdictSink (stdout JSON + exit code for sidecar)
+├── classify/                # shared — classification engine
+├── pipeline/                # sources, sinks, orchestration
+└── mappings/                # framework YAML definitions
 ```
 
 ---

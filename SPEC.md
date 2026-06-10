@@ -1107,126 +1107,114 @@ tracemill/
 
 ## §22 — Gate Module
 
-*The governance pipeline (§ governance extensions) made actionable — same logic, enforceable verdicts.*
+*The always-on observation pipeline, with an optional enforcement tap.*
 
 ### What It Is
 
-The gate is not a separate system. It is the **governance pipeline operating in enforcement mode**.
+The gate is not a separate mode, separate pipeline, or separate system. It is a **synchronous query endpoint** into the already-running observation pipeline.
 
-The governance pipeline already runs: classify → score → evaluate rules → produce a `GovernanceAssessment` (allow/warn/escalate/deny/transform). This is always computed — in observation mode it's a descriptive annotation ("this event would be blocked"), useful for dry-run tuning and compliance reporting. In gate mode the same evaluation becomes prescriptive: when a framework blocks waiting for a permission decision, the `GovernanceAssessment` is collapsed to a **binding verdict** and delivered back.
+tracemill's observation pipeline is always on — reading events from the rich source (OTel, SQLite, JSONL), parsing, classifying, scoring, accumulating session state (taint, drift, budget). Every event produces a `GovernanceAssessment`. This happens whether or not a gate is active.
+
+When a framework happens to support a pre-execution hook, that hook asks the living pipeline: *"I'm about to execute tool X with args Y — what's the verdict?"* The pipeline already has full session context because it's been observing all along. It answers immediately.
 
 ```
-Source → Parse → GovernancePipeline → Sink(s)
-                      │
-                      ├── observation mode: assessment attached as metadata (descriptive)
-                      └── gate mode: assessment collapsed to verdict (prescriptive)
+┌─────────────────────────────────────────────────────────────────────┐
+│  Always-on observation pipeline                                      │
+│                                                                      │
+│  Source (OTel/SQLite/JSONL) → Parse → GovernancePipeline → Sink(s)  │
+│       ▲                              │                               │
+│       │ continuously accumulates     │ GovernanceAssessment           │
+│       │ state: taint, drift, budget  │ always computed, always stored │
+│       │                              ▼                               │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │  Gate tap (optional, when framework blocks):                  │   │
+│  │                                                               │   │
+│  │  Hook fires → "score this pending call given everything      │   │
+│  │                you already know about this session"           │   │
+│  │            → Verdict returned synchronously                   │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-**Same rules. Same classification. Same risk scoring. Same governance_rules.yaml.** The only difference is whether the downstream consumer treats the output as advisory or authoritative.
+**One pipeline. One flow. The gate is just a synchronous read with a binary answer.**
 
-### How Gate Mode Works
+### Why This Architecture
 
-In observation mode, the governance pipeline processes events post-hoc and attaches `SessionMeta` with a `GovernanceAssessment`. Nobody blocks on it — the evaluation is descriptive metadata (dry-run, audit, alerting).
+The previous design had sidecar mode as a separate stateless flow — spawn a process, score one event in isolation, exit. That creates an information gap: the sidecar has no session history, no taint state, no drift detection. It can only classify the current tool call without context.
 
-In gate mode, a framework is blocking — waiting for tracemill to say allow or deny. The governance pipeline runs identically, but the `GovernanceAssessment` output is **collapsed to a binary verdict** and delivered synchronously:
+By making observation always-on and the gate a query into it:
+
+- **Full context always available** — the pipeline has been accumulating Phase 1 state (taint propagation, IFC labels, budget counters, drift windows) across every event in the session
+- **No richness gap** — the gate sees exactly what observation sees, because it IS observation
+- **No two-mode confusion** — there is one mode (always-on observation); enforcement is a side-effect of having a hook wired up
+- **Drift detection works** — "10th shell command in a row" requires history; the pipeline has it
+- **Budget tracking works** — "cost exceeded $5" requires accumulation; the pipeline has it
+
+### How the Gate Tap Works
+
+When `gate.enabled: true` in config and the framework's hook fires, the pending tool call is scored against the pipeline's current session state. The `GovernanceAssessment` is collapsed to a binary verdict:
 
 | `GovernanceAssessment` | Verdict | Rationale |
 |---------------------|---------|-----------|
 | `allow` | **allow** | No risk concern |
 | `warn` | **allow** | Risk noted but not blocking — logged for audit |
-| `escalate` | configurable | Default: **deny** (fail-closed). Consumer can override to allow-with-alert |
+| `escalate` | configurable | Default: **deny** (fail-closed). Override with `escalate_policy: allow` |
 | `deny` | **deny** | Risk unacceptable |
 | `transform` | **deny** | Original form blocked; agent told why and can retry with safer form |
 
-The `escalate_policy` config key controls what happens on escalate:
-
-```yaml
-pipelines:
-  copilot:
-    gate:
-      escalate_policy: deny    # "deny" (default, fail-closed) or "allow" (log + permit)
-```
-
-### Framework × Deployment Matrix
-
-tracemill supports 13 platforms across 16 deployment permutations. Each maps to one of three gate configurations:
-
-| # | Platform | Deployment Mode | Source | Sink | Gate Mechanism |
-|---|----------|----------------|--------|------|----------------|
-| 1 | **Copilot** | CLI (local) | `StdinSource` | `VerdictSink` (stdout JSON + exit code) | `.github/hooks/preToolUse.json` |
-| 2 | **Copilot** | Cloud Agent (GitHub container) | `StdinSource` | `VerdictSink` | Same hook; `copilot-setup-steps.yml` installs tracemill |
-| 3 | **Copilot** | SDK (`github-copilot-sdk`) | `FunctionCallSource` | Returns `GateResult` to caller | `on_permission_request` callback |
-| 4 | **Claude Code** | CLI (local) | `StdinSource` | `VerdictSink` | `.claude/settings.json` `PreToolUse` hook |
-| 5 | **Claude Code** | SDK (`claude-code-sdk`) | `FunctionCallSource` | Returns `GateResult` to caller | `can_use_tool` callback |
-| 6 | **Cline** | VS Code extension | `StdinSource` | `VerdictSink` | `.cline/hooks/preToolUse.sh` |
-| 7 | **OpenHands** | Self-hosted container | `StdinSource` | `VerdictSink` | `.openhands/hooks.json` |
-| 8 | **Goose** | CLI (local or orchestrated) | `FunctionCallSource` | Returns `GateResult` to caller | REST approval channel |
-| 9 | **OpenCode** | TUI/CLI | `FunctionCallSource` | Returns `GateResult` to caller | SSE `permission.asked` |
-| 10 | **LangGraph** | Python library | `FunctionCallSource` | Returns `GateResult` to caller | `interrupt()` / `Command(resume=)` |
-| 11 | **CrewAI** | Python library | `FunctionCallSource` | Returns `GateResult` to caller | `@before_tool_call` decorator |
-| 12 | **PydanticAI** | Python library | `FunctionCallSource` | Returns `GateResult` to caller | `DeferredToolRequests` |
-| 13 | **MAF / Semantic Kernel** | .NET/Python library | `FunctionCallSource` | Returns `GateResult` to caller | `IAutoFunctionInvocationFilter` |
-| 14 | **Aider** | CLI | `FileWatchSource` | `CallbackSink` (consumer reads verdict, kills process) | No pre-exec hook exists |
-| 15 | **smolagents** | Python library | `FileWatchSource` | `CallbackSink` | No pre-exec hook exists |
-| 16 | **SWE-agent** | CLI/Docker | `FileWatchSource` | `CallbackSink` | No pre-exec hook exists |
-
-**What varies is plumbing. The pipeline core is identical in all 16 cases.**
-
-### The Pipeline
-
-```
-┌────────────────────────────────────────────────────────────────────────────┐
-│                     GovernancePipeline (always the same)                    │
-│                                                                            │
-│   Source ──→ Parser ──→ GovernancePipeline.process_event() ──→ Sink(s)     │
-│                              │                                             │
-│                              ├── Phase 1: state mutation, taint, IFC       │
-│                              ├── Phase 2: labeling, drift, MCP scan        │
-│                              └── Phase 3: risk + rules → GovernanceAssessment  │
-│                                                                            │
-│   • Observation mode: SessionMeta attached, sinks write to storage         │
-│   • Gate mode: GovernanceAssessment collapsed to verdict, delivered to caller  │
-│                                                                            │
-└────────────────────────────────────────────────────────────────────────────┘
-```
-
-The governance pipeline already exists and handles all the hard work (classification, risk scoring, rule evaluation, state tracking, drift detection). The gate module adds only:
-
-1. **Verdict collapse** — map `GovernanceAssessment` → binary allow/deny
-2. **I/O adapters** — deliver the verdict to the framework (stdin/stdout for sidecar, return value for SDK)
-3. **A `gate:` config key** — enables enforcement mode for a pipeline
-
 ```python
-# This is all the gate-specific logic. Everything else is GovernancePipeline.
-def collapse_to_verdict(evaluation: GovernanceAssessment, escalate_policy: str = "deny") -> Verdict:
-    if evaluation in (GovernanceAssessment.ALLOW, GovernanceAssessment.WARN):
+def collapse_to_verdict(assessment: GovernanceAssessment, escalate_policy: str = "deny") -> Verdict:
+    if assessment in (GovernanceAssessment.ALLOW, GovernanceAssessment.WARN):
         return Verdict.ALLOW
-    if evaluation == GovernanceAssessment.ESCALATE:
+    if assessment == GovernanceAssessment.ESCALATE:
         return Verdict.DENY if escalate_policy == "deny" else Verdict.ALLOW
     return Verdict.DENY  # DENY, TRANSFORM
 ```
 
-No separate rule engine. No separate classification. No duplicated logic. The `governance_rules.yaml` that already exists IS the gate policy.
+### The Single Flow (E2E)
 
-### How the Source and Sink Vary
-
----
-
-#### Sidecar mode (rows #1, 2, 4, 6, 7)
-
-The framework spawns tracemill as a subprocess. tracemill runs the full pipeline synchronously on a single event:
+Every session follows the same flow regardless of whether a gate is active:
 
 ```
-Framework fires PreToolUse hook → spawns `tracemill gate --stdin --framework copilot`
-  → StdinSource reads one JSON event from stdin
-  → Parser normalizes (copilot.yaml mapping)
-  → Enricher classifies + scores
-  → GateStage evaluates policy → verdict
-  → VerdictSink writes stdout JSON + sets exit code (0=allow, 2=deny)
-Framework reads exit code → allows or blocks the tool
+1. Agent session starts
+2. tracemill observation pipeline starts (reads from configured source)
+3. Events stream in → Parse → Phase 1/2/3 → GovernanceAssessment → Sink(s)
+   (state accumulates: taint graph, drift window, budget counter)
+4. IF framework hook fires (pre-execution):
+   a. Hook delivers pending tool call to tracemill
+   b. Pipeline scores it against current session state (same Phase 1/2/3)
+   c. GovernanceAssessment collapsed to binary Verdict
+   d. Verdict delivered back to framework
+   e. Framework allows or blocks the tool
+5. Whether or not the tool was gated, the event (with assessment) is stored by sinks
 ```
 
-**Consumer setup (one-time, zero code):**
+Steps 1–3 and 5 always happen. Step 4 only happens when:
+- The framework supports a pre-execution hook, AND
+- `gate.enabled: true` in config, AND
+- The hook is wired to tracemill
+
+If any of those conditions is false, the pipeline still runs — you just get observation without enforcement.
+
+### Hook Delivery Mechanisms
+
+The hook in step 4a can be delivered two ways, depending on the framework:
+
+#### Shell hook (Copilot CLI, Claude CLI, Cline, OpenHands)
+
+The framework spawns a subprocess. tracemill connects to the running pipeline (via IPC/socket), queries it, returns the verdict as an exit code:
+
+```bash
+# The hook script — connects to the already-running observation pipeline
+tracemill gate query --session $SESSION_ID --stdin
+# Reads pending tool call from stdin
+# Queries the living pipeline for a verdict
+# Exits 0 (allow) or 2 (deny)
+```
+
+The observation pipeline MUST be running. The hook does not score in isolation — it queries the pipeline that has full session state.
+
+**Hook configuration (one-time, zero code):**
 
 For Copilot (`.github/hooks/preToolUse.json`):
 ```json
@@ -1235,7 +1223,7 @@ For Copilot (`.github/hooks/preToolUse.json`):
   "hooks": {
     "preToolUse": [{
       "type": "command",
-      "bash": "tracemill gate --stdin --framework copilot",
+      "bash": "tracemill gate query --stdin",
       "timeoutSec": 10
     }]
   }
@@ -1248,7 +1236,7 @@ For Claude Code (`.claude/settings.json`):
   "hooks": {
     "PreToolUse": [{
       "type": "command",
-      "command": "tracemill gate --stdin --framework claude"
+      "command": "tracemill gate query --stdin"
     }]
   }
 }
@@ -1257,7 +1245,7 @@ For Claude Code (`.claude/settings.json`):
 For Cline (`.cline/hooks/preToolUse.sh`):
 ```bash
 #!/bin/bash
-tracemill gate --stdin --framework cline
+tracemill gate query --stdin
 ```
 
 For OpenHands (`.openhands/hooks.json`):
@@ -1266,32 +1254,32 @@ For OpenHands (`.openhands/hooks.json`):
   "hooks": {
     "PreToolUse": [{
       "type": "command",
-      "command": "tracemill gate --stdin --framework openhands"
+      "command": "tracemill gate query --stdin"
     }]
   }
 }
 ```
 
-**Fail-closed:** If tracemill crashes, exit code is non-zero = deny.
+#### In-process callback (SDK frameworks)
 
----
-
-#### SDK mode (rows #3, 5, 8–13)
-
-The consumer's code calls `pipeline.score()` synchronously when their framework pauses for approval. Same pipeline, just invoked as a function instead of a process:
+For SDK-based frameworks, the observation pipeline runs in-process. The callback queries it directly — no subprocess, no IPC:
 
 ```python
-from tracemill import Pipeline
+from tracemill import Pipeline, Verdict
 
-pipeline = Pipeline.for_gate(framework="goose")
+# Pipeline is long-lived — observing AND available for gate queries
+pipeline = Pipeline.from_config("./tracemill.yaml", pipeline_name="copilot")
 
-# One call — runs full governance pipeline → returns GateResult
+# Start observation in background
+asyncio.create_task(pipeline.run())
+
+# Gate query — asks the living pipeline for a verdict
 result = pipeline.score(payload)
-result.verdict              # Verdict.ALLOW or Verdict.DENY
-result.governance_assessment    # GovernanceAssessment.DENY (raw, before collapse)
+result.verdict                # Verdict.ALLOW or Verdict.DENY
+result.governance_assessment  # GovernanceAssessment.DENY (raw 5-valued)
 result.meta.risk_assessment.score  # 92
-result.reason               # "destructive_host_or_network"
-result.matched_rule         # "destructive_host_network"
+result.reason                 # "destructive_host_or_network"
+result.matched_rule           # "destructive_host_network"
 ```
 
 **Copilot SDK integration:**
@@ -1301,7 +1289,8 @@ from copilot import CopilotClient
 from copilot.session import PermissionRequestResult
 from tracemill import Pipeline, Verdict
 
-pipeline = Pipeline.for_gate(framework="copilot")
+pipeline = Pipeline.from_config("./tracemill.yaml", pipeline_name="copilot")
+asyncio.create_task(pipeline.run())  # observation always on
 
 async def permission_handler(request, invocation):
     result = pipeline.score({
@@ -1325,7 +1314,8 @@ session = await client.create_session(
 from claude_code_sdk import ClaudeCodeOptions, PermissionResultAllow, PermissionResultDeny
 from tracemill import Pipeline, Verdict
 
-pipeline = Pipeline.for_gate(framework="claude")
+pipeline = Pipeline.from_config("./tracemill.yaml", pipeline_name="claude")
+asyncio.create_task(pipeline.run())  # observation always on
 
 async def can_use_tool(tool_name, input_data, context):
     result = pipeline.score({
@@ -1343,40 +1333,58 @@ options = ClaudeCodeOptions(
 )
 ```
 
-The consumer owns how they observe events and deliver verdicts to their framework. tracemill owns parsing, classification, scoring, and policy evaluation.
+#### Reactive kill (Aider, smolagents, SWE-agent)
 
----
-
-#### Streaming mode with gate (rows #14–16, and optionally any framework)
-
-For streaming observation pipelines (the existing architecture), the GateStage is simply present in the pipeline. Every event gets scored and receives a verdict. Sinks downstream can read it:
+Frameworks with no pre-execution hook still get observed. When the pipeline scores an event as `DENY`, the sink reacts — but the tool already fired:
 
 ```python
-from tracemill import Pipeline
-
 async def on_event(event: SessionEvent):
-    # The gate stage already ran — verdict is attached
     if event.gate_result and event.gate_result.verdict == Verdict.DENY:
         await kill_process(event.session_id)
 
 pipeline = Pipeline.from_config("./tracemill.yaml", pipeline_name="aider")
-# gate: key in config enables the gate stage automatically
 pipeline.add_sink(CallbackSink(on_event=on_event))
 await pipeline.run()
 ```
 
-This is not preventive for ungated frameworks (the tool already fired) but the consumer reacts within 50–200ms. For gateable frameworks running in streaming mode (e.g. watching Copilot's SQLite for audit), the verdict is informational — the sidecar/SDK path already handled enforcement.
+This is post-hoc — the tool executed — but the session is terminated within 50–200ms, limiting blast radius.
+
+### Framework × Deployment Matrix
+
+| # | Platform | Hook type | Gate delivery | Full context? |
+|---|----------|-----------|---------------|---------------|
+| 1 | **Copilot CLI** | Shell hook | `tracemill gate query --stdin` → exit code | ✓ (queries running pipeline) |
+| 2 | **Copilot Cloud** | Shell hook | Same; `copilot-setup-steps.yml` ensures pipeline runs | ✓ |
+| 3 | **Copilot SDK** | In-process | `pipeline.score()` | ✓ |
+| 4 | **Claude Code CLI** | Shell hook | `tracemill gate query --stdin` → exit code | ✓ |
+| 5 | **Claude Code SDK** | In-process | `pipeline.score()` | ✓ |
+| 6 | **Cline** | Shell hook | `tracemill gate query --stdin` → exit code | ✓ |
+| 7 | **OpenHands** | Shell hook | `tracemill gate query --stdin` → exit code | ✓ |
+| 8 | **Goose** | In-process | `pipeline.score()` via REST approval | ✓ |
+| 9 | **OpenCode** | In-process | `pipeline.score()` via SSE | ✓ |
+| 10 | **LangGraph** | In-process | `pipeline.score()` in interrupt handler | ✓ |
+| 11 | **CrewAI** | In-process | `pipeline.score()` in `@before_tool_call` | ✓ |
+| 12 | **PydanticAI** | In-process | `pipeline.score()` via `DeferredToolRequests` | ✓ |
+| 13 | **MAF / Semantic Kernel** | In-process | `pipeline.score()` in invocation filter | ✓ |
+| 14 | **Aider** | None | Reactive kill (post-hoc) | ✓ (observes, can't block) |
+| 15 | **smolagents** | None | Reactive kill (post-hoc) | ✓ |
+| 16 | **SWE-agent** | None | Reactive kill (post-hoc) | ✓ |
+
+**All 16 have full context.** The only difference is whether enforcement is preventive (rows 1–13) or reactive (rows 14–16).
 
 ### Separation of Concerns
 
 ```
-Parser (mappings/)             → normalizes raw framework JSON into SessionEvent
-GovernancePipeline (governance/) → classifies, scores, evaluates rules → GovernanceAssessment
-Verdict collapse (gate/)       → maps GovernanceAssessment to binary allow/deny
-Sink(s)                        → delivers verdict (stdout/exit, return value, callback)
-```
+Observation pipeline (always on):
+  Source → Parser → GovernancePipeline → Sink(s)
+  - accumulates state, classifies, scores, produces GovernanceAssessment
+  - stores everything for audit regardless of gate
 
-The governance pipeline produces `GovernanceAssessment` which is a 5-valued assessment (allow/warn/escalate/deny/transform). In observation mode this is informational metadata. In gate mode the verdict collapse reduces it to binary enforcement. The same `governance_rules.yaml` drives both modes.
+Gate tap (optional enforcement layer):
+  collapse_to_verdict(assessment) → binary Verdict
+  - only relevant when a framework hook fires
+  - queries the observation pipeline, does not run its own
+```
 
 ### Core Types
 
@@ -1397,18 +1405,14 @@ class Verdict(Enum):
 @dataclass(frozen=True, slots=True)
 class GateResult:
     verdict: Verdict
-    governance_assessment: GovernanceAssessment  # the raw governance output (before collapse)
+    governance_assessment: GovernanceAssessment  # the raw 5-valued output
     reason: str | None           # reason_code from matched rule
     matched_rule: str | None     # rule ID that triggered
     meta: SessionMeta            # full governance pipeline output
     elapsed_ms: float            # scoring latency
 ```
 
-The `GateResult` carries both the binary verdict (for enforcement) and the full `SessionMeta` (for logging/audit). Consumers who want richer information (drift status, budget, taint) read `meta`.
-
 ### Gate Configuration (in `tracemill.yaml`)
-
-The gate is enabled per-pipeline with a `gate:` key. The rules are the existing `governance_rules.yaml` — no separate rule set:
 
 ```yaml
 # tracemill.yaml
@@ -1421,7 +1425,7 @@ pipelines:
     gate:
       enabled: true
       escalate_policy: deny       # what to do on GovernanceAssessment.ESCALATE
-      # Rules come from governance_rules.yaml (same as observation mode)
+      # Rules come from governance_rules.yaml (same rules always)
       # Override per-pipeline if needed:
       # rules_path: ./custom-rules.yaml
     sinks:
@@ -1429,71 +1433,64 @@ pipelines:
         path: ./traces/copilot.jsonl
 ```
 
-No `gate:` key (or `gate.enabled: false`) = observation-only mode. The governance pipeline still runs and attaches `SessionMeta` to events, but no enforcement happens.
+No `gate:` key (or `gate.enabled: false`) = observation-only. The pipeline still runs, still scores, still stores. Nobody blocks on the output.
 
 ### Pipeline API
 
-The gate is accessed through the same `Pipeline` class. In gate mode, it constructs a `GovernancePipeline` internally and collapses the output:
-
 ```python
 class Pipeline:
-    """Unified pipeline: Source → Parse → GovernancePipeline → Sink(s)."""
+    """Unified pipeline: always-on observation + optional gate queries."""
 
     @classmethod
     def from_config(cls, config_path: Path, pipeline_name: str) -> "Pipeline":
-        """Load pipeline from tracemill.yaml. Gate activates if gate.enabled: true."""
-        ...
-
-    @classmethod
-    def for_gate(cls, framework: str) -> "Pipeline":
-        """Create a pipeline for single-shot gate scoring (SDK mode).
-        Reads config from tracemill.yaml resolution chain.
-        No source or sinks — caller provides payload via .score()."""
+        """Load pipeline from tracemill.yaml."""
         ...
 
     def score(self, payload: dict) -> GateResult:
-        """Run governance pipeline synchronously on a single event.
+        """Synchronous gate query against the running pipeline's session state.
 
-        1. Parser normalizes payload → SessionEvent (using framework mapping)
-        2. GovernancePipeline.process_event() → SessionMeta with GovernanceAssessment
-        3. Collapse GovernanceAssessment → Verdict (binary)
+        1. Parser normalizes payload → SessionEvent
+        2. GovernancePipeline.process_event() with current session state
+        3. GovernanceAssessment collapsed to Verdict
         4. Returns GateResult
         """
         ...
 
     async def run(self) -> None:
-        """Run as long-lived stream (observation mode, optionally with gate)."""
+        """Start the always-on observation loop (reads source, processes, sinks)."""
         ...
 ```
-
-For sidecar mode, `tracemill gate --stdin --framework copilot` constructs a pipeline with `StdinSource` + `VerdictSink`, runs `.score()` on the single stdin event, exits with code based on verdict.
 
 ### CLI Interface
 
 ```bash
-# Sidecar mode: used as hook script (stdin → governance pipeline → exit code)
-tracemill gate --stdin --framework copilot
-
-# Observation mode (gate.enabled in config controls enforcement):
+# Start the observation pipeline (always-on, runs as daemon/service)
 tracemill run --config tracemill.yaml
 
-# Debugging: score a payload without acting
+# Gate query — used by shell hooks; connects to running pipeline
+tracemill gate query --stdin
+# Reads pending tool call from stdin
+# Queries the running observation pipeline
+# Exits 0 (allow) or 2 (deny)
+
+# Debugging: dry-run score without a running pipeline
 echo '{"toolName":"bash","toolArgs":{"command":"rm -rf /"}}' | \
-  tracemill gate score --framework copilot
-# Output: {"verdict":"deny","governance_assessment":"deny","score":92,"rule":"destructive_host_network","reason":"destructive_host_or_network"}
+  tracemill gate dry-run --framework copilot
+# Output: {"verdict":"deny","assessment":"deny","score":92,"rule":"destructive_host_network"}
 ```
 
 ### Design Constraints
 
-1. **No new rule engine** — gate uses `governance/rules.py` and `governance_rules.yaml` directly. Zero duplication.
-2. **No framework dependencies** — `gate/` never imports Claude Code, Copilot, LangGraph, etc. Wire format handling is in mappings.
-3. **No network calls from scoring** — `.score()` is pure computation. No HTTP, no DB, no LLM.
-4. **Deterministic** — same payload + same rules = same verdict. Always.
-5. **Fast** — target <10ms p99 for `.score()`. The governance pipeline is already optimized for this.
-6. **Governance pipeline is stateful** — it tracks session state, taint, drift, budget. For sidecar mode (single-shot, no session context), Phase 1 state mutations are skipped and only Phase 2/3 (classification + rules) run.
-7. **Policy is data** — `governance_rules.yaml`. YAML only. Turing-incomplete by design.
-8. **Binary enforcement** — governance produces 5-valued `GovernanceAssessment`; gate collapses to binary allow/deny.
-9. **Fail-closed** — in sidecar mode, any crash exits non-zero = deny.
+1. **Observation is always on** — the pipeline runs continuously, accumulating state. The gate queries it; it never runs independently.
+2. **Full context always** — every gate query has access to complete session history (taint, drift, budget) because the pipeline has been observing all along.
+3. **No new rule engine** — gate uses `governance/rules.py` and `governance_rules.yaml` directly.
+4. **No framework dependencies** — `gate/` never imports Claude Code, Copilot, LangGraph, etc.
+5. **No network calls from scoring** — `.score()` is pure computation against accumulated state.
+6. **Deterministic** — same state + same payload + same rules = same verdict.
+7. **Fast** — target <10ms p99 for `.score()`.
+8. **Assessment is data** — `governance_rules.yaml`. YAML only. Turing-incomplete by design.
+9. **Binary enforcement** — governance produces 5-valued `GovernanceAssessment`; gate collapses to binary.
+10. **Fail-closed** — if `tracemill gate query` can't reach the running pipeline, exit non-zero = deny.
 
 ### File Structure
 
@@ -1508,8 +1505,8 @@ src/tracemill/
 ├── gate/                    # NEW — thin enforcement layer
 │   ├── __init__.py          # Public API: GateResult, Verdict, collapse_to_verdict
 │   ├── types.py             # Verdict enum, GateResult dataclass
-│   ├── collapse.py          # GovernanceAssessment → Verdict logic (5 lines)
-│   └── io.py                # VerdictSink (stdout JSON + exit code for sidecar)
+│   ├── collapse.py          # GovernanceAssessment → Verdict (5 lines)
+│   └── ipc.py               # IPC client for shell hooks to query running pipeline
 ├── classify/                # shared — classification engine
 ├── pipeline/                # sources, sinks, orchestration
 └── mappings/                # framework YAML definitions

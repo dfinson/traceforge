@@ -289,14 +289,16 @@ class GovernancePipeline:
         Used by .assess() to predict what the pipeline would produce if the
         event actually executed, without committing any side effects.
         """
+        from tracemill.governance.state import SessionState
+
         session_id = ctx.event.session_id
 
-        # Load state without caching for unknown sessions (no side effect on _states)
+        # Use cached state if available; otherwise start fresh (thread-safe,
+        # avoids cross-thread sqlite3 access for unknown sessions)
         if session_id in self._states:
             state = self._states[session_id]
         else:
-            from tracemill.governance.state import SessionState
-            state = SessionState.load_from_db(session_id, self._store.connection)
+            state = SessionState(session_id=session_id)
 
         # Thread-safe clone — never touches state._db
         transient = state.clone_detached()

@@ -90,27 +90,37 @@ def _build_command_analysis(command: str) -> "CommandAnalysis | None":
     # Only attempt pipe splitting if no ambiguous operators exist
     pipe_segments: tuple[PipeSegment, ...] | None = None
     if "|" in command and "||" not in command and "|&" not in command:
-        # Check that pipes are not inside quotes by comparing shlex parse
-        # against naive split — if they disagree, skip pipe segmentation
-        raw_parts = command.split("|")
-        if len(raw_parts) > 1:
-            segments: list[PipeSegment] = []
-            for part in raw_parts:
-                part = part.strip()
-                if not part:
-                    continue
-                try:
-                    seg_tokens = shlex.split(part)
-                except ValueError:
-                    seg_tokens = part.split()
-                if not seg_tokens:
-                    continue
-                seg_binary = seg_tokens[0]
-                seg_flags = tuple(t for t in seg_tokens[1:] if t.startswith("-"))
-                seg_targets = tuple(t for t in seg_tokens[1:] if not t.startswith("-"))
-                segments.append(PipeSegment(binary=seg_binary, flags=seg_flags, targets=seg_targets))
-            if len(segments) > 1:
-                pipe_segments = tuple(segments)
+        # Verify pipes are real (not inside quotes) by checking if shlex
+        # treats the full command as fewer tokens than a naive pipe-split would imply
+        try:
+            full_tokens = shlex.split(command)
+            # If "|" appears as a standalone token in shlex output, it's a real pipe
+            if "|" not in full_tokens:
+                # shlex consumed the pipe inside quotes — skip pipe segmentation
+                pass
+            else:
+                raw_parts = command.split("|")
+                if len(raw_parts) > 1:
+                    segments: list[PipeSegment] = []
+                    for part in raw_parts:
+                        part = part.strip()
+                        if not part:
+                            continue
+                        try:
+                            seg_tokens = shlex.split(part)
+                        except ValueError:
+                            seg_tokens = part.split()
+                        if not seg_tokens:
+                            continue
+                        seg_binary = seg_tokens[0]
+                        seg_flags = tuple(t for t in seg_tokens[1:] if t.startswith("-"))
+                        seg_targets = tuple(t for t in seg_tokens[1:] if not t.startswith("-"))
+                        segments.append(PipeSegment(binary=seg_binary, flags=seg_flags, targets=seg_targets))
+                    if len(segments) > 1:
+                        pipe_segments = tuple(segments)
+        except ValueError:
+            # Malformed command — skip pipe segmentation
+            pass
 
     return CommandAnalysis(
         command=command,
@@ -215,7 +225,11 @@ def assess(pipeline, payload: dict) -> AssessmentResult:
     )
 
     # Classify: use shell classifier for commands, tool classifier otherwise
-    classification = classify_tool(tool_name, engine=pipeline._engine)
+    # For MCP tools with namespace, synthesize mcp__namespace__tool format
+    classify_name = tool_name
+    if server_namespace and not tool_name.startswith("mcp__"):
+        classify_name = f"mcp__{server_namespace}__{tool_name}"
+    classification = classify_tool(classify_name, engine=pipeline._engine)
     command_analysis = None
 
     if _is_shell_tool(tool_name, classification):

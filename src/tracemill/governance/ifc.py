@@ -61,21 +61,9 @@ class IFCChecker:
 
         event = ctx.event
 
-        # Determine clearance of data being accessed
-        clearance = self._infer_clearance(ctx)
-        if clearance and _CLEARANCE_ORDER[clearance] >= _CLEARANCE_ORDER[Clearance.CONFIDENTIAL]:
-            src_labels.add(f"ifc:{clearance}")
-            # Record taint
-            session_state.add_taint(TaintEntry(
-                event_id=event.event_id,
-                clearance=clearance,
-                source=self._classify_source(ctx),
-                payload_pointer="",
-            ))
-
-        # Check if event accesses tainted data (propagation)
+        # Check taint propagation BEFORE adding new taint (prevent self-taint)
         if session_state.taint_ledger:
-            # If tool is reading/writing and there's prior taint, propagate
+            # If tool is writing and there's prior taint, propagate
             if ctx.base_classification.effect in ("mutating", "destructive"):
                 max_clearance = max(
                     (t.clearance for t in session_state.taint_ledger),
@@ -84,6 +72,18 @@ class IFCChecker:
                 )
                 if max_clearance:
                     src_labels.add(f"ifc:tainted_write:{max_clearance}")
+
+        # Determine clearance of data being accessed by current event
+        clearance = self._infer_clearance(ctx)
+        if clearance and _CLEARANCE_ORDER[clearance] >= _CLEARANCE_ORDER[Clearance.CONFIDENTIAL]:
+            src_labels.add(f"ifc:{clearance}")
+            # Record taint for future events (not current)
+            session_state.add_taint(TaintEntry(
+                event_id=event.event_id,
+                clearance=clearance,
+                source=self._classify_source(ctx),
+                payload_pointer="",
+            ))
 
     def _infer_clearance(self, ctx: "EnrichmentContext") -> Clearance | None:
         """Infer clearance level from event context."""

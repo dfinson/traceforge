@@ -102,7 +102,9 @@ class DriftDetector:
         anomaly = risk_bonus > 0
 
         if anomaly:
-            cap.add("phase_anomaly")
+            # phase_anomaly tracked via structure only (not capability)
+            # to avoid polluting canonical hash with session-contextual state
+            pass
 
         return DriftAssessment(
             phase_window=phase_window,

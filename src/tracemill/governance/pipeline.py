@@ -189,6 +189,11 @@ class GovernancePipeline:
             # Evict session state to prevent unbounded memory growth
             self._states.pop(session_id, None)
             self._write_failures.pop(session_id, None)
+            # Clean up any lingering phase23 attempts for this session's events
+            stale_keys = [k for k, _ in self._phase23_attempts.items()
+                          if k.startswith(f"{session_id}:") or k.startswith(f"{session_id}/")]
+            for k in stale_keys:
+                del self._phase23_attempts[k]
 
         snapshot = state.snapshot()
         return SessionMeta(

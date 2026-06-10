@@ -178,6 +178,26 @@ class GovernancePipeline:
         self._phase23_session_keys: dict[str, set[str]] = {}  # session_id → set of event keys with attempts
         self._MAX_PHASE23_ATTEMPTS = 3
 
+    def assess(self, payload: dict) -> "AssessmentResult":
+        """Score a pending tool call against current session state.
+
+        Args:
+            payload: Dict with at minimum:
+                - ``tool_name``: str
+                - ``tool_input``: dict
+                - ``session_id``: str
+              Optional:
+                - ``server_namespace``: str
+                - ``project_root``: str
+
+        Returns:
+            AssessmentResult with the governance assessment.
+            Does NOT persist to sinks — the observation pipeline handles storage.
+        """
+        from tracemill.assess.assessor import assess as _assess
+
+        return _assess(self, payload)
+
     def get_or_create_state(self, session_id: str) -> "SessionState":
         """Get or create session state."""
         from tracemill.governance.state import SessionState

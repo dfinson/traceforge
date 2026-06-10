@@ -1,10 +1,10 @@
-"""Tests for the Assessment API (tracemill.assess)."""
+"""Tests for the Assessment API (GovernancePipeline.assess)."""
 
 from pathlib import Path
 
 import pytest
 
-from tracemill.assess import Assessor, AssessmentResult, GovernanceAssessment
+from tracemill.assess import AssessmentResult, GovernanceAssessment
 from tracemill.classify.config import ClassificationEngine, ClassifyConfig
 from tracemill.governance.budget import BudgetTracker
 from tracemill.governance.labeler import GovernanceLabeler
@@ -41,120 +41,111 @@ def pipeline(store, rules, engine):
     )
 
 
-@pytest.fixture
-def assessor(pipeline, engine):
-    return Assessor(
-        pipeline=pipeline,
-        engine=engine,
-        session_id="test-session-001",
-        framework="copilot",
-        project_root="/tmp/project",
-    )
+class TestPipelineAssessBasic:
+    """Basic functionality of pipeline.assess()."""
 
-
-class TestAssessorBasic:
-    """Basic functionality of the Assessor."""
-
-    def test_assess_destructive_shell_returns_high_risk(self, assessor):
-        result = assessor.assess({
+    def test_assess_destructive_shell_returns_high_risk(self, pipeline):
+        result = pipeline.assess({
             "tool_name": "bash",
             "tool_input": {"command": "rm -rf /"},
+            "session_id": "sess-001",
         })
         assert isinstance(result, AssessmentResult)
-        # Destructive shell command should get at least WARN or higher
         assert result.governance_assessment in (
             GovernanceAssessment.WARN, GovernanceAssessment.ESCALATE, GovernanceAssessment.DENY
         )
         assert result.risk_score > 0
         assert result.elapsed_ms > 0
 
-    def test_assess_safe_read_returns_allow(self, assessor):
-        result = assessor.assess({
+    def test_assess_safe_read_returns_allow(self, pipeline):
+        result = pipeline.assess({
             "tool_name": "bash",
             "tool_input": {"command": "cat README.md"},
+            "session_id": "sess-001",
         })
         assert isinstance(result, AssessmentResult)
-        # A simple cat should not trigger deny
         assert result.governance_assessment in (GovernanceAssessment.ALLOW, GovernanceAssessment.WARN)
 
-    def test_assess_unknown_tool_does_not_crash(self, assessor):
-        result = assessor.assess({
+    def test_assess_unknown_tool_does_not_crash(self, pipeline):
+        result = pipeline.assess({
             "tool_name": "some_totally_unknown_tool",
             "tool_input": {"foo": "bar"},
+            "session_id": "sess-001",
         })
         assert isinstance(result, AssessmentResult)
-        # Should still return a valid result
         assert result.governance_assessment in GovernanceAssessment
 
-    def test_assess_empty_payload(self, assessor):
-        result = assessor.assess({})
+    def test_assess_empty_payload(self, pipeline):
+        result = pipeline.assess({})
         assert isinstance(result, AssessmentResult)
         assert result.governance_assessment in GovernanceAssessment
 
-    def test_assess_returns_classification(self, assessor):
-        result = assessor.assess({
+    def test_assess_returns_classification(self, pipeline):
+        result = pipeline.assess({
             "tool_name": "bash",
             "tool_input": {"command": "rm -rf /tmp/data"},
+            "session_id": "sess-001",
         })
-        # meta.classification should be populated
         assert result.classification is not None
 
-    def test_assess_returns_meta(self, assessor):
-        result = assessor.assess({
+    def test_assess_returns_meta(self, pipeline):
+        result = pipeline.assess({
             "tool_name": "bash",
             "tool_input": {"command": "ls -la"},
+            "session_id": "sess-001",
         })
         assert result.meta is not None
 
 
-class TestAssessorStateAccumulation:
-    """The assessor's calls mutate pipeline state (budget, taint)."""
+class TestPipelineAssessStateAccumulation:
+    """Assess calls mutate pipeline state (budget, taint)."""
 
-    def test_multiple_calls_accumulate_budget(self, assessor):
-        # First call
-        r1 = assessor.assess({
+    def test_multiple_calls_accumulate_budget(self, pipeline):
+        r1 = pipeline.assess({
             "tool_name": "bash",
             "tool_input": {"command": "echo hello"},
+            "session_id": "sess-002",
         })
-        # Second call — same session, budget should increment
-        r2 = assessor.assess({
+        r2 = pipeline.assess({
             "tool_name": "bash",
             "tool_input": {"command": "echo world"},
+            "session_id": "sess-002",
         })
-        # Both should succeed without error
         assert isinstance(r1, AssessmentResult)
         assert isinstance(r2, AssessmentResult)
 
 
-class TestAssessorMcpTools:
+class TestPipelineAssessMcpTools:
     """Assessment of MCP-namespaced tools."""
 
-    def test_mcp_tool_with_namespace(self, assessor):
-        result = assessor.assess({
+    def test_mcp_tool_with_namespace(self, pipeline):
+        result = pipeline.assess({
             "tool_name": "filesystem__write_file",
             "tool_input": {"path": "/etc/passwd", "content": "hacked"},
             "server_namespace": "filesystem",
+            "session_id": "sess-003",
         })
         assert isinstance(result, AssessmentResult)
-        # filesystem write to /etc/passwd should score high risk
         assert result.risk_score > 0
 
 
-class TestAssessorTimingAndFormat:
+class TestPipelineAssessTimingAndFormat:
     """AssessmentResult format and timing."""
 
-    def test_elapsed_ms_is_positive(self, assessor):
-        result = assessor.assess({
+    def test_elapsed_ms_is_positive(self, pipeline):
+        result = pipeline.assess({
             "tool_name": "bash",
             "tool_input": {"command": "pwd"},
+            "session_id": "sess-004",
         })
         assert result.elapsed_ms > 0
         assert isinstance(result.elapsed_ms, float)
 
-    def test_governance_assessment_is_enum(self, assessor):
-        result = assessor.assess({
+    def test_governance_assessment_is_enum(self, pipeline):
+        result = pipeline.assess({
             "tool_name": "bash",
             "tool_input": {"command": "rm -rf /"},
+            "session_id": "sess-004",
         })
         assert isinstance(result.governance_assessment, GovernanceAssessment)
 
@@ -174,12 +165,12 @@ class TestGovernanceAssessmentEnum:
 class TestAssessmentResultDataclass:
     """AssessmentResult structure."""
 
-    def test_fields(self, assessor):
-        result = assessor.assess({
+    def test_fields(self, pipeline):
+        result = pipeline.assess({
             "tool_name": "bash",
             "tool_input": {"command": "echo test"},
+            "session_id": "sess-005",
         })
-        # Verify all expected fields exist
         assert hasattr(result, "governance_assessment")
         assert hasattr(result, "risk_score")
         assert hasattr(result, "reason")

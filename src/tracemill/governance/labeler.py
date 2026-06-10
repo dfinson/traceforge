@@ -90,7 +90,7 @@ class GovernanceLabeler:
             all_caps = ctx.base_classification.capability | frozenset(cap)
             # Filter out current event's taint to prevent self-violation
             prior_taints = [t for t in ctx.session_state.taint_ledger
-                           if t.event_id != ctx.event.event_id]
+                           if t.source_event_key != ctx.event.source_event_key]
             if prior_taints and ctx.base_classification.effect in ("mutating", "destructive"):
                 struct.add("ifc_violation")
                 ifc_violations = 1

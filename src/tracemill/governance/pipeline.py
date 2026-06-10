@@ -341,8 +341,8 @@ class GovernancePipeline:
                     drift=None, mcp_alerts=(), evidence=None,
                 )
 
-        # Phase 2/3 succeeded — clear any retry counter
-        self._phase23_attempts.pop(event.source_event_key, None)
+        # Phase 2/3 succeeded — clear retry counter ONLY after finalization commits (below)
+        phase23_key_to_clear = event.source_event_key
 
         # Build SessionMeta
         rec = None
@@ -380,7 +380,19 @@ class GovernancePipeline:
             )
             self._store.rollback()
             # Event stays reserved; next delivery re-runs Phase 2/3
+            # Do NOT clear retry counter — finalization did not commit
+            return SessionMeta(
+                classification=gov_result.classification,
+                risk_assessment=phase3.risk_assessment,
+                recommendation=rec,
+                budget_snapshot=snapshot.budget,
+                drift=None,
+                mcp_alerts=(),
+                evidence=None,
+            )
 
+        # Only clear retry counter after successful finalization commit
+        self._phase23_attempts.pop(phase23_key_to_clear, None)
         return meta
 
     def _commit_mcp_writes_no_commit(self, writes: tuple) -> None:
@@ -732,14 +744,16 @@ class GovernancePipeline:
                     rationale=transform_data.get("rationale", ""),
                     confidence=transform_data.get("confidence", "medium"),
                 )
-            rec = RiskRecommendation(
-                recommended_action=RecommendedAction(rec_data["action"]),
-                assessment=risk,
-                reason_code=rec_data.get("reason_code", ""),
-                canonical_id=rec_data.get("canonical_id") or "",
-                message=rec_data.get("message"),
-                transform=transform,
-            )
+            # Only construct recommendation if risk is available (type contract)
+            if risk is not None:
+                rec = RiskRecommendation(
+                    recommended_action=RecommendedAction(rec_data["action"]),
+                    assessment=risk,
+                    reason_code=rec_data.get("reason_code", ""),
+                    canonical_id=rec_data.get("canonical_id") or "",
+                    message=rec_data.get("message"),
+                    transform=transform,
+                )
 
         cls = None
         cls_data = data.get("classification")

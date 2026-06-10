@@ -64,7 +64,7 @@ class TestSessionState:
 
     def test_taint_ledger_bounded(self, state):
         for i in range(250):
-            state.add_taint(TaintEntry(f"evt_{i}", "secret", "file_read", f"/path/{i}"))
+            state.add_taint(TaintEntry(f"evt_{i}", f"key_{i}", "secret", "file_read", f"/path/{i}"))
         snap = state.snapshot()
         assert len(snap.taint_ledger) == SessionState.TAINT_LEDGER_MAX
 

@@ -17,6 +17,7 @@ class TaintEntry:
     """Immutable taint record for IFC lineage tracking."""
 
     event_id: str
+    source_event_key: str  # Unique per event — used for self-taint filtering
     clearance: str  # Clearance enum value
     source: str  # "file_read", "tool_output", "user_input"
     payload_pointer: str
@@ -242,8 +243,8 @@ class SessionState:
         })
         phase_json = json.dumps(self._phase_window)
         taints_json = json.dumps([
-            {"event_id": t.event_id, "clearance": t.clearance,
-             "source": t.source, "payload_pointer": t.payload_pointer}
+            {"event_id": t.event_id, "source_event_key": t.source_event_key,
+             "clearance": t.clearance, "source": t.source, "payload_pointer": t.payload_pointer}
             for t in self._taint_ledger
         ]) if self._taint_ledger else None
         now = datetime.now(timezone.utc).isoformat()
@@ -284,8 +285,8 @@ class SessionState:
         })
         phase_json = json.dumps(self._phase_window)
         taints_json = json.dumps([
-            {"event_id": t.event_id, "clearance": t.clearance,
-             "source": t.source, "payload_pointer": t.payload_pointer}
+            {"event_id": t.event_id, "source_event_key": t.source_event_key,
+             "clearance": t.clearance, "source": t.source, "payload_pointer": t.payload_pointer}
             for t in self._taint_ledger
         ]) if self._taint_ledger else None
         now = datetime.now(timezone.utc).isoformat()
@@ -326,7 +327,13 @@ class SessionState:
         if row[5]:
             taints = json.loads(row[5])
             state._taint_ledger = [
-                TaintEntry(t["event_id"], t["clearance"], t["source"], t["payload_pointer"])
+                TaintEntry(
+                    event_id=t["event_id"],
+                    source_event_key=t.get("source_event_key", t["event_id"]),
+                    clearance=t["clearance"],
+                    source=t["source"],
+                    payload_pointer=t["payload_pointer"],
+                )
                 for t in taints
             ]
         state._event_count = row[6] or 0

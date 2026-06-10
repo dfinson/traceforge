@@ -80,6 +80,7 @@ class IFCChecker:
             # Record taint for future events (not current)
             session_state.add_taint(TaintEntry(
                 event_id=event.event_id,
+                source_event_key=event.source_event_key,
                 clearance=clearance,
                 source=self._classify_source(ctx),
                 payload_pointer="",

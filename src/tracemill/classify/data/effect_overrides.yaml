@@ -76,8 +76,9 @@ effect_overrides:
   # curl: write flags make it mutating
   curl:
     flag_effects:
-      - flags: ["-X", "-d", "--data", "--data-raw", "--data-binary",
-                "--data-urlencode", "-F", "--form", "-T", "--upload-file"]
+      - flags: ["-X", "--request", "-d", "--data", "--data-raw", "--data-binary",
+                "--data-urlencode", "-F", "--form", "-T", "--upload-file",
+                "-o", "-O", "--output"]
         effect: mutating
         mode: any_present
     default_effect: read_only
@@ -94,6 +95,12 @@ effect_overrides:
       reset: mutating
       stash: mutating
       add: mutating
+      checkout: mutating
+      switch: mutating
+      pull: mutating
+      clone: mutating
+      restore: mutating
+      clean: destructive
     default_effect: read_only
 
   # Docker/Podman
@@ -115,6 +122,16 @@ effect_overrides:
       logs: read_only
       inspect: read_only
       stats: read_only
+      system: read_only
+    compound_subcmd_effects:
+      system:
+        prune: destructive
+      image:
+        prune: destructive
+      volume:
+        prune: destructive
+      container:
+        prune: destructive
 
   podman:
     subcmd_effects:
@@ -134,6 +151,16 @@ effect_overrides:
       logs: read_only
       inspect: read_only
       stats: read_only
+      system: read_only
+    compound_subcmd_effects:
+      system:
+        prune: destructive
+      image:
+        prune: destructive
+      volume:
+        prune: destructive
+      container:
+        prune: destructive
 
   # Kubernetes
   kubectl:

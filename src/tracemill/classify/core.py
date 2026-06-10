@@ -170,6 +170,7 @@ class Classification:
     action: frozenset[str] = frozenset()
     capability: frozenset[str] = frozenset()
     structure: frozenset[str] = frozenset()
+    source_labels: frozenset[str] = frozenset()
     shell_dialect: str | None = None
     binaries: tuple[str, ...] = ()
     phase_map: tuple[PhaseSegment, ...] = ()
@@ -191,6 +192,8 @@ class Classification:
             d["capability"] = sorted(self.capability)
         if self.structure:
             d["structure"] = sorted(self.structure)
+        if self.source_labels:
+            d["source_labels"] = sorted(self.source_labels)
         if self.shell_dialect:
             d["shell_dialect"] = self.shell_dialect
         if self.binaries:
@@ -210,26 +213,28 @@ class Classification:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Classification:
         """Deserialize from a dictionary."""
-        phase_map_raw = d.get("phase_map", ())
+        phase_map_raw = d.get("phase_map") or ()
         phase_map = tuple(
             PhaseSegment(
                 phase=seg["phase"],
-                actions=frozenset(seg.get("actions", ())),
-                scopes=frozenset(seg.get("scopes", ())),
-                roles=frozenset(seg.get("roles", ())),
+                actions=frozenset(seg.get("actions") or ()),
+                scopes=frozenset(seg.get("scopes") or ()),
+                roles=frozenset(seg.get("roles") or ()),
             )
             for seg in phase_map_raw
+            if isinstance(seg, dict)
         )
         return cls(
             mechanism=d["mechanism"],
             effect=d.get("effect"),
-            scope=frozenset(d.get("scope", ())),
-            role=frozenset(d.get("role", ())),
-            action=frozenset(d.get("action", ())),
-            capability=frozenset(d.get("capability", ())),
-            structure=frozenset(d.get("structure", ())),
+            scope=frozenset(d.get("scope") or ()),
+            role=frozenset(d.get("role") or ()),
+            action=frozenset(d.get("action") or ()),
+            capability=frozenset(d.get("capability") or ()),
+            structure=frozenset(d.get("structure") or ()),
+            source_labels=frozenset(d.get("source_labels") or ()),
             shell_dialect=d.get("shell_dialect"),
-            binaries=tuple(d.get("binaries", ())),
+            binaries=tuple(d.get("binaries") or ()),
             phase_map=phase_map,
         )
 

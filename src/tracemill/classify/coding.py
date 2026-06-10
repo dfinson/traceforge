@@ -65,6 +65,7 @@ class CodingScope(StrEnum):
     PACKAGE = "artifact.package"
     DOCUMENTATION = "artifact.documentation"
     API_SPEC = "artifact.api_spec"
+    REPOSITORY = "artifact.repository"
     DEPENDENCY = "configuration.dependency"
     ENVIRONMENT = "configuration.environment"
     INFRASTRUCTURE = "configuration.infrastructure"
@@ -72,7 +73,7 @@ class CodingScope(StrEnum):
     PROCESS = "state.process"
     SERVICE = "state.service"
     DEPLOYMENT = "state.deployment"
-    REPOSITORY = "state.repository"
+    VCS_STATE = "state.repository"
 
 
 # ── Role subtypes ──
@@ -173,6 +174,7 @@ class CodingAction(StrEnum):
     RUN_SCRIPT = "execute.script"
     RUN_SERVICE = "execute.service"
     RUN_REPL = "execute.repl"
+    RUN_COMMAND = "execute.run_script"
 
     # deliver.*
     DEPLOY = "deliver.deploy"
@@ -189,6 +191,7 @@ class CodingAction(StrEnum):
     COMMIT = "persist.commit"
     WRITE = "persist.write"
     STAGE = "persist.stage"
+    INSTALL_PKG = "persist.install"
 
     # modify.*
     EDIT = "modify.edit"
@@ -205,3 +208,6 @@ class CodingAction(StrEnum):
     PROFILE = "analyze.profile"
     MEASURE = "analyze.measure"
     DIFF = "analyze.diff"
+
+    # retrieve.*  (additional subtypes for precision)
+    RETRIEVE_DIFF = "retrieve.diff"

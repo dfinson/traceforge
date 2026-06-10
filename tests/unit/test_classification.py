@@ -386,3 +386,214 @@ class TestCoreEnums:
         for v in CodingScope:
             parent = v.value.rsplit(".", 1)[0]
             assert parent in [s.value for s in Scope], f"{v.value} has invalid parent {parent}"
+
+
+# ── Red team regression tests ──
+
+
+class TestRedTeamRegressions:
+    """Regression tests for issues identified in classification engine audit."""
+
+    def test_sudo_propagates_elevated_privilege(self):
+        """sudo wrapper must propagate elevated_privilege capability."""
+        c = classify_shell("sudo rm -rf /")
+        assert c.effect == "destructive"
+        assert "elevated_privilege" in c.capability
+
+    def test_find_delete_is_destructive(self):
+        """find -delete must be classified as destructive, not read_only."""
+        c = classify_shell("find . -delete")
+        assert c.effect == "destructive"
+
+    def test_git_checkout_is_mutating(self):
+        """git checkout modifies the working tree — must be mutating."""
+        c = classify_shell("git checkout main")
+        assert c.effect == "mutating"
+
+    def test_git_clean_is_destructive(self):
+        """git clean removes untracked files — must be destructive."""
+        c = classify_shell("git clean -fdx")
+        assert c.effect == "destructive"
+
+    def test_curl_output_is_mutating(self):
+        """curl -o writes to filesystem — must be mutating."""
+        c = classify_shell("curl -o file.txt https://example.com")
+        assert c.effect == "mutating"
+
+    def test_curl_O_is_mutating(self):
+        """curl -O writes to filesystem — must be mutating."""
+        c = classify_shell("curl -O https://example.com/file.tar.gz")
+        assert c.effect == "mutating"
+
+    def test_redirect_produces_mutating_effect(self):
+        """Output redirection (>) must produce mutating effect + filesystem_write."""
+        c = classify_shell("echo hi > out.txt")
+        assert c.effect == "mutating"
+        assert "filesystem_write" in c.capability
+
+    def test_append_redirect_produces_mutating_effect(self):
+        """Append redirection (>>) must produce mutating effect."""
+        c = classify_shell("echo hi >> out.txt")
+        assert c.effect == "mutating"
+        assert "filesystem_write" in c.capability
+
+    def test_docker_system_df_is_read_only(self):
+        """docker system df is informational — must be read_only."""
+        c = classify_shell("docker system df")
+        assert c.effect == "read_only"
+
+    def test_mcp_filesystem_delete_valid_role(self):
+        """MCP filesystem delete must get modifier.file_editor, not modifier.file_browser."""
+        from tracemill.classify.mcp import classify_mcp_tool
+        from functools import partial
+
+        cm = partial(classify_mcp_tool, engine=ENGINE)
+        c = cm("mcp__filesystem__delete_file")
+        assert c is not None
+        assert "modifier.file_editor" in c.role
+        assert "modifier.file_browser" not in c.role
+
+    def test_enum_values_in_tool_classifications_are_registered(self):
+        """All values used in tool_classifications.yaml must be valid registered values."""
+        from tracemill.classify.registry import get_default_registry
+
+        reg = get_default_registry()
+        for name, cls in ENGINE.tool_classifications.items():
+            assert reg.validate("mechanism", cls.mechanism), (
+                f"{name}: mechanism '{cls.mechanism}' not registered"
+            )
+            for s in cls.scope:
+                assert reg.validate("scope", s), f"{name}: scope '{s}' not registered"
+            for r in cls.role:
+                assert reg.validate("role", r), f"{name}: role '{r}' not registered"
+            for a in cls.action:
+                assert reg.validate("action", a), f"{name}: action '{a}' not registered"
+
+    def test_rule_effects_override_binary_info_defaults(self):
+        """Shell rules with explicit effect must override binary_info defaults."""
+        # find -delete rule has effect=destructive, binary_info has read_only default
+        c = classify_shell("find /tmp -name '*.log' -delete")
+        assert c.effect == "destructive"
+
+    def test_sudo_with_mutating_command(self):
+        """sudo pip install must have both elevated_privilege and mutating."""
+        c = classify_shell("sudo pip install flask")
+        assert c.effect == "mutating"
+        assert "elevated_privilege" in c.capability
+
+    # --- Round 2 regression tests ---
+
+    def test_input_redirect_is_not_mutating(self):
+        """Input redirection (< file) must NOT produce mutating effect."""
+        c = classify_shell("grep foo < input.txt")
+        assert c.effect == "read_only"
+        assert "filesystem_write" not in c.capability
+
+    def test_heredoc_is_not_mutating(self):
+        """Heredoc (<<EOF) is input, not output — must not be mutating."""
+        c = classify_shell("cat <<EOF\nhello\nEOF")
+        assert c.effect == "read_only"
+
+    def test_git_branch_delete_is_destructive(self):
+        """git branch -D deletes a branch — must be destructive."""
+        c = classify_shell("git branch -D old-branch")
+        assert c.effect == "destructive"
+
+    def test_git_pull_is_mutating(self):
+        """git pull modifies the working tree — must be mutating."""
+        c = classify_shell("git pull")
+        assert c.effect == "mutating"
+
+    def test_git_clone_is_mutating(self):
+        """git clone creates files — must be mutating."""
+        c = classify_shell("git clone https://github.com/example/repo.git")
+        assert c.effect == "mutating"
+
+    def test_git_restore_is_mutating(self):
+        """git restore modifies working tree — must be mutating."""
+        c = classify_shell("git restore file.txt")
+        assert c.effect == "mutating"
+
+    def test_docker_system_prune_is_destructive(self):
+        """docker system prune removes data — must be destructive."""
+        c = classify_shell("docker system prune -f")
+        assert c.effect == "destructive"
+
+    def test_docker_image_prune_is_destructive(self):
+        """docker image prune removes images — must be destructive."""
+        c = classify_shell("docker image prune")
+        assert c.effect == "destructive"
+
+    def test_sed_i_with_suffix_is_mutating(self):
+        """sed -i.bak (with backup suffix) must still be mutating."""
+        c = classify_shell("sed -i.bak 's/a/b/' file.txt")
+        assert c.effect == "mutating"
+
+    def test_tee_is_mutating(self):
+        """tee always writes to a file — must be mutating."""
+        c = classify_shell("echo hi | tee out.txt")
+        assert c.effect == "mutating"
+
+    def test_curl_request_long_flag_is_mutating(self):
+        """curl --request POST must be mutating."""
+        c = classify_shell("curl --request POST https://example.com")
+        assert c.effect == "mutating"
+
+    def test_curl_attached_X_flag_is_mutating(self):
+        """curl -XPOST (attached value) must be mutating."""
+        c = classify_shell("curl -XPOST https://example.com")
+        assert c.effect == "mutating"
+
+    def test_sort_output_flag_is_mutating(self):
+        """sort -o writes to file — must be mutating."""
+        c = classify_shell("sort -o out.txt in.txt")
+        assert c.effect == "mutating"
+
+    # --- Round 3 regression tests ---
+
+    def test_sudo_u_flag_unwraps_correctly(self):
+        """sudo -u <user> must unwrap to the inner command, not the user."""
+        c = classify_shell("sudo -u deploy rm -rf /")
+        assert c.effect == "destructive"
+        assert "rm" in c.binaries
+        assert "elevated_privilege" in c.capability
+
+    def test_timeout_unwraps_correctly(self):
+        """timeout <duration> must unwrap to the inner command."""
+        c = classify_shell("timeout 5 pytest")
+        assert "pytest" in c.binaries
+
+    def test_env_u_flag_unwraps_correctly(self):
+        """env -u VAR must unwrap correctly to inner command."""
+        c = classify_shell("env -u FOO pytest tests/")
+        assert "pytest" in c.binaries
+
+    def test_apt_get_remove_is_destructive(self):
+        """apt-get remove is destructive — it removes packages."""
+        c = classify_shell("apt-get remove nginx")
+        assert c.effect == "destructive"
+
+    def test_pip_uninstall_is_destructive(self):
+        """pip uninstall is destructive — it removes packages."""
+        c = classify_shell("pip uninstall flask")
+        assert c.effect == "destructive"
+
+    def test_npm_uninstall_is_destructive(self):
+        """npm uninstall is destructive — it removes packages."""
+        c = classify_shell("npm uninstall express")
+        assert c.effect == "destructive"
+
+    def test_mkfs_ext4_is_destructive(self):
+        """mkfs.ext4 formats a disk — must be destructive."""
+        c = classify_shell("mkfs.ext4 /dev/sda1")
+        assert c.effect == "destructive"
+
+    def test_pkill_is_destructive(self):
+        """pkill kills processes — must be destructive."""
+        c = classify_shell("pkill -9 nginx")
+        assert c.effect == "destructive"
+
+    def test_killall_is_destructive(self):
+        """killall kills processes — must be destructive."""
+        c = classify_shell("killall node")
+        assert c.effect == "destructive"

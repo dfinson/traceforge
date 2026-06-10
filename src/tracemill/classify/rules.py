@@ -78,6 +78,20 @@ class BinaryInfo:
     destructive: bool = False
 
 
+def _flags_satisfy(required: frozenset[str], actual: list[str]) -> bool:
+    """Check if actual flags satisfy required flags (with short-flag prefix matching)."""
+    actual_set = set(actual)
+    for req in required:
+        if req in actual_set:
+            continue
+        # Short-flag prefix match: -i matches -i.bak, -X matches -XPOST
+        if len(req) == 2 and req[0] == "-" and req[1] != "-":
+            if any(f.startswith(req) and len(f) > 2 for f in actual):
+                continue
+        return False
+    return True
+
+
 def match_rule(
     binary: str,
     subcmd: str | None,
@@ -93,7 +107,7 @@ def match_rule(
     for rule in engine.rules_by_binary.get(binary, ()):
         if rule.subcmds is not None and subcmd not in rule.subcmds:
             continue
-        if rule.flags_require is not None and not rule.flags_require.issubset(flags):
+        if rule.flags_require is not None and not _flags_satisfy(rule.flags_require, flags):
             continue
         if rule.flags_reject is not None and rule.flags_reject.intersection(flags):
             continue
@@ -141,6 +155,7 @@ def effect_for_binary(
     flags: list[str],
     *,
     engine: ClassificationEngine,
+    all_words: list[str] | None = None,
 ) -> Effect | None:
     """Determine effect from binary + context, using effect overrides and binary info."""
     if binary in engine.effect_overrides:
@@ -148,9 +163,31 @@ def effect_for_binary(
 
         override: EffectOverrideConfig = engine.effect_overrides[binary]
 
+        # Check flags (dash-prefixed words)
         for fe in override.flag_effects:
-            if fe.mode == "any_present" and set(fe.flags).intersection(flags):
-                return Effect(fe.effect)
+            if fe.mode == "any_present":
+                override_flags = set(fe.flags)
+                # Direct match
+                if override_flags.intersection(flags):
+                    return Effect(fe.effect)
+                # Prefix match for short flags with attached values (e.g., -i.bak matches -i)
+                for f in flags:
+                    if len(f) > 2 and f[0] == "-" and f[1] != "-":
+                        # Short flag with attached value: check if -X prefix matches
+                        short_prefix = f[:2]
+                        if short_prefix in override_flags:
+                            return Effect(fe.effect)
+
+        # For multi-level subcommands (e.g., docker system prune),
+        # check compound_subcmd_effects nested dict first
+        if subcmd and all_words and override.compound_subcmd_effects:
+            positionals = [w for w in all_words[1:] if not w.startswith("-")]
+            if len(positionals) >= 2:
+                parent = positionals[0]
+                child = positionals[1]
+                nested = override.compound_subcmd_effects.get(parent)
+                if nested and child in nested:
+                    return Effect(nested[child])
 
         if subcmd and subcmd in override.subcmd_effects:
             return Effect(override.subcmd_effects[subcmd])

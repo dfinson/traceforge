@@ -145,11 +145,10 @@ def _build_classification(
         and "filesystem_write" not in capability
     ):
         capability = capability | frozenset({"filesystem_write"})
-        # Also upgrade role from retriever → modifier for filesystem write ops
+        # Upgrade role from retriever → modifier.file_editor for filesystem write ops
         if any(r.startswith("retriever.") for r in role):
             upgraded = frozenset(
-                r.replace("retriever.", "modifier.", 1) if r.startswith("retriever.") else r
-                for r in role
+                "modifier.file_editor" if r.startswith("retriever.") else r for r in role
             )
             role = upgraded
 

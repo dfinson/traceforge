@@ -39,6 +39,17 @@ class RecommendedAction(StrEnum):
     TRANSFORM = "transform"
 
 
+def _decode_budget_dims(raw: list) -> tuple[tuple[str, int], ...]:
+    """Safely decode budget dimension pairs from JSON, skipping malformed entries."""
+    result = []
+    for item in raw:
+        if isinstance(item, (list, tuple)) and len(item) == 2:
+            key, val = item
+            if isinstance(key, str) and isinstance(val, (int, float)):
+                result.append((key, int(val)))
+    return tuple(result)
+
+
 @dataclass(frozen=True)
 class TransformSuggestion:
     """Materialized by Phase 3 from TransformTemplate + event-specific data."""
@@ -716,14 +727,14 @@ class GovernancePipeline:
             total_tool_calls=budget_data.get("total_tool_calls", 0),
             total_tokens=budget_data.get("total_tokens", 0),
             elapsed_seconds=budget_data.get("elapsed_seconds", 0.0),
-            by_effect=tuple(tuple(x) for x in budget_data.get("by_effect", ())),
-            by_capability=tuple(tuple(x) for x in budget_data.get("by_capability", ())),
-            by_scope=tuple(tuple(x) for x in budget_data.get("by_scope", ())),
-            by_role=tuple(tuple(x) for x in budget_data.get("by_role", ())),
-            by_phase=tuple(tuple(x) for x in budget_data.get("by_phase", ())),
-            by_mechanism=tuple(tuple(x) for x in budget_data.get("by_mechanism", ())),
-            by_action=tuple(tuple(x) for x in budget_data.get("by_action", ())),
-            by_structure=tuple(tuple(x) for x in budget_data.get("by_structure", ())),
+            by_effect=_decode_budget_dims(budget_data.get("by_effect", ())),
+            by_capability=_decode_budget_dims(budget_data.get("by_capability", ())),
+            by_scope=_decode_budget_dims(budget_data.get("by_scope", ())),
+            by_role=_decode_budget_dims(budget_data.get("by_role", ())),
+            by_phase=_decode_budget_dims(budget_data.get("by_phase", ())),
+            by_mechanism=_decode_budget_dims(budget_data.get("by_mechanism", ())),
+            by_action=_decode_budget_dims(budget_data.get("by_action", ())),
+            by_structure=_decode_budget_dims(budget_data.get("by_structure", ())),
             pressure=budget_data.get("pressure", False),
         )
         taints = tuple(
@@ -878,14 +889,14 @@ class GovernancePipeline:
                 total_tool_calls=budget_data.get("total_tool_calls", 0),
                 total_tokens=budget_data.get("total_tokens", 0),
                 elapsed_seconds=budget_data.get("elapsed_seconds", 0.0),
-                by_effect=tuple(tuple(x) for x in budget_data.get("by_effect", ())),
-                by_capability=tuple(tuple(x) for x in budget_data.get("by_capability", ())),
-                by_scope=tuple(tuple(x) for x in budget_data.get("by_scope", ())),
-                by_role=tuple(tuple(x) for x in budget_data.get("by_role", ())),
-                by_phase=tuple(tuple(x) for x in budget_data.get("by_phase", ())),
-                by_mechanism=tuple(tuple(x) for x in budget_data.get("by_mechanism", ())),
-                by_action=tuple(tuple(x) for x in budget_data.get("by_action", ())),
-                by_structure=tuple(tuple(x) for x in budget_data.get("by_structure", ())),
+                by_effect=_decode_budget_dims(budget_data.get("by_effect", ())),
+                by_capability=_decode_budget_dims(budget_data.get("by_capability", ())),
+                by_scope=_decode_budget_dims(budget_data.get("by_scope", ())),
+                by_role=_decode_budget_dims(budget_data.get("by_role", ())),
+                by_phase=_decode_budget_dims(budget_data.get("by_phase", ())),
+                by_mechanism=_decode_budget_dims(budget_data.get("by_mechanism", ())),
+                by_action=_decode_budget_dims(budget_data.get("by_action", ())),
+                by_structure=_decode_budget_dims(budget_data.get("by_structure", ())),
                 pressure=budget_data.get("pressure", False),
             )
 

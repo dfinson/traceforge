@@ -30,24 +30,13 @@ def assess(pipeline, payload: dict) -> AssessmentResult:
 
     t0 = time.perf_counter()
 
-    # ── Validate ──
+    # ── Extract fields (best-effort, same as any intake) ──
     if not isinstance(payload, dict):
-        raise AssessmentPayloadError(f"payload must be a dict, got {type(payload).__name__}")
-    tool_name = payload.get("tool_name")
-    if not tool_name or not isinstance(tool_name, str):
-        raise AssessmentPayloadError("payload must contain 'tool_name' (str)")
-    if "tool_input" not in payload:
-        raise AssessmentPayloadError("payload must contain 'tool_input' (dict)")
-    tool_input = payload["tool_input"]
-    if not isinstance(tool_input, dict):
-        raise AssessmentPayloadError("'tool_input' must be a dict")
-    session_id = payload.get("session_id")
-    if not session_id or not isinstance(session_id, str):
-        raise AssessmentPayloadError("payload must contain 'session_id' (str)")
-    try:
-        tool_args_json = json.dumps(tool_input)
-    except (TypeError, ValueError) as exc:
-        raise AssessmentPayloadError(f"'tool_input' is not JSON-serializable: {exc}") from exc
+        payload = {}
+    tool_name = str(payload.get("tool_name", "") or "")
+    tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    session_id = str(payload.get("session_id", "") or "") or f"anonymous-{uuid.uuid4().hex[:8]}"
+    tool_args_json = json.dumps(tool_input, default=str)
 
     # ── Build ToolCallEvent ──
     server_namespace = payload.get("server_namespace")

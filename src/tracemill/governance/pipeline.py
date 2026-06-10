@@ -245,16 +245,23 @@ class GovernancePipeline:
             self._budget.check_pressure(state)
 
             # Atomic commit: state persist + reservation in single transaction
+            # Include Phase-1 snapshot in reservation so retries use event-time state
             now = datetime.now(timezone.utc).isoformat()
+            snapshot_for_reservation = state.snapshot()
+            reservation_data = {
+                "reserved": True,
+                "snapshot": self._serialize_snapshot(snapshot_for_reservation),
+            }
+            reservation_json = json.dumps(reservation_data)
             try:
                 state.persist_no_commit()
                 self._store.execute_in_transaction(
                     "INSERT OR IGNORE INTO processed_events (source_event_key, session_id, session_meta_json, processed_at) VALUES (?, ?, ?, ?)",
-                    (event.source_event_key, session_id, '{"reserved":true}', now),
+                    (event.source_event_key, session_id, reservation_json, now),
                 )
                 self._store.commit()
                 self._write_failures[session_id] = 0
-                self._store.cache_processed(event.source_event_key, '{"reserved":true}')
+                self._store.cache_processed(event.source_event_key, reservation_json)
             except (sqlite3.OperationalError, sqlite3.IntegrityError) as e:
                 import logging
                 logging.getLogger(__name__).warning(
@@ -274,7 +281,16 @@ class GovernancePipeline:
 
         # ── Phase 2: Labeling (side-effect-free) ──
         # Circuit breaker: if Phase 2/3 crashes consistently, dead-letter the event
-        snapshot = state.snapshot()
+        # For retries (existing=reserved), use the persisted event-time snapshot
+        if existing:
+            snapshot_data = meta_dict.get("snapshot")
+            if snapshot_data:
+                snapshot = self._deserialize_snapshot(snapshot_data)
+            else:
+                # Legacy reservation without snapshot — fall back to current state
+                snapshot = state.snapshot()
+        else:
+            snapshot = snapshot_for_reservation
         enrichment_ctx = self._with_snapshot(ctx, snapshot)
         try:
             gov_result = self._labeler.label(enrichment_ctx)
@@ -325,8 +341,13 @@ class GovernancePipeline:
                     event.source_event_key, attempts, self._MAX_PHASE23_ATTEMPTS, phase23_exc,
                 )
                 # Persist attempt count in reservation so it survives process restarts
+                # Preserve the snapshot so retries still use event-time state
                 try:
-                    reservation_json = json.dumps({"reserved": True, "phase23_attempts": attempts})
+                    reservation_json = json.dumps({
+                        "reserved": True,
+                        "phase23_attempts": attempts,
+                        "snapshot": self._serialize_snapshot(snapshot),
+                    })
                     self._store.execute_in_transaction(
                         "UPDATE processed_events SET session_meta_json = ? WHERE source_event_key = ?",
                         (reservation_json, event.source_event_key),
@@ -655,6 +676,78 @@ class GovernancePipeline:
                 "Failed to write session summary for %s: %s", session_id, e
             )
 
+    def _serialize_snapshot(self, snapshot: "SessionStateSnapshot") -> dict:
+        """Serialize Phase-1 snapshot for reservation persistence."""
+        return {
+            "budget": {
+                "total_tool_calls": snapshot.budget.total_tool_calls,
+                "total_tokens": snapshot.budget.total_tokens,
+                "elapsed_seconds": snapshot.budget.elapsed_seconds,
+                "pressure": snapshot.budget.pressure,
+                "by_effect": list(snapshot.budget.by_effect),
+                "by_capability": list(snapshot.budget.by_capability),
+                "by_scope": list(snapshot.budget.by_scope),
+                "by_role": list(snapshot.budget.by_role),
+                "by_phase": list(snapshot.budget.by_phase),
+                "by_mechanism": list(snapshot.budget.by_mechanism),
+                "by_action": list(snapshot.budget.by_action),
+                "by_structure": list(snapshot.budget.by_structure),
+            },
+            "phase_window": list(snapshot.phase_window),
+            "taint_ledger": [
+                {"event_id": t.event_id, "source_event_key": t.source_event_key,
+                 "clearance": t.clearance, "source": t.source, "payload_pointer": t.payload_pointer}
+                for t in snapshot.taint_ledger
+            ],
+            "last_assistant_event_id": snapshot.last_assistant_event_id,
+            "last_user_event_id": snapshot.last_user_event_id,
+            "event_count": snapshot.event_count,
+            "dropped_events": snapshot.dropped_events,
+            "last_sequence": snapshot.last_sequence,
+            "gap_ordinal": snapshot.gap_ordinal,
+        }
+
+    def _deserialize_snapshot(self, data: dict) -> "SessionStateSnapshot":
+        """Reconstruct snapshot from persisted reservation."""
+        from tracemill.governance.state import BudgetSnapshot, SessionStateSnapshot, TaintEntry
+
+        budget_data = data.get("budget", {})
+        budget = BudgetSnapshot(
+            total_tool_calls=budget_data.get("total_tool_calls", 0),
+            total_tokens=budget_data.get("total_tokens", 0),
+            elapsed_seconds=budget_data.get("elapsed_seconds", 0.0),
+            by_effect=tuple(tuple(x) for x in budget_data.get("by_effect", ())),
+            by_capability=tuple(tuple(x) for x in budget_data.get("by_capability", ())),
+            by_scope=tuple(tuple(x) for x in budget_data.get("by_scope", ())),
+            by_role=tuple(tuple(x) for x in budget_data.get("by_role", ())),
+            by_phase=tuple(tuple(x) for x in budget_data.get("by_phase", ())),
+            by_mechanism=tuple(tuple(x) for x in budget_data.get("by_mechanism", ())),
+            by_action=tuple(tuple(x) for x in budget_data.get("by_action", ())),
+            by_structure=tuple(tuple(x) for x in budget_data.get("by_structure", ())),
+            pressure=budget_data.get("pressure", False),
+        )
+        taints = tuple(
+            TaintEntry(
+                event_id=t["event_id"],
+                source_event_key=t.get("source_event_key") or t["event_id"],
+                clearance=t["clearance"],
+                source=t["source"],
+                payload_pointer=t["payload_pointer"],
+            )
+            for t in data.get("taint_ledger", ())
+        )
+        return SessionStateSnapshot(
+            budget=budget,
+            phase_window=tuple(data.get("phase_window", ())),
+            taint_ledger=taints,
+            last_assistant_event_id=data.get("last_assistant_event_id"),
+            last_user_event_id=data.get("last_user_event_id"),
+            event_count=data.get("event_count", 0),
+            dropped_events=data.get("dropped_events", 0),
+            last_sequence=data.get("last_sequence"),
+            gap_ordinal=data.get("gap_ordinal", 0),
+        )
+
     def _serialize_meta(self, meta: SessionMeta) -> dict:
         """Full serialization for idempotency cache — preserves all governance decisions."""
         rec_data = None
@@ -702,7 +795,16 @@ class GovernancePipeline:
             budget_data = {
                 "total_tool_calls": meta.budget_snapshot.total_tool_calls,
                 "total_tokens": meta.budget_snapshot.total_tokens,
+                "elapsed_seconds": meta.budget_snapshot.elapsed_seconds,
                 "pressure": meta.budget_snapshot.pressure,
+                "by_effect": list(meta.budget_snapshot.by_effect),
+                "by_capability": list(meta.budget_snapshot.by_capability),
+                "by_scope": list(meta.budget_snapshot.by_scope),
+                "by_role": list(meta.budget_snapshot.by_role),
+                "by_phase": list(meta.budget_snapshot.by_phase),
+                "by_mechanism": list(meta.budget_snapshot.by_mechanism),
+                "by_action": list(meta.budget_snapshot.by_action),
+                "by_structure": list(meta.budget_snapshot.by_structure),
             }
         return {
             "classification": cls_data,
@@ -775,6 +877,15 @@ class GovernancePipeline:
             budget = BudgetSnapshot(
                 total_tool_calls=budget_data.get("total_tool_calls", 0),
                 total_tokens=budget_data.get("total_tokens", 0),
+                elapsed_seconds=budget_data.get("elapsed_seconds", 0.0),
+                by_effect=tuple(tuple(x) for x in budget_data.get("by_effect", ())),
+                by_capability=tuple(tuple(x) for x in budget_data.get("by_capability", ())),
+                by_scope=tuple(tuple(x) for x in budget_data.get("by_scope", ())),
+                by_role=tuple(tuple(x) for x in budget_data.get("by_role", ())),
+                by_phase=tuple(tuple(x) for x in budget_data.get("by_phase", ())),
+                by_mechanism=tuple(tuple(x) for x in budget_data.get("by_mechanism", ())),
+                by_action=tuple(tuple(x) for x in budget_data.get("by_action", ())),
+                by_structure=tuple(tuple(x) for x in budget_data.get("by_structure", ())),
                 pressure=budget_data.get("pressure", False),
             )
 

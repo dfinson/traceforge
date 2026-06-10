@@ -329,7 +329,7 @@ class SessionState:
             state._taint_ledger = [
                 TaintEntry(
                     event_id=t["event_id"],
-                    source_event_key=t.get("source_event_key", t["event_id"]),
+                    source_event_key=t.get("source_event_key") or t["event_id"],
                     clearance=t["clearance"],
                     source=t["source"],
                     payload_pointer=t["payload_pointer"],

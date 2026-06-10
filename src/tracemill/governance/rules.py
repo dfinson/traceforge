@@ -109,10 +109,13 @@ def parse_rules(yaml_path: str | Path) -> list[Rule]:
 
 def _parse_when(when: dict, *, rule_index: int) -> list[Predicate]:
     """Parse a when clause into predicates."""
+    _VALID_DIMS = _SCALAR_DIMS | _SET_DIMS | {"risk_score"}
     predicates: list[Predicate] = []
     for dim, value in when.items():
         if dim in _DISALLOWED_DIMS:
             raise ValueError(f"Rule {rule_index}: dimension '{dim}' is disallowed in predicates")
+        if dim not in _VALID_DIMS:
+            raise ValueError(f"Rule {rule_index}: unknown predicate dimension '{dim}' (valid: {sorted(_VALID_DIMS)})")
 
         if dim == "risk_score":
             m = _COMPARISON_RE.match(str(value))

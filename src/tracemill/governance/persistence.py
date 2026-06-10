@@ -120,6 +120,26 @@ class SystemStore:
         self._processed_cache[source_event_key] = meta_json
         self._evict_cache()
 
+    def reserve_event(self, source_event_key: str, session_id: str, processed_at: str) -> None:
+        """Reserve an event key before state mutation to prevent double-processing on crash."""
+        self._conn.execute(
+            "INSERT OR IGNORE INTO processed_events (source_event_key, session_id, session_meta_json, processed_at) VALUES (?, ?, ?, ?)",
+            (source_event_key, session_id, '{"reserved":true}', processed_at),
+        )
+        self._conn.commit()
+        # Mark as reserved in cache (will be overwritten by finalize)
+        self._processed_cache[source_event_key] = '{"reserved":true}'
+        self._evict_cache()
+
+    def finalize_processed(self, source_event_key: str, meta_json: str) -> None:
+        """Update reserved event with full meta after Phase 3 completes."""
+        self._conn.execute(
+            "UPDATE processed_events SET session_meta_json = ? WHERE source_event_key = ?",
+            (meta_json, source_event_key),
+        )
+        self._conn.commit()
+        self._processed_cache[source_event_key] = meta_json
+
     def get_mcp_profile(self, server: str, tool_name: str) -> dict | None:
         """Get stored MCP fingerprint."""
         row = self._conn.execute(

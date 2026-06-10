@@ -1333,27 +1333,11 @@ options = ClaudeCodeOptions(
 )
 ```
 
-#### Reactive kill (Aider, smolagents, SWE-agent)
-
-Frameworks with no pre-execution hook still get observed. When the pipeline scores an event as `DENY`, the sink reacts — but the tool already fired:
-
-```python
-async def on_event(event: SessionEvent):
-    if event.gate_result and event.gate_result.verdict == Verdict.DENY:
-        await kill_process(event.session_id)
-
-pipeline = Pipeline.from_config("./tracemill.yaml", pipeline_name="aider")
-pipeline.add_sink(CallbackSink(on_event=on_event))
-await pipeline.run()
-```
-
-This is post-hoc — the tool executed — but the session is terminated within 50–200ms, limiting blast radius.
-
 ### Framework × Deployment Matrix
 
-| # | Platform | Hook type | Gate delivery | Full context? |
-|---|----------|-----------|---------------|---------------|
-| 1 | **Copilot CLI** | Shell hook | `tracemill gate query --stdin` → exit code | ✓ (queries running pipeline) |
+| # | Platform | Hook type | Gate delivery | Gateable? |
+|---|----------|-----------|---------------|-----------|
+| 1 | **Copilot CLI** | Shell hook | `tracemill gate query --stdin` → exit code | ✓ |
 | 2 | **Copilot Cloud** | Shell hook | Same; `copilot-setup-steps.yml` ensures pipeline runs | ✓ |
 | 3 | **Copilot SDK** | In-process | `pipeline.score()` | ✓ |
 | 4 | **Claude Code CLI** | Shell hook | `tracemill gate query --stdin` → exit code | ✓ |
@@ -1366,11 +1350,11 @@ This is post-hoc — the tool executed — but the session is terminated within 
 | 11 | **CrewAI** | In-process | `pipeline.score()` in `@before_tool_call` | ✓ |
 | 12 | **PydanticAI** | In-process | `pipeline.score()` via `DeferredToolRequests` | ✓ |
 | 13 | **MAF / Semantic Kernel** | In-process | `pipeline.score()` in invocation filter | ✓ |
-| 14 | **Aider** | None | Reactive kill (post-hoc) | ✓ (observes, can't block) |
-| 15 | **smolagents** | None | Reactive kill (post-hoc) | ✓ |
-| 16 | **SWE-agent** | None | Reactive kill (post-hoc) | ✓ |
+| 14 | **Aider** | None | — | ✗ (observation only) |
+| 15 | **smolagents** | None | — | ✗ (observation only) |
+| 16 | **SWE-agent** | None | — | ✗ (observation only) |
 
-**All 16 have full context.** The only difference is whether enforcement is preventive (rows 1–13) or reactive (rows 14–16).
+Rows 14–16 have no pre-execution hook. Gating is not possible — tracemill observes, classifies, and scores their events for audit and reporting, but cannot block tool calls. This is a framework limitation, not a tracemill limitation.
 
 ### Separation of Concerns
 

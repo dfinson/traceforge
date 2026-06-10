@@ -117,6 +117,7 @@ class EffectOverrideConfig(StrictModel):
 
     flag_effects: list[FlagEffectConfig] = Field(default_factory=list)
     subcmd_effects: dict[str, str] = Field(default_factory=dict)
+    compound_subcmd_effects: dict[str, dict[str, str]] = Field(default_factory=dict)
     default_effect: str | None = None
 
 

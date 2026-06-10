@@ -109,10 +109,6 @@ effect_overrides:
       rm: destructive
       rmi: destructive
       prune: destructive
-      "system prune": destructive
-      "image prune": destructive
-      "volume prune": destructive
-      "container prune": destructive
       build: mutating
       push: mutating
       run: mutating
@@ -127,16 +123,21 @@ effect_overrides:
       inspect: read_only
       stats: read_only
       system: read_only
+    compound_subcmd_effects:
+      system:
+        prune: destructive
+      image:
+        prune: destructive
+      volume:
+        prune: destructive
+      container:
+        prune: destructive
 
   podman:
     subcmd_effects:
       rm: destructive
       rmi: destructive
       prune: destructive
-      "system prune": destructive
-      "image prune": destructive
-      "volume prune": destructive
-      "container prune": destructive
       build: mutating
       push: mutating
       run: mutating
@@ -151,6 +152,15 @@ effect_overrides:
       inspect: read_only
       stats: read_only
       system: read_only
+    compound_subcmd_effects:
+      system:
+        prune: destructive
+      image:
+        prune: destructive
+      volume:
+        prune: destructive
+      container:
+        prune: destructive
 
   # Kubernetes
   kubectl:

@@ -179,13 +179,15 @@ def effect_for_binary(
                             return Effect(fe.effect)
 
         # For multi-level subcommands (e.g., docker system prune),
-        # check secondary positional args as compound subcmd keys
-        if subcmd and all_words:
+        # check compound_subcmd_effects nested dict first
+        if subcmd and all_words and override.compound_subcmd_effects:
             positionals = [w for w in all_words[1:] if not w.startswith("-")]
             if len(positionals) >= 2:
-                compound = f"{positionals[0]} {positionals[1]}"
-                if compound in override.subcmd_effects:
-                    return Effect(override.subcmd_effects[compound])
+                parent = positionals[0]
+                child = positionals[1]
+                nested = override.compound_subcmd_effects.get(parent)
+                if nested and child in nested:
+                    return Effect(nested[child])
 
         if subcmd and subcmd in override.subcmd_effects:
             return Effect(override.subcmd_effects[subcmd])

@@ -243,20 +243,19 @@ class GovernancePipeline:
             except (sqlite3.OperationalError, sqlite3.IntegrityError) as e:
                 import logging
                 logging.getLogger(__name__).warning(
-                    "Atomic Phase 1 commit failed for session %s: %s — attempting retry",
+                    "Atomic Phase 1 commit failed for session %s: %s — discarding in-memory mutations, will retry on next delivery",
                     session_id, e,
                 )
                 self._store.rollback()
-                persist_ok = self._persist_with_retry(state, session_id)
-                if not persist_ok:
-                    return SessionMeta(
-                        classification=None, risk_assessment=None,
-                        recommendation=None, budget_snapshot=state.snapshot().budget,
-                        drift=None, mcp_alerts=(), evidence=None,
-                    )
-                # State persisted on retry but no reservation — reserve separately
-                now = datetime.now(timezone.utc).isoformat()
-                self._store.reserve_event(event.source_event_key, session_id, now)
+                # Discard corrupted in-memory state — reload clean from DB
+                del self._states[session_id]
+                state = self.get_or_create_state(session_id)
+                # Return degraded response — event will be re-delivered
+                return SessionMeta(
+                    classification=None, risk_assessment=None,
+                    recommendation=None, budget_snapshot=state.snapshot().budget,
+                    drift=None, mcp_alerts=(), evidence=None,
+                )
 
         # ── Phase 2: Labeling (side-effect-free) ──
         snapshot = state.snapshot()
@@ -283,15 +282,48 @@ class GovernancePipeline:
             evidence=evidence,
         )
 
-        # Finalize idempotency record with full meta
+        # Finalize idempotency record + deferred MCP writes in single transaction
         meta_json = json.dumps(self._serialize_meta(meta))
-        self._store.finalize_processed(event.source_event_key, meta_json)
-
-        # Commit deferred MCP profile writes (only after successful finalization)
-        if gov_result.mcp_deferred_writes:
-            self._store.commit_deferred_mcp_writes(gov_result.mcp_deferred_writes)
+        try:
+            self._store.execute_in_transaction(
+                "UPDATE processed_events SET session_meta_json = ? WHERE source_event_key = ?",
+                (meta_json, event.source_event_key),
+            )
+            if gov_result.mcp_deferred_writes:
+                self._commit_mcp_writes_no_commit(gov_result.mcp_deferred_writes)
+            self._store.commit()
+            self._store.cache_processed(event.source_event_key, meta_json)
+        except (sqlite3.OperationalError, sqlite3.IntegrityError) as e:
+            import logging
+            logging.getLogger(__name__).error(
+                "Finalization commit failed for event %s: %s — will retry on next delivery",
+                event.source_event_key, e,
+            )
+            self._store.rollback()
+            # Event stays reserved; next delivery re-runs Phase 2/3
 
         return meta
+
+    def _commit_mcp_writes_no_commit(self, writes: tuple) -> None:
+        """Execute deferred MCP writes without committing — caller owns transaction."""
+        for write in writes:
+            if write.kind == "upsert":
+                profile = json.loads(write.payload)
+                self._store.execute_in_transaction(
+                    """INSERT OR IGNORE INTO mcp_fingerprints
+                       (server, tool_name, description_hash, schema_hash, registered_effect,
+                        registered_role, registered_capabilities, registered_scope, clearance, first_seen, last_seen)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (write.server, write.tool_name, profile["description_hash"], profile["schema_hash"],
+                     profile.get("registered_effect"), profile.get("registered_role"),
+                     profile.get("registered_capabilities"), profile.get("registered_scope"),
+                     profile.get("clearance"), profile["first_seen"], profile["last_seen"]),
+                )
+            elif write.kind == "last_seen":
+                self._store.execute_in_transaction(
+                    "UPDATE mcp_fingerprints SET last_seen = ? WHERE server = ? AND tool_name = ?",
+                    (write.payload, write.server, write.tool_name),
+                )
 
     def _phase3(self, ctx: "EnrichmentContext", result: "GovernanceResult", snapshot: "SessionStateSnapshot" = None) -> Phase3Result:
         """Phase 3: risk assessment + rule evaluation + evidence + escalation context."""
@@ -551,7 +583,7 @@ class GovernancePipeline:
             )
 
     def _serialize_meta(self, meta: SessionMeta) -> dict:
-        """Serialization for idempotency cache — preserves governance decisions."""
+        """Full serialization for idempotency cache — preserves all governance decisions."""
         rec_data = None
         if meta.recommendation:
             rec_data = {
@@ -569,15 +601,38 @@ class GovernancePipeline:
                 "factors": list(meta.risk_assessment.factors),
                 "mitre": list(meta.risk_assessment.mitre),
             }
+        cls_data = None
+        if meta.classification:
+            cls_data = {
+                "mechanism": meta.classification.mechanism,
+                "effect": meta.classification.effect,
+                "scope": sorted(meta.classification.scope),
+                "role": sorted(meta.classification.role),
+                "action": sorted(meta.classification.action),
+                "capability": sorted(meta.classification.capability),
+                "structure": sorted(meta.classification.structure),
+                "source_labels": sorted(meta.classification.source_labels),
+            }
+        budget_data = None
+        if meta.budget_snapshot:
+            budget_data = {
+                "total_tool_calls": meta.budget_snapshot.total_tool_calls,
+                "total_tokens": meta.budget_snapshot.total_tokens,
+                "pressure": meta.budget_snapshot.pressure,
+            }
         return {
+            "classification": cls_data,
             "recommendation": rec_data,
             "risk": risk_data,
+            "budget": budget_data,
             "mcp_alerts_count": len(meta.mcp_alerts),
         }
 
     def _deserialize_meta(self, data: dict) -> SessionMeta:
-        """Reconstruct SessionMeta from cache — preserves governance decisions."""
+        """Reconstruct SessionMeta from cache — full fidelity for idempotent output."""
+        from tracemill.classify.core import Classification
         from tracemill.classify.risk import RiskAssessment
+        from tracemill.governance.state import BudgetSnapshot
 
         risk = None
         risk_data = data.get("risk")
@@ -602,11 +657,34 @@ class GovernancePipeline:
                 message=rec_data.get("message"),
             )
 
+        cls = None
+        cls_data = data.get("classification")
+        if cls_data:
+            cls = Classification(
+                mechanism=cls_data["mechanism"],
+                effect=cls_data.get("effect"),
+                scope=frozenset(cls_data.get("scope", ())),
+                role=frozenset(cls_data.get("role", ())),
+                action=frozenset(cls_data.get("action", ())),
+                capability=frozenset(cls_data.get("capability", ())),
+                structure=frozenset(cls_data.get("structure", ())),
+                source_labels=frozenset(cls_data.get("source_labels", ())),
+            )
+
+        budget = None
+        budget_data = data.get("budget")
+        if budget_data:
+            budget = BudgetSnapshot(
+                total_tool_calls=budget_data.get("total_tool_calls", 0),
+                total_tokens=budget_data.get("total_tokens", 0),
+                pressure=budget_data.get("pressure", False),
+            )
+
         return SessionMeta(
-            classification=None,
+            classification=cls,
             risk_assessment=risk,
             recommendation=rec,
-            budget_snapshot=None,
+            budget_snapshot=budget,
             drift=None,
             mcp_alerts=(),
             evidence=None,

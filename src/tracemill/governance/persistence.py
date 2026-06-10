@@ -157,8 +157,9 @@ class SystemStore:
         }
 
     def upsert_mcp_profile(self, server: str, tool_name: str, profile: dict) -> None:
+        """Insert MCP profile only if not already registered (preserves first-seen baseline)."""
         self._conn.execute(
-            """INSERT OR REPLACE INTO mcp_fingerprints
+            """INSERT OR IGNORE INTO mcp_fingerprints
                (server, tool_name, description_hash, schema_hash, registered_effect,
                 registered_role, registered_capabilities, registered_scope, clearance, first_seen, last_seen)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",

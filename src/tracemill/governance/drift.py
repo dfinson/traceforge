@@ -153,8 +153,9 @@ class DriftDetector:
         )
 
     def _get_baseline(self, ctx: "EnrichmentContext") -> dict | None:
-        # agent_model is session-level context, not event-level — use "unknown" default
-        # Future: pass agent_model via EnrichmentContext when session metadata is available
+        # Use pre-loaded baseline from context when available
+        if ctx.drift_baseline:
+            return {"phase_counts": dict(ctx.drift_baseline), "total_events": sum(v for _, v in ctx.drift_baseline)}
         repo = ctx.project_root or "unknown"
         return self._store.get_drift_baseline("unknown", repo)
 

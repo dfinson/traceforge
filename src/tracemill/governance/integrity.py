@@ -95,6 +95,11 @@ class IntegrityVerifier:
         if path and content:
             if isinstance(content, str):
                 content = content.encode("utf-8")
+            elif isinstance(content, bytes):
+                pass  # Already bytes
+            else:
+                # Non-string content (dict, list, int) — serialize deterministically
+                content = json.dumps(content, sort_keys=True, separators=(",", ":")).encode("utf-8")
             writes.append((str(path), content))
 
         return writes

@@ -105,12 +105,11 @@ class GovernanceLabeler:
                 if drift_result.anomaly:
                     struct.add("phase_anomaly")
 
-        # Budget pressure check (read-only from snapshot)
+        # Budget pressure check (read-only from snapshot — no thresholds dependency)
         budget_bonus = 0
-        if self._budget_thresholds and ctx.session_state:
-            if ctx.session_state.budget.pressure:
-                cap.add("budget_pressure")
-                budget_bonus = 5
+        if ctx.session_state and ctx.session_state.budget.pressure:
+            cap.add("budget_pressure")
+            budget_bonus = 5
 
         # Integrity bonus
         integrity_bonus = 10 if "integrity_unverified" in cap else 0

@@ -241,19 +241,34 @@ class GovernancePipeline:
         state = self.get_or_create_state(session_id)
 
         if not existing:
-            # Phase 1 mutations (in-memory)
-            phase = self._infer_phase(ctx)
-            if phase:
-                state.update_phase_window(phase)
+            # Phase 1 mutations (in-memory) — wrapped for crash recovery
+            try:
+                phase = self._infer_phase(ctx)
+                if phase:
+                    state.update_phase_window(phase)
 
-            self._budget.increment(ctx, state)
+                self._budget.increment(ctx, state)
 
-            if self._labeler.has_ifc:
-                ifc_src_labels: set[str] = set()
-                self._labeler.check_ifc(ctx, ifc_src_labels, state)
+                if self._labeler.has_ifc:
+                    ifc_src_labels: set[str] = set()
+                    self._labeler.check_ifc(ctx, ifc_src_labels, state)
 
-            state.record_event(None)
-            self._budget.check_pressure(state)
+                state.record_event(None)
+                self._budget.check_pressure(state)
+            except Exception as phase1_exc:
+                import logging
+                logging.getLogger(__name__).error(
+                    "Phase 1 mutation failed for session %s event %s: %s — discarding state",
+                    session_id, event.source_event_key, phase1_exc,
+                )
+                # Discard corrupted in-memory state — reload clean from DB
+                del self._states[session_id]
+                state = self.get_or_create_state(session_id)
+                return SessionMeta(
+                    classification=None, risk_assessment=None,
+                    recommendation=None, budget_snapshot=state.snapshot().budget,
+                    drift=None, mcp_alerts=(), evidence=None,
+                )
 
             # Atomic commit: state persist + reservation in single transaction
             # Include Phase-1 snapshot in reservation so retries use event-time state
@@ -342,6 +357,12 @@ class GovernancePipeline:
                     self._store.cache_processed(event.source_event_key, degraded_json)
                     # Only clear attempts after successful dead-letter persistence
                     del self._phase23_attempts[event.source_event_key]
+                    # Clean session key tracking
+                    dl_keys = self._phase23_session_keys.get(session_id)
+                    if dl_keys:
+                        dl_keys.discard(event.source_event_key)
+                        if not dl_keys:
+                            del self._phase23_session_keys[session_id]
                 except (sqlite3.OperationalError, sqlite3.IntegrityError):
                     self._store.rollback()
                     # Keep attempt count — next retry will try dead-lettering again
@@ -425,6 +446,12 @@ class GovernancePipeline:
 
         # Only clear retry counter after successful finalization commit
         self._phase23_attempts.pop(phase23_key_to_clear, None)
+        # Also clean session key tracking to prevent unbounded growth
+        session_keys = self._phase23_session_keys.get(session_id)
+        if session_keys:
+            session_keys.discard(phase23_key_to_clear)
+            if not session_keys:
+                del self._phase23_session_keys[session_id]
         return meta
 
     def _commit_mcp_writes_no_commit(self, writes: tuple) -> None:

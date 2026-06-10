@@ -31,7 +31,10 @@ PII_PATTERNS: dict[PIICategory, re.Pattern[str]] = {
     PIICategory.SSN: re.compile(r'\b\d{3}-\d{2}-\d{4}\b'),
     PIICategory.EMAIL: re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'),
     PIICategory.CREDIT_CARD: re.compile(
-        r'\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b'
+        r'\b(?:'
+        r'(?:4\d{3}|5[1-5]\d{2}|6(?:011|5\d{2}))[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}'  # Visa/MC/Discover (16)
+        r'|3[47]\d{2}[- ]?\d{6}[- ]?\d{5}'  # Amex (15)
+        r')\b'
     ),
     PIICategory.API_KEY: re.compile(
         r'\b(?:sk|pk|api|key|token|secret)[-_][A-Za-z0-9-_]{20,}\b', re.IGNORECASE

@@ -132,7 +132,11 @@ class IFCChecker:
             if key and key in ctx.mcp_profiles:
                 profile_clearance = ctx.mcp_profiles[key].get("clearance")
                 if profile_clearance:
-                    return Clearance(profile_clearance)
+                    try:
+                        return Clearance(profile_clearance)
+                    except ValueError:
+                        # Unknown clearance value in MCP profile — treat as no clearance
+                        pass
 
         return None
 

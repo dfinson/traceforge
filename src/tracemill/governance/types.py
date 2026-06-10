@@ -96,6 +96,36 @@ class ToolCallEvent(SessionEvent):
     tool_description: str | None = None
     tool_schema_json: str | None = None
 
+    @classmethod
+    def from_dict(cls, payload: dict) -> "ToolCallEvent":
+        """Build from a raw event dict (any intake channel)."""
+        import json as _json
+        import uuid as _uuid
+        from datetime import datetime as _dt
+        from datetime import timezone as _tz
+
+        if not isinstance(payload, dict):
+            payload = {}
+        tool_name = str(payload.get("tool_name", "") or "")
+        session_id = str(payload.get("session_id", "") or "") or f"anon-{_uuid.uuid4().hex[:8]}"
+        tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+        eid = f"assess-{_uuid.uuid4().hex[:12]}"
+
+        return cls(
+            event_id=eid,
+            session_id=session_id,
+            timestamp=_dt.now(_tz.utc),
+            source_event_key=f"assess:{eid}",
+            span_id=f"assess-span-{_uuid.uuid4().hex[:8]}",
+            tool_name=tool_name,
+            server_namespace=payload.get("server_namespace"),
+            tool_args_json=_json.dumps(tool_input, default=str),
+            source_event_id=None,
+            mcp_server_name=payload.get("mcp_server_name") or payload.get("server_namespace"),
+            tool_description=payload.get("tool_description"),
+            tool_schema_json=payload.get("tool_schema_json"),
+        )
+
 
 @dataclass(frozen=True)
 class ToolResultEvent(SessionEvent):

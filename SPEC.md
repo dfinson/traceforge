@@ -99,13 +99,17 @@ tracemill was extracted from CodePlane as a standalone library. CodePlane's obse
 ### Data Flow Summary
 
 `
-Source → [Parser] → Adapter → Enricher → Pipeline → Sink(s)
+Observation: Source → [Parser] → Adapter → Enricher → Pipeline → Sink(s)
+Gate:        Hook Payload → Adapter.parse_one() → Enricher.classify() → PolicyEngine → Verdict
+                                    ↑ same classify/ rules ↑
 `
 
-The pipeline supports three record types flowing through sinks:
+The observation pipeline supports three record types flowing through sinks:
 - `SessionEvent` — the primary event type (all enrichment applies here)
 - `TelemetrySpan` — derived span data (start/end pairs)
 - `UsageRecord` — LLM token/cost accounting
+
+The gate path (§22) shares `classify/` and `mappings/` with the observation pipeline but operates synchronously on single events, returning a verdict instead of writing to sinks.
 
 ---
 
@@ -450,6 +454,8 @@ Emits events suitable for `aider_markdown.yaml` mapping.
 ## §9 — Enrichment
 
 The `Enricher` (`enricher.py`) is a stateful per-session processor that sits inside the pipeline. It transforms raw events before they reach sinks.
+
+The enricher produces **classifications and measurements only** — never verdicts, recommended actions, or decision-implying fields. It answers "what is this?" and "how risky is this?", not "what should be done about it?". Action semantics exist only in the gate module (§22) where they are actually executable.
 
 ### Enricher API
 
@@ -1081,6 +1087,7 @@ tracemill/
 | **CLI runner** | Medium | All sinks | `tracemill run` command that instantiates pipelines from config and runs until interrupted. |
 | **EventBus** | Low | None | Optional pub/sub for in-process lightweight consumers. |
 | **SDK push mode** | Medium | Sinks | In-process event push (no file watch). Uses SDKConfig batch/flush settings. |
+| **Gate module** | Medium | ClassificationEngine, risk scoring | Sync scoring path + YAML policy engine + I/O adapters (stdio, REST, callback). See §22. |
 
 ### Implementation Order (Recommended)
 
@@ -1098,7 +1105,418 @@ tracemill/
 
 ---
 
-## §22 — Success Criteria
+## §22 — Gate Module
+
+*Pre-execution scoring with pluggable policy for downstream consumers.*
+
+### Motivation
+
+The observation pipeline (§9–§12) processes events **after** they occur — it is a historian. But 9 of tracemill's 15 supported frameworks expose pre-execution hook mechanisms where tool calls can be blocked before they fire. Downstream consumers (CodePlane, custom supervisors) need a way to leverage tracemill's classification engine as a real-time scoring service for these hooks.
+
+tracemill does **not** make policy decisions or directly intervene in agent execution. It provides:
+1. A synchronous scoring path that reuses the existing classification engine
+2. Framework-specific I/O adapters that handle hook protocol boilerplate
+3. A declarative YAML policy format that consumers author
+
+The consumer authors a policy file and points a hook at tracemill. tracemill scores, evaluates, and returns a verdict in the framework's native format.
+
+### Separation of Concerns
+
+```
+Enricher    → produces FACTS (risk_score, effect, mechanism, scope, mitre...)
+PolicyEngine → maps facts to VERDICTS (allow, deny, escalate)
+I/O Adapter  → translates verdicts to FRAMEWORK PROTOCOL (exit codes, REST, callbacks)
+```
+
+The enricher **never** produces `recommended_action`, `suggested_verdict`, or any decision-implying field. It outputs measurements and classifications. Verdicts exist only in the gate path and are never written to observation sinks.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     classify/ + mappings/                             │
+│  (YAML rules, risk scoring, tool classifications, shell AST)         │
+│  Shared by BOTH paths — single source of truth                       │
+└─────────────┬───────────────────────────────────┬───────────────────┘
+              │                                   │
+              ▼                                   ▼
+┌───────────────────────────┐      ┌─────────────────────────────────┐
+│  pipeline/ (observation)   │      │  gate/ (intervention)            │
+│                            │      │                                  │
+│  Source → Parser →         │      │  Payload → Adapter.parse_one() → │
+│  Adapter → Enricher →     │      │  Enricher.classify() →            │
+│  Sink(s)                   │      │  PolicyEngine.evaluate() →        │
+│                            │      │  IOAdapter.format_response()      │
+│  Async, streaming,         │      │                                  │
+│  multi-event, post-hoc     │      │  Sync, single-event,             │
+│                            │      │  pre-execution, <10ms            │
+│  Output: enriched events   │      │                                  │
+│  to storage                │      │  Output: verdict to framework    │
+└───────────────────────────┘      └─────────────────────────────────┘
+```
+
+### Core Types (`gate/types.py`)
+
+```python
+class Verdict(Enum):
+    ALLOW = "allow"
+    DENY = "deny"
+    ESCALATE = "escalate"
+
+@dataclass(frozen=True, slots=True)
+class GateResult:
+    verdict: Verdict
+    reason: str | None           # human-readable explanation
+    matched_rule: str | None     # rule ID that triggered (for audit)
+    event: SessionEvent          # the enriched event (full classifications)
+    score: int                   # 0-100 risk score
+    elapsed_ms: float            # scoring latency
+```
+
+### Policy Format (`gate-policy.yaml`)
+
+Declarative, evaluated top-to-bottom, first match wins:
+
+```yaml
+version: 1
+default: allow                    # verdict when no rule matches
+
+rules:
+  - id: critical-risk
+    when:
+      risk_score: ">0.8"
+    verdict: deny
+    reason: "Risk score exceeds critical threshold"
+
+  - id: destructive-shell
+    when:
+      effect: destructive
+      mechanism: shell
+    verdict: deny
+
+  - id: dangerous-shell-needs-human
+    when:
+      effect: destructive
+    verdict: escalate
+    reason: "Destructive action requires approval"
+
+  - id: network-exfil
+    when:
+      capability: [network_outbound]
+      scope: [system.secrets, system.os]
+    verdict: deny
+    reason: "Network access to sensitive scope"
+
+  - id: mitre-flagged
+    when:
+      mitre_tactic: [T1485, T1070, T1059]
+    verdict: deny
+
+  - id: unknown-mcp-mutate
+    when:
+      mcp_server: "*"
+      effect: [mutating, destructive]
+    verdict: escalate
+```
+
+**`when` clause vocabulary** — matches against enricher output dimensions:
+
+| Field | Type | Source |
+|-------|------|--------|
+| `risk_score` | `">N"`, `"<N"`, `">=N"` | RiskAssessment.score (0-100, compared as int) |
+| `risk_label` | `safe \| caution \| danger \| critical` | RiskAssessment.level |
+| `effect` | str or list | Classification.effect |
+| `mechanism` | str or list | Classification.mechanism |
+| `scope` | str or list | Classification.scope (dotted: `system.os`) |
+| `role` | str or list | Classification.role |
+| `action` | str or list | Classification.action |
+| `capability` | str or list | Classification.capabilities |
+| `mitre_tactic` | str or list | RiskAssessment.mitre |
+| `tool` | str or list (glob) | SessionEvent.payload.tool_name (canonical) |
+| `mcp_server` | str or list (glob) | SessionEvent.payload.mcp_server |
+| `kind` | str or list | SessionEvent.kind |
+| `framework` | str or list | EventMetadata.source_framework |
+
+**Matching semantics:**
+- String fields: exact match or glob (`*` wildcard)
+- List fields: event value must contain at least one listed item (OR)
+- Multiple fields in one `when`: all must match (AND)
+- `risk_score` comparisons: `">80"` means score > 80
+
+### PolicyEngine (`gate/policy.py`)
+
+```python
+class PolicyEngine:
+    """Loads and evaluates gate-policy.yaml rules."""
+
+    @classmethod
+    def from_file(cls, path: Path) -> "PolicyEngine": ...
+
+    @classmethod
+    def from_dict(cls, config: dict) -> "PolicyEngine": ...
+
+    def evaluate(self, event: SessionEvent, risk: RiskAssessment) -> GateResult:
+        """Evaluate policy rules against an enriched event.
+
+        Iterates rules top-to-bottom, returns first match.
+        Returns default verdict if no rule matches.
+        """
+        ...
+```
+
+### GateEngine (`gate/engine.py`)
+
+The single entry point that orchestrates parse → enrich → evaluate:
+
+```python
+class GateEngine:
+    """Synchronous scoring + policy evaluation for pre-execution gating."""
+
+    def __init__(
+        self,
+        policy: PolicyEngine,
+        classification_engine: ClassificationEngine,
+    ): ...
+
+    @classmethod
+    def from_config(
+        cls,
+        policy_path: Path,
+        classify_config: ClassifyConfig | None = None,
+    ) -> "GateEngine": ...
+
+    def score(self, payload: dict, framework: str) -> GateResult:
+        """Score a single tool call payload and evaluate policy.
+
+        1. Selects adapter + preprocessor for framework
+        2. Parses payload into SessionEvent via Adapter.parse_one()
+        3. Classifies via ClassificationEngine (same rules as pipeline)
+        4. Computes RiskAssessment (same risk.yaml as pipeline)
+        5. Evaluates PolicyEngine rules
+        6. Returns GateResult with verdict + full enrichment
+        """
+        ...
+```
+
+### I/O Adapters (`gate/io/`)
+
+Handle framework-specific hook protocols. The consumer does not interact with these directly when using the SDK; they are used by the CLI and by pre-built hook scripts.
+
+```python
+class IOAdapter(ABC):
+    """Translates between framework hook protocol and GateEngine."""
+
+    @abstractmethod
+    def read_payload(self) -> dict:
+        """Read the incoming tool call payload from the hook transport."""
+        ...
+
+    @abstractmethod
+    def write_verdict(self, result: GateResult) -> NoReturn | None:
+        """Write the verdict in the framework's expected format."""
+        ...
+```
+
+**Bundled adapters:**
+
+| Adapter | Frameworks | Input | Output |
+|---------|-----------|-------|--------|
+| `StdioAdapter` | Claude Code, Cline, OpenHands | JSON on stdin | Exit code 0/2 + JSON on stdout/stderr |
+| `RestAdapter` | Goose, OpenCode | HTTP request body | HTTP response body (framework-specific JSON) |
+| `CallbackAdapter` | CrewAI, PydanticAI, SK | Python dict (in-process) | Returns `bool` or typed verdict object |
+| `InterruptAdapter` | LangGraph | Interrupt value (in-process) | `Command(resume=...)` value |
+
+**StdioAdapter detail** (covers 3 frameworks with same protocol):
+
+```python
+class StdioAdapter(IOAdapter):
+    """Claude Code / Cline / OpenHands PreToolUse hook protocol."""
+
+    def read_payload(self) -> dict:
+        return json.load(sys.stdin)
+
+    def write_verdict(self, result: GateResult) -> NoReturn:
+        if result.verdict == Verdict.ALLOW:
+            sys.exit(0)
+        elif result.verdict == Verdict.DENY:
+            sys.stderr.write(result.reason or "Denied by policy")
+            sys.exit(2)
+        elif result.verdict == Verdict.ESCALATE:
+            # Escalation for stdio = block + indicate needs human
+            json.dump({
+                "decision": "escalate",
+                "reason": result.reason,
+                "risk_score": result.score,
+            }, sys.stdout)
+            sys.exit(2)
+```
+
+**RestAdapter detail** (protocol varies per framework):
+
+```python
+class RestAdapter(IOAdapter):
+    """HTTP-based approval protocol (Goose, OpenCode)."""
+
+    framework_responses: ClassVar[dict] = {
+        "goose": {
+            Verdict.ALLOW: {"action": "allow_once"},
+            Verdict.DENY: {"action": "deny_once"},
+            Verdict.ESCALATE: {"action": "deny_once"},  # consumer overrides
+        },
+        "opencode": {
+            Verdict.ALLOW: "once",
+            Verdict.DENY: "reject",
+            Verdict.ESCALATE: "reject",  # consumer overrides
+        },
+    }
+```
+
+### CLI Interface
+
+```bash
+# Stdio mode — used as hook script (Claude Code, Cline, OpenHands)
+tracemill gate --stdin --framework claude --policy ./gate-policy.yaml
+
+# REST server mode — used for Goose, OpenCode, LangGraph
+tracemill gate serve --port 9090 --policy ./gate-policy.yaml
+
+# One-shot scoring (debugging / CI)
+echo '{"tool_name":"Bash","tool_input":{"command":"rm -rf /"}}' | \
+  tracemill gate score --framework claude --policy ./gate-policy.yaml
+```
+
+### SDK Interface
+
+```python
+from tracemill.gate import GateEngine, GateResult
+
+# Initialize once (loads policy + classification engine)
+engine = GateEngine.from_config(policy_path="./gate-policy.yaml")
+
+# Score a single event — sync, fast, no I/O
+result: GateResult = engine.score(
+    payload={"tool_name": "Bash", "tool_input": {"command": "rm -rf /tmp"}},
+    framework="claude",
+)
+
+result.verdict    # Verdict.DENY
+result.reason     # "Risk score exceeds critical threshold"
+result.score      # 92
+result.event      # SessionEvent with full classifications
+```
+
+### Escalation
+
+When verdict is `ESCALATE`, tracemill formats the response as a block (the tool does not execute), but signals that a human decision is needed. How escalation is handled is **consumer-defined** — tracemill provides the signal, not the workflow:
+
+- In stdio mode: exits 2 with escalation metadata in stdout JSON
+- In REST mode: responds with denial + `escalate: true` field
+- In SDK mode: returns `GateResult` with `verdict=ESCALATE` — consumer decides what to do
+
+The consumer may:
+- Show a UI prompt (CodePlane)
+- Post to Slack / PagerDuty
+- Queue for async review
+- Auto-deny after timeout
+
+tracemill does not implement any of these. It exits after returning the verdict.
+
+### Framework Compatibility Matrix
+
+| Framework | Hook Protocol | Adapter | Async Approval | Notes |
+|-----------|---------------|---------|----------------|-------|
+| Claude Code | PreToolUse subprocess | `StdioAdapter` | Script blocks | Same format as Cline/OpenHands |
+| Cline | PreToolUse subprocess | `StdioAdapter` | Script blocks | Cancel via `{cancel: true}` JSON |
+| OpenHands | PreToolUse subprocess | `StdioAdapter` | Script blocks | Claude Code compatible format |
+| Goose | REST `POST /action-required/tool-confirmation` | `RestAdapter` | YES (oneshot channel) | Agent blocks until response |
+| OpenCode | SSE `permission.asked` → HTTP reply | `RestAdapter` | YES (Effect Deferred) | Agent blocks until reply |
+| LangGraph | `interrupt()` → `Command(resume=...)` | `InterruptAdapter` | YES (checkpointed) | True cross-process pause |
+| CrewAI | `@before_tool_call` return False | `CallbackAdapter` | YES (async fn) | Global hook registry |
+| PydanticAI | `DeferredToolRequests` → `ToolApproved/Denied` | `CallbackAdapter` | YES (run returns) | Two-phase run pattern |
+| MAF/SK | `IAutoFunctionInvocationFilter` | `CallbackAdapter` | YES (async Task) | C# middleware (not Python) |
+
+**Not gateable** (observation only):
+- GitHub Copilot CLI — no external hook API
+- Aider — terminal prompt only, no programmable path
+- smolagents — no per-tool hook
+- SWE-agent — observer hooks (void return, cannot block)
+
+### Configuration (`tracemill.yaml` extension)
+
+```yaml
+# Existing pipeline config (unchanged)
+pipelines:
+  - name: copilot-local
+    source: { type: file_watch, path: ~/.copilot/logs/ }
+    adapter: { type: mapped_json, mapping: copilot }
+    sinks:
+      - type: jsonl
+        path: ./output/events.jsonl
+
+# New: gate configuration (optional, independent of pipelines)
+gate:
+  policy: ./gate-policy.yaml
+  framework: claude
+  mode: stdio                    # stdio | serve | callback
+  # For serve mode:
+  # port: 9090
+  # host: 127.0.0.1
+```
+
+### Design Constraints
+
+1. **No framework dependencies** — `gate/` never imports Claude Code, LangGraph, CrewAI, etc. It only speaks their wire protocols.
+2. **No network calls from scoring** — `engine.score()` is pure computation. I/O adapters handle transport.
+3. **Deterministic** — same payload + same policy = same verdict. No randomness, no LLM calls.
+4. **Fast** — target <10ms p99 for `engine.score()`. The classification engine is pre-built at init; scoring is lookup + arithmetic.
+5. **No state** — `GateEngine` is stateless between calls. No session tracking, no memory of previous verdicts. (Observation pipeline handles history.)
+6. **Policy is data** — no Python/code in policy files. YAML only. Turing-incomplete by design.
+7. **Enricher purity** — the enricher (§9) produces only classifications and risk scores. It never outputs verdicts, recommendations, or action suggestions. Those semantics exist only in `gate/policy.py`.
+
+### File Structure
+
+```
+src/tracemill/
+├── gate/
+│   ├── __init__.py          # Public API: GateEngine, GateResult, Verdict
+│   ├── types.py             # Verdict, GateResult, PolicyRule dataclasses
+│   ├── engine.py            # GateEngine (parse → classify → evaluate)
+│   ├── policy.py            # PolicyEngine (YAML rule loading + matching)
+│   └── io/
+│       ├── __init__.py
+│       ├── base.py          # IOAdapter ABC
+│       ├── stdio.py         # StdioAdapter (Claude Code, Cline, OpenHands)
+│       ├── rest.py          # RestAdapter (Goose, OpenCode)
+│       ├── callback.py      # CallbackAdapter (CrewAI, PydanticAI)
+│       └── interrupt.py     # InterruptAdapter (LangGraph)
+```
+
+### Interaction with Observation Pipeline
+
+The gate module and observation pipeline are independent:
+- Gate does **not** write to sinks
+- Gate does **not** use sources
+- Gate does **not** require a running pipeline
+
+However, a consumer **may** feed gate decisions back into the observation pipeline as events:
+
+```python
+# Consumer code (not tracemill's responsibility):
+result = engine.score(payload, framework="claude")
+# Optionally emit a synthetic event to the observation pipeline:
+pipeline.emit(SessionEvent(
+    kind=EventKind.PERMISSION_GRANTED if result.verdict == Verdict.ALLOW
+         else EventKind.PERMISSION_DENIED,
+    payload={"verdict": result.verdict.value, "reason": result.reason},
+    ...
+))
+```
+
+This creates a complete audit trail: the observation pipeline records what happened (including gate decisions), while the gate module makes real-time verdicts. They share the classification engine but operate independently.
+
+---
+
+## §23 — Success Criteria
 
 The library is "done" when:
 

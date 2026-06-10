@@ -1113,17 +1113,42 @@ tracemill/
 
 The gate module is a synchronous scoring path that reuses tracemill's classification engine to make allow/deny decisions on tool calls **before they execute**. It runs inside framework hook mechanisms — the framework calls tracemill, tracemill scores and decides, the framework acts on the verdict.
 
-tracemill IS the decision-maker. The policy is authored as YAML. No consumer code runs at gate-time for the common case.
+tracemill IS the decision-maker. The policy is authored as YAML. No consumer code runs at gate-time for sidecar hooks (Surface A); for SDK integrations (Surface B) the consumer calls one function.
+
+### Framework × Deployment Matrix
+
+tracemill supports 13 platforms across 16 deployment permutations. Each maps to one of three gate surfaces:
+
+| # | Platform | Deployment Mode | Surface | Gate Mechanism |
+|---|----------|----------------|---------|----------------|
+| 1 | **Copilot** | CLI (local) | A | `.github/hooks/preToolUse.json` → `tracemill gate --stdin --framework copilot` |
+| 2 | **Copilot** | Cloud Agent (GitHub container) | A | Same hook file; `copilot-setup-steps.yml` installs tracemill in container |
+| 3 | **Copilot** | SDK (`github-copilot-sdk`) | B | `on_permission_request` callback → `PermissionRequestResult("approve-once"\|"reject")` |
+| 4 | **Claude Code** | CLI (local) | A | `.claude/settings.json` `PreToolUse` hook → `tracemill gate --stdin --framework claude` |
+| 5 | **Claude Code** | SDK (`claude-code-sdk`) | B | `can_use_tool(tool_name, input, ctx)` → `PermissionResultAllow()\|PermissionResultDeny()` |
+| 6 | **Cline** | VS Code extension | A | `.cline/hooks/preToolUse.sh` → `tracemill gate --stdin --framework cline` |
+| 7 | **OpenHands** | Self-hosted container | A | `.openhands/hooks.json` `PreToolUse` → `tracemill gate --stdin --framework openhands` |
+| 8 | **Goose** | CLI (local or orchestrated) | B | REST `POST /action-required/tool-confirmation` — agent blocks on oneshot channel |
+| 9 | **OpenCode** | TUI/CLI | B | `Permission.Service.ask()` → SSE `permission.asked` → `Permission.Service.reply(id, verdict)` |
+| 10 | **LangGraph** | Python library | B | `interrupt(value)` → `GraphInterrupt` — resume via `Command(resume=verdict)` |
+| 11 | **CrewAI** | Python library | B | `@before_tool_call(tools=[...])` — return `False` to block |
+| 12 | **PydanticAI** | Python library | B | `DeferredToolRequests` → `deferred.make_results(approvals={id: Approved()\|Denied()})` |
+| 13 | **MAF / Semantic Kernel** | .NET/Python library | B | `IAutoFunctionInvocationFilter` — skip `next()` + `context.Terminate = true` to block |
+| 14 | **Aider** | CLI | Reactive | None — `--yes` auto-approves all; `io.confirm_ask()` is terminal-only |
+| 15 | **smolagents** | Python library | Reactive | None — `Monitor` is observer-only; `agent.interrupt()` is post-hoc abort |
+| 16 | **SWE-agent** | CLI/Docker | Reactive | None — `on_action_started()` returns void, observer only |
+
+**Totals:** Surface A = 5 permutations, Surface B = 8 permutations, Reactive = 3 permutations.
 
 ### How It Works (End-to-End)
 
-There are two deployment surfaces. The framework determines which one applies.
+There are three gate surfaces. The platform and deployment mode determine which applies.
 
 ---
 
 #### Surface A: Sidecar Hook Process
 
-**Applies to:** GitHub Copilot CLI, GitHub Copilot Cloud Agent, Claude Code, Cline, OpenHands
+**Applies to:** Copilot CLI (#1), Copilot Cloud Agent (#2), Claude Code CLI (#4), Cline (#6), OpenHands (#7)
 
 These frameworks all converged on the same protocol: before executing a tool call, they spawn an external process, pass tool call data on stdin as JSON, and read a decision from stdout/exit code.
 
@@ -1206,9 +1231,9 @@ For OpenHands (`.openhands/hooks.json`):
 
 #### Surface B: SDK Scoring Function
 
-**Applies to:** Goose, OpenCode, LangGraph, CrewAI, PydanticAI, MAF/Semantic Kernel
+**Applies to:** Copilot SDK (#3), Claude Code SDK (#5), Goose (#8), OpenCode (#9), LangGraph (#10), CrewAI (#11), PydanticAI (#12), MAF/Semantic Kernel (#13)
 
-These frameworks have async approval mechanisms (REST APIs, interrupt/resume, decorator hooks). An external service or in-process callback must participate in the approval flow. The service is the consumer's — tracemill provides the scoring function it calls.
+These frameworks have in-process callbacks or async approval channels. The consumer's service calls `engine.score()` and delivers the verdict back to the framework using its native protocol.
 
 **The full sequence (Goose example):**
 
@@ -1227,7 +1252,7 @@ These frameworks have async approval mechanisms (REST APIs, interrupt/resume, de
 10. Tool executes (if allowed) or agent is told it was denied
 ```
 
-**SDK usage:**
+**SDK usage (generic):**
 
 ```python
 from tracemill.gate import GateEngine
@@ -1242,8 +1267,59 @@ result.reason     # "Destructive shell command (risk 92/100)"
 result.event      # Full SessionEvent with all classifications
 ```
 
+**Copilot SDK integration:**
+
+```python
+from copilot import CopilotClient
+from tracemill.gate import GateEngine, Verdict
+
+engine = GateEngine.from_config(policy_path="./gate-policy.yaml")
+
+async def permission_handler(request, invocation):
+    result = engine.score({
+        "tool_name": request.tool_name or request.kind,
+        "tool_input": {"command": request.full_command_text, "path": request.file_name},
+        "kind": request.kind,
+    }, framework="copilot")
+    from copilot.session import PermissionRequestResult
+    if result.verdict == Verdict.ALLOW:
+        return PermissionRequestResult(kind="approve-once")
+    return PermissionRequestResult(kind="reject")
+
+client = CopilotClient()
+session = await client.create_session(
+    on_permission_request=permission_handler,
+    working_directory=cwd,
+)
+```
+
+**Claude Code SDK integration:**
+
+```python
+from claude_code_sdk import ClaudeCodeOptions, ClaudeSDKClient
+from claude_code_sdk import PermissionResultAllow, PermissionResultDeny
+from tracemill.gate import GateEngine, Verdict
+
+engine = GateEngine.from_config(policy_path="./gate-policy.yaml")
+
+async def can_use_tool(tool_name, input_data, context):
+    result = engine.score({
+        "tool_name": tool_name,
+        "tool_input": input_data,
+    }, framework="claude")
+    if result.verdict == Verdict.ALLOW:
+        return PermissionResultAllow()
+    return PermissionResultDeny(message=result.reason)
+
+options = ClaudeCodeOptions(
+    cwd=workspace_path,
+    permission_mode="default",
+    can_use_tool=can_use_tool,
+)
+```
+
 The consumer owns:
-- How they observe the event (polling, SSE, webhook)
+- How they observe the event (polling, SSE, webhook, or in-process callback)
 - How they deliver the verdict to the framework (REST call, resume command, return value)
 - What to do if they want a human in the loop (their escalation workflow)
 
@@ -1257,7 +1333,7 @@ tracemill owns:
 
 #### The Reactive Path (for ungated frameworks)
 
-**Applies to:** Aider, smolagents, SWE-agent
+**Applies to:** Aider (#14), smolagents (#15), SWE-agent (#16)
 
 For frameworks without hooks, the observation pipeline (existing) provides **fast reactive scoring**. The consumer configures a `CallbackSink` that fires on every enriched event:
 

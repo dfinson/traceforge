@@ -39,8 +39,10 @@ class RecommendedAction(StrEnum):
     TRANSFORM = "transform"
 
 
-def _decode_budget_dims(raw: list) -> tuple[tuple[str, int], ...]:
+def _decode_budget_dims(raw: list | None) -> tuple[tuple[str, int], ...]:
     """Safely decode budget dimension pairs from JSON, skipping malformed entries."""
+    if not raw:
+        return ()
     result = []
     for item in raw:
         if isinstance(item, (list, tuple)) and len(item) == 2:
@@ -819,16 +821,7 @@ class GovernancePipeline:
             }
         cls_data = None
         if meta.classification:
-            cls_data = {
-                "mechanism": meta.classification.mechanism,
-                "effect": meta.classification.effect,
-                "scope": sorted(meta.classification.scope),
-                "role": sorted(meta.classification.role),
-                "action": sorted(meta.classification.action),
-                "capability": sorted(meta.classification.capability),
-                "structure": sorted(meta.classification.structure),
-                "source_labels": sorted(meta.classification.source_labels),
-            }
+            cls_data = meta.classification.to_dict()
         budget_data = None
         if meta.budget_snapshot:
             budget_data = {
@@ -870,7 +863,18 @@ class GovernancePipeline:
                 "mitre_techniques": list(meta.evidence.mitre_techniques),
                 "pointers": pointers_data,
             }
-        mcp_alerts_data = [str(a) for a in meta.mcp_alerts] if meta.mcp_alerts else []
+        mcp_alerts_data = []
+        if meta.mcp_alerts:
+            for alert in meta.mcp_alerts:
+                mcp_alerts_data.append({
+                    "tool_name": alert.tool_name,
+                    "server": alert.server,
+                    "alert_type": alert.alert_type,
+                    "previous": alert.previous,
+                    "current": alert.current,
+                    "severity": alert.severity,
+                    "timestamp": alert.timestamp.isoformat(),
+                })
         return {
             "classification": cls_data,
             "recommendation": rec_data,
@@ -878,7 +882,6 @@ class GovernancePipeline:
             "budget": budget_data,
             "evidence": evidence_data,
             "mcp_alerts": mcp_alerts_data,
-            "mcp_alerts_count": len(meta.mcp_alerts),
         }
 
     def _deserialize_meta(self, data: dict) -> SessionMeta:
@@ -927,16 +930,7 @@ class GovernancePipeline:
         cls = None
         cls_data = data.get("classification")
         if cls_data:
-            cls = Classification(
-                mechanism=cls_data["mechanism"],
-                effect=cls_data.get("effect"),
-                scope=frozenset(cls_data.get("scope", ())),
-                role=frozenset(cls_data.get("role", ())),
-                action=frozenset(cls_data.get("action", ())),
-                capability=frozenset(cls_data.get("capability", ())),
-                structure=frozenset(cls_data.get("structure", ())),
-                source_labels=frozenset(cls_data.get("source_labels", ())),
-            )
+            cls = Classification.from_dict(cls_data)
 
         budget = None
         budget_data = data.get("budget")
@@ -981,14 +975,32 @@ class GovernancePipeline:
                 capability=tuple(evidence_data.get("capability", ())),
                 structure=tuple(evidence_data.get("structure", ())),
                 source_labels=tuple(evidence_data.get("source_labels", ())),
-                recommended_action=RecommendedAction(evidence_data.get("recommended_action", "allow")),
+                recommended_action=RecommendedAction(evidence_data["recommended_action"]) if evidence_data.get("recommended_action") in tuple(RecommendedAction) else RecommendedAction.ALLOW,
                 risk_score=evidence_data.get("risk_score", 0),
                 risk_factors=tuple(evidence_data.get("risk_factors", ())),
                 mitre_techniques=tuple(evidence_data.get("mitre_techniques", ())),
                 pointers=pointers,
             )
 
-        mcp_alerts = tuple(data.get("mcp_alerts", ()))
+        from tracemill.governance.mcp_drift import MCPIntegrityAlert
+
+        mcp_alerts_raw = data.get("mcp_alerts", ())
+        mcp_alerts: tuple = ()
+        if mcp_alerts_raw:
+            alerts_list = []
+            for a in mcp_alerts_raw:
+                if isinstance(a, dict):
+                    alerts_list.append(MCPIntegrityAlert(
+                        tool_name=a.get("tool_name", ""),
+                        server=a.get("server", ""),
+                        alert_type=a.get("alert_type", "schema_change"),
+                        previous=a.get("previous", ""),
+                        current=a.get("current", ""),
+                        severity=a.get("severity", "info"),
+                        timestamp=datetime.fromisoformat(a["timestamp"]) if a.get("timestamp") else datetime.now(timezone.utc),
+                    ))
+                # Legacy string alerts: skip (can't reconstruct typed object)
+            mcp_alerts = tuple(alerts_list)
 
         return SessionMeta(
             classification=cls,

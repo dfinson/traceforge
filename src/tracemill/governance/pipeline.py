@@ -219,6 +219,11 @@ class GovernancePipeline:
         if phase:
             state.update_phase_window(phase)
 
+        # IFC taint recording (mutable state — must run in Phase 1)
+        if self._labeler._ifc:
+            ifc_src_labels: set[str] = set()
+            self._labeler._ifc.check(ctx, ifc_src_labels, state)
+
         # Record event
         state.record_event(getattr(event, "sequence", None))
 
@@ -355,7 +360,9 @@ class GovernancePipeline:
         cls = ctx.base_classification
         if cls.effect == "read_only":
             return "exploration"
-        if cls.effect in ("mutating", "destructive"):
+        if cls.effect == "destructive":
+            return "destructive"
+        if cls.effect == "mutating":
             tool_name = str(getattr(ctx.event, "tool_name", "") or "").lower()
             if "test" in tool_name or "verify" in tool_name or "check" in tool_name:
                 return "testing"
@@ -364,6 +371,9 @@ class GovernancePipeline:
             return "implementation"
         if cls.effect == "informational":
             return "exploration"
+        # Network capability → network phase for drift detection
+        if "network_outbound" in cls.capability:
+            return "network"
         return "exploration"
 
     def _with_snapshot(self, ctx: "EnrichmentContext", snapshot: "SessionStateSnapshot") -> "EnrichmentContext":
@@ -477,12 +487,11 @@ class GovernancePipeline:
     def _sanitize_args(self, raw_args: str, max_len: int = 500) -> str:
         """Sanitize tool args for escalation context — remove secrets, truncate."""
         import re
-        # Redact obvious secrets
+        # Redact obvious secrets: capture key + separator, replace value
         sanitized = re.sub(
-            r'(?:password|secret|token|key|credential)[\s"\'=:]+[^\s"\'}{,\]]{4,}',
-            r'\g<0>'.split('=')[0] + '=<REDACTED>' if '=' in raw_args else '<REDACTED>',
+            r'(?i)((?:password|secret|token|key|credential|api_key|auth)\s*[:=]\s*)[^\s"\'}{,\]]+',
+            r'\1<REDACTED>',
             raw_args,
-            flags=re.IGNORECASE,
         )
         if len(sanitized) > max_len:
             sanitized = sanitized[:max_len] + "..."
@@ -511,28 +520,61 @@ class GovernancePipeline:
             pass  # Best-effort
 
     def _serialize_meta(self, meta: SessionMeta) -> dict:
-        """Serialization for idempotency cache."""
+        """Serialization for idempotency cache — preserves governance decisions."""
+        rec_data = None
+        if meta.recommendation:
+            rec_data = {
+                "action": str(meta.recommendation.recommended_action),
+                "reason_code": meta.recommendation.reason_code,
+                "canonical_id": getattr(meta.recommendation, "canonical_id", None),
+                "message": getattr(meta.recommendation, "message", None),
+            }
+        risk_data = None
+        if meta.risk_assessment and hasattr(meta.risk_assessment, "score"):
+            risk_data = {
+                "score": meta.risk_assessment.score,
+                "level": meta.risk_assessment.level,
+                "confidence": getattr(meta.risk_assessment, "confidence", "medium"),
+                "factors": list(meta.risk_assessment.factors) if meta.risk_assessment.factors else [],
+                "mitre": list(meta.risk_assessment.mitre) if hasattr(meta.risk_assessment, "mitre") and meta.risk_assessment.mitre else [],
+            }
         return {
-            "recommendation": meta.recommendation.reason_code if meta.recommendation else None,
-            "risk_score": meta.risk_assessment.score if meta.risk_assessment and hasattr(meta.risk_assessment, "score") else 0,
+            "recommendation": rec_data,
+            "risk": risk_data,
+            "mcp_alerts_count": len(meta.mcp_alerts),
         }
 
     def _deserialize_meta(self, data: dict) -> SessionMeta:
-        """Reconstruct minimal SessionMeta from cache."""
+        """Reconstruct SessionMeta from cache — preserves governance decisions."""
         from tracemill.classify.risk import RiskAssessment
 
-        risk = RiskAssessment(
-            score=data.get("risk_score", 0),
-            level="safe",
-            confidence="low",
-            factors=(),
-            mitre=(),
-            version="cached",
-        )
+        risk = None
+        risk_data = data.get("risk")
+        if risk_data:
+            risk = RiskAssessment(
+                score=risk_data.get("score", 0),
+                level=risk_data.get("level", "safe"),
+                confidence=risk_data.get("confidence", "medium"),
+                factors=tuple(risk_data.get("factors", ())),
+                mitre=tuple(risk_data.get("mitre", ())),
+                version="cached",
+            )
+
+        rec = None
+        rec_data = data.get("recommendation")
+        if rec_data and rec_data.get("action"):
+            rec = RiskRecommendation(
+                recommended_action=RecommendedAction(rec_data["action"]),
+                assessment=risk,
+                reason_code=rec_data.get("reason_code", ""),
+                canonical_id=rec_data.get("canonical_id") or "",
+                message=rec_data.get("message"),
+            )
+
         return SessionMeta(
             classification=None,
             risk_assessment=risk,
-            recommendation=None,
+            recommendation=rec,
             budget_snapshot=None,
             drift=None,
             mcp_alerts=(),

@@ -56,10 +56,10 @@ recommendation_rules:
     recommend: escalate
     reason: credential_exposure
 
-  # PII with network
+  # PII with network — requires BOTH capabilities simultaneously
   - id: pii_network
     when:
-      capability: [pii_exposure, network_outbound]
+      capability: { all_of: [pii_exposure, network_outbound] }
     recommend: deny
     reason: pii_network_exfiltration
 

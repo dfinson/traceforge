@@ -79,9 +79,9 @@ class GovernanceLabeler:
                 alerts_list, is_new = scan_result
                 mcp_alerts = tuple(alerts_list)
                 # Sum severity for bonus (cap at 40)
-                severity_map = {"high": 20, "medium": 10, "low": 5}
+                severity_map = {"critical": 20, "warning": 10, "info": 5}
                 mcp_bonus = min(40, sum(
-                    severity_map.get(getattr(a, "severity", "low"), 5)
+                    severity_map.get(getattr(a, "severity", "info"), 5)
                     for a in mcp_alerts
                 ))
                 if mcp_alerts:
@@ -96,12 +96,14 @@ class GovernanceLabeler:
         # IFC source labels
         ifc_violations = 0
         if self._ifc and ctx.session_state:
-            from tracemill.governance.state import SessionState
-            # IFC needs mutable state for taint recording — but we read from snapshot
             # In Phase 2, IFC operates read-only on snapshot taints for label assignment
             self._ifc_label_only(ctx, src_labels)
-            # Count violations from existing taints
-            if "ifc_violation" in struct or any("ifc:" in l for l in src_labels):
+            # Detect IFC violation: tainted data flowing to mutating/destructive/network sinks
+            if ctx.session_state.taint_ledger and ctx.base_classification.effect in ("mutating", "destructive"):
+                struct.add("ifc_violation")
+                ifc_violations = 1
+            elif any("ifc:" in l for l in src_labels) and "network_outbound" in cap:
+                struct.add("ifc_violation")
                 ifc_violations = 1
 
         # Phase drift

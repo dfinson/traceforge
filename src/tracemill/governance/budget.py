@@ -36,7 +36,7 @@ class BudgetTracker:
             effect=cls.effect,
             scope=cls.scope,
             role=cls.role,
-            action=frozenset(),  # action isn't on Classification yet
+            action=cls.action,
             capability=cls.capability,
             structure=cls.structure,
             phase=phase,

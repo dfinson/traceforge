@@ -46,7 +46,7 @@ def assess_governance_risk(
             flags=list(command_analysis.flags) if command_analysis.flags else [],
             targets=list(command_analysis.targets) if command_analysis.targets else [],
             pipe_segments=[
-                {"binary": seg.binary, "effect": seg.effect, "targets": list(seg.targets)}
+                {"binary": seg.binary, "targets": list(seg.targets)}
                 for seg in command_analysis.pipe_segments
             ] if command_analysis.pipe_segments else None,
             project_root=project_root,

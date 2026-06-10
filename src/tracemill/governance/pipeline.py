@@ -417,8 +417,8 @@ class GovernancePipeline:
         )
 
         # Finalize idempotency record + deferred MCP writes in single transaction
-        meta_json = json.dumps(self._serialize_meta(meta))
         try:
+            meta_json = json.dumps(self._serialize_meta(meta))
             self._store.execute_in_transaction(
                 "UPDATE processed_events SET session_meta_json = ? WHERE source_event_key = ?",
                 (meta_json, event.source_event_key),
@@ -428,7 +428,7 @@ class GovernancePipeline:
             self._store.commit()
             self._store.cache_processed(event.source_event_key, meta_json)
         except (sqlite3.OperationalError, sqlite3.IntegrityError,
-                json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+                json.JSONDecodeError, KeyError, TypeError, ValueError, AttributeError) as e:
             import logging
             logging.getLogger(__name__).error(
                 "Finalization commit failed for event %s: %s — will retry on next delivery",
@@ -789,6 +789,30 @@ class GovernancePipeline:
             gap_ordinal=data.get("gap_ordinal", 0),
         )
 
+    def _deserialize_escalation(self, data: dict | None) -> "EscalationContext | None":
+        """Reconstruct EscalationContext from cached evidence data."""
+        if not data:
+            return None
+        from tracemill.classify.core import Classification
+        cls = Classification.from_dict(data["classification"]) if data.get("classification") else None
+        action_val = data.get("recommended_action", "allow")
+        action = RecommendedAction(action_val) if action_val in tuple(RecommendedAction) else RecommendedAction.ALLOW
+        return EscalationContext(
+            canonical_id=data.get("canonical_id", ""),
+            classification=cls,
+            recommended_action=action,
+            reason_code=data.get("reason_code", ""),
+            mitre_techniques=tuple(data.get("mitre_techniques", ())),
+            drift=None,  # Drift is session-contextual, not cached
+            budget_snapshot=None,
+            pii_taint=data.get("pii_taint", False),
+            ifc_violations=data.get("ifc_violations", 0),
+            tool_name=data.get("tool_name", ""),
+            tool_args_summary=data.get("tool_args_summary", ""),
+            session_id=data.get("session_id", ""),
+            timestamp=datetime.fromisoformat(data["timestamp"]) if data.get("timestamp") else datetime.now(timezone.utc),
+        )
+
     def _serialize_meta(self, meta: SessionMeta) -> dict:
         """Full serialization for idempotency cache — preserves all governance decisions."""
         rec_data = None
@@ -863,6 +887,21 @@ class GovernancePipeline:
                 "mitre_techniques": list(meta.evidence.mitre_techniques),
                 "pointers": pointers_data,
             }
+            if meta.evidence.escalation:
+                esc = meta.evidence.escalation
+                evidence_data["escalation"] = {
+                    "canonical_id": esc.canonical_id,
+                    "classification": esc.classification.to_dict() if esc.classification else None,
+                    "recommended_action": str(esc.recommended_action),
+                    "reason_code": esc.reason_code,
+                    "mitre_techniques": list(esc.mitre_techniques),
+                    "pii_taint": esc.pii_taint,
+                    "ifc_violations": esc.ifc_violations,
+                    "tool_name": esc.tool_name,
+                    "tool_args_summary": esc.tool_args_summary,
+                    "session_id": esc.session_id,
+                    "timestamp": esc.timestamp.isoformat(),
+                }
         mcp_alerts_data = []
         if meta.mcp_alerts:
             for alert in meta.mcp_alerts:
@@ -980,6 +1019,7 @@ class GovernancePipeline:
                 risk_factors=tuple(evidence_data.get("risk_factors", ())),
                 mitre_techniques=tuple(evidence_data.get("mitre_techniques", ())),
                 pointers=pointers,
+                escalation=self._deserialize_escalation(evidence_data.get("escalation")),
             )
 
         from tracemill.governance.mcp_drift import MCPIntegrityAlert

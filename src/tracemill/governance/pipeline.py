@@ -213,10 +213,9 @@ class GovernancePipeline:
 
         event = ctx.event
         session_id = event.session_id
-        state = self.get_or_create_state(session_id)
 
         # ── Phase 1: State Mutation ──
-        # Idempotency check (already-processed events return cached meta)
+        # Idempotency check BEFORE loading state (prevents resurrection of ended sessions)
         existing = self._store.is_duplicate(event.source_event_key)
         if existing:
             meta_dict = json.loads(existing)
@@ -227,7 +226,10 @@ class GovernancePipeline:
             persisted_attempts = meta_dict.get("phase23_attempts", 0)
             if event.source_event_key not in self._phase23_attempts:
                 self._phase23_attempts[event.source_event_key] = persisted_attempts
-        else:
+
+        state = self.get_or_create_state(session_id)
+
+        if not existing:
             # Phase 1 mutations (in-memory)
             phase = self._infer_phase(ctx)
             if phase:
@@ -645,11 +647,22 @@ class GovernancePipeline:
         """Full serialization for idempotency cache — preserves all governance decisions."""
         rec_data = None
         if meta.recommendation:
+            transform_data = None
+            if meta.recommendation.transform:
+                transform_data = {
+                    "target_kind": meta.recommendation.transform.target_kind,
+                    "path": meta.recommendation.transform.path,
+                    "original": meta.recommendation.transform.original,
+                    "replacement": meta.recommendation.transform.replacement,
+                    "rationale": meta.recommendation.transform.rationale,
+                    "confidence": meta.recommendation.transform.confidence,
+                }
             rec_data = {
                 "action": str(meta.recommendation.recommended_action),
                 "reason_code": meta.recommendation.reason_code,
                 "canonical_id": meta.recommendation.canonical_id,
                 "message": meta.recommendation.message,
+                "transform": transform_data,
             }
         risk_data = None
         if meta.risk_assessment:
@@ -708,12 +721,24 @@ class GovernancePipeline:
         rec = None
         rec_data = data.get("recommendation")
         if rec_data and rec_data.get("action"):
+            transform = None
+            transform_data = rec_data.get("transform")
+            if transform_data:
+                transform = TransformSuggestion(
+                    target_kind=transform_data["target_kind"],
+                    path=transform_data["path"],
+                    original=transform_data["original"],
+                    replacement=transform_data.get("replacement"),
+                    rationale=transform_data.get("rationale", ""),
+                    confidence=transform_data.get("confidence", "medium"),
+                )
             rec = RiskRecommendation(
                 recommended_action=RecommendedAction(rec_data["action"]),
                 assessment=risk,
                 reason_code=rec_data.get("reason_code", ""),
                 canonical_id=rec_data.get("canonical_id") or "",
                 message=rec_data.get("message"),
+                transform=transform,
             )
 
         cls = None

@@ -161,6 +161,8 @@ class GovernancePipeline:
         self._states: dict[str, "SessionState"] = {}
         self._write_failures: dict[str, int] = {}  # session_id → consecutive failure count
         self._MAX_WRITE_FAILURES = 10
+        self._phase23_attempts: dict[str, int] = {}  # source_event_key → attempt count
+        self._MAX_PHASE23_ATTEMPTS = 3
 
     def get_or_create_state(self, session_id: str) -> "SessionState":
         """Get or create session state."""
@@ -258,12 +260,61 @@ class GovernancePipeline:
                 )
 
         # ── Phase 2: Labeling (side-effect-free) ──
+        # Circuit breaker: if Phase 2/3 crashes consistently, dead-letter the event
         snapshot = state.snapshot()
         enrichment_ctx = self._with_snapshot(ctx, snapshot)
-        gov_result = self._labeler.label(enrichment_ctx)
+        try:
+            gov_result = self._labeler.label(enrichment_ctx)
 
-        # ── Phase 3: Risk + Rules + Evidence ──
-        phase3 = self._phase3(enrichment_ctx, gov_result, snapshot)
+            # ── Phase 3: Risk + Rules + Evidence ──
+            phase3 = self._phase3(enrichment_ctx, gov_result, snapshot)
+        except Exception as phase23_exc:
+            import logging
+            logger = logging.getLogger(__name__)
+            # Increment attempt counter and dead-letter after max retries
+            attempts = self._phase23_attempts.get(event.source_event_key, 0) + 1
+            self._phase23_attempts[event.source_event_key] = attempts
+            if attempts >= self._MAX_PHASE23_ATTEMPTS:
+                logger.error(
+                    "Event %s failed Phase 2/3 %d times — dead-lettering: %s",
+                    event.source_event_key, attempts, phase23_exc,
+                )
+                # Finalize with degraded meta so event stops retrying
+                degraded_meta = SessionMeta(
+                    classification=None, risk_assessment=None,
+                    recommendation=None, budget_snapshot=snapshot.budget,
+                    drift=None, mcp_alerts=(), evidence=None,
+                )
+                degraded_json = json.dumps({
+                    **self._serialize_meta(degraded_meta),
+                    "dead_lettered": True,
+                    "error": str(phase23_exc),
+                    "attempts": attempts,
+                })
+                try:
+                    self._store.execute_in_transaction(
+                        "UPDATE processed_events SET session_meta_json = ? WHERE source_event_key = ?",
+                        (degraded_json, event.source_event_key),
+                    )
+                    self._store.commit()
+                    self._store.cache_processed(event.source_event_key, degraded_json)
+                except (sqlite3.OperationalError, sqlite3.IntegrityError):
+                    self._store.rollback()
+                del self._phase23_attempts[event.source_event_key]
+                return degraded_meta
+            else:
+                logger.warning(
+                    "Event %s Phase 2/3 attempt %d/%d failed: %s — will retry on next delivery",
+                    event.source_event_key, attempts, self._MAX_PHASE23_ATTEMPTS, phase23_exc,
+                )
+                return SessionMeta(
+                    classification=None, risk_assessment=None,
+                    recommendation=None, budget_snapshot=snapshot.budget,
+                    drift=None, mcp_alerts=(), evidence=None,
+                )
+
+        # Phase 2/3 succeeded — clear any retry counter
+        self._phase23_attempts.pop(event.source_event_key, None)
 
         # Build SessionMeta
         rec = None
@@ -548,18 +599,26 @@ class GovernancePipeline:
     def _sanitize_args(self, raw_args: str, max_len: int = 500) -> str:
         """Sanitize tool args for escalation context — remove secrets, truncate."""
         import re
-        # Redact obvious secrets: capture key + separator, replace value
+
+        _SENSITIVE_KEYS = r'password|secret|token|key|credential|api_key|auth|authorization'
+        # Handle JSON-style: "key": "value" or "key":"value"
         sanitized = re.sub(
-            r'(?i)((?:password|secret|token|key|credential|api_key|auth)\s*[:=]\s*)[^\s"\'}{,\]]+',
-            r'\1<REDACTED>',
+            r'(?i)(["\']?(?:' + _SENSITIVE_KEYS + r')["\']?\s*[:=]\s*)["\']([^"\']*)["\']',
+            r'\1"<REDACTED>"',
             raw_args,
+        )
+        # Handle bare (non-quoted) values: key=value or key: value (no quotes around value)
+        sanitized = re.sub(
+            r'(?i)((?:' + _SENSITIVE_KEYS + r')\s*[:=]\s*)([^\s"\'}{,\]\)]+)',
+            r'\1<REDACTED>',
+            sanitized,
         )
         if len(sanitized) > max_len:
             sanitized = sanitized[:max_len] + "..."
         return sanitized
 
     def _write_session_summary(self, session_id: str, snapshot: "SessionStateSnapshot") -> None:
-        """Write session summary to session_summaries table."""
+        """Write session summary to session_summaries table (idempotent — won't overwrite existing)."""
         import json as json_mod
         import logging
 
@@ -570,8 +629,9 @@ class GovernancePipeline:
             "pressure": snapshot.budget.pressure,
         })
         try:
+            # INSERT OR IGNORE: first delivery records started_at/ended_at; duplicates are no-ops
             self._store.connection.execute(
-                """INSERT OR REPLACE INTO session_summaries
+                """INSERT OR IGNORE INTO session_summaries
                    (session_id, started_at, ended_at, total_events, dropped_events, budget_snapshot_json)
                    VALUES (?, ?, ?, ?, ?, ?)""",
                 (session_id, now, now, snapshot.event_count, snapshot.dropped_events, budget_json),

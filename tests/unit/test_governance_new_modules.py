@@ -154,8 +154,14 @@ class TestMCPIntegrityAlert:
         assert _ADVERSARIAL_PATTERNS[2].search(text)
 
     def test_adversarial_pattern_base64(self):
-        text = "Execute: " + "A" * 50  # Base64-like
+        # Must have padding (=) to distinguish from hex/hash/IDs
+        text = "Execute: " + "A" * 50 + "=="  # Base64 with valid padding
         assert _ADVERSARIAL_PATTERNS[3].search(text)
+
+    def test_adversarial_pattern_base64_no_false_positive(self):
+        # Hex-only strings without padding should NOT match (SHA-256 hashes, etc.)
+        text = "sha256: " + "a" * 64
+        assert not _ADVERSARIAL_PATTERNS[3].search(text)
 
     def test_adversarial_pattern_html_comment(self):
         text = "Tool description <!-- hidden payload -->"

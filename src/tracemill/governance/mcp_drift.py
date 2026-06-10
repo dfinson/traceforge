@@ -60,7 +60,7 @@ _ADVERSARIAL_PATTERNS = [
     re.compile(r'[\u200b-\u200f\u2028-\u202f\u2060-\u206f\ufeff]'),  # Invisible unicode
     re.compile(r'(?:ignore|disregard|forget)\s+(?:previous|prior|above)\s+(?:instructions?|rules?|constraints?)', re.IGNORECASE),  # Prompt injection
     re.compile(r'(?:you\s+are|act\s+as|pretend|role[-\s]?play)', re.IGNORECASE),  # Role override
-    re.compile(r'[A-Za-z0-9+/]{40,}={0,2}'),  # Base64 payload (40+ chars)
+    re.compile(r'(?<![A-Fa-f0-9])[A-Za-z0-9+/]{40,}(?:={1,2})(?![A-Za-z0-9+/=])'),  # Base64 payload (requires padding, excludes hex-only)
     re.compile(r'<!--.*?-->', re.DOTALL),  # Hidden HTML comments
     re.compile(r'\{%.*?%\}', re.DOTALL),  # Template injection
 ]

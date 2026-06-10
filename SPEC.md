@@ -1105,7 +1105,7 @@ tracemill/
 
 ---
 
-## §22 — Gate Module
+## §22 — Assessment API & Integration Patterns
 
 *Event in → assessment out. Everything after is someone else's code.*
 

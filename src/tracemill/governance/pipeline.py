@@ -425,7 +425,8 @@ class GovernancePipeline:
                 self._commit_mcp_writes_no_commit(gov_result.mcp_deferred_writes)
             self._store.commit()
             self._store.cache_processed(event.source_event_key, meta_json)
-        except (sqlite3.OperationalError, sqlite3.IntegrityError) as e:
+        except (sqlite3.OperationalError, sqlite3.IntegrityError,
+                json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
             import logging
             logging.getLogger(__name__).error(
                 "Finalization commit failed for event %s: %s — will retry on next delivery",
@@ -844,11 +845,39 @@ class GovernancePipeline:
                 "by_action": list(meta.budget_snapshot.by_action),
                 "by_structure": list(meta.budget_snapshot.by_structure),
             }
+        evidence_data = None
+        if meta.evidence:
+            pointers_data = [
+                {"event_id": p.event_id, "rule_id": p.rule_id,
+                 "detector": p.detector, "payload_pointer": p.payload_pointer}
+                for p in meta.evidence.pointers
+            ]
+            evidence_data = {
+                "canonical_id": meta.evidence.canonical_id,
+                "timestamp": meta.evidence.timestamp.isoformat(),
+                "session_id": meta.evidence.session_id,
+                "mechanism": meta.evidence.mechanism,
+                "effect": meta.evidence.effect,
+                "scope": list(meta.evidence.scope),
+                "role": list(meta.evidence.role),
+                "action": list(meta.evidence.action),
+                "capability": list(meta.evidence.capability),
+                "structure": list(meta.evidence.structure),
+                "source_labels": list(meta.evidence.source_labels),
+                "recommended_action": str(meta.evidence.recommended_action),
+                "risk_score": meta.evidence.risk_score,
+                "risk_factors": list(meta.evidence.risk_factors),
+                "mitre_techniques": list(meta.evidence.mitre_techniques),
+                "pointers": pointers_data,
+            }
+        mcp_alerts_data = [str(a) for a in meta.mcp_alerts] if meta.mcp_alerts else []
         return {
             "classification": cls_data,
             "recommendation": rec_data,
             "risk": risk_data,
             "budget": budget_data,
+            "evidence": evidence_data,
+            "mcp_alerts": mcp_alerts_data,
             "mcp_alerts_count": len(meta.mcp_alerts),
         }
 
@@ -927,12 +956,46 @@ class GovernancePipeline:
                 pressure=budget_data.get("pressure", False),
             )
 
+        evidence = None
+        evidence_data = data.get("evidence")
+        if evidence_data:
+            from datetime import datetime as dt_cls
+            pointers = tuple(
+                EvidencePointer(
+                    event_id=p["event_id"],
+                    rule_id=p["rule_id"],
+                    detector=p["detector"],
+                    payload_pointer=p.get("payload_pointer"),
+                )
+                for p in evidence_data.get("pointers", ())
+            )
+            evidence = Evidence(
+                canonical_id=evidence_data.get("canonical_id", ""),
+                timestamp=dt_cls.fromisoformat(evidence_data["timestamp"]) if evidence_data.get("timestamp") else datetime.now(timezone.utc),
+                session_id=evidence_data.get("session_id", ""),
+                mechanism=evidence_data.get("mechanism", ""),
+                effect=evidence_data.get("effect"),
+                scope=tuple(evidence_data.get("scope", ())),
+                role=tuple(evidence_data.get("role", ())),
+                action=tuple(evidence_data.get("action", ())),
+                capability=tuple(evidence_data.get("capability", ())),
+                structure=tuple(evidence_data.get("structure", ())),
+                source_labels=tuple(evidence_data.get("source_labels", ())),
+                recommended_action=RecommendedAction(evidence_data.get("recommended_action", "allow")),
+                risk_score=evidence_data.get("risk_score", 0),
+                risk_factors=tuple(evidence_data.get("risk_factors", ())),
+                mitre_techniques=tuple(evidence_data.get("mitre_techniques", ())),
+                pointers=pointers,
+            )
+
+        mcp_alerts = tuple(data.get("mcp_alerts", ()))
+
         return SessionMeta(
             classification=cls,
             risk_assessment=risk,
             recommendation=rec,
             budget_snapshot=budget,
             drift=None,
-            mcp_alerts=(),
-            evidence=None,
+            mcp_alerts=mcp_alerts,
+            evidence=evidence,
         )

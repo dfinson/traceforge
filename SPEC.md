@@ -1155,28 +1155,41 @@ These are **recommendations from the rules engine**, not enforcement decisions. 
 The pipeline reads events from a source, processes them, and fires a registered callback for each assessment:
 
 ```python
-pipeline = Pipeline.from_config("./tracemill.yaml")
+from tracemill.config import load_config
+from tracemill.governance.pipeline import GovernancePipeline
+from tracemill import CallbackSink
 
-@pipeline.on_assessment
-async def handle(event: SessionEvent, result: AssessmentResult):
-    log_to_dashboard(event, result)
-    if result.governance_assessment == GovernanceAssessment.DENY:
-        await alert_slack(event, result.reason)
+config = load_config()  # reads tracemill.yaml
+pipeline = GovernancePipeline.create(config.governance)
 
-await pipeline.run()
+# CallbackSink fires for every enriched event in the observation stream
+async def on_enriched_event(event):
+    meta = event.metadata.get("governance")
+    if meta and meta.recommendation:
+        action = meta.recommendation.recommended_action.value
+        if action in ("deny", "escalate"):
+            await alert_slack(event, meta)
 ```
 
-Every event produces an assessment. The callback fires regardless of sink configuration. Sinks (JSONL, SQLite) persist independently.
+Every event produces an assessment via the observation pipeline. The callback fires regardless of sink configuration. Sinks (JSONL, SQLite) persist independently.
 
 #### Pull: synchronous assessment
 
 When a framework hook fires and the consumer needs an immediate assessment:
 
 ```python
-result = pipeline.assess({"tool_name": "bash", "tool_input": {"command": "rm -rf /"}})
-# result.governance_assessment == GovernanceAssessment.DENY
-# result.risk_score == 95
-# result.reason == "destructive_host_network"
+from tracemill.governance.pipeline import GovernancePipeline
+
+pipeline = GovernancePipeline.create()  # zero-config, or pass GovernanceConfig
+
+result = pipeline.assess({
+    "tool_name": "bash",
+    "tool_input": {"command": "rm -rf /"},
+    "session_id": "sess-abc",
+})
+# result.governance_assessment == GovernanceAssessment.WARN
+# result.risk_score == 48
+# result.reason == "risk_score_caution"
 ```
 
 `.assess()` runs the full governance pipeline (Phase 1/2/3) against current session state. Synchronous, <10ms p99, pure computation.
@@ -1243,20 +1256,19 @@ exit 0
 
 ```python
 from copilot.session import PermissionRequestResult
-from tracemill import Pipeline
+from tracemill.governance.pipeline import GovernancePipeline
 
-pipeline = Pipeline.from_config("./tracemill.yaml")
-asyncio.create_task(pipeline.run())
+pipeline = GovernancePipeline.create()
 
 async def permission_handler(request, invocation):
     result = pipeline.assess({
         "tool_name": request.tool_name or request.kind,
         "tool_input": {"command": request.full_command_text},
+        "session_id": invocation.session_id,
     })
-    # Enforcement logic:
-    if result.governance_assessment in ("deny", "transform"):
+    if result.governance_assessment.value in ("deny", "transform"):
         return PermissionRequestResult(kind="reject")
-    if result.governance_assessment == "escalate":
+    if result.governance_assessment.value == "escalate":
         decision = await ask_team_lead(result)
         return decision
     return PermissionRequestResult(kind="approve-once")
@@ -1266,15 +1278,17 @@ async def permission_handler(request, invocation):
 
 ```python
 from claude_code_sdk import PermissionResultAllow, PermissionResultDeny
-from tracemill import Pipeline
+from tracemill.governance.pipeline import GovernancePipeline
 
-pipeline = Pipeline.from_config("./tracemill.yaml")
-asyncio.create_task(pipeline.run())
+pipeline = GovernancePipeline.create()
 
 async def can_use_tool(tool_name, input_data, context):
-    result = pipeline.assess({"tool_name": tool_name, "tool_input": input_data})
-    # Enforcement logic:
-    if result.governance_assessment in ("deny", "escalate", "transform"):
+    result = pipeline.assess({
+        "tool_name": tool_name,
+        "tool_input": input_data,
+        "session_id": context.session_id,
+    })
+    if result.governance_assessment.value in ("deny", "escalate", "transform"):
         return PermissionResultDeny(message=result.reason)
     return PermissionResultAllow()
 ```
@@ -1320,48 +1334,79 @@ The `.assess()` call updates pipeline state (Phase 1: taint, budget, drift) but 
 
 ### Configuration (`tracemill.yaml`)
 
-tracemill's config covers observation only. No enforcement config, no verdict mapping, no escalation policy:
+The `governance` section configures the scoring engine. Same shape in YAML and SDK:
 
 ```yaml
+# tracemill.yaml
+governance:
+  db_path: ./tracemill.db
+  project_root: .
+  pii_scanning: true
+  rules_path: null          # null = bundled defaults
+  budget:
+    max_tool_calls: 200
+    max_by_effect:
+      destructive: 10
+    max_by_capability: null
+    max_by_scope: null
+
 pipelines:
   copilot:
     source:
-      type: sqlite
+      type: file_watch
       path: ~/.config/github-copilot/chat.db
-    framework: copilot
+    adapter:
+      type: mapped_json
+      mapping: copilot
     sinks:
       - type: jsonl
         path: ./traces/copilot.jsonl
 ```
 
-Rules live in `governance_rules.yaml`. They produce assessments, not enforcement decisions.
+SDK equivalent (no YAML needed):
+
+```python
+from tracemill.config import GovernanceConfig, BudgetConfig
+from tracemill.governance.pipeline import GovernancePipeline
+
+pipeline = GovernancePipeline.create(GovernanceConfig(
+    db_path="./tracemill.db",
+    project_root=".",
+    pii_scanning=True,
+    budget=BudgetConfig(max_tool_calls=200, max_by_effect={"destructive": 10}),
+))
+```
+
+Rules live in `recommendation_rules.yaml`. They produce assessments, not enforcement decisions.
 
 ### Pipeline API
 
 ```python
-class Pipeline:
+from tracemill.governance.pipeline import GovernancePipeline
+from tracemill.config import GovernanceConfig
+
+class GovernancePipeline:
     """Observation + assessment. No enforcement."""
 
     @classmethod
-    def from_config(cls, config_path: Path, pipeline_name: str) -> "Pipeline":
-        """Load pipeline from tracemill.yaml."""
+    def create(cls, config: GovernanceConfig | None = None) -> "GovernancePipeline":
+        """Construct from config. None = all defaults (in-memory, PII on, no budget caps)."""
         ...
 
     def assess(self, payload: dict) -> AssessmentResult:
         """Synchronous assessment against current session state.
 
-        Runs Parse → Phase 1/2/3 → returns AssessmentResult.
+        payload keys:
+            tool_name: str (required)
+            tool_input: dict (required)
+            session_id: str (required)
+            server_namespace: str (optional, for MCP tools)
+            project_root: str (optional)
+
+        Runs Phase 1/2/3 → returns AssessmentResult.
         Updates session state (taint, budget, drift).
         Does NOT persist to sinks.
         """
-        ...
-
-    def on_assessment(self, callback: Callable) -> None:
-        """Register callback for observation assessments (push model)."""
-        ...
-
-    async def run(self) -> None:
-        """Start always-on observation loop."""
         ...
 ```
 
@@ -1404,17 +1449,21 @@ Rows 14–16 have no pre-execution hook. tracemill observes and assesses their e
 
 ```
 src/tracemill/
+├── config/
+│   ├── models.py            # GovernanceConfig, BudgetConfig, TracemillConfig
+│   └── loader.py            # load_config() — reads tracemill.yaml
 ├── governance/              # The engine (classification + rules + state)
-│   ├── pipeline.py          # GovernancePipeline (Phase 1/2/3)
+│   ├── pipeline.py          # GovernancePipeline (Phase 1/2/3, .assess(), .create())
 │   ├── rules.py             # Rule, Predicate, evaluate_rules()
 │   ├── labeler.py           # GovernanceLabeler
 │   ├── state.py             # SessionState (taint, budget, drift)
 │   └── ...
-├── assess/                  # Public assessment interface
+├── assess/                  # Public assessment types
 │   ├── __init__.py          # AssessmentResult, GovernanceAssessment
-│   └── types.py             # Dataclasses
+│   ├── types.py             # Dataclasses
+│   └── assessor.py          # assess() implementation (stateless)
 ├── classify/                # Classification engine
-├── pipeline/                # Sources, sinks, orchestration
+├── sinks/                   # Storage backends (JSONL, SQLite, S3)
 └── mappings/                # Framework YAML definitions
 ```
 

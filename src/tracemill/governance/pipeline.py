@@ -39,19 +39,31 @@ class RecommendedAction(StrEnum):
 
 @dataclass(frozen=True)
 class TransformSuggestion:
-    """Concrete transform suggestion for an event."""
+    """Materialized by Phase 3 from TransformTemplate + event-specific data."""
+    target_kind: str  # "shell_flag", "shell_arg", "tool_arg", "file_content"
+    path: str  # AST node path (shell) or JSONPath (mcp tool args)
     original: str
-    suggested: str
-    description: str | None = None
+    replacement: str | None  # None = suggest removal
+    rationale: str
+    confidence: str = "medium"  # "high", "medium", "low"
 
 
 @dataclass(frozen=True)
 class EscalationContext:
-    """Extra detail for escalate/deny recommendations."""
-    session_budget_snapshot: object  # BudgetSnapshot
-    recent_tool_calls: tuple[str, ...] = ()
-    agent_model: str | None = None
-    session_duration_seconds: float = 0.0
+    """Rich metadata for escalate/deny — full classification context."""
+    canonical_id: str
+    classification: object  # Classification
+    recommended_action: "RecommendedAction"
+    reason_code: str
+    mitre_techniques: tuple[str, ...]
+    drift: object | None  # DriftAssessment
+    budget_snapshot: object  # BudgetSnapshot
+    pii_taint: bool
+    ifc_violations: int
+    tool_name: str
+    tool_args_summary: str  # Sanitized — no secrets
+    session_id: str
+    timestamp: datetime
 
 
 @dataclass(frozen=True)
@@ -112,12 +124,18 @@ class Phase3Result:
 
 @dataclass(frozen=True)
 class SessionMeta:
-    """Final governance metadata attached to enriched events."""
-    classification: object  # Classification (enriched)
-    risk_assessment: object  # RiskAssessment
+    """Full classification output. Attached to event payload under `_governance` key.
+
+    For lifecycle events (session_start/end), Phase 2/3 fields are None.
+    canonical_id is accessed via recommendation.canonical_id (no separate field).
+    """
+    classification: object | None  # Classification (enriched) | None for lifecycle
+    risk_assessment: object | None  # RiskAssessment | None for lifecycle
     recommendation: RiskRecommendation | None = None
+    budget_snapshot: object | None = None  # BudgetSnapshot — always present
+    drift: object | None = None  # DriftAssessment | None
+    mcp_alerts: tuple = ()  # tuple[MCPIntegrityAlert, ...]
     evidence: Evidence | None = None
-    budget_snapshot: object | None = None  # BudgetSnapshot
 
 
 class GovernancePipeline:
@@ -139,6 +157,8 @@ class GovernancePipeline:
         self._engine = engine
         self._thresholds = thresholds
         self._states: dict[str, "SessionState"] = {}
+        self._write_failures: dict[str, int] = {}  # session_id → consecutive failure count
+        self._MAX_WRITE_FAILURES = 10
 
     def get_or_create_state(self, session_id: str) -> "SessionState":
         """Get or create session state."""
@@ -148,6 +168,31 @@ class GovernancePipeline:
             state = SessionState.load_from_db(session_id, self._store.connection)
             self._states[session_id] = state
         return self._states[session_id]
+
+    def process_lifecycle(self, session_id: str, event_kind: str) -> SessionMeta:
+        """Handle session_start/end — Phase 1 only, skip Phase 2/3."""
+        from tracemill.governance.state import SessionState
+
+        state = self.get_or_create_state(session_id)
+
+        if event_kind == "session_start":
+            # Initialize state (idempotent — load_from_db handles fresh sessions)
+            pass
+        elif event_kind == "session_end":
+            # Finalize: write session summary
+            snapshot = state.snapshot()
+            self._write_session_summary(session_id, snapshot)
+
+        snapshot = state.snapshot()
+        return SessionMeta(
+            classification=None,
+            risk_assessment=None,
+            recommendation=None,
+            budget_snapshot=snapshot.budget,
+            drift=None,
+            mcp_alerts=(),
+            evidence=None,
+        )
 
     def process_event(self, ctx: "EnrichmentContext") -> SessionMeta:
         """Full pipeline: Phase 1 → Phase 2 → Phase 3 → SessionMeta."""
@@ -163,14 +208,13 @@ class GovernancePipeline:
         # Idempotency check
         existing = self._store.is_duplicate(event.source_event_key)
         if existing:
-            # Return cached meta
             meta_dict = json.loads(existing)
             return self._deserialize_meta(meta_dict)
 
         # Budget increment
         self._budget.increment(ctx, state)
 
-        # Phase window update (infer phase from classification)
+        # Phase window update
         phase = self._infer_phase(ctx)
         if phase:
             state.update_phase_window(phase)
@@ -181,18 +225,16 @@ class GovernancePipeline:
         # Pressure check
         self._budget.check_pressure(state)
 
-        # Persist state
-        state.persist()
+        # Persist state (with write-failure handling)
+        self._persist_with_retry(state, session_id)
 
         # ── Phase 2: Labeling (side-effect-free) ──
-        # Create snapshot for labeler
         snapshot = state.snapshot()
-        # Inject snapshot into ctx for labeler access
         enrichment_ctx = self._with_snapshot(ctx, snapshot)
         gov_result = self._labeler.label(enrichment_ctx)
 
-        # ── Phase 3: Risk + Rules ──
-        phase3 = self._phase3(enrichment_ctx, gov_result)
+        # ── Phase 3: Risk + Rules + Evidence ──
+        phase3 = self._phase3(enrichment_ctx, gov_result, snapshot)
 
         # Build SessionMeta
         rec = None
@@ -201,12 +243,18 @@ class GovernancePipeline:
             rec = phase3.recommendation_result.recommendation
             evidence = phase3.recommendation_result.evidence
 
+        # Get drift/mcp_alerts from labeler result
+        drift_assessment = gov_result.drift_result
+        mcp_alerts = gov_result.mcp_alerts if hasattr(gov_result, "mcp_alerts") else ()
+
         meta = SessionMeta(
             classification=gov_result.classification,
             risk_assessment=phase3.risk_assessment,
             recommendation=rec,
-            evidence=evidence,
             budget_snapshot=snapshot.budget,
+            drift=drift_assessment,
+            mcp_alerts=mcp_alerts,
+            evidence=evidence,
         )
 
         # Record processed (for idempotency)
@@ -216,8 +264,8 @@ class GovernancePipeline:
 
         return meta
 
-    def _phase3(self, ctx: "EnrichmentContext", result: "GovernanceResult") -> Phase3Result:
-        """Phase 3: risk assessment + rule evaluation + evidence construction."""
+    def _phase3(self, ctx: "EnrichmentContext", result: "GovernanceResult", snapshot: "SessionStateSnapshot" = None) -> Phase3Result:
+        """Phase 3: risk assessment + rule evaluation + evidence + escalation context."""
         from tracemill.governance.canonical import compute_canonical_hash
         from tracemill.governance.risk_wrapper import assess_governance_risk
         from tracemill.governance.rules import evaluate_rules
@@ -245,6 +293,9 @@ class GovernancePipeline:
             reason_code=rule_match.template.reason_code,
         )
 
+        # Render transform suggestion (if template provided)
+        transform = self._render_transform(rule_match.template.transform, ctx)
+
         # Build recommendation
         recommendation = RiskRecommendation(
             recommended_action=RecommendedAction(rule_match.template.recommended_action),
@@ -252,7 +303,7 @@ class GovernancePipeline:
             reason_code=rule_match.template.reason_code,
             canonical_id=canonical_id,
             message=rule_match.template.message,
-            transform=None,
+            transform=transform,
         )
 
         # Build evidence for non-allow actions
@@ -260,6 +311,13 @@ class GovernancePipeline:
         if recommendation.recommended_action in (
             RecommendedAction.WARN, RecommendedAction.ESCALATE, RecommendedAction.DENY
         ):
+            # Build EscalationContext for escalate/deny
+            escalation = None
+            if recommendation.recommended_action in (RecommendedAction.ESCALATE, RecommendedAction.DENY):
+                escalation = self._build_escalation(
+                    ctx, result, risk, recommendation, canonical_id, snapshot,
+                )
+
             evidence = Evidence(
                 canonical_id=canonical_id,
                 timestamp=ctx.event.timestamp,
@@ -268,7 +326,7 @@ class GovernancePipeline:
                 effect=result.classification.effect,
                 scope=tuple(sorted(result.classification.scope)),
                 role=tuple(sorted(result.classification.role)),
-                action=tuple(sorted(result.classification.action)) if hasattr(result.classification, "action") else (),
+                action=tuple(sorted(result.classification.action)),
                 capability=tuple(sorted(result.classification.capability)),
                 structure=tuple(sorted(result.classification.structure)),
                 source_labels=tuple(sorted(getattr(result.classification, "source_labels", frozenset()))),
@@ -281,6 +339,7 @@ class GovernancePipeline:
                     rule_id=rule_match.rule_id,
                     detector="rule_engine",
                 ),),
+                escalation=escalation,
             )
 
         return Phase3Result(
@@ -297,9 +356,14 @@ class GovernancePipeline:
         if cls.effect == "read_only":
             return "exploration"
         if cls.effect in ("mutating", "destructive"):
-            if "test" in str(getattr(ctx.event, "tool_name", "") or "").lower():
+            tool_name = str(getattr(ctx.event, "tool_name", "") or "").lower()
+            if "test" in tool_name or "verify" in tool_name or "check" in tool_name:
                 return "testing"
+            if "deploy" in tool_name or "publish" in tool_name:
+                return "deployment"
             return "implementation"
+        if cls.effect == "informational":
+            return "exploration"
         return "exploration"
 
     def _with_snapshot(self, ctx: "EnrichmentContext", snapshot: "SessionStateSnapshot") -> "EnrichmentContext":
@@ -307,11 +371,150 @@ class GovernancePipeline:
         import dataclasses
         return dataclasses.replace(ctx, session_state=snapshot)
 
+    def _persist_with_retry(self, state: "SessionState", session_id: str) -> None:
+        """Write-through with failure handling: 10 consecutive failures → memory-only mode."""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        try:
+            state.persist()
+            self._write_failures[session_id] = 0  # Reset on success
+        except Exception as e:
+            failures = self._write_failures.get(session_id, 0) + 1
+            self._write_failures[session_id] = failures
+            if failures >= self._MAX_WRITE_FAILURES:
+                logger.critical(
+                    "SQLite write failed %d consecutive times for session %s — "
+                    "degrading to memory-only mode: %s",
+                    failures, session_id, e,
+                )
+                # Detach DB to prevent further write attempts
+                state.attach_db(None)  # type: ignore[arg-type]
+            else:
+                logger.error(
+                    "SQLite write failed (%d/%d) for session %s: %s — "
+                    "will retry on next event",
+                    failures, self._MAX_WRITE_FAILURES, session_id, e,
+                )
+
+    def _render_transform(self, template, ctx: "EnrichmentContext") -> TransformSuggestion | None:
+        """Render TransformTemplate → TransformSuggestion using event data.
+
+        Returns None if target cannot be located in event data (safe fallback).
+        """
+        if template is None:
+            return None
+
+        from tracemill.governance.types import ToolCallEvent
+        import json as json_mod
+
+        try:
+            if isinstance(ctx.event, ToolCallEvent) and ctx.command_analysis:
+                # Shell event: use command analysis
+                original = ctx.command_analysis.command or ""
+                # Apply pattern/replacement from template
+                replacement = template.replacement if hasattr(template, "replacement") else None
+                return TransformSuggestion(
+                    target_kind="shell_arg",
+                    path=f"command[0:{len(original)}]",
+                    original=original,
+                    replacement=replacement,
+                    rationale=template.description or f"Rule suggests transformation",
+                    confidence="medium",
+                )
+            elif isinstance(ctx.event, ToolCallEvent):
+                # MCP event: use tool args
+                args_str = ctx.event.tool_args_json
+                return TransformSuggestion(
+                    target_kind="tool_arg",
+                    path="$.args",
+                    original=args_str[:200],  # Truncate for safety
+                    replacement=None,
+                    rationale=template.description or f"Rule suggests transformation",
+                    confidence="low",
+                )
+        except Exception:
+            pass  # Transform rendering failed — drop silently
+
+        return None  # Cannot locate target → drop transform, recommendation still fires
+
+    def _build_escalation(
+        self, ctx: "EnrichmentContext", result: "GovernanceResult",
+        risk, recommendation, canonical_id: str, snapshot,
+    ) -> EscalationContext:
+        """Build full EscalationContext for escalate/deny recommendations."""
+        from tracemill.governance.types import ToolCallEvent
+
+        tool_name = ""
+        tool_args_summary = ""
+        if isinstance(ctx.event, ToolCallEvent):
+            tool_name = ctx.event.tool_name or ""
+            # Sanitize args — truncate and remove obvious secrets
+            raw_args = ctx.event.tool_args_json or ""
+            tool_args_summary = self._sanitize_args(raw_args)
+
+        pii_taint = "pii_exposure" in result.classification.capability or "credential_exposure" in result.classification.capability
+        ifc_violations = result.risk_modifiers.ifc_violations
+
+        budget = snapshot.budget if snapshot else None
+
+        return EscalationContext(
+            canonical_id=canonical_id,
+            classification=result.classification,
+            recommended_action=recommendation.recommended_action,
+            reason_code=recommendation.reason_code,
+            mitre_techniques=risk.mitre,
+            drift=result.drift_result,
+            budget_snapshot=budget,
+            pii_taint=pii_taint,
+            ifc_violations=ifc_violations,
+            tool_name=tool_name,
+            tool_args_summary=tool_args_summary,
+            session_id=ctx.event.session_id,
+            timestamp=ctx.event.timestamp,
+        )
+
+    def _sanitize_args(self, raw_args: str, max_len: int = 500) -> str:
+        """Sanitize tool args for escalation context — remove secrets, truncate."""
+        import re
+        # Redact obvious secrets
+        sanitized = re.sub(
+            r'(?:password|secret|token|key|credential)[\s"\'=:]+[^\s"\'}{,\]]{4,}',
+            r'\g<0>'.split('=')[0] + '=<REDACTED>' if '=' in raw_args else '<REDACTED>',
+            raw_args,
+            flags=re.IGNORECASE,
+        )
+        if len(sanitized) > max_len:
+            sanitized = sanitized[:max_len] + "..."
+        return sanitized
+
+    def _write_session_summary(self, session_id: str, snapshot: "SessionStateSnapshot") -> None:
+        """Write session summary to session_summaries table."""
+        import json as json_mod
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).isoformat()
+        budget_json = json_mod.dumps({
+            "total_tool_calls": snapshot.budget.total_tool_calls,
+            "total_tokens": snapshot.budget.total_tokens,
+            "pressure": snapshot.budget.pressure,
+        })
+        try:
+            self._store.connection.execute(
+                """INSERT OR REPLACE INTO session_summaries
+                   (session_id, started_at, ended_at, total_events, dropped_events, budget_snapshot_json)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (session_id, now, now, snapshot.event_count, snapshot.dropped_events, budget_json),
+            )
+            self._store.connection.commit()
+        except Exception:
+            pass  # Best-effort
+
     def _serialize_meta(self, meta: SessionMeta) -> dict:
-        """Minimal serialization for caching."""
+        """Serialization for idempotency cache."""
         return {
             "recommendation": meta.recommendation.reason_code if meta.recommendation else None,
-            "risk_score": meta.risk_assessment.score if hasattr(meta.risk_assessment, "score") else 0,
+            "risk_score": meta.risk_assessment.score if meta.risk_assessment and hasattr(meta.risk_assessment, "score") else 0,
         }
 
     def _deserialize_meta(self, data: dict) -> SessionMeta:
@@ -327,9 +530,11 @@ class GovernancePipeline:
             version="cached",
         )
         return SessionMeta(
-            classification=None,  # type: ignore[arg-type]
+            classification=None,
             risk_assessment=risk,
             recommendation=None,
-            evidence=None,
             budget_snapshot=None,
+            drift=None,
+            mcp_alerts=(),
+            evidence=None,
         )

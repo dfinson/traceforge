@@ -28,8 +28,9 @@ class GovernanceResult:
     """Output of Phase 2 — enriched classification + risk modifiers."""
     classification: "Classification"  # Original with governance labels merged in
     risk_modifiers: "RiskModifiers"
-    drift_result: "DriftResult | None" = None
-    mcp_drift_result: "MCPDriftResult | None" = None
+    drift_result: object | None = None  # DriftAssessment
+    mcp_drift_result: object | None = None  # MCPDriftResult (legacy compat)
+    mcp_alerts: tuple = ()  # tuple[MCPIntegrityAlert, ...]
 
 
 class GovernanceLabeler:
@@ -69,12 +70,28 @@ class GovernanceLabeler:
 
         # MCP fingerprint drift
         mcp_drift_result = None
+        mcp_alerts: tuple = ()
         mcp_bonus = 0
         if self._mcp:
-            mcp_drift_result = self._mcp.scan(ctx, cap)
-            if mcp_drift_result and (mcp_drift_result.description_changed or mcp_drift_result.schema_changed):
-                struct.add("semantic_drift")
-                mcp_bonus = 15
+            scan_result = self._mcp.scan(ctx, cap)
+            # New API returns (alerts, is_new) tuple; old returns MCPDriftResult
+            if isinstance(scan_result, tuple):
+                alerts_list, is_new = scan_result
+                mcp_alerts = tuple(alerts_list)
+                # Sum severity for bonus (cap at 40)
+                severity_map = {"high": 20, "medium": 10, "low": 5}
+                mcp_bonus = min(40, sum(
+                    severity_map.get(getattr(a, "severity", "low"), 5)
+                    for a in mcp_alerts
+                ))
+                if mcp_alerts:
+                    struct.add("semantic_drift")
+            else:
+                # Legacy MCPDriftResult fallback
+                mcp_drift_result = scan_result
+                if mcp_drift_result and (mcp_drift_result.description_changed or mcp_drift_result.schema_changed):
+                    struct.add("semantic_drift")
+                    mcp_bonus = 15
 
         # IFC source labels
         ifc_violations = 0
@@ -92,9 +109,15 @@ class GovernanceLabeler:
         phase_bonus = 0
         if self._drift and ctx.session_state:
             drift_result = self._drift.detect(ctx, ctx.session_state, cap)
-            if drift_result and drift_result.anomaly:
-                struct.add("phase_anomaly")
-                phase_bonus = 10
+            if drift_result:
+                # New DriftAssessment has risk_bonus
+                if hasattr(drift_result, "risk_bonus"):
+                    phase_bonus = drift_result.risk_bonus
+                    if drift_result.anomaly:
+                        struct.add("phase_anomaly")
+                elif drift_result.anomaly:
+                    struct.add("phase_anomaly")
+                    phase_bonus = 10
 
         # Budget pressure check (read-only from snapshot)
         budget_bonus = 0
@@ -127,6 +150,7 @@ class GovernanceLabeler:
             risk_modifiers=modifiers,
             drift_result=drift_result,
             mcp_drift_result=mcp_drift_result,
+            mcp_alerts=mcp_alerts,
         )
 
     def _ifc_label_only(self, ctx: "EnrichmentContext", src_labels: set[str]) -> None:

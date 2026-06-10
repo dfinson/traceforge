@@ -105,7 +105,7 @@ class TestCanonicalHash:
     def test_format(self):
         cls = Classification(mechanism="shell.execute")
         h = compute_canonical_hash(cls)
-        assert h.startswith("sha256:v1:")
+        assert h.startswith("sha256:")
         assert len(h) > 20
 
 

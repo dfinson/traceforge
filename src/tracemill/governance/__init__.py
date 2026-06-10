@@ -42,9 +42,11 @@ from tracemill.governance.canonical import compute_canonical_hash
 from tracemill.governance.pii import PIIScanner
 from tracemill.governance.ifc import IFCChecker
 from tracemill.governance.integrity import IntegrityVerifier
-from tracemill.governance.mcp_drift import MCPIntegrityScanner
-from tracemill.governance.drift import DriftDetector
+from tracemill.governance.mcp_drift import MCPIntegrityScanner, MCPIntegrityAlert, MCPToolProfile
+from tracemill.governance.drift import DriftDetector, DriftAssessment
 from tracemill.governance.budget import BudgetThresholds, BudgetTracker
+from tracemill.governance.envelope import ContextGapEvent, EnrichedEvent
+from tracemill.governance.observer import TracemillObserver
 
 __all__ = [
     # Types
@@ -93,8 +95,15 @@ __all__ = [
     "IFCChecker",
     "IntegrityVerifier",
     "MCPIntegrityScanner",
+    "MCPIntegrityAlert",
+    "MCPToolProfile",
     "DriftDetector",
+    "DriftAssessment",
     # Budget
     "BudgetThresholds",
     "BudgetTracker",
+    # Envelope & Observer
+    "ContextGapEvent",
+    "EnrichedEvent",
+    "TracemillObserver",
 ]

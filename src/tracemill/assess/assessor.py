@@ -112,6 +112,26 @@ def _infer_engine(classification: "Classification") -> Literal["shell", "mcp", "
     return "coding"
 
 
+def _classify_shell_command(tool_name: str, command: str, engine) -> "Classification":
+    """Dispatch to the correct shell dialect classifier (mirrors Enricher)."""
+    from tracemill.classify.cmd import classify_cmd_command
+    from tracemill.classify.coding import CodingMechanism
+    from tracemill.classify.core import Classification
+    from tracemill.classify.powershell import classify_powershell_command
+    from tracemill.classify.shell import classify_shell
+
+    try:
+        lower = tool_name.lower()
+        if lower in ("powershell", "pwsh"):
+            return classify_powershell_command(command, engine=engine)
+        if lower == "cmd":
+            return classify_cmd_command(command, engine=engine)
+        return classify_shell(command, engine=engine)
+    except Exception:
+        # Graceful degradation on parse errors — return generic shell classification
+        return Classification(mechanism=CodingMechanism.PROCESS_SHELL, effect=None)
+
+
 def assess(pipeline, payload: dict) -> AssessmentResult:
     """Score a pending tool call against current session state.
 
@@ -134,7 +154,6 @@ def assess(pipeline, payload: dict) -> AssessmentResult:
     Raises:
         AssessmentPayloadError: if required fields are missing or have wrong types.
     """
-    from tracemill.classify.shell import classify_shell
     from tracemill.classify.tools import classify_tool
     from tracemill.governance.types import (
         EnrichmentContext,
@@ -172,9 +191,9 @@ def assess(pipeline, payload: dict) -> AssessmentResult:
 
     if _is_shell_tool(tool_name, classification):
         command = tool_input.get("command", "")
-        if command:
-            # Re-classify using the full shell classifier for proper effect/scope
-            classification = classify_shell(command, engine=pipeline._engine)
+        if command and isinstance(command, str):
+            # Dispatch to dialect-specific classifier (mirrors Enricher logic)
+            classification = _classify_shell_command(tool_name, command, pipeline._engine)
             command_analysis = _build_command_analysis(command)
 
     # Determine the engine literal for EnrichmentContext
@@ -206,8 +225,8 @@ def assess(pipeline, payload: dict) -> AssessmentResult:
     if meta.recommendation is not None:
         governance_assessment = GovernanceAssessment(meta.recommendation.recommended_action.value)
         reason = meta.recommendation.reason_code
-        if meta.evidence and hasattr(meta.evidence, "rule_id"):
-            matched_rule = meta.evidence.rule_id
+        if meta.evidence and meta.evidence.pointers:
+            matched_rule = meta.evidence.pointers[0].rule_id
         else:
             matched_rule = reason
 

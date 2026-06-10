@@ -207,7 +207,7 @@ class GovernancePipeline:
         """
         from pathlib import Path
 
-        from tracemill.classify.config import ClassificationEngine, ClassifyConfig
+        from tracemill.classify.config import get_default_engine
         from tracemill.config.models import GovernanceConfig
         from tracemill.governance.budget import BudgetThresholds, BudgetTracker
         from tracemill.governance.labeler import GovernanceLabeler
@@ -218,7 +218,7 @@ class GovernancePipeline:
             config = GovernanceConfig()
 
         store = SystemStore(config.db_path or ":memory:")
-        engine = ClassificationEngine(ClassifyConfig())
+        engine = get_default_engine()
 
         # Rules: custom path or bundled defaults
         if config.rules_path:

@@ -36,7 +36,9 @@ def _validate_payload(payload: dict) -> tuple[str, dict, str]:
     if not tool_name or not isinstance(tool_name, str):
         raise AssessmentPayloadError("payload must contain 'tool_name' (str)")
 
-    tool_input = payload.get("tool_input", {})
+    if "tool_input" not in payload:
+        raise AssessmentPayloadError("payload must contain 'tool_input' (dict)")
+    tool_input = payload["tool_input"]
     if not isinstance(tool_input, dict):
         raise AssessmentPayloadError("'tool_input' must be a dict")
 
@@ -62,10 +64,36 @@ def _is_shell_tool(tool_name: str, classification: "Classification") -> bool:
     return tool_name.lower() in shell_names
 
 
+_SHELL_WRAPPERS = frozenset({"sudo", "env", "nohup", "nice", "ionice", "strace", "time", "doas"})
+
+
+def _unwrap_binary(tokens: list[str]) -> tuple[str, list[str]]:
+    """Skip transparent wrappers (sudo, env, ...) to find the effective binary."""
+    i = 0
+    while i < len(tokens) and tokens[i] in _SHELL_WRAPPERS:
+        wrapper = tokens[i]
+        i += 1
+        # Skip flags belonging to the wrapper (e.g. sudo -u root)
+        while i < len(tokens) and tokens[i].startswith("-"):
+            i += 1
+            # skip option argument (e.g. -u root)
+            if i < len(tokens) and not tokens[i].startswith("-") and "=" not in tokens[i]:
+                i += 1
+        # env-style: skip VAR=VALUE assignments
+        if wrapper == "env":
+            while i < len(tokens) and "=" in tokens[i] and not tokens[i].startswith("-"):
+                i += 1
+    if i >= len(tokens):
+        # Everything was wrappers — use last wrapper as binary
+        return tokens[0], tokens[1:]
+    return tokens[i], tokens[:i] + tokens[i + 1:]
+
+
 def _build_command_analysis(command: str) -> "CommandAnalysis | None":
     """Build CommandAnalysis from a shell command string.
 
     Uses simple tokenization for the primary binary/flags/targets.
+    Unwraps transparent wrappers (sudo, env, ...) so the effective binary is scored.
     Pipe segments are only populated when unambiguous single-pipe separators exist
     (avoids misinterpreting ||, |&, or pipes inside quotes).
     """
@@ -83,9 +111,9 @@ def _build_command_analysis(command: str) -> "CommandAnalysis | None":
     if not tokens:
         return None
 
-    binary = tokens[0]
-    flags = tuple(t for t in tokens[1:] if t.startswith("-"))
-    targets = tuple(t for t in tokens[1:] if not t.startswith("-"))
+    binary, remainder = _unwrap_binary(tokens)
+    flags = tuple(t for t in remainder if t.startswith("-"))
+    targets = tuple(t for t in remainder if not t.startswith("-"))
 
     # Only attempt pipe splitting if no ambiguous operators exist
     pipe_segments: tuple[PipeSegment, ...] | None = None
@@ -104,18 +132,18 @@ def _build_command_analysis(command: str) -> "CommandAnalysis | None":
                 for tok in all_tokens:
                     if tok == "|":
                         if current_segment:
-                            seg_binary = current_segment[0]
-                            seg_flags = tuple(t for t in current_segment[1:] if t.startswith("-"))
-                            seg_targets = tuple(t for t in current_segment[1:] if not t.startswith("-"))
-                            segments.append(PipeSegment(binary=seg_binary, flags=seg_flags, targets=seg_targets))
+                            seg_bin, seg_rest = _unwrap_binary(current_segment)
+                            seg_flags = tuple(t for t in seg_rest if t.startswith("-"))
+                            seg_targets = tuple(t for t in seg_rest if not t.startswith("-"))
+                            segments.append(PipeSegment(binary=seg_bin, flags=seg_flags, targets=seg_targets))
                         current_segment = []
                     else:
                         current_segment.append(tok)
                 if current_segment:
-                    seg_binary = current_segment[0]
-                    seg_flags = tuple(t for t in current_segment[1:] if t.startswith("-"))
-                    seg_targets = tuple(t for t in current_segment[1:] if not t.startswith("-"))
-                    segments.append(PipeSegment(binary=seg_binary, flags=seg_flags, targets=seg_targets))
+                    seg_bin, seg_rest = _unwrap_binary(current_segment)
+                    seg_flags = tuple(t for t in seg_rest if t.startswith("-"))
+                    seg_targets = tuple(t for t in seg_rest if not t.startswith("-"))
+                    segments.append(PipeSegment(binary=seg_bin, flags=seg_flags, targets=seg_targets))
                 if len(segments) > 1:
                     pipe_segments = tuple(segments)
         except ValueError:
@@ -143,23 +171,21 @@ def _infer_engine(classification: "Classification") -> Literal["shell", "mcp", "
 
 
 def _classify_shell_command(tool_name: str, command: str, engine) -> "Classification":
-    """Dispatch to the correct shell dialect classifier (mirrors Enricher)."""
+    """Dispatch to the correct shell dialect classifier (mirrors Enricher).
+
+    Exceptions propagate to the outer fail-closed block so that classifier
+    failures produce ESCALATE rather than silently downgrading risk.
+    """
     from tracemill.classify.cmd import classify_cmd_command
-    from tracemill.classify.coding import CodingMechanism
-    from tracemill.classify.core import Classification
     from tracemill.classify.powershell import classify_powershell_command
     from tracemill.classify.shell import classify_shell
 
-    try:
-        lower = tool_name.lower()
-        if lower in ("powershell", "pwsh"):
-            return classify_powershell_command(command, engine=engine)
-        if lower == "cmd":
-            return classify_cmd_command(command, engine=engine)
-        return classify_shell(command, engine=engine)
-    except Exception:
-        # Graceful degradation on parse errors — return generic shell classification
-        return Classification(mechanism=CodingMechanism.PROCESS_SHELL, effect=None)
+    lower = tool_name.lower()
+    if lower in ("powershell", "pwsh"):
+        return classify_powershell_command(command, engine=engine)
+    if lower == "cmd":
+        return classify_cmd_command(command, engine=engine)
+    return classify_shell(command, engine=engine)
 
 
 def assess(pipeline, payload: dict) -> AssessmentResult:

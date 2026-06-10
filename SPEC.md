@@ -1183,18 +1183,37 @@ Every session follows the same flow regardless of whether a gate is active:
 4. IF framework hook fires (pre-execution):
    a. Hook delivers pending tool call to tracemill
    b. Pipeline scores it against current session state (same Phase 1/2/3)
+      — Phase 1 state IS updated (taint, budget, drift) even before execution
    c. GovernanceAssessment collapsed to binary Verdict
    d. Verdict delivered back to framework
    e. Framework allows or blocks the tool
-5. Whether or not the tool was gated, the event (with assessment) is stored by sinks
+5. Observation pipeline continues reading from source:
+   — Allowed events: appear in source naturally when tool executes.
+     Pipeline recognizes it (by correlation) and skips re-processing.
+     Already scored, already stored by gate path.
+   — Denied events: never appear in source (tool never executed).
+     Gate injects a synthetic "blocked" event into the observation stream
+     so it appears in audit and sinks.
 ```
 
-Steps 1–3 and 5 always happen. Step 4 only happens when:
+Steps 1–3 always happen. Step 4 only happens when:
 - The framework supports a pre-execution hook, AND
 - `gate.enabled: true` in config, AND
 - The hook is wired to tracemill
 
 If any of those conditions is false, the pipeline still runs — you just get observation without enforcement.
+
+### Deduplication
+
+When the gate scores a pending event, it updates pipeline state (Phase 1) and stores the result. When that same event later appears in the static source (because the tool was allowed and executed), the observation pipeline must not re-process it:
+
+- **Gate query updates state but does NOT persist to sinks.** Persistence happens only when the observation pipeline naturally encounters the event from its source. At that point, the pipeline recognizes it was already gated (matching tool_name + args + timestamp window) and attaches the pre-computed assessment without re-running Phase 1/2/3.
+- **Denied events never appear in the source** (the tool didn't execute). The pipeline emits a synthetic `tool.blocked` event into the observation stream with the full assessment, so sinks (JSONL, SQLite, dashboard) have a complete record including blocks.
+
+This means:
+- No duplicates — each event is stored exactly once
+- Denied events are visible in audit (synthetic injection)
+- Session state is consistent — Phase 1 mutations from the gate query persist into the observation stream's state
 
 ### Hook Delivery Mechanisms
 

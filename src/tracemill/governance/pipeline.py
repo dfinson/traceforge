@@ -241,7 +241,7 @@ class GovernancePipeline:
             from tracemill.governance.pii import PIIScanner
             pii_scanner = PIIScanner()
 
-        return cls(
+        instance = cls(
             store=store,
             labeler=GovernanceLabeler(pii_scanner=pii_scanner),
             budget_tracker=BudgetTracker(thresholds=thresholds),
@@ -249,6 +249,8 @@ class GovernancePipeline:
             engine=engine,
             thresholds=thresholds,
         )
+        instance._project_root = config.project_root
+        return instance
 
     def assess(self, payload: dict) -> "AssessmentResult":
         """Score a pending tool call against current session state.

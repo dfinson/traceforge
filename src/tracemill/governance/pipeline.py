@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -15,11 +16,12 @@ if TYPE_CHECKING:
     from tracemill.classify.risk import RiskAssessment
     from tracemill.governance.budget import BudgetThresholds, BudgetTracker
     from tracemill.governance.canonical import compute_canonical_hash
+    from tracemill.governance.drift import DriftAssessment
     from tracemill.governance.labeler import GovernanceLabeler, GovernanceResult
     from tracemill.governance.persistence import SystemStore
     from tracemill.governance.risk_wrapper import RiskModifiers, assess_governance_risk
     from tracemill.governance.rules import Rule, RuleMatch, evaluate_rules
-    from tracemill.governance.state import SessionState, SessionStateSnapshot
+    from tracemill.governance.state import BudgetSnapshot, SessionState, SessionStateSnapshot
     from tracemill.governance.types import (
         CommandAnalysis,
         EnrichmentContext,
@@ -52,12 +54,12 @@ class TransformSuggestion:
 class EscalationContext:
     """Rich metadata for escalate/deny — full classification context."""
     canonical_id: str
-    classification: object  # Classification
+    classification: "Classification"
     recommended_action: "RecommendedAction"
     reason_code: str
     mitre_techniques: tuple[str, ...]
-    drift: object | None  # DriftAssessment
-    budget_snapshot: object  # BudgetSnapshot
+    drift: "DriftAssessment | None"
+    budget_snapshot: "BudgetSnapshot | None"
     pii_taint: bool
     ifc_violations: int
     tool_name: str
@@ -101,7 +103,7 @@ class Evidence:
 class RiskRecommendation:
     """Full recommendation with canonical identity."""
     recommended_action: RecommendedAction
-    assessment: object  # RiskAssessment
+    assessment: "RiskAssessment"
     reason_code: str
     canonical_id: str
     message: str | None = None
@@ -118,7 +120,7 @@ class RecommendationResult:
 @dataclass(frozen=True)
 class Phase3Result:
     """Always produced by Phase 3."""
-    risk_assessment: object  # RiskAssessment
+    risk_assessment: "RiskAssessment"
     recommendation_result: RecommendationResult | None = None
 
 
@@ -129,11 +131,11 @@ class SessionMeta:
     For lifecycle events (session_start/end), Phase 2/3 fields are None.
     canonical_id is accessed via recommendation.canonical_id (no separate field).
     """
-    classification: object | None  # Classification (enriched) | None for lifecycle
-    risk_assessment: object | None  # RiskAssessment | None for lifecycle
+    classification: "Classification | None"
+    risk_assessment: "RiskAssessment | None"
     recommendation: RiskRecommendation | None = None
-    budget_snapshot: object | None = None  # BudgetSnapshot — always present
-    drift: object | None = None  # DriftAssessment | None
+    budget_snapshot: "BudgetSnapshot | None" = None
+    drift: "DriftAssessment | None" = None
     mcp_alerts: tuple = ()  # tuple[MCPIntegrityAlert, ...]
     evidence: Evidence | None = None
 
@@ -211,40 +213,50 @@ class GovernancePipeline:
             meta_dict = json.loads(existing)
             if not meta_dict.get("reserved"):
                 return self._deserialize_meta(meta_dict)
-            # Reserved but never finalized (crash mid-processing) — re-run full pipeline
+            # Reserved = Phase 1 completed atomically. Skip Phase 1, re-run Phase 2/3 only.
+        else:
+            # Phase 1 mutations (in-memory)
+            phase = self._infer_phase(ctx)
+            if phase:
+                state.update_phase_window(phase)
 
-        # Phase 1 mutations
-        phase = self._infer_phase(ctx)
-        if phase:
-            state.update_phase_window(phase)
+            self._budget.increment(ctx, state)
 
-        self._budget.increment(ctx, state)
+            if self._labeler.has_ifc:
+                ifc_src_labels: set[str] = set()
+                self._labeler.check_ifc(ctx, ifc_src_labels, state)
 
-        if self._labeler._ifc:
-            ifc_src_labels: set[str] = set()
-            self._labeler._ifc.check(ctx, ifc_src_labels, state)
+            state.record_event(None)
+            self._budget.check_pressure(state)
 
-        state.record_event(getattr(event, "sequence", None))
-        self._budget.check_pressure(state)
-
-        # Atomic persist: state + idempotency reservation in single transaction
-        # If this fails, no state change is durable — safe to retry on next delivery
-        persist_ok = self._persist_with_retry(state, session_id)
-        if not persist_ok:
-            # State not durable — return degraded meta, event will be re-delivered
-            return SessionMeta(
-                classification=None,
-                risk_assessment=None,
-                recommendation=None,
-                budget_snapshot=state.snapshot().budget,
-                drift=None,
-                mcp_alerts=(),
-                evidence=None,
-            )
-
-        # Mark as reserved (persisted state is durable; Phase 2/3 can now run safely)
-        now = datetime.now(timezone.utc).isoformat()
-        self._store.reserve_event(event.source_event_key, session_id, now)
+            # Atomic commit: state persist + reservation in single transaction
+            now = datetime.now(timezone.utc).isoformat()
+            try:
+                state.persist_no_commit()
+                self._store.execute_in_transaction(
+                    "INSERT OR IGNORE INTO processed_events (source_event_key, session_id, session_meta_json, processed_at) VALUES (?, ?, ?, ?)",
+                    (event.source_event_key, session_id, '{"reserved":true}', now),
+                )
+                self._store.commit()
+                self._write_failures[session_id] = 0
+                self._store.cache_processed(event.source_event_key, '{"reserved":true}')
+            except (sqlite3.OperationalError, sqlite3.IntegrityError) as e:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Atomic Phase 1 commit failed for session %s: %s — attempting retry",
+                    session_id, e,
+                )
+                self._store.rollback()
+                persist_ok = self._persist_with_retry(state, session_id)
+                if not persist_ok:
+                    return SessionMeta(
+                        classification=None, risk_assessment=None,
+                        recommendation=None, budget_snapshot=state.snapshot().budget,
+                        drift=None, mcp_alerts=(), evidence=None,
+                    )
+                # State persisted on retry but no reservation — reserve separately
+                now = datetime.now(timezone.utc).isoformat()
+                self._store.reserve_event(event.source_event_key, session_id, now)
 
         # ── Phase 2: Labeling (side-effect-free) ──
         snapshot = state.snapshot()
@@ -261,23 +273,23 @@ class GovernancePipeline:
             rec = phase3.recommendation_result.recommendation
             evidence = phase3.recommendation_result.evidence
 
-        # Get drift/mcp_alerts from labeler result
-        drift_assessment = gov_result.drift_result
-        mcp_alerts = gov_result.mcp_alerts if hasattr(gov_result, "mcp_alerts") else ()
-
         meta = SessionMeta(
             classification=gov_result.classification,
             risk_assessment=phase3.risk_assessment,
             recommendation=rec,
             budget_snapshot=snapshot.budget,
-            drift=drift_assessment,
-            mcp_alerts=mcp_alerts,
+            drift=gov_result.drift_result,
+            mcp_alerts=gov_result.mcp_alerts,
             evidence=evidence,
         )
 
         # Finalize idempotency record with full meta
         meta_json = json.dumps(self._serialize_meta(meta))
         self._store.finalize_processed(event.source_event_key, meta_json)
+
+        # Commit deferred MCP profile writes (only after successful finalization)
+        if gov_result.mcp_deferred_writes:
+            self._store.commit_deferred_mcp_writes(gov_result.mcp_deferred_writes)
 
         return meta
 
@@ -346,7 +358,7 @@ class GovernancePipeline:
                 action=tuple(sorted(result.classification.action)),
                 capability=tuple(sorted(result.classification.capability)),
                 structure=tuple(sorted(result.classification.structure)),
-                source_labels=tuple(sorted(getattr(result.classification, "source_labels", frozenset()))),
+                source_labels=tuple(sorted(result.classification.source_labels)),
                 recommended_action=recommendation.recommended_action,
                 risk_score=risk.score,
                 risk_factors=risk.factors,
@@ -369,8 +381,10 @@ class GovernancePipeline:
 
     def _infer_phase(self, ctx: "EnrichmentContext") -> str | None:
         """Infer session phase from classification/event."""
+        from tracemill.governance.types import ToolCallEvent
+
         cls = ctx.base_classification
-        # Network capability takes priority — network-capable events are always "network"
+        # Network capability takes priority
         if "network_outbound" in cls.capability:
             return "network"
         if cls.effect == "read_only":
@@ -378,7 +392,9 @@ class GovernancePipeline:
         if cls.effect == "destructive":
             return "destructive"
         if cls.effect == "mutating":
-            tool_name = str(getattr(ctx.event, "tool_name", "") or "").lower()
+            tool_name = ""
+            if isinstance(ctx.event, ToolCallEvent):
+                tool_name = (ctx.event.tool_name or "").lower()
             if "test" in tool_name or "verify" in tool_name or "check" in tool_name:
                 return "testing"
             if "deploy" in tool_name or "publish" in tool_name:
@@ -401,9 +417,9 @@ class GovernancePipeline:
 
         try:
             state.persist()
-            self._write_failures[session_id] = 0  # Reset on success
+            self._write_failures[session_id] = 0
             return True
-        except Exception as e:
+        except (sqlite3.OperationalError, sqlite3.IntegrityError, OSError) as e:
             failures = self._write_failures.get(session_id, 0) + 1
             self._write_failures[session_id] = failures
             if failures >= self._MAX_WRITE_FAILURES:
@@ -412,8 +428,7 @@ class GovernancePipeline:
                     "degrading to memory-only mode: %s",
                     failures, session_id, e,
                 )
-                # Detach DB to prevent further write attempts
-                state.attach_db(None)  # type: ignore[arg-type]
+                state.attach_db(None)
             else:
                 logger.error(
                     "SQLite write failed (%d/%d) for session %s: %s — "
@@ -425,43 +440,42 @@ class GovernancePipeline:
     def _render_transform(self, template, ctx: "EnrichmentContext") -> TransformSuggestion | None:
         """Render TransformTemplate → TransformSuggestion using event data.
 
-        Returns None if target cannot be located in event data (safe fallback).
+        Returns None if target cannot be located in event data.
         """
         if template is None:
             return None
 
         from tracemill.governance.types import ToolCallEvent
-        import json as json_mod
+        import logging
 
         try:
             if isinstance(ctx.event, ToolCallEvent) and ctx.command_analysis:
-                # Shell event: use command analysis
                 original = ctx.command_analysis.command or ""
-                # Apply pattern/replacement from template
-                replacement = template.replacement if hasattr(template, "replacement") else None
+                replacement = template.replacement if template.replacement is not None else None
                 return TransformSuggestion(
                     target_kind="shell_arg",
                     path=f"command[0:{len(original)}]",
                     original=original,
                     replacement=replacement,
-                    rationale=template.description or f"Rule suggests transformation",
+                    rationale=template.description or "Rule suggests transformation",
                     confidence="medium",
                 )
             elif isinstance(ctx.event, ToolCallEvent):
-                # MCP event: use tool args
                 args_str = ctx.event.tool_args_json
                 return TransformSuggestion(
                     target_kind="tool_arg",
                     path="$.args",
-                    original=args_str[:200],  # Truncate for safety
+                    original=args_str[:200],
                     replacement=None,
-                    rationale=template.description or f"Rule suggests transformation",
+                    rationale=template.description or "Rule suggests transformation",
                     confidence="low",
                 )
-        except Exception:
-            pass  # Transform rendering failed — drop silently
+        except (KeyError, AttributeError, TypeError) as e:
+            logging.getLogger(__name__).debug(
+                "Transform rendering failed for template %s: %s", template, e
+            )
 
-        return None  # Cannot locate target → drop transform, recommendation still fires
+        return None
 
     def _build_escalation(
         self, ctx: "EnrichmentContext", result: "GovernanceResult",
@@ -515,7 +529,7 @@ class GovernancePipeline:
     def _write_session_summary(self, session_id: str, snapshot: "SessionStateSnapshot") -> None:
         """Write session summary to session_summaries table."""
         import json as json_mod
-        from datetime import datetime, timezone
+        import logging
 
         now = datetime.now(timezone.utc).isoformat()
         budget_json = json_mod.dumps({
@@ -531,8 +545,10 @@ class GovernancePipeline:
                 (session_id, now, now, snapshot.event_count, snapshot.dropped_events, budget_json),
             )
             self._store.connection.commit()
-        except Exception:
-            pass  # Best-effort
+        except sqlite3.OperationalError as e:
+            logging.getLogger(__name__).warning(
+                "Failed to write session summary for %s: %s", session_id, e
+            )
 
     def _serialize_meta(self, meta: SessionMeta) -> dict:
         """Serialization for idempotency cache — preserves governance decisions."""
@@ -541,17 +557,17 @@ class GovernancePipeline:
             rec_data = {
                 "action": str(meta.recommendation.recommended_action),
                 "reason_code": meta.recommendation.reason_code,
-                "canonical_id": getattr(meta.recommendation, "canonical_id", None),
-                "message": getattr(meta.recommendation, "message", None),
+                "canonical_id": meta.recommendation.canonical_id,
+                "message": meta.recommendation.message,
             }
         risk_data = None
-        if meta.risk_assessment and hasattr(meta.risk_assessment, "score"):
+        if meta.risk_assessment:
             risk_data = {
                 "score": meta.risk_assessment.score,
                 "level": meta.risk_assessment.level,
-                "confidence": getattr(meta.risk_assessment, "confidence", "medium"),
-                "factors": list(meta.risk_assessment.factors) if meta.risk_assessment.factors else [],
-                "mitre": list(meta.risk_assessment.mitre) if hasattr(meta.risk_assessment, "mitre") and meta.risk_assessment.mitre else [],
+                "confidence": meta.risk_assessment.confidence,
+                "factors": list(meta.risk_assessment.factors),
+                "mitre": list(meta.risk_assessment.mitre),
             }
         return {
             "recommendation": rec_data,

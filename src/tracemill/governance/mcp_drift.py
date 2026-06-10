@@ -66,28 +66,47 @@ _ADVERSARIAL_PATTERNS = [
 ]
 
 
+@dataclass(frozen=True)
+class MCPDeferredWrite:
+    """Immutable deferred DB write — committed only after pipeline finalization."""
+    kind: Literal["upsert", "last_seen"]
+    server: str
+    tool_name: str
+    payload: str  # JSON for upsert, ISO timestamp for last_seen
+
+
+@dataclass(frozen=True)
+class MCPScanResult:
+    """Complete scan output — alerts, novelty flag, and deferred writes."""
+    alerts: tuple[MCPIntegrityAlert, ...]
+    is_new: bool
+    deferred_writes: tuple[MCPDeferredWrite, ...]
+
+
 class MCPIntegrityScanner:
     """Full MCP integrity scanning: fingerprint drift + semantic analysis + adversarial detection."""
 
     def __init__(self, store: "SystemStore") -> None:
         self._store = store
 
-    def scan(self, ctx: "EnrichmentContext", cap: set[str]) -> tuple[list[MCPIntegrityAlert], bool]:
+    def scan(self, ctx: "EnrichmentContext", cap: set[str]) -> MCPScanResult:
         """Full scan: fingerprint comparison + semantic drift + adversarial patterns.
 
-        Returns (alerts, is_new). Adds 'mcp_drift' and/or 'semantic_drift' to cap.
+        Returns MCPScanResult with alerts, is_new flag, and deferred writes.
+        Deferred writes MUST only be committed after pipeline finalization.
         """
         from tracemill.governance.types import ToolCallEvent
 
         if not isinstance(ctx.event, ToolCallEvent):
-            return [], False
+            return MCPScanResult(alerts=(), is_new=False, deferred_writes=())
 
         server = ctx.event.mcp_server_name or ""
         tool_name = ctx.event.tool_name or ""
         if not server or not tool_name:
-            return [], False
+            return MCPScanResult(alerts=(), is_new=False, deferred_writes=())
 
         alerts: list[MCPIntegrityAlert] = []
+        deferred: list[MCPDeferredWrite] = []
         now = datetime.now(timezone.utc)
 
         # Compute current fingerprints
@@ -98,25 +117,34 @@ class MCPIntegrityScanner:
         stored = self._store.get_mcp_profile(server, tool_name)
 
         if stored is None:
-            # First time — register with current classification dims
+            # First time — defer registration until pipeline finalization
             cls = ctx.base_classification
-            self._store.upsert_mcp_profile(server, tool_name, {
-                "description_hash": desc_hash,
-                "schema_hash": schema_hash,
-                "registered_effect": cls.effect,
-                "registered_role": json.dumps(sorted(cls.role)) if cls.role else None,
-                "registered_capabilities": json.dumps(sorted(cls.capability)) if cls.capability else None,
-                "registered_scope": json.dumps(sorted(cls.scope)) if cls.scope else None,
-                "clearance": None,
-                "first_seen": now.isoformat(),
-                "last_seen": now.isoformat(),
-            })
+            deferred.append(MCPDeferredWrite(
+                kind="upsert",
+                server=server,
+                tool_name=tool_name,
+                payload=json.dumps({
+                    "description_hash": desc_hash,
+                    "schema_hash": schema_hash,
+                    "registered_effect": cls.effect,
+                    "registered_role": json.dumps(sorted(cls.role)) if cls.role else None,
+                    "registered_capabilities": json.dumps(sorted(cls.capability)) if cls.capability else None,
+                    "registered_scope": json.dumps(sorted(cls.scope)) if cls.scope else None,
+                    "clearance": None,
+                    "first_seen": now.isoformat(),
+                    "last_seen": now.isoformat(),
+                }),
+            ))
             # Still scan description for adversarial content on first-seen
             desc_alerts = self.scan_description(ctx.event.tool_description or "", tool_name, server, now)
             if desc_alerts:
                 alerts.extend(desc_alerts)
                 cap.add("mcp_drift")
-            return alerts, True
+            return MCPScanResult(
+                alerts=tuple(alerts),
+                is_new=True,
+                deferred_writes=tuple(deferred),
+            )
 
         # ── Fingerprint comparison ──
         if stored["description_hash"] != desc_hash:
@@ -153,10 +181,19 @@ class MCPIntegrityScanner:
             if max_severity in ("warning", "critical"):
                 cap.add("mcp_drift")
 
-        # Update only last_seen — preserve registered baseline hashes/dimensions
-        self._store.update_mcp_last_seen(server, tool_name, now.isoformat())
+        # Defer last_seen update until pipeline finalization
+        deferred.append(MCPDeferredWrite(
+            kind="last_seen",
+            server=server,
+            tool_name=tool_name,
+            payload=now.isoformat(),
+        ))
 
-        return alerts, False
+        return MCPScanResult(
+            alerts=tuple(alerts),
+            is_new=False,
+            deferred_writes=tuple(deferred),
+        )
 
     def check_semantic_drift(
         self, tool: str, server: str, current: "Classification",

@@ -40,7 +40,7 @@ def compute_canonical_hash(
         "effect": classification.effect,
         "scope": sorted(classification.scope),
         "role": sorted(classification.role),
-        "action": sorted(classification.action) if hasattr(classification, "action") else [],
+        "action": sorted(classification.action),
         "capability": stable_cap,
         "structure": stable_struct,
     }

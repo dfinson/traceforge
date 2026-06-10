@@ -41,7 +41,18 @@ class BudgetSnapshot:
 
     def count(self, dimension: str, key: str) -> int:
         """Lookup a count by dimension name and key."""
-        for k, v in getattr(self, f"by_{dimension}", ()):
+        dimension_map = {
+            "effect": self.by_effect,
+            "capability": self.by_capability,
+            "scope": self.by_scope,
+            "role": self.by_role,
+            "phase": self.by_phase,
+            "mechanism": self.by_mechanism,
+            "action": self.by_action,
+            "structure": self.by_structure,
+        }
+        entries = dimension_map.get(dimension, ())
+        for k, v in entries:
             if k == key:
                 return v
         return 0
@@ -98,7 +109,7 @@ class SessionState:
                 "structure": Counter(),
             }
 
-    def attach_db(self, db: sqlite3.Connection) -> None:
+    def attach_db(self, db: sqlite3.Connection | None) -> None:
         self._db = db
 
     def increment_budget(
@@ -245,6 +256,47 @@ class SessionState:
             ),
         )
         self._db.commit()
+
+    def persist_no_commit(self) -> None:
+        """Write state to SQLite WITHOUT committing — caller must commit.
+        Used for atomic state+reservation transactions."""
+        if self._db is None:
+            return
+        budget_json = json.dumps({
+            "version": 1,
+            "total_tool_calls": self._total_tool_calls,
+            "total_tokens": self._total_tokens,
+            "elapsed_seconds": self._elapsed_seconds,
+            "by_effect": dict(self._budget_counters["effect"]),
+            "by_mechanism": dict(self._budget_counters["mechanism"]),
+            "by_scope": dict(self._budget_counters["scope"]),
+            "by_role": dict(self._budget_counters["role"]),
+            "by_phase": dict(self._budget_counters["phase"]),
+            "by_capability": dict(self._budget_counters["capability"]),
+            "by_action": dict(self._budget_counters["action"]),
+            "by_structure": dict(self._budget_counters["structure"]),
+            "pressure": self._pressure,
+        })
+        phase_json = json.dumps(self._phase_window)
+        taints_json = json.dumps([
+            {"event_id": t.event_id, "clearance": t.clearance,
+             "source": t.source, "payload_pointer": t.payload_pointer}
+            for t in self._taint_ledger
+        ]) if self._taint_ledger else None
+        now = datetime.now(timezone.utc).isoformat()
+        self._db.execute(
+            """INSERT OR REPLACE INTO session_state
+               (session_id, budget_json, phase_window_json, last_assistant_json,
+                last_user_json, pii_taints_json, event_count, dropped_events,
+                last_sequence, last_event_id, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                self.session_id, budget_json, phase_json,
+                self._last_assistant_event_id, self._last_user_event_id,
+                taints_json, self._event_count, self._dropped_events,
+                self._last_sequence, None, now,
+            ),
+        )
 
     @classmethod
     def load_from_db(cls, session_id: str, db: sqlite3.Connection) -> "SessionState":

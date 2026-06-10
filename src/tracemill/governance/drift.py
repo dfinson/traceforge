@@ -153,9 +153,10 @@ class DriftDetector:
         )
 
     def _get_baseline(self, ctx: "EnrichmentContext") -> dict | None:
-        model = getattr(ctx.event, "agent_model", None) or "unknown"
+        # agent_model is session-level context, not event-level — use "unknown" default
+        # Future: pass agent_model via EnrichmentContext when session metadata is available
         repo = ctx.project_root or "unknown"
-        return self._store.get_drift_baseline(model, repo)
+        return self._store.get_drift_baseline("unknown", repo)
 
     def _count_transitions(self, phases: tuple[str, ...]) -> int:
         """Count phase transitions (consecutive different phases) in window."""

@@ -210,9 +210,10 @@ class TestMCPIntegrityScannerIntegration:
         scanner, store = self._make_scanner()
         ctx = self._make_ctx()
         cap: set[str] = set()
-        alerts, is_new = scanner.scan(ctx, cap)
-        assert is_new is True
-        assert len(alerts) == 0  # New tool — no drift, just registration
+        result = scanner.scan(ctx, cap)
+        assert result.is_new is True
+        assert len(result.alerts) == 0  # New tool — no drift, just registration
+        assert len(result.deferred_writes) == 1  # Deferred upsert
 
     def test_non_mcp_event_returns_empty(self):
         from tracemill.governance.types import ToolCallEvent, EnrichmentContext
@@ -234,9 +235,10 @@ class TestMCPIntegrityScannerIntegration:
             engine="shell", drift_baseline=None, mcp_profile_key=None,
         )
         cap: set[str] = set()
-        alerts, is_new = scanner.scan(ctx, cap)
-        assert alerts == []
-        assert is_new is False
+        result = scanner.scan(ctx, cap)
+        assert result.alerts == ()
+        assert result.is_new is False
+        assert result.deferred_writes == ()
 
 
 # ─── DriftAssessment Tests ───

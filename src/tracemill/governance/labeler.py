@@ -13,10 +13,10 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from tracemill.classify.core import Classification
     from tracemill.governance.budget import BudgetThresholds, BudgetTracker
-    from tracemill.governance.drift import DriftDetector, DriftResult
+    from tracemill.governance.drift import DriftAssessment, DriftDetector, DriftResult
     from tracemill.governance.ifc import IFCChecker
     from tracemill.governance.integrity import IntegrityVerifier
-    from tracemill.governance.mcp_drift import MCPDriftResult, MCPIntegrityScanner
+    from tracemill.governance.mcp_drift import MCPDeferredWrite, MCPIntegrityScanner, MCPScanResult
     from tracemill.governance.pii import PIIScanner
     from tracemill.governance.risk_wrapper import RiskModifiers
     from tracemill.governance.state import SessionStateSnapshot
@@ -26,11 +26,11 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class GovernanceResult:
     """Output of Phase 2 — enriched classification + risk modifiers."""
-    classification: "Classification"  # Original with governance labels merged in
+    classification: "Classification"
     risk_modifiers: "RiskModifiers"
-    drift_result: object | None = None  # DriftAssessment
-    mcp_drift_result: object | None = None  # MCPDriftResult (legacy compat)
+    drift_result: "DriftResult | None" = None
     mcp_alerts: tuple = ()  # tuple[MCPIntegrityAlert, ...]
+    mcp_deferred_writes: tuple = ()  # tuple[MCPDeferredWrite, ...] — committed by pipeline after finalization
 
 
 class GovernanceLabeler:
@@ -68,37 +68,25 @@ class GovernanceLabeler:
         if self._integrity:
             self._integrity.check_event(ctx, cap)
 
-        # MCP fingerprint drift
-        mcp_drift_result = None
+        # MCP fingerprint drift — scan returns typed MCPScanResult
         mcp_alerts: tuple = ()
+        mcp_deferred_writes: tuple = ()
         mcp_bonus = 0
         if self._mcp:
             scan_result = self._mcp.scan(ctx, cap)
-            # New API returns (alerts, is_new) tuple; old returns MCPDriftResult
-            if isinstance(scan_result, tuple):
-                alerts_list, is_new = scan_result
-                mcp_alerts = tuple(alerts_list)
-                # Sum severity for bonus (cap at 40)
-                severity_map = {"critical": 20, "warning": 10, "info": 5}
-                mcp_bonus = min(40, sum(
-                    severity_map.get(getattr(a, "severity", "info"), 5)
-                    for a in mcp_alerts
-                ))
-                if mcp_alerts:
-                    struct.add("semantic_drift")
-            else:
-                # Legacy MCPDriftResult fallback
-                mcp_drift_result = scan_result
-                if mcp_drift_result and (mcp_drift_result.description_changed or mcp_drift_result.schema_changed):
-                    struct.add("semantic_drift")
-                    mcp_bonus = 15
+            mcp_alerts = scan_result.alerts
+            mcp_deferred_writes = scan_result.deferred_writes
+            severity_map = {"critical": 20, "warning": 10, "info": 5}
+            mcp_bonus = min(40, sum(
+                severity_map[a.severity] for a in mcp_alerts
+            ))
+            if mcp_alerts:
+                struct.add("semantic_drift")
 
         # IFC source labels
         ifc_violations = 0
         if self._ifc and ctx.session_state:
-            # In Phase 2, IFC operates read-only on snapshot taints for label assignment
             self._ifc_label_only(ctx, src_labels)
-            # Detect IFC violation: tainted data flowing to mutating/destructive/network sinks
             all_caps = ctx.base_classification.capability | frozenset(cap)
             if ctx.session_state.taint_ledger and ctx.base_classification.effect in ("mutating", "destructive"):
                 struct.add("ifc_violation")
@@ -107,20 +95,15 @@ class GovernanceLabeler:
                 struct.add("ifc_violation")
                 ifc_violations = 1
 
-        # Phase drift
-        drift_result = None
+        # Phase drift — returns typed DriftAssessment with risk_bonus field
+        drift_result: "DriftAssessment | None" = None
         phase_bonus = 0
         if self._drift and ctx.session_state:
             drift_result = self._drift.detect(ctx, ctx.session_state, cap)
             if drift_result:
-                # New DriftAssessment has risk_bonus
-                if hasattr(drift_result, "risk_bonus"):
-                    phase_bonus = drift_result.risk_bonus
-                    if drift_result.anomaly:
-                        struct.add("phase_anomaly")
-                elif drift_result.anomaly:
+                phase_bonus = drift_result.risk_bonus
+                if drift_result.anomaly:
                     struct.add("phase_anomaly")
-                    phase_bonus = 10
 
         # Budget pressure check (read-only from snapshot)
         budget_bonus = 0
@@ -132,12 +115,12 @@ class GovernanceLabeler:
         # Integrity bonus
         integrity_bonus = 10 if "integrity_unverified" in cap else 0
 
-        # Merge labels into classification via dataclasses.replace()
+        # Merge labels into classification
         enriched = dataclasses.replace(
             ctx.base_classification,
             capability=ctx.base_classification.capability | frozenset(cap),
             structure=ctx.base_classification.structure | frozenset(struct),
-            source_labels=getattr(ctx.base_classification, "source_labels", frozenset()) | frozenset(src_labels),
+            source_labels=ctx.base_classification.source_labels | frozenset(src_labels),
         )
 
         modifiers = RiskModifiers(
@@ -152,8 +135,8 @@ class GovernanceLabeler:
             classification=enriched,
             risk_modifiers=modifiers,
             drift_result=drift_result,
-            mcp_drift_result=mcp_drift_result,
             mcp_alerts=mcp_alerts,
+            mcp_deferred_writes=mcp_deferred_writes,
         )
 
     def _ifc_label_only(self, ctx: "EnrichmentContext", src_labels: set[str]) -> None:
@@ -169,3 +152,20 @@ class GovernanceLabeler:
             )
             if max_clearance:
                 src_labels.add(f"ifc:{max_clearance}")
+
+    # ── Public facade methods for pipeline (eliminate private member access) ──
+
+    @property
+    def has_ifc(self) -> bool:
+        """Whether IFC checker is configured."""
+        return self._ifc is not None
+
+    def check_ifc(self, ctx: "EnrichmentContext", src_labels: set[str], state) -> None:
+        """Run IFC check (Phase 1 taint propagation). Delegates to IFCChecker."""
+        if self._ifc:
+            self._ifc.check(ctx, src_labels, state)
+
+    @property
+    def has_mcp_scanner(self) -> bool:
+        """Whether MCP integrity scanner is configured."""
+        return self._mcp is not None

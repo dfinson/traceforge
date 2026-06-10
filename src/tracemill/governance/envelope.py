@@ -76,7 +76,7 @@ class EnrichedEvent:
 
         governance_dict = {}
         if self.governance.classification is not None:
-            governance_dict["classification"] = self.governance.classification.to_dict() if hasattr(self.governance.classification, "to_dict") else str(self.governance.classification)
+            governance_dict["classification"] = self.governance.classification.to_dict()
         if self.governance.risk_assessment is not None:
             ra = self.governance.risk_assessment
             governance_dict["risk_assessment"] = {

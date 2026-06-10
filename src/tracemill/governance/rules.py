@@ -121,8 +121,10 @@ def _parse_when(when: dict, *, rule_index: int) -> list[Predicate]:
             m = _COMPARISON_RE.match(str(value))
             if not m:
                 raise ValueError(f"Rule {rule_index}: invalid risk_score predicate: {value}")
+            op = m.group(1)
+            assert op in (">=", ">", "<=", "<", "=="), f"Invalid comparison operator: {op}"
             predicates.append(Predicate(
-                dim="risk_score", operator=m.group(1),  # type: ignore[arg-type]
+                dim="risk_score", operator=op,  # type: ignore[arg-type]  # validated above
                 threshold=int(m.group(2)),
             ))
             continue
@@ -147,7 +149,7 @@ def _parse_when(when: dict, *, rule_index: int) -> list[Predicate]:
             if not isinstance(op_targets, list):
                 raise ValueError(f"Rule {rule_index}: operator '{op_key}' value must be a list, got {type(op_targets).__name__}")
             predicates.append(Predicate(
-                dim=dim, operator=op_key,  # type: ignore[arg-type]
+                dim=dim, operator=op_key,  # type: ignore[arg-type]  # validated above
                 targets=tuple(op_targets),
             ))
         else:
@@ -181,7 +183,17 @@ def _predicate_matches(pred: Predicate, c: "Classification", r: "RiskAssessment"
     if pred.dim == "risk_score":
         return _compare_score(r.score, pred.operator, pred.threshold or 0)
 
-    value = getattr(c, pred.dim, None)
+    # Explicit dimension → value mapping (no dynamic getattr)
+    _DIM_VALUES: dict[str, object] = {
+        "mechanism": c.mechanism,
+        "effect": c.effect,
+        "scope": c.scope,
+        "role": c.role,
+        "action": c.action,
+        "capability": c.capability,
+        "structure": c.structure,
+    }
+    value = _DIM_VALUES.get(pred.dim)
 
     # None or empty — only none_of matches vacuously
     if value is None or (isinstance(value, frozenset) and len(value) == 0):

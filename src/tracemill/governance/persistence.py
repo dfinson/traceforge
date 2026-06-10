@@ -202,6 +202,37 @@ class SystemStore:
         import json
         return {"phase_counts": json.loads(row[0]), "total_events": row[1]}
 
+    def execute_in_transaction(self, sql: str, params: tuple = ()) -> None:
+        """Execute SQL within the current transaction (no auto-commit)."""
+        self._conn.execute(sql, params)
+
+    def commit(self) -> None:
+        """Commit the current transaction."""
+        self._conn.commit()
+
+    def rollback(self) -> None:
+        """Rollback the current transaction."""
+        self._conn.rollback()
+
+    def cache_processed(self, source_event_key: str, meta_json: str | None) -> None:
+        """Add entry to processed events cache."""
+        self._processed_cache[source_event_key] = meta_json
+        self._evict_cache()
+
+    def commit_deferred_mcp_writes(self, writes: "tuple") -> None:
+        """Commit deferred MCP profile writes after pipeline finalization.
+
+        Accepts tuple[MCPDeferredWrite, ...] from MCPScanResult.
+        """
+        import json as json_mod
+        from tracemill.governance.mcp_drift import MCPDeferredWrite
+
+        for write in writes:
+            if write.kind == "upsert":
+                self.upsert_mcp_profile(write.server, write.tool_name, json_mod.loads(write.payload))
+            elif write.kind == "last_seen":
+                self.update_mcp_last_seen(write.server, write.tool_name, write.payload)
+
     def close(self) -> None:
         self._conn.close()
 

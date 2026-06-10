@@ -140,9 +140,15 @@ def _parse_when(when: dict, *, rule_index: int) -> list[Predicate]:
             op_key = next(iter(value))
             if op_key not in ("any_of", "all_of", "none_of"):
                 raise ValueError(f"Rule {rule_index}: unknown operator '{op_key}'")
+            # Scalar dimensions only support any_of and none_of (not all_of — nonsensical for single value)
+            if dim in _SCALAR_DIMS and op_key == "all_of":
+                raise ValueError(f"Rule {rule_index}: 'all_of' is not valid for scalar dimension '{dim}' (use 'exact' or 'any_of')")
+            op_targets = value[op_key]
+            if not isinstance(op_targets, list):
+                raise ValueError(f"Rule {rule_index}: operator '{op_key}' value must be a list, got {type(op_targets).__name__}")
             predicates.append(Predicate(
                 dim=dim, operator=op_key,  # type: ignore[arg-type]
-                targets=tuple(value[op_key]),
+                targets=tuple(op_targets),
             ))
         else:
             raise ValueError(f"Rule {rule_index}: invalid predicate value type for '{dim}': {type(value)}")
@@ -197,6 +203,10 @@ def _predicate_matches(pred: Predicate, c: "Classification", r: "RiskAssessment"
     # Scalar against any_of
     if pred.operator == "any_of":
         return value in pred.targets
+
+    # Scalar against none_of
+    if pred.operator == "none_of":
+        return value not in pred.targets
 
     return False
 

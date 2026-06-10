@@ -205,54 +205,46 @@ class GovernancePipeline:
         state = self.get_or_create_state(session_id)
 
         # ── Phase 1: State Mutation ──
-        # Idempotency check + reservation (atomic: prevents double-processing on crash)
+        # Idempotency check (already-processed events return cached meta)
         existing = self._store.is_duplicate(event.source_event_key)
         if existing:
             meta_dict = json.loads(existing)
-            # If reserved but never finalized (crash recovery), re-process
             if not meta_dict.get("reserved"):
                 return self._deserialize_meta(meta_dict)
-            # Reserved retry: skip Phase 1 mutations (already applied), go straight to Phase 2/3
+            # Reserved but never finalized (crash mid-processing) — re-run full pipeline
 
-        # Reserve the event key BEFORE state mutation to prevent double-increment on crash
-        if not existing:
-            now = datetime.now(timezone.utc).isoformat()
-            self._store.reserve_event(event.source_event_key, session_id, now)
+        # Phase 1 mutations
+        phase = self._infer_phase(ctx)
+        if phase:
+            state.update_phase_window(phase)
 
-            # Phase 1 mutations (only on first attempt, not on reserved retry)
-            # Phase window update (before budget so phase is current)
-            phase = self._infer_phase(ctx)
-            if phase:
-                state.update_phase_window(phase)
+        self._budget.increment(ctx, state)
 
-            # Budget increment
-            self._budget.increment(ctx, state)
+        if self._labeler._ifc:
+            ifc_src_labels: set[str] = set()
+            self._labeler._ifc.check(ctx, ifc_src_labels, state)
 
-            # IFC taint recording (mutable state — must run in Phase 1)
-            if self._labeler._ifc:
-                ifc_src_labels: set[str] = set()
-                self._labeler._ifc.check(ctx, ifc_src_labels, state)
+        state.record_event(getattr(event, "sequence", None))
+        self._budget.check_pressure(state)
 
-            # Record event
-            state.record_event(getattr(event, "sequence", None))
+        # Atomic persist: state + idempotency reservation in single transaction
+        # If this fails, no state change is durable — safe to retry on next delivery
+        persist_ok = self._persist_with_retry(state, session_id)
+        if not persist_ok:
+            # State not durable — return degraded meta, event will be re-delivered
+            return SessionMeta(
+                classification=None,
+                risk_assessment=None,
+                recommendation=None,
+                budget_snapshot=state.snapshot().budget,
+                drift=None,
+                mcp_alerts=(),
+                evidence=None,
+            )
 
-            # Pressure check
-            self._budget.check_pressure(state)
-
-            # Persist state (with write-failure handling)
-            persist_ok = self._persist_with_retry(state, session_id)
-
-            # If state persistence failed, do NOT finalize — allow retry on next delivery
-            if not persist_ok:
-                return SessionMeta(
-                    classification=None,
-                    risk_assessment=None,
-                    recommendation=None,
-                    budget_snapshot=state.snapshot().budget,
-                    drift=None,
-                    mcp_alerts=(),
-                    evidence=None,
-                )
+        # Mark as reserved (persisted state is durable; Phase 2/3 can now run safely)
+        now = datetime.now(timezone.utc).isoformat()
+        self._store.reserve_event(event.source_event_key, session_id, now)
 
         # ── Phase 2: Labeling (side-effect-free) ──
         snapshot = state.snapshot()

@@ -235,9 +235,9 @@ def assess(pipeline, payload: dict) -> AssessmentResult:
         mcp_profile_key=server_namespace,
     )
 
-    # Run governance pipeline (Phase 1/2/3)
+    # Run governance pipeline (Phase 2/3 only — read-only, no state mutation)
     try:
-        meta = pipeline.process_event(ctx)
+        meta = pipeline.preflight_event(ctx)
     except Exception as exc:
         # Fail closed: internal errors → ESCALATE with diagnostic reason
         elapsed_ms = (time.perf_counter() - t0) * 1000
@@ -269,12 +269,18 @@ def assess(pipeline, payload: dict) -> AssessmentResult:
 
     risk_score = meta.risk_assessment.score if meta.risk_assessment else 0
 
+    # Surface transform suggestion at top level for TRANSFORM assessments
+    transform = None
+    if meta.recommendation and meta.recommendation.transform:
+        transform = meta.recommendation.transform
+
     return AssessmentResult(
         governance_assessment=governance_assessment,
         risk_score=risk_score,
         reason=reason,
         matched_rule=matched_rule,
         classification=meta.classification,
+        transform=transform,
         meta=meta,
         elapsed_ms=round(elapsed_ms, 2),
     )

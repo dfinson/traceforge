@@ -164,6 +164,7 @@ class GovernancePipeline:
         rules: "list[Rule]",
         engine: "ClassificationEngine",
         thresholds: "BudgetThresholds | None" = None,
+        project_root: str | None = None,
     ) -> None:
         self._store = store
         self._labeler = labeler
@@ -171,6 +172,7 @@ class GovernancePipeline:
         self._rules = rules
         self._engine = engine
         self._thresholds = thresholds
+        self._project_root = project_root
         self._states: dict[str, "SessionState"] = {}
         self._write_failures: dict[str, int] = {}  # session_id → consecutive failure count
         self._MAX_WRITE_FAILURES = 10
@@ -255,6 +257,11 @@ class GovernancePipeline:
     def assess(self, payload: dict) -> "AssessmentResult":
         """Score a pending tool call against current session state.
 
+        This is a **read-only preflight** — it evaluates the tool call against
+        accumulated session state but does NOT mutate budget, taint, or drift.
+        State is only updated when the observation pipeline sees the event
+        actually execute (or when the consumer explicitly confirms execution).
+
         Args:
             payload: Dict with at minimum:
                 - ``tool_name``: str
@@ -266,11 +273,41 @@ class GovernancePipeline:
 
         Returns:
             AssessmentResult with the governance assessment.
-            Does NOT persist to sinks — the observation pipeline handles storage.
+            Does NOT persist to sinks or mutate pipeline state.
         """
         from tracemill.assess.assessor import assess as _assess
 
         return _assess(self, payload)
+
+    def preflight_event(self, ctx: "EnrichmentContext") -> "SessionMeta":
+        """Read-only Phase 2/3 scoring — no state mutation, no persistence.
+
+        Runs labeling and risk/rules against the current session snapshot.
+        Used by .assess() to score without side effects.
+        """
+        session_id = ctx.event.session_id
+        state = self.get_or_create_state(session_id)
+        snapshot = state.snapshot()
+        enrichment_ctx = self._with_snapshot(ctx, snapshot)
+
+        gov_result = self._labeler.label(enrichment_ctx)
+        phase3 = self._phase3(enrichment_ctx, gov_result, snapshot)
+
+        rec = None
+        evidence = None
+        if phase3.recommendation_result:
+            rec = phase3.recommendation_result.recommendation
+            evidence = phase3.recommendation_result.evidence
+
+        return SessionMeta(
+            classification=gov_result.classification,
+            risk_assessment=phase3.risk_assessment,
+            recommendation=rec,
+            budget_snapshot=snapshot.budget,
+            drift=gov_result.drift_result,
+            mcp_alerts=gov_result.mcp_alerts,
+            evidence=evidence,
+        )
 
     def get_or_create_state(self, session_id: str) -> "SessionState":
         """Get or create session state."""

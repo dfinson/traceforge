@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from tracemill.governance.rules import RecommendedAction as _RecommendedAction
 
 if TYPE_CHECKING:
     from tracemill.classify.core import Classification
-    from tracemill.governance.pipeline import SessionMeta
+    from tracemill.governance.pipeline import SessionMeta, TransformSuggestion
 
 
 # Public alias — the spec names this GovernanceAssessment.
@@ -19,7 +19,7 @@ GovernanceAssessment = _RecommendedAction
 
 @dataclass(frozen=True, slots=True)
 class AssessmentResult:
-    """Output of ``Assessor.assess()`` — everything tracemill knows about a pending tool call.
+    """Output of ``GovernancePipeline.assess()`` — everything tracemill knows about a pending tool call.
 
     The consumer interprets these fields and decides enforcement.
     tracemill never issues verdicts.
@@ -40,8 +40,11 @@ class AssessmentResult:
     classification: "Classification | None"
     """Full classification output (mechanism, effect, scope, role, action, etc.)."""
 
-    meta: "SessionMeta"
+    transform: Any = None
+    """TransformSuggestion when governance_assessment is TRANSFORM, else None."""
+
+    meta: "SessionMeta | None" = None
     """Full governance pipeline output including taint, drift, budget, MCP alerts."""
 
-    elapsed_ms: float
+    elapsed_ms: float = 0.0
     """Wall-clock time for the assessment in milliseconds."""

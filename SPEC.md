@@ -1131,6 +1131,7 @@ class AssessmentResult:
     reason: str | None                           # matched rule's reason code
     matched_rule: str | None                     # rule ID that triggered
     classification: Classification               # full classification output
+    transform: TransformSuggestion | None        # suggested rewrite (if TRANSFORM)
     meta: SessionMeta                            # full pipeline state (taint, drift, budget)
     elapsed_ms: float                            # assessment latency
 ```
@@ -1192,9 +1193,9 @@ result = pipeline.assess({
 # result.reason == "risk_score_caution"
 ```
 
-`.assess()` runs the full governance pipeline (Phase 1/2/3) against current session state. Synchronous, <10ms p99, pure computation.
+`.assess()` runs governance scoring (Phase 2: labeling, Phase 3: risk + rules) against current session state. Synchronous, <10ms p99, read-only — no state mutation.
 
-### CLI
+### CLI *(planned — not yet implemented)*
 
 ```bash
 # Assess a single event — outputs JSON assessment to stdout
@@ -1311,26 +1312,28 @@ async def can_use_tool(tool_name, input_data, context):
 1. Agent session starts
 2. tracemill observation pipeline starts (reads from configured source)
 3. Events stream in → Parse → Phase 1/2/3 → GovernanceAssessment
-   • State accumulates (taint, drift, budget)
+   • State accumulates (taint, drift, budget) — ONLY on observed execution
    • on_assessment callback fires (if registered)
    • Sinks persist (always)
 4. IF consumer's hook fires (pre-execution):
    a. Consumer's hook script/callback calls tracemill assess
-   b. Pipeline runs Phase 1/2/3 against current session state
+   b. Pipeline runs Phase 2/3 (read-only) against current session state
    c. Returns AssessmentResult to consumer
    d. Consumer maps assessment to allow/deny/escalate
    e. Consumer returns decision to framework
 5. Observation pipeline continues:
-   • Allowed events: appear in source, pipeline recognizes (dedup), skips re-processing
-   • Denied events: never in source, pipeline emits synthetic tool.blocked event
+   • Allowed events: appear in source → Phase 1 mutates state → persist
+   • Denied events: never in source → no state mutation (budget stays accurate)
 ```
 
 ### Deduplication
 
-The `.assess()` call updates pipeline state (Phase 1: taint, budget, drift) but does NOT persist to sinks. Persistence happens only when the observation pipeline encounters the event from its source:
+The `.assess()` call is **read-only** — it scores against accumulated state but does NOT mutate budget, taint, or drift. State changes only occur when the observation pipeline processes an event from its source (confirming execution):
 
-- **Allowed events:** Observation sees them naturally, recognizes pre-assessed (by correlation), attaches pre-computed assessment, persists once.
-- **Denied events:** Never appear in source. Pipeline emits a synthetic `tool.blocked` event into the stream so sinks have a complete audit record.
+- **Allowed events:** Observation sees them naturally, processes Phase 1/2/3, commits state changes, persists to sinks.
+- **Denied events:** Never appear in source. The consumer should call `pipeline.record_blocked(payload, result)` *(future)* to emit a synthetic `tool.blocked` audit event to sinks.
+
+This design ensures that blocked calls never corrupt budget/taint state. The observation pipeline is the single source of truth for state mutations.
 
 ### Configuration (`tracemill.yaml`)
 
@@ -1394,7 +1397,7 @@ class GovernancePipeline:
         ...
 
     def assess(self, payload: dict) -> AssessmentResult:
-        """Synchronous assessment against current session state.
+        """Read-only preflight assessment against current session state.
 
         payload keys:
             tool_name: str (required)
@@ -1403,8 +1406,8 @@ class GovernancePipeline:
             server_namespace: str (optional, for MCP tools)
             project_root: str (optional)
 
-        Runs Phase 1/2/3 → returns AssessmentResult.
-        Updates session state (taint, budget, drift).
+        Runs Phase 2/3 (labeling + risk/rules) → returns AssessmentResult.
+        Does NOT mutate session state (budget, taint, drift).
         Does NOT persist to sinks.
         """
         ...
@@ -1416,8 +1419,8 @@ class GovernancePipeline:
 2. **No Verdict type** — tracemill has no concept of allow/deny as a binary decision.
 3. **No enforcement config** — no `gate.enabled`, no `escalate_policy`, no exit code mapping.
 4. **Assessment is always computed** — whether or not anyone calls `.assess()`, observation produces assessments for every event.
-5. **`.assess()` is synchronous** — <10ms p99, pure computation against accumulated state.
-6. **Session state is shared** — `.assess()` and observation share the same state (taint, drift, budget). Gate queries see full history.
+5. **`.assess()` is read-only** — scores against accumulated state without mutating budget/taint/drift. State mutations only happen when observation confirms execution.
+6. **Session state is shared** — `.assess()` and observation share the same state snapshot for scoring. Observation alone commits mutations.
 7. **No framework dependencies** — tracemill never imports Copilot, Claude, LangGraph, etc.
 8. **Rules are data** — `governance_rules.yaml`. Turing-incomplete.
 9. **Callbacks are optional** — `on_assessment` is for consumers who want push. Sinks persist regardless.

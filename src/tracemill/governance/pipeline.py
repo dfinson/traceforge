@@ -181,46 +181,73 @@ class GovernancePipeline:
     @classmethod
     def create(
         cls,
-        *,
-        db_path: str | None = None,
-        project_root: str | None = None,
+        config: "GovernanceConfig | None" = None,
     ) -> "GovernancePipeline":
-        """Construct a ready-to-use pipeline with sensible defaults.
+        """Construct a ready-to-use pipeline from config.
 
         Usage::
 
             from tracemill.governance.pipeline import GovernancePipeline
 
+            # Zero-config (all defaults)
             pipeline = GovernancePipeline.create()
-            result = pipeline.assess({
-                "tool_name": "bash",
-                "tool_input": {"command": "rm -rf /"},
-                "session_id": "sess-1",
-            })
+
+            # With config object (mirrors tracemill.yaml governance section)
+            from tracemill.config.models import GovernanceConfig, BudgetConfig
+            pipeline = GovernancePipeline.create(GovernanceConfig(
+                db_path="./tracemill.db",
+                project_root=".",
+                pii_scanning=True,
+                budget=BudgetConfig(max_tool_calls=200),
+            ))
 
         Args:
-            db_path: Path to state DB. Defaults to in-memory (":memory:").
-            project_root: Project root for scope-aware rules. Optional.
+            config: GovernanceConfig instance. Defaults to GovernanceConfig()
+                    (in-memory DB, PII scanning on, no budget caps).
         """
         from pathlib import Path
 
         from tracemill.classify.config import ClassificationEngine, ClassifyConfig
-        from tracemill.governance.budget import BudgetTracker
+        from tracemill.config.models import GovernanceConfig
+        from tracemill.governance.budget import BudgetThresholds, BudgetTracker
         from tracemill.governance.labeler import GovernanceLabeler
         from tracemill.governance.persistence import SystemStore
         from tracemill.governance.rules import parse_rules
 
-        store = SystemStore(db_path or ":memory:")
+        if config is None:
+            config = GovernanceConfig()
+
+        store = SystemStore(config.db_path or ":memory:")
         engine = ClassificationEngine(ClassifyConfig())
-        rules_path = Path(__file__).parent.parent / "classify" / "data" / "recommendation_rules.yaml"
+
+        # Rules: custom path or bundled defaults
+        if config.rules_path:
+            rules_path = Path(config.rules_path)
+        else:
+            rules_path = Path(__file__).parent.parent / "classify" / "data" / "recommendation_rules.yaml"
         rules = parse_rules(rules_path)
+
+        # Budget thresholds from config
+        thresholds = BudgetThresholds(
+            max_tool_calls=config.budget.max_tool_calls,
+            max_by_effect=config.budget.max_by_effect,
+            max_by_capability=config.budget.max_by_capability,
+            max_by_scope=config.budget.max_by_scope,
+        )
+
+        # PII scanner
+        pii_scanner = None
+        if config.pii_scanning:
+            from tracemill.governance.pii import PIIScanner
+            pii_scanner = PIIScanner()
 
         return cls(
             store=store,
-            labeler=GovernanceLabeler(),
-            budget_tracker=BudgetTracker(),
+            labeler=GovernanceLabeler(pii_scanner=pii_scanner),
+            budget_tracker=BudgetTracker(thresholds=thresholds),
             rules=rules,
             engine=engine,
+            thresholds=thresholds,
         )
 
     def assess(self, payload: dict) -> "AssessmentResult":

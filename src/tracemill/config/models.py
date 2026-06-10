@@ -189,6 +189,49 @@ class SDKConfig(StrictModel):
     max_queue_size: int = Field(default=10000, ge=1)
 
 
+# ─── Governance Config ────────────────────────────────────────────────────────
+
+
+class BudgetConfig(StrictModel):
+    """Budget thresholds for governance scoring."""
+
+    max_tool_calls: int | None = None
+    max_by_effect: dict[str, int] | None = None
+    max_by_capability: dict[str, int] | None = None
+    max_by_scope: dict[str, int] | None = None
+
+
+class GovernanceConfig(StrictModel):
+    """Governance pipeline configuration.
+
+    Same shape in YAML and SDK::
+
+        # tracemill.yaml
+        governance:
+          db_path: ./tracemill.db
+          project_root: .
+          pii_scanning: true
+          budget:
+            max_tool_calls: 200
+            max_by_effect:
+              destructive: 10
+
+        # SDK equivalent
+        GovernanceConfig(
+            db_path="./tracemill.db",
+            project_root=".",
+            pii_scanning=True,
+            budget=BudgetConfig(max_tool_calls=200, max_by_effect={"destructive": 10}),
+        )
+    """
+
+    db_path: str | None = None  # None = in-memory
+    project_root: str | None = None
+    rules_path: str | None = None  # custom rules YAML override
+    pii_scanning: bool = True
+    budget: BudgetConfig = Field(default_factory=BudgetConfig)
+
+
 # ─── Root Config ─────────────────────────────────────────────────────────────
 
 
@@ -215,6 +258,9 @@ class TracemillConfig(StrictModel):
 
     # SDK-mode configuration
     sdk: SDKConfig = Field(default_factory=SDKConfig)
+
+    # Governance pipeline configuration
+    governance: GovernanceConfig = Field(default_factory=GovernanceConfig)
 
     @field_validator("pipelines")
     @classmethod

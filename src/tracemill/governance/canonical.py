@@ -13,8 +13,8 @@ if TYPE_CHECKING:
 _CANONICAL_VERSION = "v1"
 
 # Session-contextual labels excluded from canonical hash (runtime-dependent)
-_DYNAMIC_CAPABILITIES = frozenset({"budget_pressure"})
-_DYNAMIC_STRUCTURES = frozenset({"phase_anomaly", "semantic_drift"})
+_DYNAMIC_CAPABILITIES = frozenset({"budget_pressure", "mcp_drift"})
+_DYNAMIC_STRUCTURES = frozenset({"phase_anomaly", "semantic_drift", "ifc_violation"})
 
 
 def compute_canonical_hash(

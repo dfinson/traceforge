@@ -35,6 +35,8 @@ class BudgetSnapshot:
     by_role: tuple[tuple[str, int], ...] = ()
     by_phase: tuple[tuple[str, int], ...] = ()
     by_mechanism: tuple[tuple[str, int], ...] = ()
+    by_action: tuple[tuple[str, int], ...] = ()
+    by_structure: tuple[tuple[str, int], ...] = ()
     pressure: bool = False
 
     def count(self, dimension: str, key: str) -> int:
@@ -187,6 +189,8 @@ class SessionState:
             by_role=tuple(sorted(self._budget_counters["role"].items())),
             by_phase=tuple(sorted(self._budget_counters["phase"].items())),
             by_mechanism=tuple(sorted(self._budget_counters["mechanism"].items())),
+            by_action=tuple(sorted(self._budget_counters["action"].items())),
+            by_structure=tuple(sorted(self._budget_counters["structure"].items())),
             pressure=self._pressure,
         )
         return SessionStateSnapshot(

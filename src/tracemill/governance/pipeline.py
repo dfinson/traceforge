@@ -212,33 +212,47 @@ class GovernancePipeline:
             # If reserved but never finalized (crash recovery), re-process
             if not meta_dict.get("reserved"):
                 return self._deserialize_meta(meta_dict)
+            # Reserved retry: skip Phase 1 mutations (already applied), go straight to Phase 2/3
 
         # Reserve the event key BEFORE state mutation to prevent double-increment on crash
         if not existing:
             now = datetime.now(timezone.utc).isoformat()
             self._store.reserve_event(event.source_event_key, session_id, now)
 
-        # Budget increment
-        self._budget.increment(ctx, state)
+            # Phase 1 mutations (only on first attempt, not on reserved retry)
+            # Phase window update (before budget so phase is current)
+            phase = self._infer_phase(ctx)
+            if phase:
+                state.update_phase_window(phase)
 
-        # Phase window update
-        phase = self._infer_phase(ctx)
-        if phase:
-            state.update_phase_window(phase)
+            # Budget increment
+            self._budget.increment(ctx, state)
 
-        # IFC taint recording (mutable state — must run in Phase 1)
-        if self._labeler._ifc:
-            ifc_src_labels: set[str] = set()
-            self._labeler._ifc.check(ctx, ifc_src_labels, state)
+            # IFC taint recording (mutable state — must run in Phase 1)
+            if self._labeler._ifc:
+                ifc_src_labels: set[str] = set()
+                self._labeler._ifc.check(ctx, ifc_src_labels, state)
 
-        # Record event
-        state.record_event(getattr(event, "sequence", None))
+            # Record event
+            state.record_event(getattr(event, "sequence", None))
 
-        # Pressure check
-        self._budget.check_pressure(state)
+            # Pressure check
+            self._budget.check_pressure(state)
 
-        # Persist state (with write-failure handling)
-        self._persist_with_retry(state, session_id)
+            # Persist state (with write-failure handling)
+            persist_ok = self._persist_with_retry(state, session_id)
+
+            # If state persistence failed, do NOT finalize — allow retry on next delivery
+            if not persist_ok:
+                return SessionMeta(
+                    classification=None,
+                    risk_assessment=None,
+                    recommendation=None,
+                    budget_snapshot=state.snapshot().budget,
+                    drift=None,
+                    mcp_alerts=(),
+                    evidence=None,
+                )
 
         # ── Phase 2: Labeling (side-effect-free) ──
         snapshot = state.snapshot()
@@ -364,6 +378,9 @@ class GovernancePipeline:
     def _infer_phase(self, ctx: "EnrichmentContext") -> str | None:
         """Infer session phase from classification/event."""
         cls = ctx.base_classification
+        # Network capability takes priority — network-capable events are always "network"
+        if "network_outbound" in cls.capability:
+            return "network"
         if cls.effect == "read_only":
             return "exploration"
         if cls.effect == "destructive":
@@ -377,9 +394,6 @@ class GovernancePipeline:
             return "implementation"
         if cls.effect == "informational":
             return "exploration"
-        # Network capability → network phase for drift detection
-        if "network_outbound" in cls.capability:
-            return "network"
         return "exploration"
 
     def _with_snapshot(self, ctx: "EnrichmentContext", snapshot: "SessionStateSnapshot") -> "EnrichmentContext":
@@ -387,14 +401,16 @@ class GovernancePipeline:
         import dataclasses
         return dataclasses.replace(ctx, session_state=snapshot)
 
-    def _persist_with_retry(self, state: "SessionState", session_id: str) -> None:
-        """Write-through with failure handling: 10 consecutive failures → memory-only mode."""
+    def _persist_with_retry(self, state: "SessionState", session_id: str) -> bool:
+        """Write-through with failure handling: 10 consecutive failures → memory-only mode.
+        Returns True on success, False on failure."""
         import logging
         logger = logging.getLogger(__name__)
 
         try:
             state.persist()
             self._write_failures[session_id] = 0  # Reset on success
+            return True
         except Exception as e:
             failures = self._write_failures.get(session_id, 0) + 1
             self._write_failures[session_id] = failures
@@ -412,6 +428,7 @@ class GovernancePipeline:
                     "will retry on next event",
                     failures, self._MAX_WRITE_FAILURES, session_id, e,
                 )
+            return False
 
     def _render_transform(self, template, ctx: "EnrichmentContext") -> TransformSuggestion | None:
         """Render TransformTemplate → TransformSuggestion using event data.

@@ -169,6 +169,14 @@ class SystemStore:
         )
         self._conn.commit()
 
+    def update_mcp_last_seen(self, server: str, tool_name: str, last_seen: str) -> None:
+        """Update only last_seen timestamp — preserves registered baseline."""
+        self._conn.execute(
+            "UPDATE mcp_fingerprints SET last_seen = ? WHERE server = ? AND tool_name = ?",
+            (last_seen, server, tool_name),
+        )
+        self._conn.commit()
+
     def get_content_hash(self, repo: str, file_path: str) -> str | None:
         row = self._conn.execute(
             "SELECT sha256 FROM content_hashes WHERE repo = ? AND file_path = ?",

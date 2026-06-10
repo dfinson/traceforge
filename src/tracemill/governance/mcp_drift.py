@@ -153,18 +153,8 @@ class MCPIntegrityScanner:
             if max_severity in ("warning", "critical"):
                 cap.add("mcp_drift")
 
-        # Always update last_seen on every scan (not just alerting scans)
-        self._store.upsert_mcp_profile(server, tool_name, {
-            "description_hash": desc_hash,
-            "schema_hash": schema_hash,
-            "registered_effect": stored.get("registered_effect"),
-            "registered_role": stored.get("registered_role"),
-            "registered_capabilities": stored.get("registered_capabilities"),
-            "registered_scope": stored.get("registered_scope"),
-            "clearance": stored.get("clearance"),
-            "first_seen": stored["first_seen"],
-            "last_seen": now.isoformat(),
-        })
+        # Update only last_seen — preserve registered baseline hashes/dimensions
+        self._store.update_mcp_last_seen(server, tool_name, now.isoformat())
 
         return alerts, False
 

@@ -99,10 +99,11 @@ class GovernanceLabeler:
             # In Phase 2, IFC operates read-only on snapshot taints for label assignment
             self._ifc_label_only(ctx, src_labels)
             # Detect IFC violation: tainted data flowing to mutating/destructive/network sinks
+            all_caps = ctx.base_classification.capability | frozenset(cap)
             if ctx.session_state.taint_ledger and ctx.base_classification.effect in ("mutating", "destructive"):
                 struct.add("ifc_violation")
                 ifc_violations = 1
-            elif any("ifc:" in l for l in src_labels) and "network_outbound" in cap:
+            elif any("ifc:" in l for l in src_labels) and "network_outbound" in all_caps:
                 struct.add("ifc_violation")
                 ifc_violations = 1
 

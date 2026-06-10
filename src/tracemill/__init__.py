@@ -1,5 +1,6 @@
 """tracemill — Agent event observation pipeline with pluggable storage backends."""
 
+from tracemill.assess import Assessor, AssessmentResult, GovernanceAssessment
 from tracemill.adapters.base import Adapter, JsonLineAdapter
 from tracemill.adapters.mapped_json import MappedJsonAdapter
 from tracemill.adapters.otel import OtelSpanAdapter
@@ -34,6 +35,11 @@ from tracemill.types import (
 )
 
 __all__ = [
+    # Assessment API
+    "Assessor",
+    "AssessmentResult",
+    "GovernanceAssessment",
+    # Adapters
     "Adapter",
     "JsonLineAdapter",
     "MappedJsonAdapter",

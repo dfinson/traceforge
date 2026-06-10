@@ -289,8 +289,6 @@ class GovernancePipeline:
         Used by .assess() to predict what the pipeline would produce if the
         event actually executed, without committing any side effects.
         """
-        import copy
-
         session_id = ctx.event.session_id
 
         # Load state without caching for unknown sessions (no side effect on _states)
@@ -300,13 +298,8 @@ class GovernancePipeline:
             from tracemill.governance.state import SessionState
             state = SessionState.load_from_db(session_id, self._store.connection)
 
-        # Deep-copy state for transient simulation
-        # sqlite3.Connection cannot be pickled — detach before copy, restore after
-        original_db = state._db
-        state._db = None
-        transient = copy.deepcopy(state)
-        state._db = original_db
-        # transient has no DB — persist calls are no-ops
+        # Thread-safe clone — never touches state._db
+        transient = state.clone_detached()
 
         # ── Phase 1 simulation (non-persisted) ──
         phase = self._infer_phase(ctx)

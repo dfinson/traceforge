@@ -280,14 +280,47 @@ class GovernancePipeline:
         return _assess(self, payload)
 
     def preflight_event(self, ctx: "EnrichmentContext") -> "SessionMeta":
-        """Read-only Phase 2/3 scoring — no state mutation, no persistence.
+        """Simulate full pipeline (Phase 1/2/3) without persisting state changes.
 
-        Runs labeling and risk/rules against the current session snapshot.
-        Used by .assess() to score without side effects.
+        Creates a transient copy of session state, applies Phase 1 mutations
+        (budget, taint, drift) to it, then runs Phase 2/3 against the result.
+        The real state and DB are never modified.
+
+        Used by .assess() to predict what the pipeline would produce if the
+        event actually executed, without committing any side effects.
         """
+        import copy
+
         session_id = ctx.event.session_id
-        state = self.get_or_create_state(session_id)
-        snapshot = state.snapshot()
+
+        # Load state without caching for unknown sessions (no side effect on _states)
+        if session_id in self._states:
+            state = self._states[session_id]
+        else:
+            from tracemill.governance.state import SessionState
+            state = SessionState.load_from_db(session_id, self._store.connection)
+
+        # Deep-copy state for transient simulation
+        # sqlite3.Connection cannot be pickled — detach before copy, restore after
+        original_db = state._db
+        state._db = None
+        transient = copy.deepcopy(state)
+        state._db = original_db
+        # transient has no DB — persist calls are no-ops
+
+        # ── Phase 1 simulation (non-persisted) ──
+        phase = self._infer_phase(ctx)
+        if phase:
+            transient.update_phase_window(phase)
+        self._budget.increment(ctx, transient)
+        if self._labeler.has_ifc:
+            ifc_src_labels: set[str] = set()
+            self._labeler.check_ifc(ctx, ifc_src_labels, transient)
+        transient.record_event(None)
+        self._budget.check_pressure(transient)
+
+        # ── Phase 2/3 (side-effect-free) ──
+        snapshot = transient.snapshot()
         enrichment_ctx = self._with_snapshot(ctx, snapshot)
 
         gov_result = self._labeler.label(enrichment_ctx)

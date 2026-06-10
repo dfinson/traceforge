@@ -185,6 +185,9 @@ def assess(pipeline, payload: dict) -> AssessmentResult:
     # Validate payload
     tool_name, tool_input, session_id = _validate_payload(payload)
     server_namespace = payload.get("server_namespace")
+    mcp_server_name = payload.get("mcp_server_name") or server_namespace
+    tool_description = payload.get("tool_description")
+    tool_schema_json = payload.get("tool_schema_json")
     project_root = payload.get("project_root") or getattr(pipeline, "_project_root", None)
     try:
         tool_args_json = json.dumps(tool_input)
@@ -206,6 +209,9 @@ def assess(pipeline, payload: dict) -> AssessmentResult:
         server_namespace=server_namespace,
         tool_args_json=tool_args_json,
         source_event_id=None,
+        mcp_server_name=mcp_server_name,
+        tool_description=tool_description,
+        tool_schema_json=tool_schema_json,
     )
 
     # Classify: use shell classifier for commands, tool classifier otherwise

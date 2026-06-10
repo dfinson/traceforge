@@ -1111,75 +1111,93 @@ tracemill/
 
 ### What It Is
 
-The gate module is a synchronous scoring path that reuses tracemill's classification engine to make allow/deny decisions on tool calls **before they execute**. It runs inside framework hook mechanisms — the framework calls tracemill, tracemill scores and decides, the framework acts on the verdict.
+The gate is not a separate system — it is a **stage** in the existing pipeline. The pipeline is:
 
-tracemill IS the decision-maker. The policy is authored as YAML. No consumer code runs at gate-time for sidecar hooks (Surface A); for SDK integrations (Surface B) the consumer calls one function.
+```
+Source → Parse → Enrich → Gate → Sink(s)
+```
+
+The Gate stage evaluates a YAML policy against the enrichment output and attaches a binary verdict (`allow` or `deny`) to the event. What varies by framework is the Source (where events come from) and the Sink (what acts on the verdict). The Parse → Enrich → Gate core is always the same.
 
 ### Framework × Deployment Matrix
 
-tracemill supports 13 platforms across 16 deployment permutations. Each maps to one of three gate surfaces:
+tracemill supports 13 platforms across 16 deployment permutations. Each maps to one of three gate configurations:
 
-| # | Platform | Deployment Mode | Surface | Gate Mechanism |
-|---|----------|----------------|---------|----------------|
-| 1 | **Copilot** | CLI (local) | A | `.github/hooks/preToolUse.json` → `tracemill gate --stdin --framework copilot` |
-| 2 | **Copilot** | Cloud Agent (GitHub container) | A | Same hook file; `copilot-setup-steps.yml` installs tracemill in container |
-| 3 | **Copilot** | SDK (`github-copilot-sdk`) | B | `on_permission_request` callback → `PermissionRequestResult("approve-once"\|"reject")` |
-| 4 | **Claude Code** | CLI (local) | A | `.claude/settings.json` `PreToolUse` hook → `tracemill gate --stdin --framework claude` |
-| 5 | **Claude Code** | SDK (`claude-code-sdk`) | B | `can_use_tool(tool_name, input, ctx)` → `PermissionResultAllow()\|PermissionResultDeny()` |
-| 6 | **Cline** | VS Code extension | A | `.cline/hooks/preToolUse.sh` → `tracemill gate --stdin --framework cline` |
-| 7 | **OpenHands** | Self-hosted container | A | `.openhands/hooks.json` `PreToolUse` → `tracemill gate --stdin --framework openhands` |
-| 8 | **Goose** | CLI (local or orchestrated) | B | REST `POST /action-required/tool-confirmation` — agent blocks on oneshot channel |
-| 9 | **OpenCode** | TUI/CLI | B | `Permission.Service.ask()` → SSE `permission.asked` → `Permission.Service.reply(id, verdict)` |
-| 10 | **LangGraph** | Python library | B | `interrupt(value)` → `GraphInterrupt` — resume via `Command(resume=verdict)` |
-| 11 | **CrewAI** | Python library | B | `@before_tool_call(tools=[...])` — return `False` to block |
-| 12 | **PydanticAI** | Python library | B | `DeferredToolRequests` → `deferred.make_results(approvals={id: Approved()\|Denied()})` |
-| 13 | **MAF / Semantic Kernel** | .NET/Python library | B | `IAutoFunctionInvocationFilter` — skip `next()` + `context.Terminate = true` to block |
-| 14 | **Aider** | CLI | Reactive | None — `--yes` auto-approves all; `io.confirm_ask()` is terminal-only |
-| 15 | **smolagents** | Python library | Reactive | None — `Monitor` is observer-only; `agent.interrupt()` is post-hoc abort |
-| 16 | **SWE-agent** | CLI/Docker | Reactive | None — `on_action_started()` returns void, observer only |
+| # | Platform | Deployment Mode | Source | Sink | Gate Mechanism |
+|---|----------|----------------|--------|------|----------------|
+| 1 | **Copilot** | CLI (local) | `StdinSource` | `VerdictSink` (stdout JSON + exit code) | `.github/hooks/preToolUse.json` |
+| 2 | **Copilot** | Cloud Agent (GitHub container) | `StdinSource` | `VerdictSink` | Same hook; `copilot-setup-steps.yml` installs tracemill |
+| 3 | **Copilot** | SDK (`github-copilot-sdk`) | `FunctionCallSource` | Returns `GateResult` to caller | `on_permission_request` callback |
+| 4 | **Claude Code** | CLI (local) | `StdinSource` | `VerdictSink` | `.claude/settings.json` `PreToolUse` hook |
+| 5 | **Claude Code** | SDK (`claude-code-sdk`) | `FunctionCallSource` | Returns `GateResult` to caller | `can_use_tool` callback |
+| 6 | **Cline** | VS Code extension | `StdinSource` | `VerdictSink` | `.cline/hooks/preToolUse.sh` |
+| 7 | **OpenHands** | Self-hosted container | `StdinSource` | `VerdictSink` | `.openhands/hooks.json` |
+| 8 | **Goose** | CLI (local or orchestrated) | `FunctionCallSource` | Returns `GateResult` to caller | REST approval channel |
+| 9 | **OpenCode** | TUI/CLI | `FunctionCallSource` | Returns `GateResult` to caller | SSE `permission.asked` |
+| 10 | **LangGraph** | Python library | `FunctionCallSource` | Returns `GateResult` to caller | `interrupt()` / `Command(resume=)` |
+| 11 | **CrewAI** | Python library | `FunctionCallSource` | Returns `GateResult` to caller | `@before_tool_call` decorator |
+| 12 | **PydanticAI** | Python library | `FunctionCallSource` | Returns `GateResult` to caller | `DeferredToolRequests` |
+| 13 | **MAF / Semantic Kernel** | .NET/Python library | `FunctionCallSource` | Returns `GateResult` to caller | `IAutoFunctionInvocationFilter` |
+| 14 | **Aider** | CLI | `FileWatchSource` | `CallbackSink` (consumer reads verdict, kills process) | No pre-exec hook exists |
+| 15 | **smolagents** | Python library | `FileWatchSource` | `CallbackSink` | No pre-exec hook exists |
+| 16 | **SWE-agent** | CLI/Docker | `FileWatchSource` | `CallbackSink` | No pre-exec hook exists |
 
-**Totals:** Surface A = 5 permutations, Surface B = 8 permutations, Reactive = 3 permutations.
+**What varies is plumbing. The pipeline core is identical in all 16 cases.**
 
-### How It Works (End-to-End)
+### The Pipeline (Unified)
 
-There are three gate surfaces. The platform and deployment mode determine which applies.
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                          THE PIPELINE (always)                              │
+│                                                                            │
+│   Source ──→ Parser ──→ Enricher ──→ GateStage ──→ Sink(s)                 │
+│                                                                            │
+│   • Parser: selects mapping YAML by framework, normalizes to SessionEvent  │
+│   • Enricher: classifies, scores, attaches FACTS to event metadata         │
+│   • GateStage: evaluates policy YAML against facts, attaches verdict       │
+│   • If no policy configured: GateStage is a no-op pass-through             │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+The GateStage is trivial:
+
+```python
+class GateStage:
+    """Pipeline stage that evaluates policy and attaches verdict to event."""
+
+    def __init__(self, policy: PolicyEngine | None = None):
+        self._policy = policy
+
+    def process(self, event: SessionEvent) -> SessionEvent:
+        if self._policy:
+            event.gate_result = self._policy.evaluate(event.enrichment)
+        return event
+```
+
+If no `gate-policy.yaml` is configured, the stage is absent or passes through. The pipeline still works for pure observation. When policy IS configured, every event gets a verdict — what differs is whether something blocks on that verdict.
+
+### How the Source and Sink Vary
 
 ---
 
-#### Surface A: Sidecar Hook Process
+#### Sidecar mode (rows #1, 2, 4, 6, 7)
 
-**Applies to:** Copilot CLI (#1), Copilot Cloud Agent (#2), Claude Code CLI (#4), Cline (#6), OpenHands (#7)
-
-These frameworks all converged on the same protocol: before executing a tool call, they spawn an external process, pass tool call data on stdin as JSON, and read a decision from stdout/exit code.
-
-**The full sequence:**
+The framework spawns tracemill as a subprocess. tracemill runs the full pipeline synchronously on a single event:
 
 ```
-1. Agent decides to call a tool (e.g. Bash "rm -rf /tmp")
-2. Framework fires PreToolUse hook — spawns tracemill process
-3. Framework writes to stdin:
-     {"toolName": "bash", "toolArgs": {"command": "rm -rf /tmp"}}
-4. tracemill reads stdin
-5. tracemill selects mapping (copilot.yaml / claude.yaml / cline.yaml)
-6. tracemill parses payload → SessionEvent
-7. tracemill classifies:
-     mechanism=shell, effect=destructive, scope=system.os
-8. tracemill scores:
-     risk_score=92, risk_label=critical, mitre=[T1485]
-9. tracemill evaluates gate-policy.yaml:
-     rule "critical-risk" matches (risk_score > 80) → deny
-10. tracemill writes to stdout:
-      {"permissionDecision": "deny",
-       "permissionDecisionReason": "Destructive shell command (risk 92/100)"}
-11. tracemill exits with code 2 (non-zero = deny for command hooks)
-12. Framework receives deny — tool call never executes
-13. Agent is told: "Tool denied: Destructive shell command"
-14. Agent adapts and tries a different approach
+Framework fires PreToolUse hook → spawns `tracemill gate --stdin --framework copilot`
+  → StdinSource reads one JSON event from stdin
+  → Parser normalizes (copilot.yaml mapping)
+  → Enricher classifies + scores
+  → GateStage evaluates policy → verdict
+  → VerdictSink writes stdout JSON + sets exit code (0=allow, 2=deny)
+Framework reads exit code → allows or blocks the tool
 ```
 
-**Consumer setup (one-time):**
+**Consumer setup (one-time, zero code):**
 
-For Copilot Cloud Agent (`.github/hooks/preToolUse.json`):
+For Copilot (`.github/hooks/preToolUse.json`):
 ```json
 {
   "version": 1,
@@ -1223,70 +1241,46 @@ For OpenHands (`.openhands/hooks.json`):
 }
 ```
 
-**The consumer writes zero code.** They install tracemill, author a `gate-policy.yaml`, and drop the hook config into their repo. tracemill handles all protocol differences internally.
-
-**Fail-closed by default:** If tracemill crashes, the non-zero exit code causes the framework to deny the tool call. This is a safety property of the sidecar hook pattern.
+**Fail-closed:** If tracemill crashes, exit code is non-zero = deny.
 
 ---
 
-#### Surface B: SDK Scoring Function
+#### SDK mode (rows #3, 5, 8–13)
 
-**Applies to:** Copilot SDK (#3), Claude Code SDK (#5), Goose (#8), OpenCode (#9), LangGraph (#10), CrewAI (#11), PydanticAI (#12), MAF/Semantic Kernel (#13)
-
-These frameworks have in-process callbacks or async approval channels. The consumer's service calls `engine.score()` and delivers the verdict back to the framework using its native protocol.
-
-**The full sequence (Goose example):**
-
-```
-1. Agent decides to call a tool
-2. Goose's PermissionInspector returns RequireApproval
-3. Goose emits ToolConfirmationRequest to SQLite (content_json)
-4. Goose blocks on tokio::oneshot channel, waiting for resolution
-5. Consumer's service (e.g. CodePlane) observes the event
-6. Consumer calls: engine.score(event_payload, framework="goose")
-7. tracemill parses, classifies, scores → returns GateResult
-8. Consumer reads result.verdict:
-   - ALLOW: POSTs {"id": req_id, "action": "allow_once"} to Goose
-   - DENY:  POSTs {"id": req_id, "action": "deny_once"} to Goose
-9. Goose's oneshot channel resolves
-10. Tool executes (if allowed) or agent is told it was denied
-```
-
-**SDK usage (generic):**
+The consumer's code calls `pipeline.score()` synchronously when their framework pauses for approval. Same pipeline, just invoked as a function instead of a process:
 
 ```python
-from tracemill.gate import GateEngine
+from tracemill import Pipeline
 
-engine = GateEngine.from_config(policy_path="./gate-policy.yaml")
+pipeline = Pipeline.for_gate(policy_path="./gate-policy.yaml")
 
-# Called by the consumer wherever they intercept the event
-result = engine.score(payload, framework="goose")
+# One call — runs Parse → Enrich → Gate → returns result
+result = pipeline.score(payload, framework="goose")
 result.verdict    # Verdict.ALLOW or Verdict.DENY
 result.score      # 92
 result.reason     # "Destructive shell command (risk 92/100)"
-result.event      # Full SessionEvent with all classifications
+result.event      # Full SessionEvent with enrichment + verdict attached
 ```
 
 **Copilot SDK integration:**
 
 ```python
 from copilot import CopilotClient
-from tracemill.gate import GateEngine, Verdict
+from copilot.session import PermissionRequestResult
+from tracemill import Pipeline, Verdict
 
-engine = GateEngine.from_config(policy_path="./gate-policy.yaml")
+pipeline = Pipeline.for_gate(policy_path="./gate-policy.yaml")
 
 async def permission_handler(request, invocation):
-    result = engine.score({
+    result = pipeline.score({
         "tool_name": request.tool_name or request.kind,
         "tool_input": {"command": request.full_command_text, "path": request.file_name},
         "kind": request.kind,
     }, framework="copilot")
-    from copilot.session import PermissionRequestResult
     if result.verdict == Verdict.ALLOW:
         return PermissionRequestResult(kind="approve-once")
     return PermissionRequestResult(kind="reject")
 
-client = CopilotClient()
 session = await client.create_session(
     on_permission_request=permission_handler,
     working_directory=cwd,
@@ -1296,14 +1290,13 @@ session = await client.create_session(
 **Claude Code SDK integration:**
 
 ```python
-from claude_code_sdk import ClaudeCodeOptions, ClaudeSDKClient
-from claude_code_sdk import PermissionResultAllow, PermissionResultDeny
-from tracemill.gate import GateEngine, Verdict
+from claude_code_sdk import ClaudeCodeOptions, PermissionResultAllow, PermissionResultDeny
+from tracemill import Pipeline, Verdict
 
-engine = GateEngine.from_config(policy_path="./gate-policy.yaml")
+pipeline = Pipeline.for_gate(policy_path="./gate-policy.yaml")
 
 async def can_use_tool(tool_name, input_data, context):
-    result = engine.score({
+    result = pipeline.score({
         "tool_name": tool_name,
         "tool_input": input_data,
     }, framework="claude")
@@ -1318,80 +1311,43 @@ options = ClaudeCodeOptions(
 )
 ```
 
-The consumer owns:
-- How they observe the event (polling, SSE, webhook, or in-process callback)
-- How they deliver the verdict to the framework (REST call, resume command, return value)
-- What to do if they want a human in the loop (their escalation workflow)
-
-tracemill owns:
-- Parsing the payload using the correct framework mapping
-- Classifying and scoring
-- Evaluating the YAML policy
-- Returning a deterministic verdict
+The consumer owns how they observe events and deliver verdicts to their framework. tracemill owns parsing, classification, scoring, and policy evaluation.
 
 ---
 
-#### The Reactive Path (for ungated frameworks)
+#### Streaming mode with gate (rows #14–16, and optionally any framework)
 
-**Applies to:** Aider (#14), smolagents (#15), SWE-agent (#16)
-
-For frameworks without hooks, the observation pipeline (existing) provides **fast reactive scoring**. The consumer configures a `CallbackSink` that fires on every enriched event:
+For streaming observation pipelines (the existing architecture), the GateStage is simply present in the pipeline. Every event gets scored and receives a verdict. Sinks downstream can read it:
 
 ```python
+from tracemill import Pipeline
+
 async def on_event(event: SessionEvent):
-    if event.metadata.classification and event.metadata.risk.score > 80:
+    # The gate stage already ran — verdict is attached
+    if event.gate_result and event.gate_result.verdict == Verdict.DENY:
         await kill_process(event.session_id)
 
-sink = CallbackSink(on_event=on_event)
+pipeline = Pipeline(
+    source=FileWatchSource(path),
+    framework="aider",
+    policy_path="./gate-policy.yaml",   # enables gate stage
+    sinks=[CallbackSink(on_event=on_event), JsonlSink(output_path)],
+)
+await pipeline.run()
 ```
 
-This is not preventive — the tool already fired. But the consumer can:
-- Kill the agent process before the next tool call
-- Revoke credentials
-- Alert a human
-- Flag the session
-
-The latency depends on the source (FileWatchSource: ~50-200ms, SSE: ~10-50ms).
-
----
+This is not preventive for ungated frameworks (the tool already fired) but the consumer reacts within 50–200ms. For gateable frameworks running in streaming mode (e.g. watching Copilot's SQLite for audit), the verdict is informational — the sidecar/SDK path already handled enforcement.
 
 ### Separation of Concerns
 
 ```
-Enricher (classify/)  → produces FACTS (risk_score, effect, mechanism, scope, mitre...)
-PolicyEngine (gate/)  → maps facts to VERDICTS (allow or deny)
-I/O layer             → Surface A: tracemill handles (stdin/stdout/exit)
-                        Surface B: consumer handles (their service, their transport)
+Parser (mappings/)    → normalizes raw framework JSON/events into SessionEvent
+Enricher (classify/)  → attaches FACTS (risk_score, effect, mechanism, scope, mitre...)
+GateStage (gate/)     → evaluates policy against facts, attaches VERDICT (allow/deny)
+Sink(s)               → acts on the enriched+gated event (store, emit, exit, return)
 ```
 
-The enricher **never** produces `recommended_action`, `suggested_verdict`, or any decision-implying field. It outputs measurements and classifications only. Verdicts exist only in the gate path.
-
-### Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                     classify/ + mappings/                             │
-│  (YAML rules, risk scoring, tool classifications, shell AST)         │
-│  Shared by BOTH paths — single source of truth                       │
-└─────────────┬───────────────────────────────────────────────────────┘
-              │
-   ┌──────────┼──────────┐
-   │          │          │
-   ▼          ▼          ▼
-┌────────┐ ┌──────────┐ ┌──────────────────────────────────────────┐
-│pipeline│ │gate CLI  │ │gate SDK                                   │
-│        │ │          │ │                                           │
-│Source →│ │stdin →   │ │engine.score(payload, fw) →                │
-│Adapter→│ │parse →   │ │  parse → classify → score → policy eval  │
-│Enrich →│ │classify →│ │  → GateResult                            │
-│Sink(s) │ │score →   │ │                                           │
-│        │ │policy →  │ │Consumer calls this from their service     │
-│async,  │ │exit code │ │and acts on the result themselves          │
-│post-hoc│ │          │ │                                           │
-│        │ │sync,     │ │sync, in-process, <10ms                   │
-│        │ │<10ms     │ │                                           │
-└────────┘ └──────────┘ └──────────────────────────────────────────┘
-```
+The enricher **never** produces `recommended_action`, `suggested_verdict`, or any decision-implying field. It outputs measurements and classifications only. The GateStage is the sole place where facts become a verdict.
 
 ### Core Types
 
@@ -1476,33 +1432,47 @@ rules:
 - Multiple fields in one `when`: all must match (AND)
 - `risk_score` comparisons: `">80"` means score > 80
 
-### GateEngine
+### Pipeline API
+
+The gate is accessed through the same `Pipeline` class, configured differently depending on mode:
 
 ```python
-class GateEngine:
-    """Synchronous scoring + policy evaluation."""
+class Pipeline:
+    """Unified pipeline: Source → Parse → Enrich → Gate → Sink(s)."""
 
     @classmethod
-    def from_config(cls, policy_path: Path, classify_config: ClassifyConfig | None = None) -> "GateEngine": ...
+    def for_gate(cls, policy_path: Path, classify_config: ClassifyConfig | None = None) -> "Pipeline":
+        """Create a pipeline configured for single-shot gate scoring (SDK mode).
+        No source or sinks — caller provides payload via .score() method."""
+        ...
 
     def score(self, payload: dict, framework: str) -> GateResult:
-        """Score a single tool call payload and evaluate policy.
+        """Run the full pipeline synchronously on a single event (SDK mode).
 
-        1. Selects adapter + preprocessor for framework
-        2. Parses payload into SessionEvent
-        3. Classifies via ClassificationEngine
-        4. Computes RiskAssessment
-        5. Evaluates policy rules (first match wins)
-        6. Returns GateResult
+        1. Parser selects mapping for framework, normalizes to SessionEvent
+        2. Enricher classifies + scores → attaches facts
+        3. GateStage evaluates policy → attaches verdict
+        4. Returns GateResult (verdict + enriched event)
+        """
+        ...
+
+    async def run(self) -> None:
+        """Run the pipeline as a long-lived stream (observation mode).
+        Source emits events → each passes through Parse → Enrich → Gate → Sink(s).
         """
         ...
 ```
 
+For sidecar mode, the CLI (`tracemill gate --stdin`) constructs a pipeline with `StdinSource` + `VerdictSink` and calls `run()` on a single event.
+
 ### CLI Interface
 
 ```bash
-# Surface A: used as sidecar hook script (stdin → score → exit code)
+# Sidecar mode: used as hook script (stdin → pipeline → exit code)
 tracemill gate --stdin --framework copilot --policy ./gate-policy.yaml
+
+# Observation mode with gate enabled:
+tracemill run --config tracemill.yaml  # policy_path in config enables gate stage
 
 # Debugging: score a payload without acting
 echo '{"toolName":"bash","toolArgs":{"command":"rm -rf /"}}' | \
@@ -1510,55 +1480,35 @@ echo '{"toolName":"bash","toolArgs":{"command":"rm -rf /"}}' | \
 # Output: {"verdict":"deny","score":92,"reason":"...","rule":"critical-risk"}
 ```
 
-### Framework Compatibility Matrix
-
-| Framework | Surface | Hook Config Location | Protocol |
-|-----------|---------|---------------------|----------|
-| GitHub Copilot CLI | A (sidecar) | `.github/hooks/*.json` or `/etc/github-copilot/policy.d/` | stdin JSON → stdout JSON + exit code |
-| GitHub Copilot Cloud Agent | A (sidecar) | `.github/hooks/*.json` | stdin JSON → stdout JSON + exit code |
-| Claude Code | A (sidecar) | `.claude/settings.json` | stdin JSON → stdout JSON + exit code |
-| Cline / Roo Code | A (sidecar) | `.cline/hooks/` scripts | stdin JSON → stdout JSON + exit code |
-| OpenHands | A (sidecar) | `.openhands/hooks.json` | stdin JSON → stdout JSON + exit code |
-| Goose | B (SDK) | Consumer's service | `engine.score()` → consumer POSTs to Goose REST API |
-| OpenCode | B (SDK) | Consumer's service | `engine.score()` → consumer calls `Permission.Service.reply()` |
-| LangGraph | B (SDK) | Consumer's service | `engine.score()` → consumer sends `Command(resume=...)` |
-| CrewAI | B (SDK) | Consumer's code | `engine.score()` inside `@before_tool_call`, return False to deny |
-| PydanticAI | B (SDK) | Consumer's code | `engine.score()` on `DeferredToolRequests`, return `ToolDenied()` |
-| MAF/Semantic Kernel | B (SDK) | Consumer's code (C#) | `engine.score()` via HTTP, don't call `next()` to deny |
-
-**Observation only (no pre-execution path):**
-
-| Framework | Why | What tracemill provides |
-|-----------|-----|------------------------|
-| Aider | Terminal prompt only, no programmable hook | Post-hoc scoring via pipeline + CallbackSink |
-| smolagents | No per-tool hook API | Post-hoc scoring via pipeline + CallbackSink |
-| SWE-agent | Observer hooks (void return, cannot block) | Post-hoc scoring via pipeline + CallbackSink |
-
 ### Design Constraints
 
-1. **No framework dependencies** — `gate/` never imports Claude Code, Copilot, LangGraph, etc. It speaks their wire formats.
-2. **No network calls from scoring** — `engine.score()` is pure computation. No HTTP, no DB, no LLM.
-3. **Deterministic** — same payload + same policy = same verdict. Always.
-4. **Fast** — target <10ms p99 for `engine.score()`. Pre-built indexes at init; scoring is lookup + arithmetic.
-5. **Stateless** — no session memory between calls. Each call is independent.
-6. **Policy is data** — no code in policy files. YAML only. Turing-incomplete by design.
-7. **Binary verdicts** — allow or deny. No "escalate" or "maybe." Consumer implements escalation if they want it.
-8. **Fail-closed** — in sidecar mode, any crash or unhandled error exits non-zero = deny.
-9. **Enricher purity** — the enricher (§9) produces only classifications and scores. Never verdicts.
+1. **One pipeline** — gate is a stage, not a separate system. Same code path for observation and enforcement.
+2. **No framework dependencies** — `gate/` never imports Claude Code, Copilot, LangGraph, etc. It speaks their wire formats via mappings.
+3. **No network calls from scoring** — `pipeline.score()` is pure computation. No HTTP, no DB, no LLM.
+4. **Deterministic** — same payload + same policy = same verdict. Always.
+5. **Fast** — target <10ms p99 for `pipeline.score()`. Pre-built indexes at init; scoring is lookup + arithmetic.
+6. **Stateless** — no session memory between calls. Each call is independent.
+7. **Policy is data** — no code in policy files. YAML only. Turing-incomplete by design.
+8. **Binary verdicts** — allow or deny. No "escalate" or "maybe." Consumer implements escalation if they want it.
+9. **Fail-closed** — in sidecar mode, any crash or unhandled error exits non-zero = deny.
+10. **Enricher purity** — the enricher (§9) produces only classifications and scores. Never verdicts.
 
 ### File Structure
 
 ```
 src/tracemill/
+├── pipeline/
+│   ├── __init__.py          # Pipeline class (unified)
+│   ├── stages.py            # ParseStage, EnrichStage, GateStage
+│   ├── sources/             # StdinSource, FunctionCallSource, FileWatchSource, SSESource...
+│   └── sinks/               # VerdictSink, JsonlSink, SqliteSink, CallbackSink...
 ├── gate/
-│   ├── __init__.py          # Public API: GateEngine, GateResult, Verdict
+│   ├── __init__.py          # Public API: GateResult, Verdict, PolicyEngine
 │   ├── types.py             # Verdict, GateResult dataclasses
-│   ├── engine.py            # GateEngine (parse → classify → score → policy)
-│   ├── policy.py            # PolicyEngine (YAML rule loading + matching)
-│   └── io.py               # Stdin/stdout protocol handling for CLI mode
-├── classify/                # unchanged — shared with pipeline
-├── pipeline/                # unchanged — observation path
-└── mappings/                # unchanged — shared with gate
+│   ├── policy.py            # PolicyEngine (YAML rule loading + first-match evaluation)
+│   └── io.py                # VerdictSink (stdout JSON + exit code for sidecar mode)
+├── classify/                # shared — enricher logic
+└── mappings/                # shared — framework YAML definitions
 ```
 
 ---

@@ -1117,7 +1117,7 @@ The gate is not a separate system — it is a **stage** in the existing pipeline
 Source → Parse → Enrich → Gate → Sink(s)
 ```
 
-The Gate stage evaluates a YAML policy against the enrichment output and attaches a binary verdict (`allow` or `deny`) to the event. What varies by framework is the Source (where events come from) and the Sink (what acts on the verdict). The Parse → Enrich → Gate core is always the same.
+The Gate stage evaluates policy rules (defined in `tracemill.yaml` under the pipeline's `gate:` key) against the enrichment output and attaches a binary verdict (`allow` or `deny`) to the event. No `gate:` key = no verdict, stage is a no-op pass-through. What varies by framework is the Source (where events come from) and the Sink (what acts on the verdict). The Parse → Enrich → Gate core is always the same.
 
 ### Framework × Deployment Matrix
 
@@ -1175,7 +1175,7 @@ class GateStage:
         return event
 ```
 
-If no `gate-policy.yaml` is configured, the stage is absent or passes through. The pipeline still works for pure observation. When policy IS configured, every event gets a verdict — what differs is whether something blocks on that verdict.
+If no `gate:` key is present in the pipeline config, the stage is a no-op pass-through. The pipeline still works for pure observation. When gate rules ARE configured, every event gets a verdict — what differs is whether something blocks on that verdict.
 
 ### How the Source and Sink Vary
 
@@ -1252,10 +1252,10 @@ The consumer's code calls `pipeline.score()` synchronously when their framework 
 ```python
 from tracemill import Pipeline
 
-pipeline = Pipeline.for_gate(policy_path="./gate-policy.yaml")
+pipeline = Pipeline.for_gate(framework="goose")
 
 # One call — runs Parse → Enrich → Gate → returns result
-result = pipeline.score(payload, framework="goose")
+result = pipeline.score(payload)
 result.verdict    # Verdict.ALLOW or Verdict.DENY
 result.score      # 92
 result.reason     # "Destructive shell command (risk 92/100)"
@@ -1269,14 +1269,14 @@ from copilot import CopilotClient
 from copilot.session import PermissionRequestResult
 from tracemill import Pipeline, Verdict
 
-pipeline = Pipeline.for_gate(policy_path="./gate-policy.yaml")
+pipeline = Pipeline.for_gate(framework="copilot")
 
 async def permission_handler(request, invocation):
     result = pipeline.score({
         "tool_name": request.tool_name or request.kind,
         "tool_input": {"command": request.full_command_text, "path": request.file_name},
         "kind": request.kind,
-    }, framework="copilot")
+    })
     if result.verdict == Verdict.ALLOW:
         return PermissionRequestResult(kind="approve-once")
     return PermissionRequestResult(kind="reject")
@@ -1293,13 +1293,13 @@ session = await client.create_session(
 from claude_code_sdk import ClaudeCodeOptions, PermissionResultAllow, PermissionResultDeny
 from tracemill import Pipeline, Verdict
 
-pipeline = Pipeline.for_gate(policy_path="./gate-policy.yaml")
+pipeline = Pipeline.for_gate(framework="claude")
 
 async def can_use_tool(tool_name, input_data, context):
     result = pipeline.score({
         "tool_name": tool_name,
         "tool_input": input_data,
-    }, framework="claude")
+    })
     if result.verdict == Verdict.ALLOW:
         return PermissionResultAllow()
     return PermissionResultDeny(message=result.reason)
@@ -1327,12 +1327,9 @@ async def on_event(event: SessionEvent):
     if event.gate_result and event.gate_result.verdict == Verdict.DENY:
         await kill_process(event.session_id)
 
-pipeline = Pipeline(
-    source=FileWatchSource(path),
-    framework="aider",
-    policy_path="./gate-policy.yaml",   # enables gate stage
-    sinks=[CallbackSink(on_event=on_event), JsonlSink(output_path)],
-)
+pipeline = Pipeline.from_config("./tracemill.yaml", pipeline_name="aider")
+# gate: key in config enables the gate stage automatically
+pipeline.add_sink(CallbackSink(on_event=on_event))
 await pipeline.run()
 ```
 
@@ -1368,45 +1365,56 @@ class GateResult:
 
 No `ESCALATE` verdict. If a consumer wants human-in-the-loop they read the `GateResult` and implement escalation themselves. tracemill always commits to a binary allow/deny based on the policy YAML.
 
-### Policy Format (`gate-policy.yaml`)
+### Gate Configuration (in `tracemill.yaml`)
 
-Declarative, evaluated top-to-bottom, first match wins:
+The gate is configured per-pipeline as a `gate:` key. Declarative rules, evaluated top-to-bottom, first match wins:
 
 ```yaml
-version: 1
-default: allow                    # verdict when no rule matches
+# tracemill.yaml
+pipelines:
+  copilot:
+    source:
+      type: sqlite
+      path: ~/.config/github-copilot/chat.db
+    framework: copilot
+    gate:
+      default: allow                    # verdict when no rule matches
+      rules:
+        - id: critical-risk
+          when:
+            risk_score: ">80"
+          verdict: deny
+          reason: "Risk score exceeds critical threshold"
 
-rules:
-  - id: critical-risk
-    when:
-      risk_score: ">80"
-    verdict: deny
-    reason: "Risk score exceeds critical threshold"
+        - id: destructive-shell
+          when:
+            effect: destructive
+            mechanism: shell
+          verdict: deny
 
-  - id: destructive-shell
-    when:
-      effect: destructive
-      mechanism: shell
-    verdict: deny
+        - id: network-exfil
+          when:
+            capability: [network_outbound]
+            scope: [system.secrets, system.os]
+          verdict: deny
+          reason: "Network access to sensitive scope"
 
-  - id: network-exfil
-    when:
-      capability: [network_outbound]
-      scope: [system.secrets, system.os]
-    verdict: deny
-    reason: "Network access to sensitive scope"
+        - id: mitre-flagged
+          when:
+            mitre_tactic: [T1485, T1070, T1059]
+          verdict: deny
 
-  - id: mitre-flagged
-    when:
-      mitre_tactic: [T1485, T1070, T1059]
-    verdict: deny
-
-  - id: unknown-mcp-mutate
-    when:
-      mcp_server: "*"
-      effect: [mutating, destructive]
-    verdict: deny
+        - id: unknown-mcp-mutate
+          when:
+            mcp_server: "*"
+            effect: [mutating, destructive]
+          verdict: deny
+    sinks:
+      - type: jsonl
+        path: ./traces/copilot.jsonl
 ```
+
+No `gate:` key = GateStage is a no-op. Same pipeline, same config file, no separate policy file.
 
 **`when` clause vocabulary** — matches against enricher output dimensions:
 
@@ -1441,17 +1449,23 @@ class Pipeline:
     """Unified pipeline: Source → Parse → Enrich → Gate → Sink(s)."""
 
     @classmethod
-    def for_gate(cls, policy_path: Path, classify_config: ClassifyConfig | None = None) -> "Pipeline":
+    def from_config(cls, config_path: Path, pipeline_name: str) -> "Pipeline":
+        """Load pipeline from tracemill.yaml. Gate stage activates if gate: key present."""
+        ...
+
+    @classmethod
+    def for_gate(cls, config_path: Path, framework: str) -> "Pipeline":
         """Create a pipeline configured for single-shot gate scoring (SDK mode).
+        Reads gate rules from the framework's pipeline config in tracemill.yaml.
         No source or sinks — caller provides payload via .score() method."""
         ...
 
-    def score(self, payload: dict, framework: str) -> GateResult:
+    def score(self, payload: dict, framework: str | None = None) -> GateResult:
         """Run the full pipeline synchronously on a single event (SDK mode).
 
         1. Parser selects mapping for framework, normalizes to SessionEvent
         2. Enricher classifies + scores → attaches facts
-        3. GateStage evaluates policy → attaches verdict
+        3. GateStage evaluates rules → attaches verdict
         4. Returns GateResult (verdict + enriched event)
         """
         ...
@@ -1463,20 +1477,21 @@ class Pipeline:
         ...
 ```
 
-For sidecar mode, the CLI (`tracemill gate --stdin`) constructs a pipeline with `StdinSource` + `VerdictSink` and calls `run()` on a single event.
+For sidecar mode, the CLI (`tracemill gate --stdin`) constructs a pipeline with `StdinSource` + `VerdictSink` and calls `run()` on a single event. It reads gate rules from the same `tracemill.yaml` config resolution chain (project-local → user-global → defaults).
 
 ### CLI Interface
 
 ```bash
 # Sidecar mode: used as hook script (stdin → pipeline → exit code)
-tracemill gate --stdin --framework copilot --policy ./gate-policy.yaml
+# Reads gate rules from ./tracemill.yaml (or ~/.tracemill/config.yaml)
+tracemill gate --stdin --framework copilot
 
-# Observation mode with gate enabled:
-tracemill run --config tracemill.yaml  # policy_path in config enables gate stage
+# Observation mode with gate enabled (gate: key in config activates it):
+tracemill run --config tracemill.yaml
 
 # Debugging: score a payload without acting
 echo '{"toolName":"bash","toolArgs":{"command":"rm -rf /"}}' | \
-  tracemill gate score --framework copilot --policy ./gate-policy.yaml
+  tracemill gate score --framework copilot
 # Output: {"verdict":"deny","score":92,"reason":"...","rule":"critical-risk"}
 ```
 
@@ -1498,14 +1513,14 @@ echo '{"toolName":"bash","toolArgs":{"command":"rm -rf /"}}' | \
 ```
 src/tracemill/
 ├── pipeline/
-│   ├── __init__.py          # Pipeline class (unified)
+│   ├── __init__.py          # Pipeline class (unified: .run(), .score(), .for_gate())
 │   ├── stages.py            # ParseStage, EnrichStage, GateStage
 │   ├── sources/             # StdinSource, FunctionCallSource, FileWatchSource, SSESource...
 │   └── sinks/               # VerdictSink, JsonlSink, SqliteSink, CallbackSink...
 ├── gate/
-│   ├── __init__.py          # Public API: GateResult, Verdict, PolicyEngine
+│   ├── __init__.py          # Public API: GateResult, Verdict
 │   ├── types.py             # Verdict, GateResult dataclasses
-│   ├── policy.py            # PolicyEngine (YAML rule loading + first-match evaluation)
+│   ├── policy.py            # PolicyEngine (rule loading from config + first-match evaluation)
 │   └── io.py                # VerdictSink (stdout JSON + exit code for sidecar mode)
 ├── classify/                # shared — enricher logic
 └── mappings/                # shared — framework YAML definitions

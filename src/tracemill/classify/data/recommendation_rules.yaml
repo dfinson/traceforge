@@ -1,0 +1,111 @@
+# Governance recommendation rules — first match wins (top-to-bottom).
+# All `recommend` values are classification labels, not enforcement actions.
+
+recommendation_rules:
+  # Critical: destructive at host/network scope
+  - id: destructive_host_network
+    when:
+      effect: destructive
+      scope: [host, network]
+    recommend: deny
+    reason: destructive_host_or_network
+
+  # Dangerous: destructive at repo/project scope
+  - id: destructive_repo_scope
+    when:
+      effect: destructive
+      scope: [repository, project]
+    recommend: escalate
+    reason: destructive_repo_scope
+
+  # Network exfiltration with mutation
+  - id: mutating_network
+    when:
+      effect: mutating
+      capability: [network_outbound]
+    recommend: escalate
+    reason: mutating_with_network
+
+  # Piped download-execute pattern
+  - id: piped_download_execute
+    when:
+      structure: [piped]
+      capability: { all_of: [network_outbound, arbitrary_execution] }
+    recommend: deny
+    reason: piped_download_execute
+
+  # Phase drift combined with destructive action
+  - id: drift_destructive
+    when:
+      structure: [phase_anomaly]
+      effect: destructive
+    recommend: deny
+    reason: drift_plus_destructive
+
+  # Budget pressure escalation
+  - id: budget_exceeded
+    when:
+      capability: [budget_pressure]
+    recommend: escalate
+    reason: budget_exceeded
+
+  # Credential exposure
+  - id: credential_exposure
+    when:
+      capability: [credential_exposure]
+    recommend: escalate
+    reason: credential_exposure
+
+  # PII with network
+  - id: pii_network
+    when:
+      capability: [pii_exposure, network_outbound]
+    recommend: deny
+    reason: pii_network_exfiltration
+
+  # MCP tool drift
+  - id: mcp_drift
+    when:
+      capability: [mcp_drift]
+    recommend: warn
+    reason: mcp_tool_fingerprint_changed
+
+  # IFC violation
+  - id: ifc_violation
+    when:
+      structure: [ifc_violation]
+    recommend: escalate
+    reason: ifc_clearance_violation
+
+  # Tainted flow
+  - id: tainted_flow
+    when:
+      structure: [tainted_flow]
+    recommend: warn
+    reason: tainted_data_flow
+
+  # Integrity verification failure
+  - id: integrity_unverified
+    when:
+      capability: [integrity_unverified]
+    recommend: warn
+    reason: content_integrity_mismatch
+
+  # Fallback risk score thresholds
+  - id: risk_critical
+    when:
+      risk_score: ">=85"
+    recommend: deny
+    reason: risk_score_critical
+
+  - id: risk_danger
+    when:
+      risk_score: ">=65"
+    recommend: escalate
+    reason: risk_score_danger
+
+  - id: risk_caution
+    when:
+      risk_score: ">=40"
+    recommend: warn
+    reason: risk_score_caution

@@ -11,8 +11,7 @@ from typing import TYPE_CHECKING, Literal
 from tracemill.classify.core import Classification
 
 if TYPE_CHECKING:
-    from tracemill.governance.mcp import MCPToolProfile
-    from tracemill.governance.session import SessionStateSnapshot
+    from tracemill.governance.state import SessionStateSnapshot
 
 
 def _normalize_timestamp(source_timestamp: datetime | str) -> str:
@@ -93,6 +92,9 @@ class ToolCallEvent(SessionEvent):
     server_namespace: str | None
     tool_args_json: str
     source_event_id: str | None
+    mcp_server_name: str | None = None
+    tool_description: str | None = None
+    tool_schema_json: str | None = None
 
 
 @dataclass(frozen=True)
@@ -134,9 +136,9 @@ class EnrichmentContext:
     event: SessionEvent
     base_classification: Classification
     command_analysis: CommandAnalysis | None
-    session_state: SessionStateSnapshot
-    mcp_profiles: tuple[tuple[tuple[str, str], MCPToolProfile], ...]
+    session_state: "SessionStateSnapshot | None"
+    mcp_profiles: dict[str, dict] | None
     project_root: str | None
     engine: Literal["shell", "mcp", "coding"]
     drift_baseline: tuple[tuple[str, float], ...] | None
-    mcp_profile_key: tuple[str, str] | None
+    mcp_profile_key: str | None

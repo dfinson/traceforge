@@ -170,6 +170,7 @@ class Classification:
     action: frozenset[str] = frozenset()
     capability: frozenset[str] = frozenset()
     structure: frozenset[str] = frozenset()
+    source_labels: frozenset[str] = frozenset()
     shell_dialect: str | None = None
     binaries: tuple[str, ...] = ()
     phase_map: tuple[PhaseSegment, ...] = ()
@@ -191,6 +192,8 @@ class Classification:
             d["capability"] = sorted(self.capability)
         if self.structure:
             d["structure"] = sorted(self.structure)
+        if self.source_labels:
+            d["source_labels"] = sorted(self.source_labels)
         if self.shell_dialect:
             d["shell_dialect"] = self.shell_dialect
         if self.binaries:
@@ -228,6 +231,7 @@ class Classification:
             action=frozenset(d.get("action", ())),
             capability=frozenset(d.get("capability", ())),
             structure=frozenset(d.get("structure", ())),
+            source_labels=frozenset(d.get("source_labels", ())),
             shell_dialect=d.get("shell_dialect"),
             binaries=tuple(d.get("binaries", ())),
             phase_map=phase_map,

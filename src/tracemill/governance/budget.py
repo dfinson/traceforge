@@ -28,6 +28,9 @@ class BudgetTracker:
     def increment(self, ctx: "EnrichmentContext", state: "SessionState") -> None:
         """Increment budget counters for the current event's classification."""
         cls = ctx.base_classification
+        # Infer current phase from the session's phase window
+        phase_window = state.snapshot().phase_window
+        phase = phase_window[-1] if phase_window else None
         state.increment_budget(
             mechanism=cls.mechanism,
             effect=cls.effect,
@@ -36,6 +39,7 @@ class BudgetTracker:
             action=frozenset(),  # action isn't on Classification yet
             capability=cls.capability,
             structure=cls.structure,
+            phase=phase,
         )
 
     def check_pressure(self, state: "SessionState") -> bool:

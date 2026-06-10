@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from tracemill.governance.pipeline import SessionMeta
+
+
+@dataclass(frozen=True)
+class AgentContext:
+    """Context provided by the host framework on session lifecycle events."""
+    session_id: str
+    agent_model: str | None = None
+    repo: str | None = None
+    project_root: str | None = None
 
 
 @runtime_checkable
@@ -15,42 +25,18 @@ class TracemillObserver(Protocol):
     Each method returns SessionMeta with full governance analysis.
     """
 
-    async def on_pre_tool_call(
-        self,
-        *,
-        session_id: str,
-        event_id: str,
-        tool_name: str,
-        tool_args: dict | str,
-        span_id: str | None = None,
-        server_namespace: str | None = None,
-        source_event_id: str | None = None,
-        mcp_server_name: str | None = None,
-        tool_description: str | None = None,
-        tool_schema: dict | str | None = None,
-    ) -> SessionMeta:
-        """Called before a tool is invoked."""
+    async def on_pre_tool_call(self, tool_name: str, args: dict) -> SessionMeta:
+        """Primary classification point."""
         ...
 
-    async def on_post_tool_call(
-        self,
-        *,
-        session_id: str,
-        event_id: str,
-        tool_name: str,
-        result_payload: dict | str | None,
-        result_status: str = "success",
-        span_id: str | None = None,
-        server_namespace: str | None = None,
-        pre_call_event_id: str | None = None,
-    ) -> SessionMeta:
-        """Called after a tool invocation completes."""
+    async def on_post_tool_call(self, tool_name: str, result: dict) -> SessionMeta:
+        """IFC propagation, integrity checks, PII scan of output."""
         ...
 
-    async def on_session_start(self, *, session_id: str) -> SessionMeta:
+    async def on_session_start(self, context: AgentContext) -> SessionMeta:
         """Called when a new agent session begins."""
         ...
 
-    async def on_session_end(self, *, session_id: str) -> SessionMeta:
+    async def on_session_end(self, context: AgentContext) -> SessionMeta:
         """Called when an agent session ends."""
         ...

@@ -20,12 +20,29 @@ class Clearance(StrEnum):
 
 _CLEARANCE_ORDER = {c: i for i, c in enumerate(Clearance)}
 
+# Public constants for IFC label rules (referenced by spec)
+SCOPE_TO_LABEL: dict[str, str] = {
+    "host": "ifc:host_access",
+    "network": "ifc:network_access",
+    "cloud": "ifc:cloud_access",
+    "sandbox": "ifc:sandboxed",
+}
+
+PATH_LABEL_RULES: dict[str, Clearance] = {
+    ".env": Clearance.SECRET,
+    ".env.local": Clearance.SECRET,
+    ".env.production": Clearance.SECRET,
+    "secrets.yaml": Clearance.SECRET,
+    "credentials.json": Clearance.SECRET,
+    ".npmrc": Clearance.CONFIDENTIAL,
+    ".pypirc": Clearance.CONFIDENTIAL,
+    "id_rsa": Clearance.SECRET,
+    ".ssh/config": Clearance.SECRET,
+    "kubeconfig": Clearance.SECRET,
+}
+
 # Source label assignment rules
-_SENSITIVE_PATHS = frozenset({
-    ".env", ".env.local", ".env.production", "secrets.yaml",
-    "credentials.json", ".npmrc", ".pypirc", "id_rsa",
-    ".ssh/config", "kubeconfig",
-})
+_SENSITIVE_PATHS = frozenset(PATH_LABEL_RULES.keys())
 _SENSITIVE_EXTENSIONS = frozenset({".pem", ".key", ".p12", ".pfx", ".jks"})
 
 

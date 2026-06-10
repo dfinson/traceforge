@@ -321,13 +321,21 @@ class TestTracemillObserver:
         assert hasattr(TracemillObserver, "on_session_end")
 
     def test_protocol_is_runtime_checkable(self):
+        from tracemill.governance.observer import AgentContext
         class FakeObserver:
-            async def on_pre_tool_call(self, event): pass
-            async def on_post_tool_call(self, event): pass
-            async def on_session_start(self, session_id): pass
-            async def on_session_end(self, session_id): pass
+            async def on_pre_tool_call(self, tool_name, args): pass
+            async def on_post_tool_call(self, tool_name, result): pass
+            async def on_session_start(self, context): pass
+            async def on_session_end(self, context): pass
 
         assert hasattr(FakeObserver, "on_pre_tool_call")
+
+    def test_agent_context_dataclass(self):
+        from tracemill.governance.observer import AgentContext
+        ctx = AgentContext(session_id="s1", agent_model="gpt-4", repo="org/repo")
+        assert ctx.session_id == "s1"
+        assert ctx.agent_model == "gpt-4"
+        assert ctx.project_root is None
 
 
 # ─── Pipeline Lifecycle Tests ───

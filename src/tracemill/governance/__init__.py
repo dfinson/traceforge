@@ -40,13 +40,13 @@ from tracemill.governance.rules import (
 from tracemill.governance.risk_wrapper import RiskModifiers, assess_governance_risk
 from tracemill.governance.canonical import compute_canonical_hash
 from tracemill.governance.pii import PIIScanner
-from tracemill.governance.ifc import IFCChecker
+from tracemill.governance.ifc import IFCChecker, SCOPE_TO_LABEL, PATH_LABEL_RULES
 from tracemill.governance.integrity import IntegrityVerifier
 from tracemill.governance.mcp_drift import MCPIntegrityScanner, MCPIntegrityAlert, MCPToolProfile
 from tracemill.governance.drift import DriftDetector, DriftAssessment
 from tracemill.governance.budget import BudgetThresholds, BudgetTracker
 from tracemill.governance.envelope import ContextGapEvent, EnrichedEvent
-from tracemill.governance.observer import TracemillObserver
+from tracemill.governance.observer import TracemillObserver, AgentContext
 
 __all__ = [
     # Types
@@ -93,6 +93,8 @@ __all__ = [
     # Scanners
     "PIIScanner",
     "IFCChecker",
+    "SCOPE_TO_LABEL",
+    "PATH_LABEL_RULES",
     "IntegrityVerifier",
     "MCPIntegrityScanner",
     "MCPIntegrityAlert",
@@ -106,4 +108,5 @@ __all__ = [
     "ContextGapEvent",
     "EnrichedEvent",
     "TracemillObserver",
+    "AgentContext",
 ]

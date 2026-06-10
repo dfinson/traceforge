@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from tracemill.assess import AssessmentPayloadError, AssessmentResult, GovernanceAssessment
-from tracemill.classify.config import ClassificationEngine, ClassifyConfig
+from tracemill.classify.config import get_default_engine
 from tracemill.governance.budget import BudgetTracker
 from tracemill.governance.labeler import GovernanceLabeler
 from tracemill.governance.persistence import SystemStore
@@ -22,7 +22,7 @@ def store(tmp_path):
 
 @pytest.fixture
 def engine():
-    return ClassificationEngine(ClassifyConfig())
+    return get_default_engine()
 
 
 @pytest.fixture

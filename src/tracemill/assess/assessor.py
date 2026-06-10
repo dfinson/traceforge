@@ -50,27 +50,16 @@ def _validate_payload(payload: dict) -> tuple[str, dict, str]:
 
 
 def _is_shell_tool(tool_name: str, classification: "Classification") -> bool:
-    """Detect shell tools by classification mechanism or known names."""
-    # Check classification mechanism first (covers custom tool names)
+    """Return True if the classification mechanism indicates a shell tool."""
     mech = classification.mechanism if classification else ""
     mech_str = mech.value if hasattr(mech, "value") else str(mech)
-    if "shell" in mech_str.lower() or "process" in mech_str.lower():
-        return True
-    # Fallback: known shell tool names (includes dialect-specific names)
-    shell_names = {
-        "bash", "shell", "execute_command", "run_command", "terminal",
-        "exec", "run_shell", "powershell", "pwsh", "cmd",
-    }
-    return tool_name.lower() in shell_names
+    return "shell" in mech_str.lower() or "process" in mech_str.lower()
 
 
-_SHELL_WRAPPERS = frozenset({"sudo", "env", "nohup", "nice", "ionice", "strace", "time", "doas"})
-
-
-def _unwrap_binary(tokens: list[str]) -> tuple[str, list[str]]:
-    """Skip transparent wrappers (sudo, env, ...) to find the effective binary."""
+def _unwrap_binary(tokens: list[str], wrappers: frozenset[str]) -> tuple[str, list[str]]:
+    """Skip transparent wrappers to find the effective binary."""
     i = 0
-    while i < len(tokens) and tokens[i] in _SHELL_WRAPPERS:
+    while i < len(tokens) and tokens[i] in wrappers:
         wrapper = tokens[i]
         i += 1
         # Skip flags belonging to the wrapper (e.g. sudo -u root)
@@ -89,13 +78,10 @@ def _unwrap_binary(tokens: list[str]) -> tuple[str, list[str]]:
     return tokens[i], tokens[:i] + tokens[i + 1:]
 
 
-def _build_command_analysis(command: str) -> "CommandAnalysis | None":
+def _build_command_analysis(command: str, wrappers: frozenset[str]) -> "CommandAnalysis | None":
     """Build CommandAnalysis from a shell command string.
 
-    Uses simple tokenization for the primary binary/flags/targets.
-    Unwraps transparent wrappers (sudo, env, ...) so the effective binary is scored.
-    Pipe segments are only populated when unambiguous single-pipe separators exist
-    (avoids misinterpreting ||, |&, or pipes inside quotes).
+    Pipe segments are populated when unambiguous single-pipe separators exist.
     """
     from tracemill.governance.types import CommandAnalysis, PipeSegment
 
@@ -111,7 +97,7 @@ def _build_command_analysis(command: str) -> "CommandAnalysis | None":
     if not tokens:
         return None
 
-    binary, remainder = _unwrap_binary(tokens)
+    binary, remainder = _unwrap_binary(tokens, wrappers)
     flags = tuple(t for t in remainder if t.startswith("-"))
     targets = tuple(t for t in remainder if not t.startswith("-"))
 
@@ -132,7 +118,7 @@ def _build_command_analysis(command: str) -> "CommandAnalysis | None":
                 for tok in all_tokens:
                     if tok == "|":
                         if current_segment:
-                            seg_bin, seg_rest = _unwrap_binary(current_segment)
+                            seg_bin, seg_rest = _unwrap_binary(current_segment, wrappers)
                             seg_flags = tuple(t for t in seg_rest if t.startswith("-"))
                             seg_targets = tuple(t for t in seg_rest if not t.startswith("-"))
                             segments.append(PipeSegment(binary=seg_bin, flags=seg_flags, targets=seg_targets))
@@ -140,7 +126,7 @@ def _build_command_analysis(command: str) -> "CommandAnalysis | None":
                     else:
                         current_segment.append(tok)
                 if current_segment:
-                    seg_bin, seg_rest = _unwrap_binary(current_segment)
+                    seg_bin, seg_rest = _unwrap_binary(current_segment, wrappers)
                     seg_flags = tuple(t for t in seg_rest if t.startswith("-"))
                     seg_targets = tuple(t for t in seg_rest if not t.startswith("-"))
                     segments.append(PipeSegment(binary=seg_bin, flags=seg_flags, targets=seg_targets))
@@ -171,11 +157,7 @@ def _infer_engine(classification: "Classification") -> Literal["shell", "mcp", "
 
 
 def _classify_shell_command(tool_name: str, command: str, engine) -> "Classification":
-    """Dispatch to the correct shell dialect classifier (mirrors Enricher).
-
-    Exceptions propagate to the outer fail-closed block so that classifier
-    failures produce ESCALATE rather than silently downgrading risk.
-    """
+    """Dispatch to the correct shell dialect classifier."""
     from tracemill.classify.cmd import classify_cmd_command
     from tracemill.classify.powershell import classify_powershell_command
     from tracemill.classify.shell import classify_shell
@@ -267,7 +249,7 @@ def assess(pipeline, payload: dict) -> AssessmentResult:
             command = tool_input.get("command", "")
             if command and isinstance(command, str):
                 classification = _classify_shell_command(tool_name, command, pipeline._engine)
-                command_analysis = _build_command_analysis(command)
+                command_analysis = _build_command_analysis(command, pipeline._engine.transparent_wrappers)
 
         engine_literal = _infer_engine(classification)
 

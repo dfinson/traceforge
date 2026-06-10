@@ -178,6 +178,51 @@ class GovernancePipeline:
         self._phase23_session_keys: dict[str, set[str]] = {}  # session_id → set of event keys with attempts
         self._MAX_PHASE23_ATTEMPTS = 3
 
+    @classmethod
+    def create(
+        cls,
+        *,
+        db_path: str | None = None,
+        project_root: str | None = None,
+    ) -> "GovernancePipeline":
+        """Construct a ready-to-use pipeline with sensible defaults.
+
+        Usage::
+
+            from tracemill.governance.pipeline import GovernancePipeline
+
+            pipeline = GovernancePipeline.create()
+            result = pipeline.assess({
+                "tool_name": "bash",
+                "tool_input": {"command": "rm -rf /"},
+                "session_id": "sess-1",
+            })
+
+        Args:
+            db_path: Path to state DB. Defaults to in-memory (":memory:").
+            project_root: Project root for scope-aware rules. Optional.
+        """
+        from pathlib import Path
+
+        from tracemill.classify.config import ClassificationEngine, ClassifyConfig
+        from tracemill.governance.budget import BudgetTracker
+        from tracemill.governance.labeler import GovernanceLabeler
+        from tracemill.governance.persistence import SystemStore
+        from tracemill.governance.rules import parse_rules
+
+        store = SystemStore(db_path or ":memory:")
+        engine = ClassificationEngine(ClassifyConfig())
+        rules_path = Path(__file__).parent.parent / "classify" / "data" / "recommendation_rules.yaml"
+        rules = parse_rules(rules_path)
+
+        return cls(
+            store=store,
+            labeler=GovernanceLabeler(),
+            budget_tracker=BudgetTracker(),
+            rules=rules,
+            engine=engine,
+        )
+
     def assess(self, payload: dict) -> "AssessmentResult":
         """Score a pending tool call against current session state.
 

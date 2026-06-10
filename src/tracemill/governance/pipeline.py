@@ -186,6 +186,9 @@ class GovernancePipeline:
             # Finalize: write session summary
             snapshot = state.snapshot()
             self._write_session_summary(session_id, snapshot)
+            # Evict session state to prevent unbounded memory growth
+            self._states.pop(session_id, None)
+            self._write_failures.pop(session_id, None)
 
         snapshot = state.snapshot()
         return SessionMeta(
@@ -216,6 +219,10 @@ class GovernancePipeline:
             if not meta_dict.get("reserved"):
                 return self._deserialize_meta(meta_dict)
             # Reserved = Phase 1 completed atomically. Skip Phase 1, re-run Phase 2/3 only.
+            # Restore attempt count from persisted reservation (survives restarts)
+            persisted_attempts = meta_dict.get("phase23_attempts", 0)
+            if event.source_event_key not in self._phase23_attempts:
+                self._phase23_attempts[event.source_event_key] = persisted_attempts
         else:
             # Phase 1 mutations (in-memory)
             phase = self._infer_phase(ctx)
@@ -298,15 +305,28 @@ class GovernancePipeline:
                     )
                     self._store.commit()
                     self._store.cache_processed(event.source_event_key, degraded_json)
+                    # Only clear attempts after successful dead-letter persistence
+                    del self._phase23_attempts[event.source_event_key]
                 except (sqlite3.OperationalError, sqlite3.IntegrityError):
                     self._store.rollback()
-                del self._phase23_attempts[event.source_event_key]
+                    # Keep attempt count — next retry will try dead-lettering again
                 return degraded_meta
             else:
                 logger.warning(
                     "Event %s Phase 2/3 attempt %d/%d failed: %s — will retry on next delivery",
                     event.source_event_key, attempts, self._MAX_PHASE23_ATTEMPTS, phase23_exc,
                 )
+                # Persist attempt count in reservation so it survives process restarts
+                try:
+                    reservation_json = json.dumps({"reserved": True, "phase23_attempts": attempts})
+                    self._store.execute_in_transaction(
+                        "UPDATE processed_events SET session_meta_json = ? WHERE source_event_key = ?",
+                        (reservation_json, event.source_event_key),
+                    )
+                    self._store.commit()
+                    self._store.cache_processed(event.source_event_key, reservation_json)
+                except (sqlite3.OperationalError, sqlite3.IntegrityError):
+                    self._store.rollback()
                 return SessionMeta(
                     classification=None, risk_assessment=None,
                     recommendation=None, budget_snapshot=snapshot.budget,
@@ -492,34 +512,6 @@ class GovernancePipeline:
         import dataclasses
         return dataclasses.replace(ctx, session_state=snapshot)
 
-    def _persist_with_retry(self, state: "SessionState", session_id: str) -> bool:
-        """Write-through with failure handling: 10 consecutive failures → memory-only mode.
-        Returns True on success, False on failure."""
-        import logging
-        logger = logging.getLogger(__name__)
-
-        try:
-            state.persist()
-            self._write_failures[session_id] = 0
-            return True
-        except (sqlite3.OperationalError, sqlite3.IntegrityError, OSError) as e:
-            failures = self._write_failures.get(session_id, 0) + 1
-            self._write_failures[session_id] = failures
-            if failures >= self._MAX_WRITE_FAILURES:
-                logger.critical(
-                    "SQLite write failed %d consecutive times for session %s — "
-                    "degrading to memory-only mode: %s",
-                    failures, session_id, e,
-                )
-                state.attach_db(None)
-            else:
-                logger.error(
-                    "SQLite write failed (%d/%d) for session %s: %s — "
-                    "will retry on next event",
-                    failures, self._MAX_WRITE_FAILURES, session_id, e,
-                )
-            return False
-
     def _render_transform(self, template, ctx: "EnrichmentContext") -> TransformSuggestion | None:
         """Render TransformTemplate → TransformSuggestion using event data.
 
@@ -600,7 +592,8 @@ class GovernancePipeline:
         """Sanitize tool args for escalation context — remove secrets, truncate."""
         import re
 
-        _SENSITIVE_KEYS = r'password|secret|token|key|credential|api_key|auth|authorization'
+        # Word-boundary anchored to avoid matching "monkey", "turkey", "keyboard" etc.
+        _SENSITIVE_KEYS = r'(?<![a-zA-Z])(?:password|secret|token|api_key|credential|auth|authorization)(?![a-zA-Z])'
         # Handle JSON-style: "key": "value" or "key":"value"
         sanitized = re.sub(
             r'(?i)(["\']?(?:' + _SENSITIVE_KEYS + r')["\']?\s*[:=]\s*)["\']([^"\']*)["\']',

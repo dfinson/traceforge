@@ -162,6 +162,11 @@ class SessionState:
         self._dropped_events += count
         self._gap_ordinal += 1
 
+    @property
+    def taint_ledger(self) -> list[TaintEntry]:
+        """Public read access to taint ledger for IFC checks."""
+        return self._taint_ledger
+
     def set_last_assistant(self, event_id: str) -> None:
         self._last_assistant_event_id = event_id
 

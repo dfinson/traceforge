@@ -74,11 +74,11 @@ class IFCChecker:
             ))
 
         # Check if event accesses tainted data (propagation)
-        if session_state._taint_ledger:
+        if session_state.taint_ledger:
             # If tool is reading/writing and there's prior taint, propagate
             if ctx.base_classification.effect in ("mutating", "destructive"):
                 max_clearance = max(
-                    (t.clearance for t in session_state._taint_ledger),
+                    (t.clearance for t in session_state.taint_ledger),
                     key=lambda c: _CLEARANCE_ORDER.get(c, 0),
                     default=None,
                 )

@@ -189,6 +189,17 @@ def effect_for_binary(
                 if nested and child in nested:
                     return Effect(nested[child])
 
+        # Verb prefix matching for multi-level CLIs (aws <svc> <verb>, az <grp> <verb>)
+        # Skips the first positional (service/group name) to avoid collisions
+        # with service names that happen to also be verb-like words (e.g., 'connect').
+        if all_words and override.verb_prefix_effects:
+            positionals = [w for w in all_words[1:] if not w.startswith("-")]
+            # Start from index 1 to skip service/group name
+            for word in positionals[1:]:
+                for prefix, eff in override.verb_prefix_effects.items():
+                    if word == prefix or word.startswith(prefix + "-"):
+                        return Effect(eff)
+
         if subcmd and subcmd in override.subcmd_effects:
             return Effect(override.subcmd_effects[subcmd])
 

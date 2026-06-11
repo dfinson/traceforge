@@ -901,7 +901,281 @@ shell_rules:
     effect: read_only
     scope: artifact.repository
 
-  - id: aws-az-gcloud-api-client
+  # ═══════════════════════════════════════════════════════════════════════════
+  # AWS CLI — subcommand-level classification
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Effect is determined by verb_prefix_effects in effect_overrides.yaml.
+  # These rules match service-level subcmds for activity/scope routing.
+
+  - id: aws-s3-storage
+    binaries: [aws]
+    subcmds: [s3, s3api, glacier]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+    action: persist.write
+
+  - id: aws-iam-sts-identity
+    binaries: [aws]
+    subcmds: [iam, sts, sso, sso-admin, organizations, identitystore]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  - id: aws-compute
+    binaries: [aws]
+    subcmds: [ec2, ecs, eks, lambda, lightsail, batch, autoscaling]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  - id: aws-database
+    binaries: [aws]
+    subcmds: [rds, dynamodb, elasticache, redshift, docdb, neptune, dax]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  - id: aws-analytics-ml
+    binaries: [aws]
+    subcmds: [athena, glue, emr, kinesis, firehose, sagemaker, bedrock, comprehend, rekognition, textract]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  - id: aws-networking
+    binaries: [aws]
+    subcmds: [elb, elbv2, route53, cloudfront, apigateway, apigatewayv2, vpc-lattice]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  - id: aws-deploy-cicd
+    binaries: [aws]
+    subcmds: [cloudformation, codebuild, codedeploy, codepipeline, codeartifact, ecr, stepfunctions]
+    activity: implementation
+    role: orchestrator.task_runner
+    scope: configuration.infrastructure
+
+  - id: aws-messaging
+    binaries: [aws]
+    subcmds: [sqs, sns, events, eventbridge, ses, sesv2]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  - id: aws-security
+    binaries: [aws]
+    subcmds: [kms, secretsmanager, acm, waf, wafv2, guardduty, inspector2, securityhub]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  - id: aws-observability
+    binaries: [aws]
+    subcmds: [logs, cloudwatch, cloudtrail, xray, ce]
+    activity: investigation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  - id: aws-config-ssm
+    binaries: [aws]
+    subcmds: [ssm, config, configservice, appconfig]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Azure CLI (az) — subcommand-level classification
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  - id: az-login-account
+    binaries: [az]
+    subcmds: [login, logout, account, configure, version, feedback, find, interactive, rest, self-test, upgrade]
+    activity: setup
+    role: retriever.api_client
+    effect: read_only
+    scope: configuration.infrastructure
+    action: configure.setup
+
+  - id: az-compute
+    binaries: [az]
+    subcmds: [vm, vmss, sig, disk, snapshot, image, ppg, capacity]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  - id: az-containers
+    binaries: [az]
+    subcmds: [aks, acr, container, containerapp]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  - id: az-networking
+    binaries: [az]
+    subcmds: [network, cdn, frontdoor, dns, private-dns, traffic-manager]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  - id: az-storage-data
+    binaries: [az]
+    subcmds: [storage, dls]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  - id: az-databases
+    binaries: [az]
+    subcmds: [sql, cosmosdb, mysql, postgres, redis, mariadb]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  - id: az-identity-security
+    binaries: [az]
+    subcmds: [ad, role, keyvault, identity]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  - id: az-web-serverless
+    binaries: [az]
+    subcmds: [webapp, functionapp, staticwebapp, logicapp, apim, spring]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  - id: az-devops-deploy
+    binaries: [az]
+    subcmds: [deployment, group, resource, tag, lock, policy, blueprint, managedapp]
+    activity: implementation
+    role: orchestrator.task_runner
+    scope: configuration.infrastructure
+
+  - id: az-messaging
+    binaries: [az]
+    subcmds: [servicebus, eventhubs, eventgrid, relay, notification-hub, signalr]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  - id: az-monitoring
+    binaries: [az]
+    subcmds: [monitor, advisor, alerts]
+    activity: investigation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Google Cloud CLI (gcloud) — subcommand-level classification
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  - id: gcloud-auth-config
+    binaries: [gcloud]
+    subcmds: [auth, config, init, components, topic, version, info]
+    activity: setup
+    role: retriever.api_client
+    effect: read_only
+    scope: configuration.infrastructure
+    action: configure.setup
+
+  - id: gcloud-compute
+    binaries: [gcloud]
+    subcmds: [compute]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  - id: gcloud-container
+    binaries: [gcloud]
+    subcmds: [container, artifacts]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  - id: gcloud-serverless
+    binaries: [gcloud]
+    subcmds: [run, functions, app, scheduler, tasks, workflows, eventarc]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  - id: gcloud-data
+    binaries: [gcloud]
+    subcmds: [sql, spanner, firestore, bigtable, datastore, memcache, storage, dataflow, dataproc]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  - id: gcloud-networking
+    binaries: [gcloud]
+    subcmds: [dns, domains]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  - id: gcloud-iam-security
+    binaries: [gcloud]
+    subcmds: [iam, projects, organizations, secrets, kms, access-context-manager]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  - id: gcloud-messaging
+    binaries: [gcloud]
+    subcmds: [pubsub]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  - id: gcloud-devops
+    binaries: [gcloud]
+    subcmds: [builds, deploy, source]
+    activity: implementation
+    role: orchestrator.task_runner
+    scope: configuration.infrastructure
+
+  - id: gcloud-monitoring
+    binaries: [gcloud]
+    subcmds: [logging, monitoring, trace]
+    activity: investigation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
+  # --- gsutil (legacy GCS CLI) ---
+  - id: gsutil-read-only
+    binaries: [gsutil]
+    subcmds: [ls, cat, stat, du, hash, ver, acl, cors, defacl, iam, label, lifecycle, logging, notification, requesterpays, retention, versioning, web, signurl]
+    activity: investigation
+    role: retriever.api_client
+    effect: read_only
+    scope: configuration.infrastructure
+    action: retrieve.browse
+
+  - id: gsutil-mutating
+    binaries: [gsutil]
+    subcmds: [cp, mv, mb, rsync, rewrite, compose, setmeta]
+    activity: implementation
+    role: retriever.api_client
+    effect: mutating
+    scope: configuration.infrastructure
+    action: persist.write
+
+  - id: gsutil-destructive
+    binaries: [gsutil]
+    subcmds: [rm, rb]
+    activity: implementation
+    role: retriever.api_client
+    effect: destructive
+    scope: configuration.infrastructure
+    action: remove.delete
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Cloud CLI fallback — catches unrecognized subcommands
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: aws-az-gcloud-fallback
     binaries: [aws, az, gcloud]
     activity: implementation
     role: retriever.api_client

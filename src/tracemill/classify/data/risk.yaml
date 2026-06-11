@@ -240,6 +240,62 @@ flag_modifiers:
       requires_all: false
       modifier: 12
       factor: "file_truncation"
+  aws:
+    # --force: skip confirmation prompts on destructive operations
+    # Grounding: ToolEmu "partially-reversible → irreversible" — bypasses safety
+    - flags: ["--force"]
+      requires_all: false
+      modifier: 10
+      factor: "force_flag"
+    # --recursive: scope escalation for S3 and IAM operations
+    # Grounding: CVSS Scope:Changed (1.08×) — affects multiple resources
+    - flags: ["--recursive"]
+      requires_all: false
+      modifier: 10
+      factor: "recursive_flag"
+    # --no-verify-ssl: disables TLS verification (MITM risk)
+    # Grounding: CVSS AV:Network + weakened confidentiality
+    - flags: ["--no-verify-ssl"]
+      requires_all: false
+      modifier: 15
+      factor: "tls_bypass"
+      mitre: "T1557"
+  az:
+    # --yes / -y: skip confirmation prompts
+    # Grounding: ToolEmu — removes human-in-the-loop safety check
+    - flags: ["--yes", "-y"]
+      requires_all: false
+      modifier: 8
+      factor: "skip_confirmation"
+    # --force-string: bypass template validation
+    - flags: ["--force-string"]
+      requires_all: false
+      modifier: 6
+      factor: "force_string"
+    # --no-wait: fire-and-forget mode for destructive operations
+    # Grounding: reduces observability of impact
+    - flags: ["--no-wait"]
+      requires_all: false
+      modifier: 4
+      factor: "async_unmonitored"
+  gcloud:
+    # --quiet / -q: suppresses all interactive prompts
+    # Grounding: ToolEmu — removes human-in-the-loop safety check
+    - flags: ["--quiet", "-q"]
+      requires_all: false
+      modifier: 8
+      factor: "quiet_mode"
+    # --force: skip confirmation on destructive operations
+    - flags: ["--force"]
+      requires_all: false
+      modifier: 10
+      factor: "force_flag"
+    # --delete-all-versions: version-level destruction
+    # Grounding: CVSS Scope:Changed — affects all versions, not just current
+    - flags: ["--delete-all-versions"]
+      requires_all: false
+      modifier: 12
+      factor: "all_versions_delete"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Layer 3: Injection/evasion patterns (regex on raw command text)

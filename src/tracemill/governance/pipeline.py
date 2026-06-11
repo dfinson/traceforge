@@ -417,12 +417,11 @@ class GovernancePipeline:
             pipe_segments=pipe_segments,
         )
 
-    def score_tool_call(self, payload: dict, _callback=None) -> "SessionMeta":
+    def score_tool_call(self, payload: dict) -> "SessionMeta":
         """Score a pending tool call against current session state.
 
-        Evaluates the tool call against accumulated session state but does NOT
-        mutate budget, taint, or drift. Persists the scoring result so denied
-        calls appear in the audit trail.
+        Pure scoring — returns SessionMeta. Does NOT fire any callbacks.
+        Downstream apps decide what to do with the result.
 
         Args:
             payload: Dict with at minimum:
@@ -450,14 +449,7 @@ class GovernancePipeline:
             return self._fail_closed(exc, classification=ctx.base_classification)
 
         self._persist_score(event.source_event_key, event.session_id, meta)
-        self._notify_tool_call(payload, meta, _callback)
         return meta
-
-    def _notify_tool_call(self, payload: dict, meta: "SessionMeta", callback=None) -> None:
-        """Fire per-framework callback if provided, else universal on_tool_call."""
-        cb = callback if callback is not None else self.on_tool_call
-        if cb is not None:
-            cb(payload, meta)
 
     def score_tool_call_event(self, event: "tracemill.types.SessionEvent") -> "SessionMeta":
         """Score an enriched SessionEvent via the canonical bridge.
@@ -479,11 +471,6 @@ class GovernancePipeline:
             return self._fail_closed(exc, classification=ctx.base_classification)
 
         self._persist_score(ctx.event.source_event_key, ctx.event.session_id, meta)
-        self._notify_tool_call({
-            "tool_name": event.payload.get("tool_name", ""),
-            "tool_input": event.payload.get("arguments", {}),
-            "session_id": event.session_id,
-        }, meta)
         return meta
 
     def _persist_score(self, source_event_key: str, session_id: str, meta: "SessionMeta") -> None:
@@ -1475,99 +1462,179 @@ class GovernancePipeline:
     def attach_crewai(self, *, session_id: str = "sdk", on_tool_call=None) -> None:
         """Register tracemill into CrewAI's before_tool_call hook.
 
+        Blocking: returns False to CrewAI when callback returns DENY.
+        Limitation: CrewAI shows a hardcoded block message to the model.
         Requires: crewai installed with hooks support.
         """
         from crewai.hooks.decorators import before_tool_call
 
+        from tracemill.sdk.verdict import Verdict, interpret_callback_result
+
         pipeline = self
 
         @before_tool_call
-        def _tracemill_hook(ctx) -> None:
+        def _tracemill_hook(ctx):
             payload = {
                 "tool_name": ctx.tool_name,
                 "tool_input": ctx.tool_input,
                 "session_id": session_id,
             }
-            meta = pipeline.score_tool_call(payload, _callback=on_tool_call)
+            meta = pipeline.score_tool_call(payload)
+            if on_tool_call is not None:
+                verdict = interpret_callback_result(on_tool_call(payload, meta))
+                if verdict.denied:
+                    return False  # CrewAI blocks execution
+            return None  # allow
 
-    def attach_langchain(self, chain, *, session_id: str = "sdk", on_tool_call=None) -> None:
-        """Attach tracemill as a LangChain callback handler on the given chain.
+    def attach_langchain(self, tool, *, session_id: str = "sdk", on_tool_call=None):
+        """Wrap a LangChain tool's _run with tracemill gating.
 
+        Blocking: raises ToolException when callback returns DENY.
+        Sets handle_tool_error=True so the denial message reaches the model.
         Requires: langchain-core installed.
         """
-        import json as _json
+        from langchain_core.tools.base import ToolException
 
-        from langchain_core.callbacks import BaseCallbackHandler
+        from tracemill.sdk.verdict import interpret_callback_result
+
+        pipeline = self
+        original_run = tool._run
+
+        def _guarded_run(*args, **kwargs):
+            tool_input = kwargs if kwargs else {"input": args[0]} if args else {}
+            payload = {
+                "tool_name": tool.name,
+                "tool_input": tool_input,
+                "session_id": session_id,
+            }
+            meta = pipeline.score_tool_call(payload)
+            if on_tool_call is not None:
+                verdict = interpret_callback_result(on_tool_call(payload, meta))
+                if verdict.denied:
+                    raise ToolException(f"Denied: {verdict.reason}")
+            return original_run(*args, **kwargs)
+
+        tool._run = _guarded_run
+        tool.handle_tool_error = True
+        return tool
+
+    def attach_langgraph(self, tools, *, session_id: str = "sdk", on_tool_call=None):
+        """Return a ToolNode with tracemill gating via wrap_tool_call.
+
+        Blocking: returns denial ToolMessage without calling execute.
+        Requires: langgraph installed.
+        """
+        from langgraph.prebuilt import ToolNode
+
+        from tracemill.sdk.verdict import interpret_callback_result
 
         pipeline = self
 
-        class _TracemillHandler(BaseCallbackHandler):
-            def on_tool_start(self, serialized: dict, input_str: str, **kwargs) -> None:
-                tool_name = serialized.get("name", "unknown")
-                try:
-                    tool_input = _json.loads(input_str) if isinstance(input_str, str) else input_str
-                except (ValueError, TypeError):
-                    tool_input = {"raw": input_str}
-                payload = {
-                    "tool_name": tool_name,
-                    "tool_input": tool_input,
-                    "session_id": session_id,
-                }
-                meta = pipeline.score_tool_call(payload, _callback=on_tool_call)
+        def _tracemill_wrapper(request, execute):
+            from langchain_core.messages import ToolMessage
 
-        chain.callbacks = list(chain.callbacks or []) + [_TracemillHandler()]
+            payload = {
+                "tool_name": request.tool_call["name"],
+                "tool_input": request.tool_call["args"],
+                "session_id": session_id,
+            }
+            meta = pipeline.score_tool_call(payload)
+            if on_tool_call is not None:
+                verdict = interpret_callback_result(on_tool_call(payload, meta))
+                if verdict.denied:
+                    return ToolMessage(
+                        content=f"Denied: {verdict.reason}",
+                        tool_call_id=request.tool_call["id"],
+                        name=request.tool_call["name"],
+                        status="error",
+                    )
+            return execute(request)
+
+        return ToolNode(tools, wrap_tool_call=_tracemill_wrapper)
 
     def attach_anthropic(self, *, session_id: str = "sdk", on_tool_call=None):
-        """Return a dispatch helper for Anthropic SDK tool_use blocks.
+        """Return a gate function for the Anthropic tool-use loop.
 
         Usage:
-            score_block = pipeline.attach_anthropic()
-            # In your message loop:
+            gate = pipeline.attach_anthropic(on_tool_call=my_policy)
             for block in response.content:
                 if block.type == "tool_use":
-                    score_block(block)
+                    verdict, denial = gate(block)
+                    if denial:
+                        results.append(denial)
+                    else:
+                        results.append(execute_tool(block))
         """
+        from tracemill.sdk.verdict import Verdict, interpret_callback_result
+
         pipeline = self
 
-        def _score_block(block) -> "SessionMeta":
+        def _gate(block):
             payload = {
                 "tool_name": block.name,
                 "tool_input": block.input,
                 "session_id": session_id,
             }
-            meta = pipeline.score_tool_call(payload, _callback=on_tool_call)
-            return meta
+            meta = pipeline.score_tool_call(payload)
+            if on_tool_call is not None:
+                verdict = interpret_callback_result(on_tool_call(payload, meta))
+                if verdict.denied:
+                    return verdict, {
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": f"Denied by policy: {verdict.reason}",
+                        "is_error": True,
+                    }
+            return Verdict.allow(), None
 
-        return _score_block
+        return _gate
 
     def attach_openai(self, *, session_id: str = "sdk", on_tool_call=None):
-        """Return a dispatch helper for OpenAI ChatCompletionMessageToolCall.
+        """Return a gate function for OpenAI ChatCompletionMessageToolCall.
 
         Usage:
-            score_tc = pipeline.attach_openai()
+            gate = pipeline.attach_openai(on_tool_call=my_policy)
             for tc in message.tool_calls:
-                score_tc(tc)
+                verdict, denial = gate(tc)
+                if denial:
+                    messages.append(denial)
+                else:
+                    messages.append(execute_and_format(tc))
         """
         import json as _json
 
+        from tracemill.sdk.verdict import Verdict, interpret_callback_result
+
         pipeline = self
 
-        def _score_tc(tc) -> "SessionMeta":
+        def _gate(tc):
             payload = {
                 "tool_name": tc.function.name,
                 "tool_input": _json.loads(tc.function.arguments),
                 "session_id": session_id,
             }
-            meta = pipeline.score_tool_call(payload, _callback=on_tool_call)
-            return meta
+            meta = pipeline.score_tool_call(payload)
+            if on_tool_call is not None:
+                verdict = interpret_callback_result(on_tool_call(payload, meta))
+                if verdict.denied:
+                    return verdict, {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": f"Error: Denied by policy. {verdict.reason}",
+                    }
+            return Verdict.allow(), None
 
-        return _score_tc
+        return _gate
 
     def attach_semantic_kernel(self, kernel, *, session_id: str = "sdk", on_tool_call=None) -> None:
         """Register tracemill as a Semantic Kernel auto function invocation filter.
 
+        Blocking: skips next_handler and injects denial FunctionResult.
+        Sets context.terminate = True to stop the auto-invoke loop.
         Requires: semantic-kernel installed.
         """
+        from tracemill.sdk.verdict import interpret_callback_result
+
         pipeline = self
 
         @kernel.filter(filter_type="auto_function_invocation")
@@ -1577,49 +1644,88 @@ class GovernancePipeline:
                 "tool_input": dict(context.arguments),
                 "session_id": session_id,
             }
-            meta = pipeline.score_tool_call(payload, _callback=on_tool_call)
+            meta = pipeline.score_tool_call(payload)
+            if on_tool_call is not None:
+                verdict = interpret_callback_result(on_tool_call(payload, meta))
+                if verdict.denied:
+                    from semantic_kernel.functions import FunctionResult
+
+                    context.function_result = FunctionResult(
+                        function=context.function.metadata,
+                        value=f"Tool blocked by policy: {verdict.reason}",
+                    )
+                    context.terminate = True
+                    return
             await next_handler(context)
 
-    def attach_autogen(self, *, session_id: str = "sdk", on_tool_call=None):
-        """Return a dispatch helper for AutoGen FunctionCall objects.
+    def attach_autogen(self, tools, *, session_id: str = "sdk", on_tool_call=None):
+        """Return a TracemillWorkbench that gates tool calls for AutoGen v0.4.
 
+        Blocking: returns synthetic ToolResult without executing the tool.
         Usage:
-            score_call = pipeline.attach_autogen()
-            for call in message.function_calls:
-                score_call(call)
+            workbench = pipeline.attach_autogen(tools, on_tool_call=my_policy)
+            agent = AssistantAgent("agent", model_client, workbench=workbench)
+        Requires: autogen-core installed.
         """
-        import json as _json
+        from autogen_core.tools import StaticWorkbench
+
+        from tracemill.sdk.verdict import interpret_callback_result
 
         pipeline = self
+        _on_tool_call = on_tool_call
 
-        def _score_call(call) -> "SessionMeta":
-            payload = {
-                "tool_name": call.name,
-                "tool_input": _json.loads(call.arguments),
-                "session_id": session_id,
-            }
-            meta = pipeline.score_tool_call(payload, _callback=on_tool_call)
-            return meta
+        class _TracemillWorkbench(StaticWorkbench):
+            async def call_tool(self, name, arguments=None, cancellation_token=None, call_id=None):
+                from autogen_core.tools import TextResultContent, ToolResult
 
-        return _score_call
+                payload = {
+                    "tool_name": name,
+                    "tool_input": arguments or {},
+                    "session_id": session_id,
+                }
+                meta = pipeline.score_tool_call(payload)
+                if _on_tool_call is not None:
+                    verdict = interpret_callback_result(_on_tool_call(payload, meta))
+                    if verdict.denied:
+                        return ToolResult(
+                            name=name,
+                            result=[TextResultContent(content=f"Denied: {verdict.reason}")],
+                            is_error=False,
+                        )
+                return await super().call_tool(name, arguments, cancellation_token, call_id)
 
-    def attach_smolagents(self, *, session_id: str = "sdk", on_tool_call=None):
-        """Return a dispatch helper for smolagents ToolCall objects.
+        return _TracemillWorkbench(tools)
 
+    def attach_smolagents(self, agent_cls=None, *, session_id: str = "sdk", on_tool_call=None):
+        """Return a TracemillAgent subclass that gates tool calls for smolagents.
+
+        Blocking: returns denial string as observation without executing the tool.
         Usage:
-            score_tc = pipeline.attach_smolagents()
-            for tc in step.tool_calls:
-                score_tc(tc)
+            AgentCls = pipeline.attach_smolagents(ToolCallingAgent, on_tool_call=my_policy)
+            agent = AgentCls(tools=[...], model=model)
+        Requires: smolagents installed.
         """
+        if agent_cls is None:
+            from smolagents import ToolCallingAgent
+            agent_cls = ToolCallingAgent
+
+        from tracemill.sdk.verdict import interpret_callback_result
+
         pipeline = self
+        _on_tool_call = on_tool_call
 
-        def _score_tc(tc) -> "SessionMeta":
-            payload = {
-                "tool_name": tc.name,
-                "tool_input": tc.arguments,
-                "session_id": session_id,
-            }
-            meta = pipeline.score_tool_call(payload, _callback=on_tool_call)
-            return meta
+        class _TracemillAgent(agent_cls):
+            def execute_tool_call(self, tool_name: str, arguments) -> any:
+                payload = {
+                    "tool_name": tool_name,
+                    "tool_input": arguments if isinstance(arguments, dict) else {"raw": arguments},
+                    "session_id": session_id,
+                }
+                meta = pipeline.score_tool_call(payload)
+                if _on_tool_call is not None:
+                    verdict = interpret_callback_result(_on_tool_call(payload, meta))
+                    if verdict.denied:
+                        return f"[BLOCKED] {verdict.reason}"
+                return super().execute_tool_call(tool_name, arguments)
 
-        return _score_tc
+        return _TracemillAgent

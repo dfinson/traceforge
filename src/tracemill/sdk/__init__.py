@@ -1,11 +1,12 @@
-"""Tracemill SDK — pipeline setup.
+"""Tracemill SDK — pipeline setup and gating.
 
 Usage:
-    from tracemill.sdk import Pipeline
+    from tracemill.sdk import Pipeline, Verdict, Decision
 
     def my_policy(payload, meta):
         if meta.risk_assessment and meta.risk_assessment.score > 60:
-            raise Exception("blocked by policy")
+            return Verdict.deny(f"score {meta.risk_assessment.score} exceeds threshold")
+        return Verdict.allow()
 
     # From config (one call):
     pipeline = Pipeline.from_config(on_tool_call=my_policy)
@@ -13,8 +14,8 @@ Usage:
     # Or builder for manual wiring:
     pipeline = Pipeline.builder().on_tool_call(my_policy).db_path("./my.db").build()
 
-Tracemill never enforces. on_tool_call fires after every score.
-The framework's own hook is what blocks — tracemill just provides the signal.
+The callback returns a Verdict. Tracemill enforces it using each framework's
+native blocking mechanism.
 """
 
 from __future__ import annotations
@@ -25,8 +26,9 @@ if TYPE_CHECKING:
     from tracemill.governance.results import SessionMeta
 
 from tracemill.governance.pipeline import GovernancePipeline as Pipeline  # noqa: E402
+from tracemill.sdk.verdict import Decision, Verdict, interpret_callback_result  # noqa: E402
 
-__all__ = ["Pipeline"]
+__all__ = ["Pipeline", "Verdict", "Decision"]
 
 
 def _default_db_path() -> str:
@@ -62,34 +64,38 @@ class _PipelineBuilder:
 
     def attach_crewai(self, *, session_id: str = "sdk", on_tool_call=None) -> "_PipelineBuilder":
         """Register tracemill into CrewAI's before_tool_call hook."""
-        self._ensure_built().attach_crewai(session_id=session_id, on_tool_call=on_tool_call)
+        self._ensure_built().attach_crewai(session_id=session_id, on_tool_call=on_tool_call or self._on_tool_call)
         return self
 
-    def attach_langchain(self, chain, *, session_id: str = "sdk", on_tool_call=None) -> "_PipelineBuilder":
-        """Attach tracemill as a LangChain callback handler."""
-        self._ensure_built().attach_langchain(chain, session_id=session_id, on_tool_call=on_tool_call)
+    def attach_langchain(self, tool, *, session_id: str = "sdk", on_tool_call=None) -> "_PipelineBuilder":
+        """Wrap a LangChain tool with tracemill gating."""
+        self._ensure_built().attach_langchain(tool, session_id=session_id, on_tool_call=on_tool_call or self._on_tool_call)
         return self
+
+    def attach_langgraph(self, tools, *, session_id: str = "sdk", on_tool_call=None):
+        """Return a gated ToolNode for LangGraph."""
+        return self._ensure_built().attach_langgraph(tools, session_id=session_id, on_tool_call=on_tool_call or self._on_tool_call)
 
     def attach_anthropic(self, *, session_id: str = "sdk", on_tool_call=None):
-        """Return a dispatch helper for Anthropic ToolUseBlock objects."""
-        return self._ensure_built().attach_anthropic(session_id=session_id, on_tool_call=on_tool_call)
+        """Return a gate function for Anthropic tool_use blocks."""
+        return self._ensure_built().attach_anthropic(session_id=session_id, on_tool_call=on_tool_call or self._on_tool_call)
 
     def attach_openai(self, *, session_id: str = "sdk", on_tool_call=None):
-        """Return a dispatch helper for OpenAI tool calls."""
-        return self._ensure_built().attach_openai(session_id=session_id, on_tool_call=on_tool_call)
+        """Return a gate function for OpenAI tool calls."""
+        return self._ensure_built().attach_openai(session_id=session_id, on_tool_call=on_tool_call or self._on_tool_call)
 
     def attach_semantic_kernel(self, kernel, *, session_id: str = "sdk", on_tool_call=None) -> "_PipelineBuilder":
         """Register tracemill as a Semantic Kernel function invocation filter."""
-        self._ensure_built().attach_semantic_kernel(kernel, session_id=session_id, on_tool_call=on_tool_call)
+        self._ensure_built().attach_semantic_kernel(kernel, session_id=session_id, on_tool_call=on_tool_call or self._on_tool_call)
         return self
 
-    def attach_autogen(self, *, session_id: str = "sdk", on_tool_call=None):
-        """Return a dispatch helper for AutoGen FunctionCall objects."""
-        return self._ensure_built().attach_autogen(session_id=session_id, on_tool_call=on_tool_call)
+    def attach_autogen(self, tools, *, session_id: str = "sdk", on_tool_call=None):
+        """Return a TracemillWorkbench for AutoGen v0.4."""
+        return self._ensure_built().attach_autogen(tools, session_id=session_id, on_tool_call=on_tool_call or self._on_tool_call)
 
-    def attach_smolagents(self, *, session_id: str = "sdk", on_tool_call=None):
-        """Return a dispatch helper for smolagents ToolCall objects."""
-        return self._ensure_built().attach_smolagents(session_id=session_id, on_tool_call=on_tool_call)
+    def attach_smolagents(self, agent_cls=None, *, session_id: str = "sdk", on_tool_call=None):
+        """Return a TracemillAgent subclass for smolagents."""
+        return self._ensure_built().attach_smolagents(agent_cls, session_id=session_id, on_tool_call=on_tool_call or self._on_tool_call)
 
     def build(self) -> Pipeline:
         """Finalize and return the GovernancePipeline."""

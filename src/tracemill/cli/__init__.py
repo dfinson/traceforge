@@ -10,6 +10,8 @@ from tracemill.cli.watch import watch
 from tracemill.cli.score import score
 from tracemill.cli.replay import replay
 from tracemill.cli.status import status
+from tracemill.cli.gate_cmd import gate
+from tracemill.cli.init_cmd import init
 
 
 @click.group()
@@ -24,3 +26,5 @@ main.add_command(detect)
 main.add_command(replay)
 main.add_command(config)
 main.add_command(status)
+main.add_command(gate)
+main.add_command(init)

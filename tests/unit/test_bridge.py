@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tracemill.score import score_tool_call_event
+
 from tracemill.classify.coding import CodingMechanism
 from tracemill.classify.config import get_default_engine
 from tracemill.classify.core import Classification, Mechanism
@@ -208,7 +208,7 @@ class TestAssessEvent:
             arguments={"command": "rm -rf /"},
             classification=cls,
         )
-        result = score_tool_call_event(pipeline, event)
+        result = pipeline.score_tool_call_event(event)
         assert isinstance(result, SessionMeta)
         assert result.recommendation is not None or result.risk_assessment is not None
         assert result.risk_assessment is not None
@@ -216,7 +216,7 @@ class TestAssessEvent:
     def test_safe_tool_allowed(self, pipeline):
         cls = Classification(mechanism=Mechanism.FILESYSTEM, effect=None)
         event = _make_event(tool_name="read_file", arguments={"path": "/tmp/x"}, classification=cls)
-        result = score_tool_call_event(pipeline, event)
+        result = pipeline.score_tool_call_event(event)
         assert isinstance(result, SessionMeta)
 
     def test_fail_closed_on_broken_event(self, pipeline):
@@ -229,7 +229,7 @@ class TestAssessEvent:
             raise RuntimeError("synthetic failure")
 
         pipeline.context_from_session_event = _boom
-        result = score_tool_call_event(pipeline, event)
+        result = pipeline.score_tool_call_event(event)
         assert result.recommendation.recommended_action == RecommendedAction.ESCALATE
         assert "RuntimeError" in result.recommendation.reason_code
         pipeline.context_from_session_event = orig
@@ -243,8 +243,8 @@ class TestAssessEvent:
             classification=cls,
         )
         # Assess twice — results should be identical (no state accumulated)
-        r1 = score_tool_call_event(pipeline, event)
-        r2 = score_tool_call_event(pipeline, event)
+        r1 = pipeline.score_tool_call_event(event)
+        r2 = pipeline.score_tool_call_event(event)
         assert r1.risk_assessment.score == r2.risk_assessment.score
         if r1.recommendation and r2.recommendation:
             assert r1.recommendation.recommended_action == r2.recommendation.recommended_action
@@ -257,7 +257,7 @@ class TestAssessEvent:
             server_namespace="github",
             classification=cls,
         )
-        result = score_tool_call_event(pipeline, event)
+        result = pipeline.score_tool_call_event(event)
         assert isinstance(result, SessionMeta)
         assert result.risk_assessment is not None
 

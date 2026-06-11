@@ -468,9 +468,62 @@ class GovernancePipeline:
         Returns:
             SessionMeta — same shape sinks receive in the observation pipeline.
         """
-        from tracemill.score.scorer import score_tool_call as _score
+        from tracemill.governance.types import ToolCallEvent
 
-        return _score(self, payload)
+        try:
+            event = ToolCallEvent.from_dict(payload)
+            ctx = self.enrich_event(event)
+        except Exception as exc:
+            return self._fail_closed(exc)
+
+        try:
+            return self.preflight_event(ctx)
+        except Exception as exc:
+            return self._fail_closed(exc, classification=ctx.base_classification)
+
+    def score_tool_call_event(self, event: "tracemill.types.SessionEvent") -> "SessionMeta":
+        """Score an enriched SessionEvent via the canonical bridge.
+
+        Same as score_tool_call but accepts a SessionEvent (from adapters/Enricher)
+        instead of a raw dict.
+
+        Returns:
+            SessionMeta — same shape sinks receive in the observation pipeline.
+        """
+        try:
+            ctx = self.context_from_session_event(event)
+        except Exception as exc:
+            return self._fail_closed(exc)
+
+        try:
+            return self.preflight_event(ctx)
+        except Exception as exc:
+            return self._fail_closed(exc, classification=ctx.base_classification)
+
+    def _fail_closed(self, exc: Exception, classification=None) -> "SessionMeta":
+        """Produce a SessionMeta that signals ESCALATE due to internal error."""
+        from tracemill.classify.risk import RiskAssessment
+
+        reason = f"internal_error: {type(exc).__name__}"
+        risk = RiskAssessment(
+            score=0,
+            level="unknown",
+            confidence="low",
+            factors=(reason,),
+            mitre=(),
+            version="1",
+        )
+        recommendation = RiskRecommendation(
+            recommended_action=RecommendedAction.ESCALATE,
+            assessment=risk,
+            reason_code=reason,
+            canonical_id="error",
+        )
+        return SessionMeta(
+            classification=classification,
+            risk_assessment=risk,
+            recommendation=recommendation,
+        )
 
     def preflight_event(self, ctx: "EnrichmentContext") -> "SessionMeta":
         """Simulate full pipeline (Phase 1/2/3) without persisting state changes.

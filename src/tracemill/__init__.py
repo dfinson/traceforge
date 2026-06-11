@@ -1,6 +1,5 @@
 """tracemill — Agent event observation pipeline with pluggable storage backends."""
 
-from tracemill.score import score_tool_call, score_tool_call_event
 from tracemill.adapters.base import Adapter, JsonLineAdapter
 from tracemill.adapters.mapped_json import MappedJsonAdapter
 from tracemill.adapters.otel import OtelSpanAdapter
@@ -35,9 +34,6 @@ from tracemill.types import (
 )
 
 __all__ = [
-    # Scoring API
-    "score_tool_call",
-    "score_tool_call_event",
     # Adapters
     "Adapter",
     "JsonLineAdapter",

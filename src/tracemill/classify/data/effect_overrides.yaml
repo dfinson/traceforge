@@ -363,6 +363,7 @@ effect_overrides:
       up: mutating
       build: mutating
       run: mutating
+      detach: mutating
       login: read_only
       logout: read_only
       account: read_only
@@ -372,7 +373,6 @@ effect_overrides:
       remove: destructive
       clear: destructive
       revoke: destructive
-      detach: destructive
       deallocate: destructive
       deactivate: destructive
       cancel: destructive
@@ -432,7 +432,7 @@ effect_overrides:
       invoke: mutating
       trigger: mutating
       approve: mutating
-      reject: mutating
+      reject: destructive
       activate: mutating
       modify: mutating
       patch: mutating

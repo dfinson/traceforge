@@ -111,3 +111,26 @@ def test_gcloud_effect(cmd, expected):
 def test_gsutil_effect(cmd, expected):
     result = cs(cmd)
     assert result.effect == expected, f"{cmd!r}: got {result.effect!r}"
+
+
+# ── Service name / verb prefix collision tests ──
+
+
+@pytest.mark.parametrize(
+    "cmd,expected",
+    [
+        # 'connect' is an AWS service name AND a verb prefix — service should be skipped
+        ("aws connect describe-instance --instance-id i-123", "read_only"),
+        ("aws connect list-users --instance-id i-123", "read_only"),
+        ("aws connect delete-user --instance-id i-123 --user-id u-1", "destructive"),
+        # 'deploy' is an AWS service name (legacy codedeploy alias)
+        ("aws deploy list-deployments --application-name app", "read_only"),
+        ("aws deploy get-deployment --deployment-id d-123", "read_only"),
+        # 'configure' is a built-in command
+        ("aws configure list", "read_only"),
+        ("aws configure set region us-east-1", "mutating"),
+    ],
+)
+def test_service_name_collision(cmd, expected):
+    result = cs(cmd)
+    assert result.effect == expected, f"{cmd!r}: got {result.effect!r}"

@@ -8,6 +8,7 @@ import logging
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
+from tracemill.governance.results import SessionMeta
 from tracemill.sinks.base import StorageSink
 from tracemill.types import SessionEvent, TelemetrySpan, UsageRecord
 
@@ -74,16 +75,31 @@ class WebhookSink(StorageSink):
         logger.error("WebhookSink: all %d attempts to %s failed", self._max_retries, self._url)
 
     def _extract_action(self, event: SessionEvent) -> str | None:
-        gov = getattr(event.metadata, 'governance', None) if event.metadata else None
-        if isinstance(gov, dict):
-            rec = gov.get("recommendation", {})
-            if isinstance(rec, dict):
-                return rec.get("action")
-        return None
+        gov = event.metadata.governance if event.metadata else None
+        if gov is None:
+            return None
+        rec = gov.recommendation
+        if rec is None:
+            return None
+        return rec.recommended_action.value
 
     def _extract_governance(self, event: SessionEvent) -> dict | None:
-        gov = getattr(event.metadata, 'governance', None) if event.metadata else None
-        return gov if isinstance(gov, dict) else None
+        gov = event.metadata.governance if event.metadata else None
+        if gov is None:
+            return None
+        result: dict = {}
+        if gov.risk_assessment is not None:
+            result["risk_assessment"] = {
+                "score": gov.risk_assessment.score,
+                "level": gov.risk_assessment.level,
+                "confidence": gov.risk_assessment.confidence,
+            }
+        if gov.recommendation is not None:
+            result["recommendation"] = {
+                "action": gov.recommendation.recommended_action.value,
+                "reason_code": gov.recommendation.reason_code,
+            }
+        return result or None
 
     async def on_span(self, span: TelemetrySpan) -> None:
         pass

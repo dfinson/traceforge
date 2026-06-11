@@ -65,15 +65,13 @@ class SqliteOutputSink(StorageSink):
             tool_name = event.payload.get("tool_name")
 
         if event.metadata:
-            gov = getattr(event.metadata, 'governance', None)
-            if isinstance(gov, dict):
-                risk = gov.get("risk_assessment", {})
-                if isinstance(risk, dict):
-                    risk_level = risk.get("level")
-                    risk_score = risk.get("score")
-                rec = gov.get("recommendation", {})
-                if isinstance(rec, dict):
-                    action = rec.get("action")
+            gov = event.metadata.governance
+            if gov is not None:
+                if gov.risk_assessment is not None:
+                    risk_level = gov.risk_assessment.level
+                    risk_score = gov.risk_assessment.score
+                if gov.recommendation is not None:
+                    action = gov.recommendation.recommended_action.value
 
         payload_json = json.dumps(event.payload, default=str) if event.payload else None
         metadata_json = json.dumps(

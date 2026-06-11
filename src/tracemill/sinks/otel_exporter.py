@@ -97,22 +97,18 @@ class OtelExporterSink(StorageSink):
                     {"key": "gen_ai.tool.name", "value": {"stringValue": str(tool_name)}}
                 )
 
-        gov = getattr(event.metadata, 'governance', None) if event.metadata else None
-        if isinstance(gov, dict):
-            risk = gov.get("risk_assessment", {})
-            if isinstance(risk, dict):
-                if "score" in risk:
-                    attributes.append(
-                        {"key": "tracemill.risk.score", "value": {"intValue": risk["score"]}}
-                    )
-                if "level" in risk:
-                    attributes.append(
-                        {"key": "tracemill.risk.level", "value": {"stringValue": risk["level"]}}
-                    )
-            rec = gov.get("recommendation", {})
-            if isinstance(rec, dict) and "action" in rec:
+        gov = event.metadata.governance if event.metadata else None
+        if gov is not None:
+            if gov.risk_assessment is not None:
                 attributes.append(
-                    {"key": "tracemill.action", "value": {"stringValue": rec["action"]}}
+                    {"key": "tracemill.risk.score", "value": {"intValue": gov.risk_assessment.score}}
+                )
+                attributes.append(
+                    {"key": "tracemill.risk.level", "value": {"stringValue": gov.risk_assessment.level}}
+                )
+            if gov.recommendation is not None:
+                attributes.append(
+                    {"key": "tracemill.action", "value": {"stringValue": gov.recommendation.recommended_action.value}}
                 )
 
         return {

@@ -1,4 +1,4 @@
-"""Tracemill SDK — builder pattern for pipeline setup.
+"""Tracemill SDK — pipeline setup.
 
 Usage:
     from tracemill.sdk import Pipeline
@@ -7,11 +7,11 @@ Usage:
         if meta.risk_assessment and meta.risk_assessment.score > 60:
             raise Exception("blocked by policy")
 
-    # Manual:
-    pipeline = Pipeline.builder().on_tool_call(my_policy).build()
+    # From config (one call):
+    pipeline = Pipeline.from_config(on_tool_call=my_policy)
 
-    # From config file:
-    pipeline = Pipeline.from_config("./tracemill.yaml").on_tool_call(my_policy).build()
+    # Or builder for manual wiring:
+    pipeline = Pipeline.builder().on_tool_call(my_policy).db_path("./my.db").build()
 
 Tracemill never enforces. on_tool_call fires after every score.
 The framework's own hook is what blocks — tracemill just provides the signal.

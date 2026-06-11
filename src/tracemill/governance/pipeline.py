@@ -171,22 +171,21 @@ class GovernancePipeline:
         return PipelineBuilder()
 
     @classmethod
-    def from_config(cls, path=None) -> "PipelineBuilder":
-        """Return a builder pre-configured from a tracemill.yaml file.
+    def from_config(cls, path=None, *, on_tool_call=None) -> "GovernancePipeline":
+        """Create a fully-configured pipeline from a tracemill.yaml file.
 
         Args:
             path: Path to tracemill.yaml. None uses standard discovery
                   (TRACEMILL_CONFIG env, ./tracemill.yaml, ~/.tracemill/config.yaml).
+            on_tool_call: Callback invoked after every tool call is scored.
 
         Usage:
-            pipeline = Pipeline.from_config("./tracemill.yaml").on_tool_call(fn).build()
+            pipeline = Pipeline.from_config("./tracemill.yaml", on_tool_call=fn)
         """
         import os
 
         from tracemill.config.loader import load_config
-        from tracemill.sdk import PipelineBuilder
 
-        # If explicit path given, temporarily set env var for discovery
         old_env = os.environ.get("TRACEMILL_CONFIG")
         if path is not None:
             os.environ["TRACEMILL_CONFIG"] = str(path)
@@ -199,14 +198,9 @@ class GovernancePipeline:
                 else:
                     os.environ["TRACEMILL_CONFIG"] = old_env
 
-        gov = config.governance
-        builder = PipelineBuilder()
-        builder._config = gov
-        if gov.db_path:
-            builder._db_path = gov.db_path
-        if gov.project_root:
-            builder._project_root = gov.project_root
-        return builder
+        instance = cls.create(config.governance)
+        instance.on_tool_call = on_tool_call
+        return instance
 
     def context_from_session_event(self, event: "tracemill.types.SessionEvent") -> "EnrichmentContext":
         """Bridge: convert an enriched SessionEvent (from adapters/Enricher) into an EnrichmentContext.

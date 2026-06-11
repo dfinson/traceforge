@@ -1,14 +1,14 @@
 """Tracemill SDK — builder pattern for pipeline setup.
 
 Usage:
-    from tracemill.sdk import Pipeline
+    from tracemill.sdk import PipelineBuilder
 
     def my_policy(payload, meta):
         if meta.risk_assessment and meta.risk_assessment.score > 60:
             raise Exception("blocked by policy")
 
     pipeline = (
-        Pipeline()
+        PipelineBuilder()
         .on_tool_call(my_policy)
         .attach_crewai()
         .build()
@@ -33,7 +33,7 @@ def _default_db_path() -> str:
     return str(Path.home() / ".tracemill" / "system.db")
 
 
-class Pipeline:
+class PipelineBuilder:
     """Builder for a fully-wired GovernancePipeline.
 
     Chainable methods configure the pipeline. Call .build() to finalize.
@@ -48,7 +48,7 @@ class Pipeline:
         self._pipeline: "GovernancePipeline | None" = None
         self._pending_attaches: list[tuple[str, dict]] = []
 
-    def on_tool_call(self, callback: "Callable[[dict, SessionMeta], None]") -> "Pipeline":
+    def on_tool_call(self, callback: "Callable[[dict, SessionMeta], None]") -> "PipelineBuilder":
         """Set the callback invoked after every tool call is scored.
 
         Receives (payload_dict, SessionMeta). Fire-and-forget from tracemill's
@@ -58,12 +58,12 @@ class Pipeline:
         self._on_tool_call = callback
         return self
 
-    def db_path(self, path: str) -> "Pipeline":
+    def db_path(self, path: str) -> "PipelineBuilder":
         """Set the system.db path (default ~/.tracemill/system.db)."""
         self._db_path = path
         return self
 
-    def project_root(self, path: str) -> "Pipeline":
+    def project_root(self, path: str) -> "PipelineBuilder":
         """Set the project root for path resolution."""
         self._project_root = path
         return self
@@ -93,12 +93,12 @@ class Pipeline:
 
     # ─── Attach methods (delegate to pipeline, auto-build if needed) ────────
 
-    def attach_crewai(self, *, session_id: str = "sdk") -> "Pipeline":
+    def attach_crewai(self, *, session_id: str = "sdk") -> "PipelineBuilder":
         """Register tracemill into CrewAI's before_tool_call hook."""
         self._ensure_built().attach_crewai(session_id=session_id)
         return self
 
-    def attach_langchain(self, chain, *, session_id: str = "sdk") -> "Pipeline":
+    def attach_langchain(self, chain, *, session_id: str = "sdk") -> "PipelineBuilder":
         """Attach tracemill as a LangChain callback handler."""
         self._ensure_built().attach_langchain(chain, session_id=session_id)
         return self
@@ -111,7 +111,7 @@ class Pipeline:
         """Return a dispatch helper for OpenAI tool calls."""
         return self._ensure_built().attach_openai(session_id=session_id)
 
-    def attach_semantic_kernel(self, kernel, *, session_id: str = "sdk") -> "Pipeline":
+    def attach_semantic_kernel(self, kernel, *, session_id: str = "sdk") -> "PipelineBuilder":
         """Register tracemill as a Semantic Kernel function invocation filter."""
         self._ensure_built().attach_semantic_kernel(kernel, session_id=session_id)
         return self

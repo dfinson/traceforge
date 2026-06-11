@@ -162,13 +162,51 @@ class GovernancePipeline:
 
     @classmethod
     def builder(cls) -> "PipelineBuilder":
-        """Return a PipelineBuilder for chainable pipeline configuration.
+        """Return a builder for chainable pipeline configuration.
 
         Usage:
-            pipeline = GovernancePipeline.builder().on_tool_call(my_policy).build()
+            pipeline = Pipeline.builder().on_tool_call(my_policy).build()
         """
         from tracemill.sdk import PipelineBuilder
         return PipelineBuilder()
+
+    @classmethod
+    def from_config(cls, path=None) -> "PipelineBuilder":
+        """Return a builder pre-configured from a tracemill.yaml file.
+
+        Args:
+            path: Path to tracemill.yaml. None uses standard discovery
+                  (TRACEMILL_CONFIG env, ./tracemill.yaml, ~/.tracemill/config.yaml).
+
+        Usage:
+            pipeline = Pipeline.from_config("./tracemill.yaml").on_tool_call(fn).build()
+        """
+        import os
+
+        from tracemill.config.loader import load_config
+        from tracemill.sdk import PipelineBuilder
+
+        # If explicit path given, temporarily set env var for discovery
+        old_env = os.environ.get("TRACEMILL_CONFIG")
+        if path is not None:
+            os.environ["TRACEMILL_CONFIG"] = str(path)
+        try:
+            config = load_config()
+        finally:
+            if path is not None:
+                if old_env is None:
+                    os.environ.pop("TRACEMILL_CONFIG", None)
+                else:
+                    os.environ["TRACEMILL_CONFIG"] = old_env
+
+        gov = config.governance
+        builder = PipelineBuilder()
+        builder._config = gov
+        if gov.db_path:
+            builder._db_path = gov.db_path
+        if gov.project_root:
+            builder._project_root = gov.project_root
+        return builder
 
     def context_from_session_event(self, event: "tracemill.types.SessionEvent") -> "EnrichmentContext":
         """Bridge: convert an enriched SessionEvent (from adapters/Enricher) into an EnrichmentContext.

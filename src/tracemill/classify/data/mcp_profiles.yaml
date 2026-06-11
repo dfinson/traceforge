@@ -257,6 +257,53 @@ mcp_profiles:
     role: [retriever.api_client]
     scope: [configuration.infrastructure]
     capability: [network_outbound, uses_credentials]
+    tool_overrides:
+      # Destructive operations
+      delete_stack:
+        effect: destructive
+      terminate_instances:
+        effect: destructive
+      delete_bucket:
+        effect: destructive
+      delete_function:
+        effect: destructive
+      delete_table:
+        effect: destructive
+      delete_cluster:
+        effect: destructive
+      delete_db_instance:
+        effect: destructive
+      delete_secret:
+        effect: destructive
+      delete_queue:
+        effect: destructive
+      remove_targets:
+        effect: destructive
+      # Mutating operations
+      create_stack:
+        effect: mutating
+        role: [orchestrator.task_runner]
+      update_stack:
+        effect: mutating
+      invoke_function:
+        effect: mutating
+      run_task:
+        effect: mutating
+      start_execution:
+        effect: mutating
+      put_item:
+        effect: mutating
+      # Read-only operations
+      describe_instances:
+        effect: read_only
+      list_buckets:
+        effect: read_only
+      get_caller_identity:
+        effect: read_only
+      describe_stacks:
+        effect: read_only
+      list_functions:
+        effect: read_only
 
   - id: azure
     namespace_aliases: [azure]
@@ -264,6 +311,41 @@ mcp_profiles:
     role: [retriever.api_client]
     scope: [configuration.infrastructure]
     capability: [network_outbound, uses_credentials]
+    tool_overrides:
+      # Destructive operations
+      delete_resource_group:
+        effect: destructive
+      delete_vm:
+        effect: destructive
+      delete_webapp:
+        effect: destructive
+      delete_aks_cluster:
+        effect: destructive
+      purge_keyvault:
+        effect: destructive
+      delete_storage_account:
+        effect: destructive
+      delete_sql_server:
+        effect: destructive
+      delete_cosmosdb_account:
+        effect: destructive
+      # Mutating operations
+      create_resource_group:
+        effect: mutating
+      create_vm:
+        effect: mutating
+      deploy_arm_template:
+        effect: mutating
+        role: [orchestrator.task_runner]
+      create_aks_cluster:
+        effect: mutating
+      # Read-only operations
+      list_resource_groups:
+        effect: read_only
+      show_vm:
+        effect: read_only
+      list_storage_accounts:
+        effect: read_only
 
   - id: gcp
     namespace_aliases: [gcp, gcloud, google_cloud]
@@ -271,6 +353,45 @@ mcp_profiles:
     role: [retriever.api_client]
     scope: [configuration.infrastructure]
     capability: [network_outbound, uses_credentials]
+    tool_overrides:
+      # Destructive operations
+      delete_instance:
+        effect: destructive
+      delete_cluster:
+        effect: destructive
+      delete_function:
+        effect: destructive
+      delete_service:
+        effect: destructive
+      delete_bucket:
+        effect: destructive
+      delete_topic:
+        effect: destructive
+      delete_subscription:
+        effect: destructive
+      delete_secret:
+        effect: destructive
+      # Mutating operations
+      create_instance:
+        effect: mutating
+      create_cluster:
+        effect: mutating
+      deploy_service:
+        effect: mutating
+        role: [orchestrator.task_runner]
+      set_iam_policy:
+        effect: mutating
+      add_iam_policy_binding:
+        effect: mutating
+      # Read-only operations
+      list_instances:
+        effect: read_only
+      describe_instance:
+        effect: read_only
+      get_iam_policy:
+        effect: read_only
+      list_clusters:
+        effect: read_only
 
   - id: docker
     namespace_aliases: [docker]

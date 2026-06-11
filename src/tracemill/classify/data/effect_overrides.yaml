@@ -200,3 +200,276 @@ effect_overrides:
       show: read_only
       state: read_only
       output: read_only
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Cloud provider CLIs — use verb_prefix_effects for multi-level commands
+  # These match verbs appearing anywhere in positional args (e.g., "aws ec2 describe-instances")
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  aws:
+    verb_prefix_effects:
+      # Read-only verbs
+      describe: read_only
+      get: read_only
+      list: read_only
+      head: read_only
+      wait: read_only
+      check: read_only
+      preview: read_only
+      validate: read_only
+      estimate: read_only
+      lookup: read_only
+      download: read_only
+      receive: read_only
+      verify: read_only
+      scan: read_only
+      detect: read_only
+      analyze: read_only
+      evaluate: read_only
+      batch-get: read_only
+      generate: read_only
+      ls: read_only
+      presign: read_only
+      # Mutating verbs
+      create: mutating
+      put: mutating
+      update: mutating
+      tag: mutating
+      untag: mutating
+      start: mutating
+      stop: mutating
+      reboot: mutating
+      modify: mutating
+      attach: mutating
+      detach: mutating
+      associate: mutating
+      disassociate: mutating
+      enable: mutating
+      disable: mutating
+      register: mutating
+      import: mutating
+      copy: mutating
+      set: mutating
+      add: mutating
+      scale: mutating
+      restore: mutating
+      rotate: mutating
+      encrypt: mutating
+      allocate: mutating
+      assign: mutating
+      authorize: mutating
+      accept: mutating
+      invoke: mutating
+      send: mutating
+      publish: mutating
+      subscribe: mutating
+      confirm: mutating
+      run: mutating
+      execute: mutating
+      submit: mutating
+      reset: mutating
+      move: mutating
+      upgrade: mutating
+      renew: mutating
+      replace: mutating
+      configure: mutating
+      connect: mutating
+      provision: mutating
+      activate: mutating
+      resume: mutating
+      pause: mutating
+      protect: mutating
+      unprotect: mutating
+      assume: mutating
+      cp: mutating
+      mv: mutating
+      mb: mutating
+      sync: mutating
+      deploy: mutating
+      push: mutating
+      upload: mutating
+      # Destructive verbs
+      delete: destructive
+      terminate: destructive
+      remove: destructive
+      purge: destructive
+      destroy: destructive
+      revoke: destructive
+      deregister: destructive
+      cancel: destructive
+      abort: destructive
+      reject: destructive
+      force-delete: destructive
+      empty: destructive
+      release: destructive
+      rm: destructive
+      rb: destructive
+
+  az:
+    verb_prefix_effects:
+      # Read-only verbs
+      list: read_only
+      show: read_only
+      get: read_only
+      check: read_only
+      wait: read_only
+      exists: read_only
+      browse: read_only
+      export: read_only
+      query: read_only
+      download: read_only
+      generate: read_only
+      # Mutating verbs
+      create: mutating
+      update: mutating
+      set: mutating
+      start: mutating
+      stop: mutating
+      restart: mutating
+      scale: mutating
+      import: mutating
+      assign: mutating
+      move: mutating
+      lock: mutating
+      unlock: mutating
+      configure: mutating
+      connect: mutating
+      enable: mutating
+      disable: mutating
+      rotate: mutating
+      upgrade: mutating
+      add: mutating
+      renew: mutating
+      failover: mutating
+      swap: mutating
+      resize: mutating
+      restore: mutating
+      recover: mutating
+      accept: mutating
+      invoke: mutating
+      apply: mutating
+      attach: mutating
+      migrate: mutating
+      convert: mutating
+      redeploy: mutating
+      reimage: mutating
+      generalize: mutating
+      capture: mutating
+      provision: mutating
+      deploy: mutating
+      push: mutating
+      publish: mutating
+      upload: mutating
+      up: mutating
+      build: mutating
+      run: mutating
+      login: read_only
+      logout: read_only
+      account: read_only
+      # Destructive verbs
+      delete: destructive
+      purge: destructive
+      remove: destructive
+      clear: destructive
+      revoke: destructive
+      detach: destructive
+      deallocate: destructive
+      deactivate: destructive
+      cancel: destructive
+      abort: destructive
+      force-delete: destructive
+      unbind: destructive
+
+  gcloud:
+    verb_prefix_effects:
+      # Read-only verbs
+      list: read_only
+      ls: read_only
+      cat: read_only
+      describe: read_only
+      get-iam-policy: read_only
+      info: read_only
+      export: read_only
+      get: read_only
+      print-access-token: read_only
+      print-identity-token: read_only
+      read: read_only
+      tail: read_only
+      show: read_only
+      check: read_only
+      operations: read_only
+      auth: read_only
+      config: read_only
+      init: read_only
+      components: read_only
+      version: read_only
+      # Mutating verbs
+      create: mutating
+      update: mutating
+      set: mutating
+      set-iam-policy: mutating
+      add-iam-policy-binding: mutating
+      start: mutating
+      stop: mutating
+      resize: mutating
+      add: mutating
+      import: mutating
+      enable: mutating
+      disable: mutating
+      connect: mutating
+      ssh: mutating
+      scp: mutating
+      attach: mutating
+      detach: mutating
+      move: mutating
+      restore: mutating
+      reset: mutating
+      upgrade: mutating
+      scale: mutating
+      apply: mutating
+      configure: mutating
+      submit: mutating
+      invoke: mutating
+      trigger: mutating
+      approve: mutating
+      reject: mutating
+      activate: mutating
+      modify: mutating
+      patch: mutating
+      promote: mutating
+      deploy: mutating
+      push: mutating
+      cp: mutating
+      mv: mutating
+      # Destructive verbs
+      delete: destructive
+      rm: destructive
+      remove-iam-policy-binding: destructive
+      destroy: destructive
+      drain: destructive
+      clear: destructive
+      revoke: destructive
+      purge: destructive
+      drop: destructive
+      undelete: mutating
+
+  # gsutil legacy CLI (verb is the first positional — handled by subcmd_effects)
+  gsutil:
+    subcmd_effects:
+      ls: read_only
+      cat: read_only
+      stat: read_only
+      du: read_only
+      hash: read_only
+      ver: read_only
+      cp: mutating
+      mv: mutating
+      mb: mutating
+      rsync: mutating
+      rewrite: mutating
+      compose: mutating
+      setmeta: mutating
+      signurl: read_only
+      rm: destructive
+      rb: destructive
+    default_effect: read_only

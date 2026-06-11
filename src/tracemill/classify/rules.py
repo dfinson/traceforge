@@ -189,6 +189,15 @@ def effect_for_binary(
                 if nested and child in nested:
                     return Effect(nested[child])
 
+        # Verb prefix matching for multi-level CLIs (aws <svc> <verb>, az <grp> <verb>)
+        # Scans all positional words for a matching verb prefix.
+        if all_words and override.verb_prefix_effects:
+            positionals = [w for w in all_words[1:] if not w.startswith("-")]
+            for word in positionals:
+                for prefix, eff in override.verb_prefix_effects.items():
+                    if word == prefix or word.startswith(prefix + "-"):
+                        return Effect(eff)
+
         if subcmd and subcmd in override.subcmd_effects:
             return Effect(override.subcmd_effects[subcmd])
 

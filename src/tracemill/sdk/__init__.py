@@ -1,14 +1,14 @@
 """Tracemill SDK — builder pattern for pipeline setup.
 
 Usage:
-    from tracemill.sdk import PipelineBuilder
+    from tracemill.sdk import Pipeline
 
     def my_policy(payload, meta):
         if meta.risk_assessment and meta.risk_assessment.score > 60:
             raise Exception("blocked by policy")
 
     pipeline = (
-        PipelineBuilder()
+        Pipeline.builder()
         .on_tool_call(my_policy)
         .attach_crewai()
         .build()
@@ -23,8 +23,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
-    from tracemill.governance.pipeline import GovernancePipeline
     from tracemill.governance.results import SessionMeta
+
+from tracemill.governance.pipeline import GovernancePipeline as Pipeline  # noqa: E402
+
+__all__ = ["Pipeline", "PipelineBuilder"]
 
 
 def _default_db_path() -> str:
@@ -45,7 +48,7 @@ class PipelineBuilder:
         self._on_tool_call: Callable[[dict, "SessionMeta"], None] | None = None
         self._db_path: str | None = None
         self._project_root: str | None = None
-        self._pipeline: "GovernancePipeline | None" = None
+        self._pipeline: Pipeline | None = None
         self._pending_attaches: list[tuple[str, dict]] = []
 
     def on_tool_call(self, callback: "Callable[[dict, SessionMeta], None]") -> "PipelineBuilder":
@@ -68,7 +71,7 @@ class PipelineBuilder:
         self._project_root = path
         return self
 
-    def build(self) -> "GovernancePipeline":
+    def build(self) -> Pipeline:
         """Finalize and return the GovernancePipeline."""
         if self._pipeline is None:
             from tracemill.cli.factory import create_default_pipeline
@@ -86,7 +89,7 @@ class PipelineBuilder:
             self._pending_attaches.clear()
         return self._pipeline
 
-    def _ensure_built(self) -> "GovernancePipeline":
+    def _ensure_built(self) -> Pipeline:
         if self._pipeline is None:
             return self.build()
         return self._pipeline

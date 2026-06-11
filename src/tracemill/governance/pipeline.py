@@ -160,6 +160,16 @@ class GovernancePipeline:
         instance._project_root = config.project_root
         return instance
 
+    @classmethod
+    def builder(cls) -> "PipelineBuilder":
+        """Return a PipelineBuilder for chainable pipeline configuration.
+
+        Usage:
+            pipeline = GovernancePipeline.builder().on_tool_call(my_policy).build()
+        """
+        from tracemill.sdk import PipelineBuilder
+        return PipelineBuilder()
+
     def context_from_session_event(self, event: "tracemill.types.SessionEvent") -> "EnrichmentContext":
         """Bridge: convert an enriched SessionEvent (from adapters/Enricher) into an EnrichmentContext.
 

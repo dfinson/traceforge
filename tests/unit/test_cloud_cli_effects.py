@@ -134,3 +134,103 @@ def test_gsutil_effect(cmd, expected):
 def test_service_name_collision(cmd, expected):
     result = cs(cmd)
     assert result.effect == expected, f"{cmd!r}: got {result.effect!r}"
+
+
+# ── Batch verbs ──
+
+
+@pytest.mark.parametrize(
+    "cmd,expected",
+    [
+        ("aws dynamodb batch-get-item --request-items file://req.json", "read_only"),
+        ("aws dynamodb batch-write-item --request-items file://req.json", "mutating"),
+        ("aws sesv2 batch-delete-suppressed-destinations", "destructive"),
+    ],
+)
+def test_aws_batch_verbs(cmd, expected):
+    result = cs(cmd)
+    assert result.effect == expected, f"{cmd!r}: got {result.effect!r}"
+
+
+# ── Deep nesting (3+ positional levels) ──
+
+
+@pytest.mark.parametrize(
+    "cmd,expected",
+    [
+        ("aws ec2 describe-security-group-rules --security-group-id sg-123", "read_only"),
+        ("az network vnet subnet delete --name sub1 --vnet-name v1 --resource-group rg", "destructive"),
+        ("az network vnet subnet create --name sub1 --vnet-name v1 --resource-group rg", "mutating"),
+        ("gcloud compute firewall-rules delete rule1", "destructive"),
+        ("gcloud compute firewall-rules list", "read_only"),
+        ("gcloud container clusters get-credentials my-cluster", "read_only"),
+    ],
+)
+def test_deep_nesting(cmd, expected):
+    result = cs(cmd)
+    assert result.effect == expected, f"{cmd!r}: got {result.effect!r}"
+
+
+# ── Fallback behavior (unknown verbs/services) ──
+
+
+@pytest.mark.parametrize(
+    "cmd,expected",
+    [
+        ("aws ec2 some-unknown-verb --id i-123", None),
+        ("az foobar unknown-cmd --name x", None),
+        ("gcloud compute things frobnicate", None),
+        ("aws", None),
+        ("az", None),
+        ("gcloud", None),
+    ],
+)
+def test_unknown_verb_fallback(cmd, expected):
+    result = cs(cmd)
+    assert result.effect == expected, f"{cmd!r}: got {result.effect!r}"
+
+
+# ── Real-world agent transcript patterns ──
+
+
+@pytest.mark.parametrize(
+    "cmd,expected",
+    [
+        # Piped commands
+        ("aws s3 ls | grep backup", "read_only"),
+        # Environment variable prefix
+        ("AWS_PROFILE=prod aws ec2 describe-instances", "read_only"),
+        # Flags with verb-like words in values
+        ("aws ssm put-parameter --name /delete/path --value secret", "mutating"),
+        # Long flag chains
+        ("az vm create --name vm1 --resource-group rg1 --image UbuntuLTS --size Standard_D2s_v3", "mutating"),
+        # gcloud with --format (doesn't affect effect)
+        ("gcloud compute instances list --format=json", "read_only"),
+        # gcloud with --quiet on delete (still destructive)
+        ("gcloud compute instances delete vm1 --project my-proj --zone us-east1-b --quiet", "destructive"),
+        # aws with --output flag
+        ("aws ec2 describe-instances --output json", "read_only"),
+        # presign (read-only, generates URL)
+        ("aws s3 presign s3://bucket/key", "read_only"),
+    ],
+)
+def test_real_world_patterns(cmd, expected):
+    result = cs(cmd)
+    assert result.effect == expected, f"{cmd!r}: got {result.effect!r}"
+
+
+# ── Scope routing verification ──
+
+
+@pytest.mark.parametrize(
+    "cmd,expected_scope",
+    [
+        ("aws ec2 describe-instances", "configuration.infrastructure"),
+        ("aws s3 ls", "configuration.infrastructure"),
+        ("az group list", "configuration.infrastructure"),
+        ("gcloud compute instances list", "configuration.infrastructure"),
+    ],
+)
+def test_scope_routing(cmd, expected_scope):
+    result = cs(cmd)
+    assert expected_scope in result.scope, f"{cmd!r}: scope={result.scope!r}"

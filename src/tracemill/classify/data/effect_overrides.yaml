@@ -227,11 +227,14 @@ effect_overrides:
       analyze: read_only
       evaluate: read_only
       batch-get: read_only
+      batch-check: read_only
       generate: read_only
       ls: read_only
       presign: read_only
       # Mutating verbs
       create: mutating
+      batch-put: mutating
+      batch-write: mutating
       put: mutating
       update: mutating
       tag: mutating
@@ -290,6 +293,7 @@ effect_overrides:
       upload: mutating
       # Destructive verbs
       delete: destructive
+      batch-delete: destructive
       terminate: destructive
       remove: destructive
       purge: destructive
@@ -397,7 +401,6 @@ effect_overrides:
       tail: read_only
       show: read_only
       check: read_only
-      operations: read_only
       auth: read_only
       config: read_only
       init: read_only
@@ -441,6 +444,7 @@ effect_overrides:
       push: mutating
       cp: mutating
       mv: mutating
+      undelete: mutating
       # Destructive verbs
       delete: destructive
       rm: destructive
@@ -451,7 +455,6 @@ effect_overrides:
       revoke: destructive
       purge: destructive
       drop: destructive
-      undelete: mutating
 
   # gsutil legacy CLI (verb is the first positional — handled by subcmd_effects)
   gsutil:

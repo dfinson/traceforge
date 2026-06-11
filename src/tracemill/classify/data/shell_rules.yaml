@@ -936,6 +936,13 @@ shell_rules:
     role: retriever.api_client
     scope: configuration.infrastructure
 
+  - id: aws-analytics-ml
+    binaries: [aws]
+    subcmds: [athena, glue, emr, kinesis, firehose, sagemaker, bedrock, comprehend, rekognition, textract]
+    activity: implementation
+    role: retriever.api_client
+    scope: configuration.infrastructure
+
   - id: aws-networking
     binaries: [aws]
     subcmds: [elb, elbv2, route53, cloudfront, apigateway, apigatewayv2, vpc-lattice]
@@ -1097,7 +1104,7 @@ shell_rules:
 
   - id: gcloud-data
     binaries: [gcloud]
-    subcmds: [sql, spanner, firestore, bigtable, datastore, memcache, storage]
+    subcmds: [sql, spanner, firestore, bigtable, datastore, memcache, storage, dataflow, dataproc]
     activity: implementation
     role: retriever.api_client
     scope: configuration.infrastructure

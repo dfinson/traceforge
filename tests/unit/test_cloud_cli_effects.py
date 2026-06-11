@@ -225,6 +225,43 @@ def test_semantic_correctness(cmd, expected):
     assert result.effect == expected, f"{cmd!r}: got {result.effect!r}"
 
 
+# ── Cross-CLI consistency and coverage gaps ──
+
+
+@pytest.mark.parametrize(
+    "cmd,expected",
+    [
+        # Route53 change verb
+        ("aws route53 change-resource-record-sets --hosted-zone-id z --change-batch file://c.json", "mutating"),
+        # EKS lifecycle
+        ("aws eks describe-cluster --name c", "read_only"),
+        ("aws eks create-cluster --name c --role-arn r --resources-vpc-config subnetIds=s", "mutating"),
+        ("aws eks delete-cluster --name c", "destructive"),
+        # CloudFront invalidation
+        ("aws cloudfront create-invalidation --distribution-id d --paths /*", "mutating"),
+        # Cross-CLI create consistency
+        ("aws ec2 run-instances --image-id ami-123 --instance-type t3.micro", "mutating"),
+        ("az vm create --name vm1 --resource-group rg --image UbuntuLTS", "mutating"),
+        ("gcloud compute instances create vm1 --zone us-central1-a", "mutating"),
+        # Cross-CLI delete consistency
+        ("az vm delete --name vm1 --resource-group rg --yes", "destructive"),
+        ("gcloud compute instances delete vm1 --zone us-central1-a --quiet", "destructive"),
+        # AWS purge (destructive)
+        ("aws sqs purge-queue --queue-url u", "destructive"),
+        # Azure restart/start/stop
+        ("az vm restart --name vm1 --resource-group rg", "mutating"),
+        ("az vm start --name vm1 --resource-group rg", "mutating"),
+        ("az vm stop --name vm1 --resource-group rg", "mutating"),
+        # GCP deploy
+        ("gcloud run deploy svc --image gcr.io/p/img --platform managed", "mutating"),
+        ("gcloud functions deploy f --runtime python39 --trigger-http", "mutating"),
+    ],
+)
+def test_cross_cli_consistency(cmd, expected):
+    result = cs(cmd)
+    assert result.effect == expected, f"{cmd!r}: got {result.effect!r}"
+
+
 # ── Real-world agent transcript patterns ──
 
 

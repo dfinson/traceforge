@@ -291,6 +291,7 @@ effect_overrides:
       deploy: mutating
       push: mutating
       upload: mutating
+      change: mutating
       # Destructive verbs
       delete: destructive
       batch-delete: destructive

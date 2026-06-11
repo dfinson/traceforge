@@ -48,8 +48,34 @@ class PipelineBuilder:
         self._on_tool_call: Callable[[dict, "SessionMeta"], None] | None = None
         self._db_path: str | None = None
         self._project_root: str | None = None
+        self._config = None  # GovernanceConfig if from_config was used
         self._pipeline: Pipeline | None = None
         self._pending_attaches: list[tuple[str, dict]] = []
+
+    @classmethod
+    def from_config(cls, path=None) -> "PipelineBuilder":
+        """Create a builder pre-configured from a tracemill.yaml file.
+
+        Args:
+            path: Path to tracemill.yaml. None auto-discovers from cwd/home.
+
+        Returns:
+            PipelineBuilder with db_path, project_root, etc. pre-set from config.
+        """
+        from pathlib import Path as P
+
+        from tracemill.config.loader import load_config
+
+        config = load_config(P(path) if path else None)
+        gov = config.governance
+
+        builder = cls()
+        builder._config = gov
+        if gov.db_path:
+            builder._db_path = gov.db_path
+        if gov.project_root:
+            builder._project_root = gov.project_root
+        return builder
 
     def on_tool_call(self, callback: "Callable[[dict, SessionMeta], None]") -> "PipelineBuilder":
         """Set the callback invoked after every tool call is scored.
@@ -74,15 +100,22 @@ class PipelineBuilder:
     def build(self) -> Pipeline:
         """Finalize and return the GovernancePipeline."""
         if self._pipeline is None:
-            from tracemill.cli.factory import create_default_pipeline
-            from tracemill.governance.persistence import SystemStore
+            if self._config is not None:
+                # Full config path — uses GovernancePipeline.create() which handles
+                # rules, PII scanning, budget thresholds from config
+                self._pipeline = Pipeline.create(self._config)
+                self._pipeline.on_tool_call = self._on_tool_call
+            else:
+                # Minimal path — just db_path + project_root
+                from tracemill.cli.factory import create_default_pipeline
+                from tracemill.governance.persistence import SystemStore
 
-            store = SystemStore(self._db_path or _default_db_path())
-            self._pipeline = create_default_pipeline(
-                store,
-                project_root=self._project_root,
-                on_tool_call=self._on_tool_call,
-            )
+                store = SystemStore(self._db_path or _default_db_path())
+                self._pipeline = create_default_pipeline(
+                    store,
+                    project_root=self._project_root,
+                    on_tool_call=self._on_tool_call,
+                )
             # Replay any attaches that were called before build
             for method_name, kwargs in self._pending_attaches:
                 getattr(self._pipeline, method_name)(**kwargs)

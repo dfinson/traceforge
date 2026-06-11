@@ -1,0 +1,132 @@
+"""OTel exporter sink — emit governance results as OpenTelemetry spans."""
+
+from __future__ import annotations
+
+import json
+import logging
+from urllib.error import URLError
+from urllib.request import Request, urlopen
+
+from tracemill.sinks.base import StorageSink
+from tracemill.types import SessionEvent, TelemetrySpan, UsageRecord
+
+logger = logging.getLogger(__name__)
+
+
+class OtelExporterSink(StorageSink):
+    """Exports enriched events as OTel spans via OTLP/HTTP JSON.
+
+    Uses a simplified OTLP JSON payload (not protobuf) to avoid heavy
+    dependencies. Compatible with any OTLP/HTTP collector.
+    """
+
+    def __init__(
+        self,
+        endpoint: str = "http://localhost:4318/v1/traces",
+        service_name: str = "tracemill",
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self._endpoint = endpoint
+        self._service_name = service_name
+        self._headers = headers or {}
+        self._batch: list[dict] = []
+        self._batch_size = 32
+
+    async def on_event(self, event: SessionEvent) -> None:
+        span = self._event_to_span(event)
+        self._batch.append(span)
+
+        if len(self._batch) >= self._batch_size:
+            await self.flush()
+
+    async def flush(self) -> None:
+        if not self._batch:
+            return
+
+        payload = {
+            "resourceSpans": [{
+                "resource": {
+                    "attributes": [
+                        {"key": "service.name", "value": {"stringValue": self._service_name}},
+                    ]
+                },
+                "scopeSpans": [{
+                    "scope": {"name": "tracemill.governance"},
+                    "spans": list(self._batch),
+                }],
+            }]
+        }
+
+        self._batch.clear()
+
+        body = json.dumps(payload, default=str).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            **self._headers,
+        }
+
+        try:
+            req = Request(self._endpoint, data=body, headers=headers, method="POST")
+            with urlopen(req, timeout=10) as resp:
+                if resp.status >= 300:
+                    logger.warning("OtelExporterSink: OTLP endpoint returned %d", resp.status)
+        except (URLError, OSError, TimeoutError) as exc:
+            logger.error("OtelExporterSink: failed to export spans: %s", exc)
+
+    async def close(self) -> None:
+        await self.flush()
+
+    def _event_to_span(self, event: SessionEvent) -> dict:
+        """Convert a SessionEvent to an OTLP span dict."""
+        import uuid
+
+        ts_ns = int(event.timestamp.timestamp() * 1_000_000_000) if event.timestamp else 0
+        span_id = uuid.uuid4().hex[:16]
+        trace_id = uuid.uuid4().hex
+
+        attributes = [
+            {"key": "tracemill.event.kind", "value": {"stringValue": event.kind}},
+            {"key": "tracemill.session.id", "value": {"stringValue": event.session_id}},
+        ]
+
+        if event.payload:
+            tool_name = event.payload.get("tool_name")
+            if tool_name:
+                attributes.append(
+                    {"key": "gen_ai.tool.name", "value": {"stringValue": str(tool_name)}}
+                )
+
+        if event.metadata and event.metadata.governance:
+            gov = event.metadata.governance
+            if isinstance(gov, dict):
+                risk = gov.get("risk_assessment", {})
+                if isinstance(risk, dict):
+                    if "score" in risk:
+                        attributes.append(
+                            {"key": "tracemill.risk.score", "value": {"intValue": risk["score"]}}
+                        )
+                    if "level" in risk:
+                        attributes.append(
+                            {"key": "tracemill.risk.level", "value": {"stringValue": risk["level"]}}
+                        )
+                rec = gov.get("recommendation", {})
+                if isinstance(rec, dict) and "action" in rec:
+                    attributes.append(
+                        {"key": "tracemill.action", "value": {"stringValue": rec["action"]}}
+                    )
+
+        return {
+            "traceId": trace_id,
+            "spanId": span_id,
+            "name": f"tracemill.{event.kind}",
+            "kind": 1,  # SPAN_KIND_INTERNAL
+            "startTimeUnixNano": str(ts_ns),
+            "endTimeUnixNano": str(ts_ns),
+            "attributes": attributes,
+        }
+
+    async def on_span(self, span: TelemetrySpan) -> None:
+        pass
+
+    async def on_usage(self, usage: UsageRecord) -> None:
+        pass

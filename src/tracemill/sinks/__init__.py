@@ -2,5 +2,18 @@
 
 from tracemill.sinks.base import StorageSink
 from tracemill.sinks.callback import CallbackSink
+from tracemill.sinks.console import ConsoleSink
+from tracemill.sinks.jsonl import JsonlSink
+from tracemill.sinks.otel_exporter import OtelExporterSink
+from tracemill.sinks.sqlite_output import SqliteOutputSink
+from tracemill.sinks.webhook import WebhookSink
 
-__all__ = ["StorageSink", "CallbackSink"]
+__all__ = [
+    "StorageSink",
+    "CallbackSink",
+    "ConsoleSink",
+    "JsonlSink",
+    "OtelExporterSink",
+    "SqliteOutputSink",
+    "WebhookSink",
+]

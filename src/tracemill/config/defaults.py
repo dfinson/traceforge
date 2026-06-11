@@ -11,43 +11,69 @@ DEFAULT_CONFIG_YAML = """\
 
 log_level: INFO
 
-# Additional directories to search for custom YAML framework mappings.
-# Bundled mappings (copilot, claude, langgraph, etc.) are always available.
-# Place custom .yaml files in ~/.tracemill/mappings/ or list dirs here.
-mappings_dirs:
-  - ~/.tracemill/mappings
+# ─── Auto-detection ─────────────────────────────────────────────────────────
+# On startup, tracemill scans well-known paths for installed AI coding agents.
+# Detected frameworks are watched automatically — no explicit pipeline config needed.
+auto_detect:
+  enabled: true
+  # Restrict to specific frameworks (empty = detect all):
+  # frameworks: [claude, codex, continue, cline, goose, amazonq, aider]
 
-# SDK configuration (in-process push mode)
+# ─── Score API (preflight scoring endpoint) ─────────────────────────────────
+# Always available for gate integrations to ask "should this tool call proceed?"
+score:
+  enabled: true
+  listen: localhost:7331
+
+# ─── Sinks (where governance results go) ────────────────────────────────────
+# Default: SQLite (queryable history) + Console (real-time alerts)
+# Uncomment additional sinks as needed.
+#
+# sinks:
+#   - type: sqlite
+#     path: ~/.tracemill/tracemill.db
+#   - type: console
+#     filter: [warn, deny, escalate]
+#   - type: jsonl
+#     path: ~/.tracemill/output/{session_id}.jsonl
+#   - type: webhook
+#     url: https://hooks.slack.com/services/...
+#     filter: [deny, escalate]
+#   - type: otel
+#     endpoint: http://localhost:4318/v1/traces
+#     service_name: tracemill
+
+# ─── Governance ─────────────────────────────────────────────────────────────
+governance:
+  pii_scanning: true
+  # budget:
+  #   max_tool_calls: 200
+  #   max_by_effect:
+  #     destructive: 10
+
+# ─── SDK configuration (in-process push mode) ───────────────────────────────
 sdk:
   batch_size: 64
   flush_interval: 5.0
   max_queue_size: 10000
 
-# Pipelines (CLI / file-observation mode)
-# Uncomment and configure as needed:
+# ─── Additional mapping directories ────────────────────────────────────────
+mappings_dirs:
+  - ~/.tracemill/mappings
+
+# ─── Explicit pipelines (advanced — overrides auto-detect) ──────────────────
+# Define explicit source → adapter → sink pipelines when auto-detect isn't enough.
 #
 # pipelines:
-#   - name: copilot-local
-#     source:
-#       type: file_watch
-#       path: ~/.copilot/sessions/latest.jsonl
-#       start_at: end
-#     adapter:
-#       type: mapped_json
-#       mapping: copilot
-#     sinks:
-#       - type: sqlite
-#         path: ~/.tracemill/traces.db
-#
 #   - name: claude-local
 #     source:
 #       type: file_watch
-#       path: ~/.claude/sessions/latest.jsonl
+#       path: ~/.claude/projects/-Users-me-myproject/latest.jsonl
 #       start_at: end
 #     adapter:
 #       type: mapped_json
 #       mapping: claude
 #     sinks:
-#       - type: jsonl
-#         path: ~/.tracemill/claude-events.jsonl
+#       - type: sqlite
+#         path: ~/.tracemill/traces.db
 """

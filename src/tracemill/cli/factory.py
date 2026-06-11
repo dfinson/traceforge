@@ -8,7 +8,11 @@ from tracemill.governance.persistence import SystemStore
 from tracemill.governance.pipeline import GovernancePipeline
 
 
-def create_default_pipeline(store: SystemStore, project_root: str | None = None) -> GovernancePipeline:
+def create_default_pipeline(
+    store: SystemStore,
+    project_root: str | None = None,
+    on_tool_call=None,
+) -> GovernancePipeline:
     """Create a GovernancePipeline with all default components.
 
     This is the standard way to instantiate a pipeline for CLI and Score API use.
@@ -33,4 +37,5 @@ def create_default_pipeline(store: SystemStore, project_root: str | None = None)
         rules=rules,
         engine=engine,
         project_root=project_root,
+        on_tool_call=on_tool_call,
     )

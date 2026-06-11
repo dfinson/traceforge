@@ -6,7 +6,7 @@ import json
 import sqlite3
 import uuid
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Callable, Literal
 
 from tracemill.governance.results import (
     Evidence,
@@ -69,6 +69,7 @@ class GovernancePipeline:
         engine: "ClassificationEngine",
         thresholds: "BudgetThresholds | None" = None,
         project_root: str | None = None,
+        on_tool_call: "Callable[[dict, SessionMeta], None] | None" = None,
     ) -> None:
         self._store = store
         self._labeler = labeler
@@ -77,6 +78,7 @@ class GovernancePipeline:
         self._engine = engine
         self._thresholds = thresholds
         self._project_root = project_root
+        self.on_tool_call = on_tool_call
         self._states: dict[str, "SessionState"] = {}
         self._write_failures: dict[str, int] = {}  # session_id → consecutive failure count
         self._MAX_WRITE_FAILURES = 10
@@ -385,6 +387,8 @@ class GovernancePipeline:
             return self._fail_closed(exc, classification=ctx.base_classification)
 
         self._persist_score(event.source_event_key, event.session_id, meta)
+        if self.on_tool_call is not None:
+            self.on_tool_call(payload, meta)
         return meta
 
     def score_tool_call_event(self, event: "tracemill.types.SessionEvent") -> "SessionMeta":
@@ -407,6 +411,12 @@ class GovernancePipeline:
             return self._fail_closed(exc, classification=ctx.base_classification)
 
         self._persist_score(ctx.event.source_event_key, ctx.event.session_id, meta)
+        if self.on_tool_call is not None:
+            self.on_tool_call({
+                "tool_name": event.tool_name,
+                "tool_input": event.tool_input,
+                "session_id": event.session_id,
+            }, meta)
         return meta
 
     def _persist_score(self, source_event_key: str, session_id: str, meta: "SessionMeta") -> None:
@@ -1392,3 +1402,146 @@ class GovernancePipeline:
             mcp_alerts=mcp_alerts,
             evidence=evidence,
         )
+
+    # ─── Framework attach methods ───────────────────────────────────────────
+
+    def attach_crewai(self, *, session_id: str = "sdk") -> None:
+        """Register tracemill into CrewAI's before_tool_call hook.
+
+        Requires: crewai installed with hooks support.
+        """
+        from crewai.hooks.decorators import before_tool_call
+
+        pipeline = self
+
+        @before_tool_call
+        def _tracemill_hook(ctx) -> None:
+            pipeline.score_tool_call({
+                "tool_name": ctx.tool_name,
+                "tool_input": ctx.tool_input,
+                "session_id": session_id,
+            })
+
+    def attach_langchain(self, chain, *, session_id: str = "sdk") -> None:
+        """Attach tracemill as a LangChain callback handler on the given chain.
+
+        Requires: langchain-core installed.
+        """
+        import json as _json
+
+        from langchain_core.callbacks import BaseCallbackHandler
+
+        pipeline = self
+
+        class _TracemillHandler(BaseCallbackHandler):
+            def on_tool_start(self, serialized: dict, input_str: str, **kwargs) -> None:
+                tool_name = serialized.get("name", "unknown")
+                try:
+                    tool_input = _json.loads(input_str) if isinstance(input_str, str) else input_str
+                except (ValueError, TypeError):
+                    tool_input = {"raw": input_str}
+                pipeline.score_tool_call({
+                    "tool_name": tool_name,
+                    "tool_input": tool_input,
+                    "session_id": session_id,
+                })
+
+        chain.callbacks = list(chain.callbacks or []) + [_TracemillHandler()]
+
+    def attach_anthropic(self, *, session_id: str = "sdk"):
+        """Return a dispatch helper for Anthropic SDK tool_use blocks.
+
+        Usage:
+            score_block = pipeline.attach_anthropic()
+            # In your message loop:
+            for block in response.content:
+                if block.type == "tool_use":
+                    score_block(block)
+        """
+        pipeline = self
+
+        def _score_block(block) -> "SessionMeta":
+            return pipeline.score_tool_call({
+                "tool_name": block.name,
+                "tool_input": block.input,
+                "session_id": session_id,
+            })
+
+        return _score_block
+
+    def attach_openai(self, *, session_id: str = "sdk"):
+        """Return a dispatch helper for OpenAI ChatCompletionMessageToolCall.
+
+        Usage:
+            score_tc = pipeline.attach_openai()
+            for tc in message.tool_calls:
+                score_tc(tc)
+        """
+        import json as _json
+
+        pipeline = self
+
+        def _score_tc(tc) -> "SessionMeta":
+            return pipeline.score_tool_call({
+                "tool_name": tc.function.name,
+                "tool_input": _json.loads(tc.function.arguments),
+                "session_id": session_id,
+            })
+
+        return _score_tc
+
+    def attach_semantic_kernel(self, kernel, *, session_id: str = "sdk") -> None:
+        """Register tracemill as a Semantic Kernel auto function invocation filter.
+
+        Requires: semantic-kernel installed.
+        """
+        pipeline = self
+
+        @kernel.filter(filter_type="auto_function_invocation")
+        async def _tracemill_filter(context, next_handler):
+            pipeline.score_tool_call({
+                "tool_name": context.function.name,
+                "tool_input": dict(context.arguments),
+                "session_id": session_id,
+            })
+            await next_handler(context)
+
+    def attach_autogen(self, *, session_id: str = "sdk"):
+        """Return a dispatch helper for AutoGen FunctionCall objects.
+
+        Usage:
+            score_call = pipeline.attach_autogen()
+            for call in message.function_calls:
+                score_call(call)
+        """
+        import json as _json
+
+        pipeline = self
+
+        def _score_call(call) -> "SessionMeta":
+            return pipeline.score_tool_call({
+                "tool_name": call.name,
+                "tool_input": _json.loads(call.arguments),
+                "session_id": session_id,
+            })
+
+        return _score_call
+
+    def attach_smolagents(self, *, session_id: str = "sdk"):
+        """Return a dispatch helper for smolagents ToolCall objects.
+
+        Usage:
+            score_tc = pipeline.attach_smolagents()
+            for tc in step.tool_calls:
+                score_tc(tc)
+        """
+        pipeline = self
+
+        def _score_tc(tc) -> "SessionMeta":
+            return pipeline.score_tool_call({
+                "tool_name": tc.name,
+                "tool_input": tc.arguments,
+                "session_id": session_id,
+            })
+
+        return _score_tc

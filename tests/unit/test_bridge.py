@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from tracemill.assess import AssessmentResult, GovernanceAssessment, assess_event
+from tracemill.assess import assess_event
 from tracemill.classify.coding import CodingMechanism
 from tracemill.classify.config import get_default_engine
 from tracemill.classify.core import Classification, Mechanism
 from tracemill.governance.budget import BudgetTracker
 from tracemill.governance.labeler import GovernanceLabeler
 from tracemill.governance.persistence import SystemStore
-from tracemill.governance.pipeline import GovernancePipeline
+from tracemill.governance.pipeline import GovernancePipeline, RecommendedAction, SessionMeta
 from tracemill.governance.rules import parse_rules
 from tracemill.types import EventKind, EventMetadata, SessionEvent
 
@@ -195,7 +195,7 @@ class TestBridgeShellAnalysis:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Bridge: assess_event end-to-end (SessionEvent → AssessmentResult)
+# Bridge: assess_event end-to-end (SessionEvent → SessionMeta)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
@@ -209,15 +209,15 @@ class TestAssessEvent:
             classification=cls,
         )
         result = assess_event(pipeline, event)
-        assert isinstance(result, AssessmentResult)
-        assert result.governance_assessment in GovernanceAssessment
-        assert result.elapsed_ms > 0
+        assert isinstance(result, SessionMeta)
+        assert result.recommendation is not None or result.risk_assessment is not None
+        assert result.risk_assessment is not None
 
     def test_safe_tool_allowed(self, pipeline):
         cls = Classification(mechanism=Mechanism.FILESYSTEM, effect=None)
         event = _make_event(tool_name="read_file", arguments={"path": "/tmp/x"}, classification=cls)
         result = assess_event(pipeline, event)
-        assert isinstance(result, AssessmentResult)
+        assert isinstance(result, SessionMeta)
 
     def test_fail_closed_on_broken_event(self, pipeline):
         """If classification somehow raises, we get ESCALATE."""
@@ -230,8 +230,8 @@ class TestAssessEvent:
 
         pipeline.context_from_session_event = _boom
         result = assess_event(pipeline, event)
-        assert result.governance_assessment == GovernanceAssessment.ESCALATE
-        assert "RuntimeError" in result.reason
+        assert result.recommendation.recommended_action == RecommendedAction.ESCALATE
+        assert "RuntimeError" in result.recommendation.reason_code
         pipeline.context_from_session_event = orig
 
     def test_read_only_no_state_mutation(self, pipeline):
@@ -245,8 +245,9 @@ class TestAssessEvent:
         # Assess twice — results should be identical (no state accumulated)
         r1 = assess_event(pipeline, event)
         r2 = assess_event(pipeline, event)
-        assert r1.governance_assessment == r2.governance_assessment
-        assert r1.risk_score == r2.risk_score
+        assert r1.risk_assessment.score == r2.risk_assessment.score
+        if r1.recommendation and r2.recommendation:
+            assert r1.recommendation.recommended_action == r2.recommendation.recommended_action
 
     def test_mcp_event_assessment(self, pipeline):
         cls = Classification(mechanism="mcp.tool", effect=None)
@@ -257,8 +258,8 @@ class TestAssessEvent:
             classification=cls,
         )
         result = assess_event(pipeline, event)
-        assert isinstance(result, AssessmentResult)
-        assert result.elapsed_ms > 0
+        assert isinstance(result, SessionMeta)
+        assert result.risk_assessment is not None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

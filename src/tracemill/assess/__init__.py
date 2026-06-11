@@ -1,10 +1,11 @@
-"""Assessment API — synchronous scoring interface for gate integrations."""
+"""Assessment API — synchronous scoring interface for gate integrations.
 
-from tracemill.assess.assessor import assess_event
-from tracemill.assess.types import AssessmentResult, GovernanceAssessment
+Returns SessionMeta — the same shape sinks receive in the standard pipeline.
+"""
+
+from tracemill.assess.assessor import assess, assess_event
 
 __all__ = [
-    "AssessmentResult",
-    "GovernanceAssessment",
+    "assess",
     "assess_event",
 ]

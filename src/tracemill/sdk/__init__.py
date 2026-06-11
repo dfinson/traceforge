@@ -60,36 +60,36 @@ class _PipelineBuilder:
         self._project_root = path
         return self
 
-    def attach_crewai(self, *, session_id: str = "sdk") -> "_PipelineBuilder":
+    def attach_crewai(self, *, session_id: str = "sdk", on_tool_call=None) -> "_PipelineBuilder":
         """Register tracemill into CrewAI's before_tool_call hook."""
-        self._ensure_built().attach_crewai(session_id=session_id)
+        self._ensure_built().attach_crewai(session_id=session_id, on_tool_call=on_tool_call)
         return self
 
-    def attach_langchain(self, chain, *, session_id: str = "sdk") -> "_PipelineBuilder":
+    def attach_langchain(self, chain, *, session_id: str = "sdk", on_tool_call=None) -> "_PipelineBuilder":
         """Attach tracemill as a LangChain callback handler."""
-        self._ensure_built().attach_langchain(chain, session_id=session_id)
+        self._ensure_built().attach_langchain(chain, session_id=session_id, on_tool_call=on_tool_call)
         return self
 
-    def attach_anthropic(self, *, session_id: str = "sdk"):
+    def attach_anthropic(self, *, session_id: str = "sdk", on_tool_call=None):
         """Return a dispatch helper for Anthropic ToolUseBlock objects."""
-        return self._ensure_built().attach_anthropic(session_id=session_id)
+        return self._ensure_built().attach_anthropic(session_id=session_id, on_tool_call=on_tool_call)
 
-    def attach_openai(self, *, session_id: str = "sdk"):
+    def attach_openai(self, *, session_id: str = "sdk", on_tool_call=None):
         """Return a dispatch helper for OpenAI tool calls."""
-        return self._ensure_built().attach_openai(session_id=session_id)
+        return self._ensure_built().attach_openai(session_id=session_id, on_tool_call=on_tool_call)
 
-    def attach_semantic_kernel(self, kernel, *, session_id: str = "sdk") -> "_PipelineBuilder":
+    def attach_semantic_kernel(self, kernel, *, session_id: str = "sdk", on_tool_call=None) -> "_PipelineBuilder":
         """Register tracemill as a Semantic Kernel function invocation filter."""
-        self._ensure_built().attach_semantic_kernel(kernel, session_id=session_id)
+        self._ensure_built().attach_semantic_kernel(kernel, session_id=session_id, on_tool_call=on_tool_call)
         return self
 
-    def attach_autogen(self, *, session_id: str = "sdk"):
+    def attach_autogen(self, *, session_id: str = "sdk", on_tool_call=None):
         """Return a dispatch helper for AutoGen FunctionCall objects."""
-        return self._ensure_built().attach_autogen(session_id=session_id)
+        return self._ensure_built().attach_autogen(session_id=session_id, on_tool_call=on_tool_call)
 
-    def attach_smolagents(self, *, session_id: str = "sdk"):
+    def attach_smolagents(self, *, session_id: str = "sdk", on_tool_call=None):
         """Return a dispatch helper for smolagents ToolCall objects."""
-        return self._ensure_built().attach_smolagents(session_id=session_id)
+        return self._ensure_built().attach_smolagents(session_id=session_id, on_tool_call=on_tool_call)
 
     def build(self) -> Pipeline:
         """Finalize and return the GovernancePipeline."""

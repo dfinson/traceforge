@@ -5,7 +5,6 @@ from tracemill.config.models import (
     BudgetConfig,
     FileWatchSourceConfig,
     FilePollSourceConfig,
-    GovernanceConfig,
     HttpPollSourceConfig,
     MappedJsonAdapterConfig,
     OtelSpanAdapterConfig,
@@ -46,8 +45,7 @@ __all__ = [
     "PipelineConfig",
     # SDK
     "SDKConfig",
-    # Governance
-    "GovernanceConfig",
+    # Budget
     "BudgetConfig",
     # Loading
     "load_config",

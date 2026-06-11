@@ -99,7 +99,7 @@ class GovernancePipeline:
     @classmethod
     def create(
         cls,
-        config: "GovernanceConfig | None" = None,
+        config=None,
     ) -> "GovernancePipeline":
         """Construct a ready-to-use pipeline from config.
 
@@ -110,9 +110,9 @@ class GovernancePipeline:
             # Zero-config (all defaults)
             pipeline = GovernancePipeline.create()
 
-            # With config object (mirrors tracemill.yaml governance section)
-            from tracemill.config.models import GovernanceConfig, BudgetConfig
-            pipeline = GovernancePipeline.create(GovernanceConfig(
+            # With TracemillConfig
+            from tracemill.config.models import TracemillConfig, BudgetConfig
+            pipeline = GovernancePipeline.create(TracemillConfig(
                 db_path="./tracemill.db",
                 project_root=".",
                 pii_scanning=True,
@@ -120,20 +120,20 @@ class GovernancePipeline:
             ))
 
         Args:
-            config: GovernanceConfig instance. Defaults to GovernanceConfig()
-                    (in-memory DB, PII scanning on, no budget caps).
+            config: TracemillConfig instance. Defaults to
+                    TracemillConfig() (in-memory DB, PII scanning on, no budget caps).
         """
         from pathlib import Path
 
         from tracemill.classify.config import get_default_engine
-        from tracemill.config.models import GovernanceConfig
+        from tracemill.config.models import TracemillConfig
         from tracemill.governance.budget import BudgetThresholds, BudgetTracker
         from tracemill.governance.labeler import GovernanceLabeler
         from tracemill.governance.persistence import SystemStore
         from tracemill.governance.rules import parse_rules
 
         if config is None:
-            config = GovernanceConfig()
+            config = TracemillConfig()
 
         store = SystemStore(config.db_path or ":memory:")
         engine = get_default_engine()
@@ -213,7 +213,7 @@ class GovernancePipeline:
                 else:
                     os.environ["TRACEMILL_CONFIG"] = old_env
 
-        instance = cls.create(config.governance)
+        instance = cls.create(config)
 
         # Resolve callback: explicit arg > config dotted path > None
         if on_tool_call is not None:

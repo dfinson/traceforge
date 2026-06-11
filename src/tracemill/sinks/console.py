@@ -88,10 +88,8 @@ class ConsoleSink(StorageSink):
         risk_score = ""
         if event.metadata and event.metadata.governance:
             gov = event.metadata.governance
-            if isinstance(gov, dict):
-                risk = gov.get("risk_assessment", {})
-                if isinstance(risk, dict) and "score" in risk:
-                    risk_score = f" [risk:{risk['score']}]"
+            if gov.risk_assessment is not None:
+                risk_score = f" [risk:{gov.risk_assessment.score}]"
 
         ts = event.timestamp.strftime("%H:%M:%S") if event.timestamp else ""
         line = f"{dim}{ts}{reset} {color}{bold}{action.upper()}{reset} {tool_name}{risk_score}{args_preview}"

@@ -30,6 +30,8 @@ class WebhookSink(StorageSink):
         max_retries: int = 3,
         headers: dict[str, str] | None = None,
     ) -> None:
+        if not url.startswith(("http://", "https://")):
+            raise ValueError(f"Webhook URL must use http:// or https:// scheme, got: {url}")
         self._url = url
         self._filter = set(filter_actions or ["deny", "escalate"])
         self._timeout = timeout
@@ -59,12 +61,12 @@ class WebhookSink(StorageSink):
         for attempt in range(1, self._max_retries + 1):
             try:
                 req = Request(self._url, data=body, headers=headers, method="POST")
-                resp = await asyncio.to_thread(urlopen, req, timeout=self._timeout)
-                if resp.status < 300:
+                resp = await asyncio.to_thread(self._do_request, req)
+                if resp < 300:
                     return
                 logger.warning(
                     "WebhookSink: %s returned status %d (attempt %d/%d)",
-                    self._url, resp.status, attempt, self._max_retries,
+                    self._url, resp, attempt, self._max_retries,
                 )
             except (URLError, OSError, TimeoutError) as exc:
                 logger.warning(
@@ -73,6 +75,12 @@ class WebhookSink(StorageSink):
                 )
 
         logger.error("WebhookSink: all %d attempts to %s failed", self._max_retries, self._url)
+
+    def _do_request(self, req: Request) -> int:
+        """Synchronous HTTP request — returns status code. Ensures response body is consumed."""
+        with urlopen(req, timeout=self._timeout) as resp:
+            resp.read()  # consume body to release connection
+            return resp.status
 
     def _extract_action(self, event: SessionEvent) -> str | None:
         gov = event.metadata.governance if event.metadata else None

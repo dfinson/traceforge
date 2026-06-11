@@ -26,16 +26,25 @@ class OtelExporterSink(StorageSink):
         endpoint: str = "http://localhost:4318/v1/traces",
         service_name: str = "tracemill",
         headers: dict[str, str] | None = None,
+        max_backlog: int = 1024,
     ) -> None:
+        if not endpoint.startswith(("http://", "https://")):
+            raise ValueError(f"OTel endpoint must use http:// or https:// scheme, got: {endpoint}")
         self._endpoint = endpoint
         self._service_name = service_name
         self._headers = headers or {}
         self._batch: list[dict] = []
         self._batch_size = 32
+        self._max_backlog = max_backlog
 
     async def on_event(self, event: SessionEvent) -> None:
         span = self._event_to_span(event)
         self._batch.append(span)
+
+        if len(self._batch) >= self._max_backlog:
+            dropped = len(self._batch) - self._batch_size
+            self._batch = self._batch[-self._batch_size:]
+            logger.warning("OtelExporterSink: backlog exceeded %d, dropped %d oldest spans", self._max_backlog, dropped)
 
         if len(self._batch) >= self._batch_size:
             await self.flush()
@@ -66,13 +75,19 @@ class OtelExporterSink(StorageSink):
 
         try:
             req = Request(self._endpoint, data=body, headers=headers, method="POST")
-            resp = await asyncio.to_thread(urlopen, req, timeout=10)
-            if resp.status >= 300:
-                logger.warning("OtelExporterSink: OTLP endpoint returned %d", resp.status)
+            status = await asyncio.to_thread(self._do_request, req)
+            if status >= 300:
+                logger.warning("OtelExporterSink: OTLP endpoint returned %d", status)
                 return  # keep batch for retry on next flush
             self._batch.clear()  # only clear after successful send
         except (URLError, OSError, TimeoutError) as exc:
             logger.error("OtelExporterSink: failed to export %d spans: %s", len(self._batch), exc)
+
+    def _do_request(self, req: Request) -> int:
+        """Synchronous HTTP request — returns status code. Ensures response body is consumed."""
+        with urlopen(req, timeout=10) as resp:
+            resp.read()
+            return resp.status
 
     async def close(self) -> None:
         await self.flush()

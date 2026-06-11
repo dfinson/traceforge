@@ -24,9 +24,17 @@ class JsonlSink(StorageSink):
         self._rotate_size_mb = rotate_size_mb
         self._handles: dict[str, object] = {}
 
+    _SAFE_SESSION_RE = __import__("re").compile(r"[^a-zA-Z0-9_\-.]")
+
     def _resolve_path(self, session_id: str) -> Path:
-        resolved = self._path_template.replace("{session_id}", session_id)
-        return Path(resolved).expanduser()
+        sanitized = self._SAFE_SESSION_RE.sub("_", session_id)[:128]
+        resolved = self._path_template.replace("{session_id}", sanitized)
+        path = Path(resolved).expanduser().resolve()
+        # Ensure resolved path stays under the template's parent directory
+        base = Path(self._path_template.split("{session_id}")[0]).expanduser().resolve()
+        if not str(path).startswith(str(base)):
+            raise ValueError(f"JsonlSink: resolved path escapes base directory: {path}")
+        return path
 
     async def on_event(self, event: SessionEvent) -> None:
         path = self._resolve_path(event.session_id)

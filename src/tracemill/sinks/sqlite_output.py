@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sqlite3
@@ -54,8 +55,6 @@ class SqliteOutputSink(StorageSink):
         self._conn: sqlite3.Connection | None = None
 
     async def on_event(self, event: SessionEvent) -> None:
-        conn = self._get_conn()
-
         tool_name = None
         risk_level = None
         risk_score = None
@@ -78,23 +77,30 @@ class SqliteOutputSink(StorageSink):
             event.metadata.model_dump(exclude_none=True), default=str
         ) if event.metadata else None
 
+        params = (
+            event.id,
+            event.session_id,
+            event.kind,
+            event.timestamp.isoformat() if event.timestamp else None,
+            tool_name,
+            risk_level,
+            risk_score,
+            action,
+            payload_json,
+            metadata_json,
+        )
+
+        await asyncio.to_thread(self._write_event, params)
+
+    def _write_event(self, params: tuple) -> None:
+        """Synchronous write — called via asyncio.to_thread."""
+        conn = self._get_conn()
         try:
             conn.execute(
                 """INSERT OR IGNORE INTO enriched_events
                    (id, session_id, kind, timestamp, tool_name, risk_level, risk_score, action, payload_json, metadata_json)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    event.id,
-                    event.session_id,
-                    event.kind,
-                    event.timestamp.isoformat() if event.timestamp else None,
-                    tool_name,
-                    risk_level,
-                    risk_score,
-                    action,
-                    payload_json,
-                    metadata_json,
-                ),
+                params,
             )
             conn.commit()
         except sqlite3.Error as exc:
@@ -118,7 +124,7 @@ class SqliteOutputSink(StorageSink):
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._conn = sqlite3.connect(str(self._path), timeout=5)
+            self._conn = sqlite3.connect(str(self._path), timeout=5, check_same_thread=False)
             try:
                 self._conn.execute(f"PRAGMA journal_mode={self._journal_mode}")
             except sqlite3.OperationalError:

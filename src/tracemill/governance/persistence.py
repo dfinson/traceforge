@@ -89,7 +89,8 @@ class SystemStore:
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self._db_path))
+        self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
+        self._lock = __import__("threading").Lock()
         self._conn.executescript(SCHEMA_SQL)
         self._processed_cache: dict[str, str | None] = {}  # source_event_key → meta_json
 
@@ -97,14 +98,20 @@ class SystemStore:
     def connection(self) -> sqlite3.Connection:
         return self._conn
 
+    @property
+    def lock(self):
+        """Threading lock for callers needing multi-statement transactions."""
+        return self._lock
+
     def is_duplicate(self, source_event_key: str) -> str | None:
         """Check if event was already processed. Returns cached meta JSON or None."""
         if source_event_key in self._processed_cache:
             return self._processed_cache[source_event_key]
-        row = self._conn.execute(
-            "SELECT session_meta_json FROM processed_events WHERE source_event_key = ?",
-            (source_event_key,),
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT session_meta_json FROM processed_events WHERE source_event_key = ?",
+                (source_event_key,),
+            ).fetchone()
         if row:
             self._processed_cache[source_event_key] = row[0]
             self._evict_cache()
@@ -112,40 +119,44 @@ class SystemStore:
         return None
 
     def record_processed(self, source_event_key: str, session_id: str, meta_json: str, processed_at: str) -> None:
-        self._conn.execute(
-            "INSERT OR IGNORE INTO processed_events (source_event_key, session_id, session_meta_json, processed_at) VALUES (?, ?, ?, ?)",
-            (source_event_key, session_id, meta_json, processed_at),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO processed_events (source_event_key, session_id, session_meta_json, processed_at) VALUES (?, ?, ?, ?)",
+                (source_event_key, session_id, meta_json, processed_at),
+            )
+            self._conn.commit()
         self._processed_cache[source_event_key] = meta_json
         self._evict_cache()
 
     def reserve_event(self, source_event_key: str, session_id: str, processed_at: str) -> None:
         """Reserve an event key before state mutation to prevent double-processing on crash."""
-        self._conn.execute(
-            "INSERT OR IGNORE INTO processed_events (source_event_key, session_id, session_meta_json, processed_at) VALUES (?, ?, ?, ?)",
-            (source_event_key, session_id, '{"reserved":true}', processed_at),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO processed_events (source_event_key, session_id, session_meta_json, processed_at) VALUES (?, ?, ?, ?)",
+                (source_event_key, session_id, '{"reserved":true}', processed_at),
+            )
+            self._conn.commit()
         # Mark as reserved in cache (will be overwritten by finalize)
         self._processed_cache[source_event_key] = '{"reserved":true}'
         self._evict_cache()
 
     def finalize_processed(self, source_event_key: str, meta_json: str) -> None:
         """Update reserved event with full meta after Phase 3 completes."""
-        self._conn.execute(
-            "UPDATE processed_events SET session_meta_json = ? WHERE source_event_key = ?",
-            (meta_json, source_event_key),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "UPDATE processed_events SET session_meta_json = ? WHERE source_event_key = ?",
+                (meta_json, source_event_key),
+            )
+            self._conn.commit()
         self._processed_cache[source_event_key] = meta_json
 
     def get_mcp_profile(self, server: str, tool_name: str) -> dict | None:
         """Get stored MCP fingerprint."""
-        row = self._conn.execute(
-            "SELECT * FROM mcp_fingerprints WHERE server = ? AND tool_name = ?",
-            (server, tool_name),
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM mcp_fingerprints WHERE server = ? AND tool_name = ?",
+                (server, tool_name),
+            ).fetchone()
         if not row:
             return None
         return {
@@ -158,62 +169,69 @@ class SystemStore:
 
     def upsert_mcp_profile(self, server: str, tool_name: str, profile: dict) -> None:
         """Insert MCP profile only if not already registered (preserves first-seen baseline)."""
-        self._conn.execute(
-            """INSERT OR IGNORE INTO mcp_fingerprints
-               (server, tool_name, description_hash, schema_hash, registered_effect,
-                registered_role, registered_capabilities, registered_scope, clearance, first_seen, last_seen)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (server, tool_name, profile["description_hash"], profile["schema_hash"],
-             profile.get("registered_effect"), profile.get("registered_role"),
-             profile.get("registered_capabilities"), profile.get("registered_scope"),
-             profile.get("clearance"), profile["first_seen"], profile["last_seen"]),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                """INSERT OR IGNORE INTO mcp_fingerprints
+                   (server, tool_name, description_hash, schema_hash, registered_effect,
+                    registered_role, registered_capabilities, registered_scope, clearance, first_seen, last_seen)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (server, tool_name, profile["description_hash"], profile["schema_hash"],
+                 profile.get("registered_effect"), profile.get("registered_role"),
+                 profile.get("registered_capabilities"), profile.get("registered_scope"),
+                 profile.get("clearance"), profile["first_seen"], profile["last_seen"]),
+            )
+            self._conn.commit()
 
     def update_mcp_last_seen(self, server: str, tool_name: str, last_seen: str) -> None:
         """Update only last_seen timestamp — preserves registered baseline."""
-        self._conn.execute(
-            "UPDATE mcp_fingerprints SET last_seen = ? WHERE server = ? AND tool_name = ?",
-            (last_seen, server, tool_name),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "UPDATE mcp_fingerprints SET last_seen = ? WHERE server = ? AND tool_name = ?",
+                (last_seen, server, tool_name),
+            )
+            self._conn.commit()
 
     def get_content_hash(self, repo: str, file_path: str) -> str | None:
-        row = self._conn.execute(
-            "SELECT sha256 FROM content_hashes WHERE repo = ? AND file_path = ?",
-            (repo, file_path),
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT sha256 FROM content_hashes WHERE repo = ? AND file_path = ?",
+                (repo, file_path),
+            ).fetchone()
         return row[0] if row else None
 
     def store_content_hash(self, repo: str, file_path: str, sha256: str, session_id: str, updated_at: str) -> None:
-        self._conn.execute(
-            """INSERT OR REPLACE INTO content_hashes (repo, file_path, sha256, updated_at, updated_by_session)
-               VALUES (?, ?, ?, ?, ?)""",
-            (repo, file_path, sha256, updated_at, session_id),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                """INSERT OR REPLACE INTO content_hashes (repo, file_path, sha256, updated_at, updated_by_session)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (repo, file_path, sha256, updated_at, session_id),
+            )
+            self._conn.commit()
 
     def get_drift_baseline(self, agent_model: str, repo: str) -> dict | None:
-        row = self._conn.execute(
-            "SELECT phase_counts_json, total_events FROM drift_baselines WHERE agent_model = ? AND repo = ?",
-            (agent_model, repo),
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT phase_counts_json, total_events FROM drift_baselines WHERE agent_model = ? AND repo = ?",
+                (agent_model, repo),
+            ).fetchone()
         if not row:
             return None
         import json
         return {"phase_counts": json.loads(row[0]), "total_events": row[1]}
 
     def execute_in_transaction(self, sql: str, params: tuple = ()) -> None:
-        """Execute SQL within the current transaction (no auto-commit)."""
+        """Execute SQL within the current transaction (no auto-commit). Caller must hold lock."""
         self._conn.execute(sql, params)
 
     def commit(self) -> None:
         """Commit the current transaction."""
-        self._conn.commit()
+        with self._lock:
+            self._conn.commit()
 
     def rollback(self) -> None:
         """Rollback the current transaction."""
-        self._conn.rollback()
+        with self._lock:
+            self._conn.rollback()
 
     def cache_processed(self, source_event_key: str, meta_json: str | None) -> None:
         """Add entry to processed events cache."""

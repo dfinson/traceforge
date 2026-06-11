@@ -229,6 +229,36 @@ class BudgetConfig(StrictModel):
     max_by_scope: dict[str, int] | None = None
 
 
+class GovernanceConfig(StrictModel):
+    """Governance pipeline configuration.
+
+    Same shape in YAML and SDK::
+
+        # tracemill.yaml
+        governance:
+          db_path: ./tracemill.db
+          project_root: .
+          pii_scanning: true
+          budget:
+            max_tool_calls: 200
+            max_by_effect:
+              destructive: 10
+
+        # SDK equivalent
+        GovernanceConfig(
+            db_path="./tracemill.db",
+            project_root=".",
+            pii_scanning=True,
+            budget=BudgetConfig(max_tool_calls=200, max_by_effect={"destructive": 10}),
+        )
+    """
+
+    db_path: str | None = None  # None = in-memory
+    project_root: str | None = None
+    rules_path: str | None = None  # custom rules YAML override
+    pii_scanning: bool = True
+    budget: BudgetConfig = Field(default_factory=BudgetConfig)
+
 
 # ─── Score API Config ────────────────────────────────────────────────────────
 
@@ -272,13 +302,6 @@ class TracemillConfig(StrictModel):
     # Callback: dotted import path invoked after every tool call is scored
     on_tool_call: str | None = None  # e.g. "myapp.policies.my_policy"
 
-    # Core pipeline settings (formerly under governance:)
-    db_path: str | None = None  # None = in-memory
-    project_root: str | None = None
-    rules_path: str | None = None  # custom rules YAML override
-    pii_scanning: bool = True
-    budget: BudgetConfig = Field(default_factory=BudgetConfig)
-
     # Mapping search paths (in addition to bundled)
     mappings_dirs: list[Path] = Field(default_factory=list)
 
@@ -287,6 +310,9 @@ class TracemillConfig(StrictModel):
 
     # SDK-mode configuration
     sdk: SDKConfig = Field(default_factory=SDKConfig)
+
+    # Governance pipeline configuration
+    governance: GovernanceConfig = Field(default_factory=GovernanceConfig)
 
     # Score API (preflight scoring endpoint)
     score: ScoreAPIConfig = Field(default_factory=ScoreAPIConfig)

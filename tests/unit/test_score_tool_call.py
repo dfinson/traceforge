@@ -553,9 +553,9 @@ class TestFactory:
         assert isinstance(result, SessionMeta)
 
     def test_with_governance_config(self):
-        from tracemill.config import BudgetConfig, TracemillConfig
+        from tracemill.config import BudgetConfig, GovernanceConfig
 
-        p = GovernancePipeline.create(TracemillConfig(
+        p = GovernancePipeline.create(GovernanceConfig(
             pii_scanning=False,
             budget=BudgetConfig(max_tool_calls=10),
         ))

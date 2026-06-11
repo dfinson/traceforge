@@ -63,12 +63,11 @@ class ConsoleSink(StorageSink):
 
     def _extract_action(self, event: SessionEvent) -> str | None:
         """Extract the recommended action from event metadata."""
-        if event.metadata and event.metadata.governance:
-            gov = event.metadata.governance
-            if isinstance(gov, dict):
-                rec = gov.get("recommendation")
-                if isinstance(rec, dict):
-                    return rec.get("action")
+        gov = getattr(event.metadata, 'governance', None) if event.metadata else None
+        if isinstance(gov, dict):
+            rec = gov.get("recommendation")
+            if isinstance(rec, dict):
+                return rec.get("action")
         return None
 
     def _print_event(self, event: SessionEvent, action: str) -> None:

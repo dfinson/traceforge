@@ -207,6 +207,9 @@ class EventMetadata(FrozenModel):
     tool_intent: str | None = None
     duration_ms: float | None = None
 
+    # --- Governance (populated by enrichment pipeline before sink emission) ---
+    governance: dict[str, Any] | None = None
+
     @field_validator("duration_ms")
     @classmethod
     def _duration_non_negative(cls, v: float | None) -> float | None:

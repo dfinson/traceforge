@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from urllib.error import URLError
@@ -57,8 +58,6 @@ class OtelExporterSink(StorageSink):
             }]
         }
 
-        self._batch.clear()
-
         body = json.dumps(payload, default=str).encode("utf-8")
         headers = {
             "Content-Type": "application/json",
@@ -67,11 +66,13 @@ class OtelExporterSink(StorageSink):
 
         try:
             req = Request(self._endpoint, data=body, headers=headers, method="POST")
-            with urlopen(req, timeout=10) as resp:
-                if resp.status >= 300:
-                    logger.warning("OtelExporterSink: OTLP endpoint returned %d", resp.status)
+            resp = await asyncio.to_thread(urlopen, req, timeout=10)
+            if resp.status >= 300:
+                logger.warning("OtelExporterSink: OTLP endpoint returned %d", resp.status)
+                return  # keep batch for retry on next flush
+            self._batch.clear()  # only clear after successful send
         except (URLError, OSError, TimeoutError) as exc:
-            logger.error("OtelExporterSink: failed to export spans: %s", exc)
+            logger.error("OtelExporterSink: failed to export %d spans: %s", len(self._batch), exc)
 
     async def close(self) -> None:
         await self.flush()
@@ -96,24 +97,23 @@ class OtelExporterSink(StorageSink):
                     {"key": "gen_ai.tool.name", "value": {"stringValue": str(tool_name)}}
                 )
 
-        if event.metadata and event.metadata.governance:
-            gov = event.metadata.governance
-            if isinstance(gov, dict):
-                risk = gov.get("risk_assessment", {})
-                if isinstance(risk, dict):
-                    if "score" in risk:
-                        attributes.append(
-                            {"key": "tracemill.risk.score", "value": {"intValue": risk["score"]}}
-                        )
-                    if "level" in risk:
-                        attributes.append(
-                            {"key": "tracemill.risk.level", "value": {"stringValue": risk["level"]}}
-                        )
-                rec = gov.get("recommendation", {})
-                if isinstance(rec, dict) and "action" in rec:
+        gov = getattr(event.metadata, 'governance', None) if event.metadata else None
+        if isinstance(gov, dict):
+            risk = gov.get("risk_assessment", {})
+            if isinstance(risk, dict):
+                if "score" in risk:
                     attributes.append(
-                        {"key": "tracemill.action", "value": {"stringValue": rec["action"]}}
+                        {"key": "tracemill.risk.score", "value": {"intValue": risk["score"]}}
                     )
+                if "level" in risk:
+                    attributes.append(
+                        {"key": "tracemill.risk.level", "value": {"stringValue": risk["level"]}}
+                    )
+            rec = gov.get("recommendation", {})
+            if isinstance(rec, dict) and "action" in rec:
+                attributes.append(
+                    {"key": "tracemill.action", "value": {"stringValue": rec["action"]}}
+                )
 
         return {
             "traceId": trace_id,

@@ -41,9 +41,16 @@ class SqliteOutputSink(StorageSink):
     session_id, timestamp, risk_level, and action.
     """
 
+    _VALID_JOURNAL_MODES = frozenset({"wal", "delete", "truncate", "persist", "memory", "off"})
+
     def __init__(self, path: str | Path, journal_mode: str = "wal") -> None:
         self._path = Path(path).expanduser()
-        self._journal_mode = journal_mode
+        if journal_mode.lower() not in self._VALID_JOURNAL_MODES:
+            raise ValueError(
+                f"Invalid journal_mode '{journal_mode}'. "
+                f"Must be one of: {', '.join(sorted(self._VALID_JOURNAL_MODES))}"
+            )
+        self._journal_mode = journal_mode.lower()
         self._conn: sqlite3.Connection | None = None
 
     async def on_event(self, event: SessionEvent) -> None:
@@ -57,8 +64,8 @@ class SqliteOutputSink(StorageSink):
         if event.payload:
             tool_name = event.payload.get("tool_name")
 
-        if event.metadata and event.metadata.governance:
-            gov = event.metadata.governance
+        if event.metadata:
+            gov = getattr(event.metadata, 'governance', None)
             if isinstance(gov, dict):
                 risk = gov.get("risk_assessment", {})
                 if isinstance(risk, dict):

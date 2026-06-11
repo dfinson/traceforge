@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from urllib.error import URLError
@@ -36,7 +37,7 @@ class WebhookSink(StorageSink):
 
     async def on_event(self, event: SessionEvent) -> None:
         action = self._extract_action(event)
-        if action is not None and action not in self._filter:
+        if action is None or action not in self._filter:
             return
 
         payload = {
@@ -57,13 +58,13 @@ class WebhookSink(StorageSink):
         for attempt in range(1, self._max_retries + 1):
             try:
                 req = Request(self._url, data=body, headers=headers, method="POST")
-                with urlopen(req, timeout=self._timeout) as resp:
-                    if resp.status < 300:
-                        return
-                    logger.warning(
-                        "WebhookSink: %s returned status %d (attempt %d/%d)",
-                        self._url, resp.status, attempt, self._max_retries,
-                    )
+                resp = await asyncio.to_thread(urlopen, req, timeout=self._timeout)
+                if resp.status < 300:
+                    return
+                logger.warning(
+                    "WebhookSink: %s returned status %d (attempt %d/%d)",
+                    self._url, resp.status, attempt, self._max_retries,
+                )
             except (URLError, OSError, TimeoutError) as exc:
                 logger.warning(
                     "WebhookSink: POST to %s failed (attempt %d/%d): %s",
@@ -73,19 +74,16 @@ class WebhookSink(StorageSink):
         logger.error("WebhookSink: all %d attempts to %s failed", self._max_retries, self._url)
 
     def _extract_action(self, event: SessionEvent) -> str | None:
-        if event.metadata and event.metadata.governance:
-            gov = event.metadata.governance
-            if isinstance(gov, dict):
-                rec = gov.get("recommendation", {})
-                if isinstance(rec, dict):
-                    return rec.get("action")
+        gov = getattr(event.metadata, 'governance', None) if event.metadata else None
+        if isinstance(gov, dict):
+            rec = gov.get("recommendation", {})
+            if isinstance(rec, dict):
+                return rec.get("action")
         return None
 
     def _extract_governance(self, event: SessionEvent) -> dict | None:
-        if event.metadata and event.metadata.governance:
-            gov = event.metadata.governance
-            return gov if isinstance(gov, dict) else None
-        return None
+        gov = getattr(event.metadata, 'governance', None) if event.metadata else None
+        return gov if isinstance(gov, dict) else None
 
     async def on_span(self, span: TelemetrySpan) -> None:
         pass

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from tracemill.preprocessors.registry import register_preprocessor
@@ -63,12 +64,21 @@ def preprocess_continue(obj: dict[str, Any]) -> list[dict[str, Any]]:
                     if not isinstance(tc, dict):
                         continue
                     func = tc.get("function", {})
+                    args_raw = func.get("arguments", "{}") if isinstance(func, dict) else "{}"
+                    # Parse arguments string to dict for consistency with other preprocessors
+                    if isinstance(args_raw, str):
+                        try:
+                            arguments = json.loads(args_raw)
+                        except (json.JSONDecodeError, ValueError):
+                            arguments = {"_raw": args_raw}
+                    else:
+                        arguments = args_raw if isinstance(args_raw, dict) else {}
                     results.append({
                         "block_type": "assistant.tool_use",
                         "session_id": session_id,
                         "tool_call_id": tc.get("id", ""),
                         "tool_name": func.get("name", "") if isinstance(func, dict) else "",
-                        "arguments": func.get("arguments", "{}") if isinstance(func, dict) else "{}",
+                        "arguments": arguments,
                     })
 
         elif role == "tool":

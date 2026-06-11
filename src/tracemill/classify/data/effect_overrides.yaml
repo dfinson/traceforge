@@ -377,7 +377,7 @@ effect_overrides:
       remove: destructive
       clear: destructive
       revoke: destructive
-      deallocate: destructive
+      deallocate: mutating
       deactivate: destructive
       cancel: destructive
       abort: destructive
@@ -445,6 +445,7 @@ effect_overrides:
       cp: mutating
       mv: mutating
       undelete: mutating
+      snapshot: mutating
       # Destructive verbs
       delete: destructive
       rm: destructive

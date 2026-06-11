@@ -1147,7 +1147,7 @@ shell_rules:
   # --- gsutil (legacy GCS CLI) ---
   - id: gsutil-read-only
     binaries: [gsutil]
-    subcmds: [ls, cat, stat, du, hash, ver, acl, cors, defacl, iam, label, lifecycle, logging, notification, requesterpays, retention, versioning, web]
+    subcmds: [ls, cat, stat, du, hash, ver, acl, cors, defacl, iam, label, lifecycle, logging, notification, requesterpays, retention, versioning, web, signurl]
     activity: investigation
     role: retriever.api_client
     effect: read_only
@@ -1156,7 +1156,7 @@ shell_rules:
 
   - id: gsutil-mutating
     binaries: [gsutil]
-    subcmds: [cp, mv, mb, rsync, rewrite, compose, setmeta, signurl]
+    subcmds: [cp, mv, mb, rsync, rewrite, compose, setmeta]
     activity: implementation
     role: retriever.api_client
     effect: mutating

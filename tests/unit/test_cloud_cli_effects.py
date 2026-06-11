@@ -51,7 +51,7 @@ def test_aws_effect(cmd, expected):
         ("az group delete --name rg1 --yes", "destructive"),
         ("az vm delete --name vm1 --resource-group rg1 --yes", "destructive"),
         ("az keyvault purge --name kv1", "destructive"),
-        ("az vm deallocate --name vm1 --resource-group rg1", "destructive"),
+        ("az vm deallocate --name vm1 --resource-group rg1", "mutating"),
         ("az network nsg delete --name nsg1 --resource-group rg1", "destructive"),
         ("az vm create --name vm1 --resource-group rg1 --image UbuntuLTS", "mutating"),
         ("az webapp deploy --name app1", "mutating"),
@@ -186,6 +186,41 @@ def test_deep_nesting(cmd, expected):
     ],
 )
 def test_unknown_verb_fallback(cmd, expected):
+    result = cs(cmd)
+    assert result.effect == expected, f"{cmd!r}: got {result.effect!r}"
+
+
+# ── Semantic correctness audit ──
+
+
+@pytest.mark.parametrize(
+    "cmd,expected",
+    [
+        # AWS edge cases
+        ("aws sts assume-role --role-arn arn:aws:iam::123:role/R", "mutating"),
+        ("aws s3api head-object --bucket b --key k", "read_only"),
+        ("aws ec2 wait instance-running --instance-ids i-123", "read_only"),
+        ("aws ec2 release-address --allocation-id eipalloc-1", "destructive"),
+        ("aws dynamodb batch-get-item --request-items file://req.json", "read_only"),
+        ("aws dynamodb batch-write-item --request-items file://w.json", "mutating"),
+        ("aws s3api put-bucket-policy --bucket b --policy file://p", "mutating"),
+        # Azure edge cases
+        ("az lock create --name no-delete --lock-type CanNotDelete", "mutating"),
+        ("az lock delete --name no-delete --resource-group rg", "destructive"),
+        ("az account show", "read_only"),
+        ("az vm deallocate --name vm1 --resource-group rg", "mutating"),
+        ("az keyvault purge --name myvault", "destructive"),
+        # GCP edge cases
+        ("gcloud compute disks snapshot disk1 --zone us-central1-a", "mutating"),
+        ("gcloud compute instances reset vm1 --zone us-central1-a", "mutating"),
+        ("gcloud projects undelete my-project", "mutating"),
+        ("gcloud iam service-accounts keys list --iam-account sa@p.iam", "read_only"),
+        # gsutil
+        ("gsutil signurl -d 10m key.json gs://bucket/obj", "read_only"),
+        ("gsutil rm -r gs://bucket/prefix/", "destructive"),
+    ],
+)
+def test_semantic_correctness(cmd, expected):
     result = cs(cmd)
     assert result.effect == expected, f"{cmd!r}: got {result.effect!r}"
 

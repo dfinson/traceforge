@@ -299,6 +299,9 @@ class TracemillConfig(StrictModel):
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
+    # Callback: dotted import path invoked after every tool call is scored
+    on_tool_call: str | None = None  # e.g. "myapp.policies.my_policy"
+
     # Mapping search paths (in addition to bundled)
     mappings_dirs: list[Path] = Field(default_factory=list)
 

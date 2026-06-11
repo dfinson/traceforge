@@ -56,6 +56,16 @@ def _decode_budget_dims(raw: list | None) -> tuple[tuple[str, int], ...]:
     return tuple(result)
 
 
+def _import_dotted(dotted_path: str):
+    """Import a callable from a dotted module path (e.g. 'myapp.policies.my_policy')."""
+    module_path, _, attr_name = dotted_path.rpartition(".")
+    if not module_path:
+        raise ImportError(f"Invalid dotted path: {dotted_path!r} (need module.attr)")
+    import importlib
+    module = importlib.import_module(module_path)
+    return getattr(module, attr_name)
+
+
 
 class GovernancePipeline:
     """Orchestrates Phases 1, 2, 3 of the governance enrichment pipeline."""
@@ -177,10 +187,15 @@ class GovernancePipeline:
         Args:
             path: Path to tracemill.yaml. None uses standard discovery
                   (TRACEMILL_CONFIG env, ./tracemill.yaml, ~/.tracemill/config.yaml).
-            on_tool_call: Callback invoked after every tool call is scored.
+            on_tool_call: Callback override. If None, uses the dotted import path
+                  from config (governance.on_tool_call field).
 
         Usage:
-            pipeline = Pipeline.from_config("./tracemill.yaml", on_tool_call=fn)
+            # Everything from config (including policy):
+            pipeline = Pipeline.from_config()
+
+            # Config + explicit callback override:
+            pipeline = Pipeline.from_config(on_tool_call=fn)
         """
         import os
 
@@ -199,7 +214,13 @@ class GovernancePipeline:
                     os.environ["TRACEMILL_CONFIG"] = old_env
 
         instance = cls.create(config.governance)
-        instance.on_tool_call = on_tool_call
+
+        # Resolve callback: explicit arg > config dotted path > None
+        if on_tool_call is not None:
+            instance.on_tool_call = on_tool_call
+        elif config.on_tool_call:
+            instance.on_tool_call = _import_dotted(config.on_tool_call)
+
         return instance
 
     def context_from_session_event(self, event: "tracemill.types.SessionEvent") -> "EnrichmentContext":

@@ -453,8 +453,9 @@ class GovernancePipeline:
     def score_tool_call(self, payload: dict) -> "SessionMeta":
         """Score a pending tool call against current session state.
 
-        Read-only preflight — evaluates the tool call against accumulated
-        session state but does NOT mutate budget, taint, or drift.
+        Evaluates the tool call against accumulated session state but does NOT
+        mutate budget, taint, or drift. Persists the scoring result so denied
+        calls appear in the audit trail.
 
         Args:
             payload: Dict with at minimum:
@@ -477,9 +478,12 @@ class GovernancePipeline:
             return self._fail_closed(exc)
 
         try:
-            return self.preflight_event(ctx)
+            meta = self.preflight_event(ctx)
         except Exception as exc:
             return self._fail_closed(exc, classification=ctx.base_classification)
+
+        self._persist_score(event.source_event_key, event.session_id, meta)
+        return meta
 
     def score_tool_call_event(self, event: "tracemill.types.SessionEvent") -> "SessionMeta":
         """Score an enriched SessionEvent via the canonical bridge.
@@ -496,9 +500,39 @@ class GovernancePipeline:
             return self._fail_closed(exc)
 
         try:
-            return self.preflight_event(ctx)
+            meta = self.preflight_event(ctx)
         except Exception as exc:
             return self._fail_closed(exc, classification=ctx.base_classification)
+
+        self._persist_score(ctx.event.source_event_key, ctx.event.session_id, meta)
+        return meta
+
+    def _persist_score(self, source_event_key: str, session_id: str, meta: "SessionMeta") -> None:
+        """Persist a scoring result to the audit trail.
+
+        Uses a distinct source_event_key (score:{id}) that never collides with
+        observation events. If the same tool call later executes and arrives via
+        the standard pipeline, both records coexist — enabling correlation of
+        'what we recommended' vs 'what actually happened'.
+        """
+        try:
+            meta_dict = self._serialize_meta(meta)
+            meta_dict["scored"] = True
+            meta_json = json.dumps(meta_dict)
+            now = datetime.now(timezone.utc).isoformat()
+            self._store.execute_in_transaction(
+                "INSERT OR IGNORE INTO processed_events (source_event_key, session_id, session_meta_json, processed_at) VALUES (?, ?, ?, ?)",
+                (source_event_key, session_id, meta_json, now),
+            )
+            self._store.commit()
+            self._store.cache_processed(source_event_key, meta_json)
+        except Exception:
+            # Best-effort persistence — scoring result was already returned to caller.
+            # If this fails, the score is still usable but won't be in the audit trail.
+            try:
+                self._store.rollback()
+            except Exception:
+                pass
 
     def _fail_closed(self, exc: Exception, classification=None) -> "SessionMeta":
         """Produce a SessionMeta that signals ESCALATE due to internal error."""

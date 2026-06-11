@@ -383,7 +383,8 @@ class TestFailClosed:
 
 class TestReadOnly:
 
-    def test_assess_does_not_persist_state(self, pipeline):
+    def test_scoring_does_not_mutate_session_state(self, pipeline):
+        """Scoring is read-only for budget/taint/drift — same input yields same result."""
         r1 = pipeline.score_tool_call({
             "tool_name": "bash",
             "tool_input": {"command": "rm -rf /"},
@@ -396,6 +397,58 @@ class TestReadOnly:
         })
         assert _score(r1) == _score(r2)
         assert _action(r1) == _action(r2)
+
+    def test_scoring_persists_to_audit_trail(self, pipeline, store):
+        """Each score_tool_call persists a record with scored=True."""
+        pipeline.score_tool_call({
+            "tool_name": "bash",
+            "tool_input": {"command": "whoami"},
+            "session_id": "audit-sess",
+        })
+        # Query processed_events for score: prefixed keys
+        import json
+        cursor = store._conn.execute(
+            "SELECT source_event_key, session_meta_json FROM processed_events WHERE source_event_key LIKE 'score:%'"
+        )
+        rows = cursor.fetchall()
+        assert len(rows) == 1
+        key, meta_json = rows[0]
+        assert key.startswith("score:")
+        meta_dict = json.loads(meta_json)
+        assert meta_dict["scored"] is True
+
+    def test_scored_and_observed_coexist(self, pipeline, store):
+        """Scored event and a later observed event use different keys — both persist."""
+        pipeline.score_tool_call({
+            "tool_name": "bash",
+            "tool_input": {"command": "ls"},
+            "session_id": "coexist-sess",
+        })
+        # Simulate observation arriving with a different key
+        from tracemill.governance.types import ToolCallEvent
+        obs_event = ToolCallEvent(
+            event_id="obs-001",
+            session_id="coexist-sess",
+            timestamp=pipeline._store._conn.execute("SELECT datetime('now')").fetchone()[0],
+            source_event_key="adapter:obs-001",
+            span_id="span-obs",
+            tool_name="bash",
+            server_namespace=None,
+            tool_args_json='{"command": "ls"}',
+            source_event_id=None,
+        )
+        from tracemill.governance.types import EnrichmentContext
+        ctx = pipeline.enrich_event(obs_event)
+        pipeline.process_event(ctx)
+        # Both records exist
+        cursor = store._conn.execute(
+            "SELECT source_event_key FROM processed_events WHERE session_id = 'coexist-sess'"
+        )
+        keys = [r[0] for r in cursor.fetchall()]
+        score_keys = [k for k in keys if k.startswith("score:")]
+        obs_keys = [k for k in keys if k.startswith("adapter:")]
+        assert len(score_keys) == 1
+        assert len(obs_keys) == 1
 
     def test_different_sessions_isolated(self, pipeline):
         pipeline.score_tool_call({

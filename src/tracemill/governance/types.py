@@ -109,14 +109,14 @@ class ToolCallEvent(SessionEvent):
         tool_name = str(payload.get("tool_name", "") or "")
         session_id = str(payload.get("session_id", "") or "") or f"anon-{_uuid.uuid4().hex[:8]}"
         tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
-        eid = f"assess-{_uuid.uuid4().hex[:12]}"
+        eid = f"score-{_uuid.uuid4().hex[:12]}"
 
         return cls(
             event_id=eid,
             session_id=session_id,
             timestamp=_dt.now(_tz.utc),
-            source_event_key=f"assess:{eid}",
-            span_id=f"assess-span-{_uuid.uuid4().hex[:8]}",
+            source_event_key=f"score:{eid}",
+            span_id=f"score-span-{_uuid.uuid4().hex[:8]}",
             tool_name=tool_name,
             server_namespace=payload.get("server_namespace"),
             tool_args_json=_json.dumps(tool_input, default=str),

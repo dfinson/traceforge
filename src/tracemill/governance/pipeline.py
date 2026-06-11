@@ -450,13 +450,11 @@ class GovernancePipeline:
             pipe_segments=pipe_segments,
         )
 
-    def assess(self, payload: dict) -> "AssessmentResult":
+    def score_tool_call(self, payload: dict) -> "SessionMeta":
         """Score a pending tool call against current session state.
 
-        This is a **read-only preflight** — it evaluates the tool call against
-        accumulated session state but does NOT mutate budget, taint, or drift.
-        State is only updated when the observation pipeline sees the event
-        actually execute (or when the consumer explicitly confirms execution).
+        Read-only preflight — evaluates the tool call against accumulated
+        session state but does NOT mutate budget, taint, or drift.
 
         Args:
             payload: Dict with at minimum:
@@ -468,12 +466,11 @@ class GovernancePipeline:
                 - ``project_root``: str
 
         Returns:
-            AssessmentResult with the governance assessment.
-            Does NOT persist to sinks or mutate pipeline state.
+            SessionMeta — same shape sinks receive in the observation pipeline.
         """
-        from tracemill.assess.assessor import assess as _assess
+        from tracemill.score.scorer import score_tool_call as _score
 
-        return _assess(self, payload)
+        return _score(self, payload)
 
     def preflight_event(self, ctx: "EnrichmentContext") -> "SessionMeta":
         """Simulate full pipeline (Phase 1/2/3) without persisting state changes.
@@ -482,7 +479,7 @@ class GovernancePipeline:
         (budget, taint, drift) to it, then runs Phase 2/3 against the result.
         The real state and DB are never modified.
 
-        Used by .assess() to predict what the pipeline would produce if the
+        Used by .score_tool_call() to predict what the pipeline would produce if the
         event actually executed, without committing any side effects.
         """
         from tracemill.governance.state import SessionState

@@ -1,8 +1,8 @@
-"""Thin assessment wrapper — event in, SessionMeta out.
+"""Score a pending tool call — event in, SessionMeta out.
 
 Two entry points:
-  assess(pipeline, payload)       — raw dict (e.g. from HTTP/SDK)
-  assess_event(pipeline, event)   — enriched SessionEvent (from observation pipeline)
+  score_tool_call(pipeline, payload)  — raw dict (e.g. from HTTP/SDK)
+  score_tool_call_event(pipeline, event) — enriched SessionEvent (from observation pipeline)
 
 Both return SessionMeta — the same shape sinks receive in the standard pipeline.
 """
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from tracemill.types import SessionEvent
 
 
-def assess(pipeline: "GovernancePipeline", payload: dict) -> "SessionMeta":
+def score_tool_call(pipeline: "GovernancePipeline", payload: dict) -> "SessionMeta":
     """Score a pending tool call from a raw dict. Dict → ToolCallEvent → enrich → preflight."""
     from tracemill.governance.types import ToolCallEvent
 
@@ -29,7 +29,7 @@ def assess(pipeline: "GovernancePipeline", payload: dict) -> "SessionMeta":
     return _run_preflight(pipeline, ctx)
 
 
-def assess_event(pipeline: "GovernancePipeline", event: "SessionEvent") -> "SessionMeta":
+def score_tool_call_event(pipeline: "GovernancePipeline", event: "SessionEvent") -> "SessionMeta":
     """Score an enriched SessionEvent via the canonical bridge."""
     try:
         ctx = pipeline.context_from_session_event(event)

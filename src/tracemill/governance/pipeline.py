@@ -79,7 +79,7 @@ class GovernancePipeline:
         engine: "ClassificationEngine",
         thresholds: "BudgetThresholds | None" = None,
         project_root: str | None = None,
-        on_tool_call: "Callable[[dict, SessionMeta], None] | None" = None,
+        tool_gate_policy: "Callable[[dict, SessionMeta], None] | None" = None,
     ) -> None:
         self._store = store
         self._labeler = labeler
@@ -88,7 +88,7 @@ class GovernancePipeline:
         self._engine = engine
         self._thresholds = thresholds
         self._project_root = project_root
-        self.on_tool_call = on_tool_call
+        self.tool_gate_policy = tool_gate_policy
         self._states: dict[str, "SessionState"] = {}
         self._write_failures: dict[str, int] = {}  # session_id → consecutive failure count
         self._MAX_WRITE_FAILURES = 10
@@ -175,27 +175,27 @@ class GovernancePipeline:
         """Return a builder for chainable pipeline configuration.
 
         Usage:
-            pipeline = Pipeline.builder().on_tool_call(my_policy).build()
+            pipeline = Pipeline.builder().tool_gate_policy(my_policy).build()
         """
         from tracemill.sdk import PipelineBuilder
         return PipelineBuilder()
 
     @classmethod
-    def from_config(cls, path=None, *, on_tool_call=None) -> "GovernancePipeline":
+    def from_config(cls, path=None, *, tool_gate_policy=None) -> "GovernancePipeline":
         """Create a fully-configured pipeline from a tracemill.yaml file.
 
         Args:
             path: Path to tracemill.yaml. None uses standard discovery
                   (TRACEMILL_CONFIG env, ./tracemill.yaml, ~/.tracemill/config.yaml).
-            on_tool_call: Callback override. If None, uses the dotted import path
-                  from config (governance.on_tool_call field).
+            tool_gate_policy: Callback override. If None, uses the dotted import path
+                  from config (governance.tool_gate_policy field).
 
         Usage:
             # Everything from config (including policy):
             pipeline = Pipeline.from_config()
 
             # Config + explicit callback override:
-            pipeline = Pipeline.from_config(on_tool_call=fn)
+            pipeline = Pipeline.from_config(tool_gate_policy=fn)
         """
         import os
 
@@ -216,10 +216,10 @@ class GovernancePipeline:
         instance = cls.create(config.governance)
 
         # Resolve callback: explicit arg > config dotted path > None
-        if on_tool_call is not None:
-            instance.on_tool_call = on_tool_call
-        elif config.governance.on_tool_call:
-            instance.on_tool_call = _import_dotted(config.governance.on_tool_call)
+        if tool_gate_policy is not None:
+            instance.tool_gate_policy = tool_gate_policy
+        elif config.governance.tool_gate_policy:
+            instance.tool_gate_policy = _import_dotted(config.governance.tool_gate_policy)
 
         return instance
 
@@ -1459,7 +1459,7 @@ class GovernancePipeline:
 
     # ─── Framework attach methods ───────────────────────────────────────────
 
-    def attach_crewai(self, *, session_id: str = "sdk", on_tool_call=None) -> None:
+    def attach_crewai(self, *, session_id: str = "sdk", tool_gate_policy=None) -> None:
         """Register tracemill into CrewAI's before_tool_call hook.
 
         Blocking: returns False to CrewAI when callback returns DENY.
@@ -1480,13 +1480,13 @@ class GovernancePipeline:
                 "session_id": session_id,
             }
             meta = pipeline.score_tool_call(payload)
-            if on_tool_call is not None:
-                verdict = interpret_callback_result(on_tool_call(payload, meta))
+            if tool_gate_policy is not None:
+                verdict = interpret_callback_result(tool_gate_policy(payload, meta))
                 if verdict.denied:
                     return False  # CrewAI blocks execution
             return None  # allow
 
-    def attach_langchain(self, tool, *, session_id: str = "sdk", on_tool_call=None):
+    def attach_langchain(self, tool, *, session_id: str = "sdk", tool_gate_policy=None):
         """Wrap a LangChain tool's _run with tracemill gating.
 
         Blocking: raises ToolException when callback returns DENY.
@@ -1508,8 +1508,8 @@ class GovernancePipeline:
                 "session_id": session_id,
             }
             meta = pipeline.score_tool_call(payload)
-            if on_tool_call is not None:
-                verdict = interpret_callback_result(on_tool_call(payload, meta))
+            if tool_gate_policy is not None:
+                verdict = interpret_callback_result(tool_gate_policy(payload, meta))
                 if verdict.denied:
                     raise ToolException(f"Denied: {verdict.reason}")
             return original_run(*args, **kwargs)
@@ -1518,7 +1518,7 @@ class GovernancePipeline:
         tool.handle_tool_error = True
         return tool
 
-    def attach_langgraph(self, tools, *, session_id: str = "sdk", on_tool_call=None):
+    def attach_langgraph(self, tools, *, session_id: str = "sdk", tool_gate_policy=None):
         """Return a ToolNode with tracemill gating via wrap_tool_call.
 
         Blocking: returns denial ToolMessage without calling execute.
@@ -1539,8 +1539,8 @@ class GovernancePipeline:
                 "session_id": session_id,
             }
             meta = pipeline.score_tool_call(payload)
-            if on_tool_call is not None:
-                verdict = interpret_callback_result(on_tool_call(payload, meta))
+            if tool_gate_policy is not None:
+                verdict = interpret_callback_result(tool_gate_policy(payload, meta))
                 if verdict.denied:
                     return ToolMessage(
                         content=f"Denied: {verdict.reason}",
@@ -1552,11 +1552,11 @@ class GovernancePipeline:
 
         return ToolNode(tools, wrap_tool_call=_tracemill_wrapper)
 
-    def attach_anthropic(self, *, session_id: str = "sdk", on_tool_call=None):
+    def attach_anthropic(self, *, session_id: str = "sdk", tool_gate_policy=None):
         """Return a gate function for the Anthropic tool-use loop.
 
         Usage:
-            gate = pipeline.attach_anthropic(on_tool_call=my_policy)
+            gate = pipeline.attach_anthropic(tool_gate_policy=my_policy)
             for block in response.content:
                 if block.type == "tool_use":
                     verdict, denial = gate(block)
@@ -1576,8 +1576,8 @@ class GovernancePipeline:
                 "session_id": session_id,
             }
             meta = pipeline.score_tool_call(payload)
-            if on_tool_call is not None:
-                verdict = interpret_callback_result(on_tool_call(payload, meta))
+            if tool_gate_policy is not None:
+                verdict = interpret_callback_result(tool_gate_policy(payload, meta))
                 if verdict.denied:
                     return verdict, {
                         "type": "tool_result",
@@ -1589,11 +1589,11 @@ class GovernancePipeline:
 
         return _gate
 
-    def attach_openai(self, *, session_id: str = "sdk", on_tool_call=None):
+    def attach_openai(self, *, session_id: str = "sdk", tool_gate_policy=None):
         """Return a gate function for OpenAI ChatCompletionMessageToolCall.
 
         Usage:
-            gate = pipeline.attach_openai(on_tool_call=my_policy)
+            gate = pipeline.attach_openai(tool_gate_policy=my_policy)
             for tc in message.tool_calls:
                 verdict, denial = gate(tc)
                 if denial:
@@ -1614,8 +1614,8 @@ class GovernancePipeline:
                 "session_id": session_id,
             }
             meta = pipeline.score_tool_call(payload)
-            if on_tool_call is not None:
-                verdict = interpret_callback_result(on_tool_call(payload, meta))
+            if tool_gate_policy is not None:
+                verdict = interpret_callback_result(tool_gate_policy(payload, meta))
                 if verdict.denied:
                     return verdict, {
                         "role": "tool",
@@ -1626,7 +1626,7 @@ class GovernancePipeline:
 
         return _gate
 
-    def attach_semantic_kernel(self, kernel, *, session_id: str = "sdk", on_tool_call=None) -> None:
+    def attach_semantic_kernel(self, kernel, *, session_id: str = "sdk", tool_gate_policy=None) -> None:
         """Register tracemill as a Semantic Kernel auto function invocation filter.
 
         Blocking: skips next_handler and injects denial FunctionResult.
@@ -1645,8 +1645,8 @@ class GovernancePipeline:
                 "session_id": session_id,
             }
             meta = pipeline.score_tool_call(payload)
-            if on_tool_call is not None:
-                verdict = interpret_callback_result(on_tool_call(payload, meta))
+            if tool_gate_policy is not None:
+                verdict = interpret_callback_result(tool_gate_policy(payload, meta))
                 if verdict.denied:
                     from semantic_kernel.functions import FunctionResult
 
@@ -1658,12 +1658,12 @@ class GovernancePipeline:
                     return
             await next_handler(context)
 
-    def attach_autogen(self, tools, *, session_id: str = "sdk", on_tool_call=None):
+    def attach_autogen(self, tools, *, session_id: str = "sdk", tool_gate_policy=None):
         """Return a TracemillWorkbench that gates tool calls for AutoGen v0.4.
 
         Blocking: returns synthetic ToolResult without executing the tool.
         Usage:
-            workbench = pipeline.attach_autogen(tools, on_tool_call=my_policy)
+            workbench = pipeline.attach_autogen(tools, tool_gate_policy=my_policy)
             agent = AssistantAgent("agent", model_client, workbench=workbench)
         Requires: autogen-core installed.
         """
@@ -1672,7 +1672,7 @@ class GovernancePipeline:
         from tracemill.sdk.verdict import interpret_callback_result
 
         pipeline = self
-        _on_tool_call = on_tool_call
+        _tool_gate_policy = tool_gate_policy
 
         class _TracemillWorkbench(StaticWorkbench):
             async def call_tool(self, name, arguments=None, cancellation_token=None, call_id=None):
@@ -1684,8 +1684,8 @@ class GovernancePipeline:
                     "session_id": session_id,
                 }
                 meta = pipeline.score_tool_call(payload)
-                if _on_tool_call is not None:
-                    verdict = interpret_callback_result(_on_tool_call(payload, meta))
+                if _tool_gate_policy is not None:
+                    verdict = interpret_callback_result(_tool_gate_policy(payload, meta))
                     if verdict.denied:
                         return ToolResult(
                             name=name,
@@ -1696,12 +1696,12 @@ class GovernancePipeline:
 
         return _TracemillWorkbench(tools)
 
-    def attach_smolagents(self, agent_cls=None, *, session_id: str = "sdk", on_tool_call=None):
+    def attach_smolagents(self, agent_cls=None, *, session_id: str = "sdk", tool_gate_policy=None):
         """Return a TracemillAgent subclass that gates tool calls for smolagents.
 
         Blocking: returns denial string as observation without executing the tool.
         Usage:
-            AgentCls = pipeline.attach_smolagents(ToolCallingAgent, on_tool_call=my_policy)
+            AgentCls = pipeline.attach_smolagents(ToolCallingAgent, tool_gate_policy=my_policy)
             agent = AgentCls(tools=[...], model=model)
         Requires: smolagents installed.
         """
@@ -1712,7 +1712,7 @@ class GovernancePipeline:
         from tracemill.sdk.verdict import interpret_callback_result
 
         pipeline = self
-        _on_tool_call = on_tool_call
+        _tool_gate_policy = tool_gate_policy
 
         class _TracemillAgent(agent_cls):
             def execute_tool_call(self, tool_name: str, arguments) -> any:
@@ -1722,10 +1722,76 @@ class GovernancePipeline:
                     "session_id": session_id,
                 }
                 meta = pipeline.score_tool_call(payload)
-                if _on_tool_call is not None:
-                    verdict = interpret_callback_result(_on_tool_call(payload, meta))
+                if _tool_gate_policy is not None:
+                    verdict = interpret_callback_result(_tool_gate_policy(payload, meta))
                     if verdict.denied:
                         return f"[BLOCKED] {verdict.reason}"
                 return super().execute_tool_call(tool_name, arguments)
 
         return _TracemillAgent
+
+    def attach_pydantic_ai(self, agent, *, session_id: str = "sdk", tool_gate_policy=None) -> None:
+        """Register tracemill as a Pydantic AI tool-execute hook.
+
+        Blocking: raises SkipToolExecution with denial reason.
+        The model sees the denial as the tool's result and can adapt.
+        Requires: pydantic-ai installed.
+        """
+        from tracemill.sdk.verdict import interpret_callback_result
+
+        pipeline = self
+
+        @agent.tool_hook("before")
+        async def _tracemill_before_tool(ctx, tool_def, args):
+            from pydantic_ai.exceptions import SkipToolExecution
+
+            payload = {
+                "tool_name": tool_def.name,
+                "tool_input": args if isinstance(args, dict) else {"raw": args},
+                "session_id": session_id,
+            }
+            meta = pipeline.score_tool_call(payload)
+            if tool_gate_policy is not None:
+                verdict = interpret_callback_result(tool_gate_policy(payload, meta))
+                if verdict.denied:
+                    raise SkipToolExecution(f"Denied: {verdict.reason}")
+
+    def attach_openai_agents(self, agent, *, session_id: str = "sdk", tool_gate_policy=None):
+        """Register tracemill as an OpenAI Agents SDK input guardrail.
+
+        Blocking: raises GuardrailTripwireTriggered which rejects the tool call.
+        The model receives the rejection message.
+        Requires: openai-agents installed.
+        """
+        from tracemill.sdk.verdict import interpret_callback_result
+
+        pipeline = self
+
+        from agents import input_guardrail, GuardrailFunctionOutput
+
+        @input_guardrail
+        async def tracemill_guardrail(ctx, agent_instance, input_data):
+            # Extract tool call info from input if available
+            payload = {
+                "tool_name": getattr(input_data, "tool_name", "unknown"),
+                "tool_input": getattr(input_data, "tool_input", {}),
+                "session_id": session_id,
+            }
+            meta = pipeline.score_tool_call(payload)
+            if tool_gate_policy is not None:
+                verdict = interpret_callback_result(tool_gate_policy(payload, meta))
+                if verdict.denied:
+                    return GuardrailFunctionOutput(
+                        output_info=verdict.reason,
+                        tripwire_triggered=True,
+                    )
+            return GuardrailFunctionOutput(
+                output_info="allowed",
+                tripwire_triggered=False,
+            )
+
+        # Add guardrail to agent's input guardrails
+        if not hasattr(agent, "input_guardrails"):
+            agent.input_guardrails = []
+        agent.input_guardrails.append(tracemill_guardrail)
+        return agent

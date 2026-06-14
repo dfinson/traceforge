@@ -8,8 +8,7 @@ Usage:
             return Verdict.deny(f"score {request.risk_score} exceeds threshold")
         return Verdict.allow()
 
-    policy = GatePolicy()
-    policy.add_preflight(my_preflight)
+    policy = GatePolicy().preflight(my_preflight)
 
     pipeline = Pipeline.create(policy=policy)
     pipeline.attach_openai(session_id="s1")

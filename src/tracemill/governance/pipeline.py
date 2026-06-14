@@ -120,8 +120,7 @@ class GovernancePipeline:
             pipeline = GovernancePipeline.create()
 
             # With gate policy
-            policy = GatePolicy()
-            policy.add_preflight(my_gate)
+            policy = GatePolicy().preflight(my_gate)
             pipeline = GovernancePipeline.create(policy=policy)
 
         Args:
@@ -215,8 +214,7 @@ class GovernancePipeline:
         elif config.governance.tool_preflight_gate:
             from tracemill.sdk.gate_policy import GatePolicy
             gate_fn = _import_dotted(config.governance.tool_preflight_gate)
-            auto_policy = GatePolicy()
-            auto_policy.add_preflight(gate_fn)
+            auto_policy = GatePolicy().preflight(gate_fn)
             instance.policy = auto_policy
 
         return instance

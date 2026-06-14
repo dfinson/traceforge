@@ -19,34 +19,38 @@ class GatePolicy:
     """Ordered collection of gates. Testable without a pipeline.
 
     Usage:
-        policy = GatePolicy()
-        policy.add_preflight(block_destructive_shell, priority=10)
-        policy.add_preflight(rate_limit_gate, priority=20)
-        policy.add_postflight(redact_secrets)
+        policy = (
+            GatePolicy()
+            .preflight(block_destructive_shell, priority=10)
+            .preflight(rate_limit_gate, priority=20)
+            .postflight(redact_secrets)
+        )
 
-        pipeline = GovernancePipeline.create(policy=policy)
+        pipeline = Pipeline.create(policy=policy)
     """
 
     _preflight: list[tuple[int, PreflightGate]] = field(default_factory=list)
     _postflight: list[tuple[int, PostflightGate]] = field(default_factory=list)
 
-    def add_preflight(self, gate: PreflightGate, *, priority: int = 50) -> None:
-        """Register a preflight gate. Lower priority runs first."""
+    def preflight(self, gate: "PreflightGate", *, priority: int = 50) -> "GatePolicy":
+        """Register a preflight gate. Lower priority runs first. Returns self for chaining."""
         self._preflight.append((priority, gate))
         self._preflight.sort(key=lambda t: t[0])
+        return self
 
-    def add_postflight(self, gate: PostflightGate, *, priority: int = 50) -> None:
-        """Register a postflight gate. Lower priority runs first."""
+    def postflight(self, gate: "PostflightGate", *, priority: int = 50) -> "GatePolicy":
+        """Register a postflight gate. Lower priority runs first. Returns self for chaining."""
         self._postflight.append((priority, gate))
         self._postflight.sort(key=lambda t: t[0])
+        return self
 
     @property
-    def preflight_gates(self) -> tuple[PreflightGate, ...]:
+    def preflight_gates(self) -> tuple["PreflightGate", ...]:
         """Ordered preflight gates (lowest priority first)."""
         return tuple(g for _, g in self._preflight)
 
     @property
-    def postflight_gates(self) -> tuple[PostflightGate, ...]:
+    def postflight_gates(self) -> tuple["PostflightGate", ...]:
         """Ordered postflight gates (lowest priority first)."""
         return tuple(g for _, g in self._postflight)
 

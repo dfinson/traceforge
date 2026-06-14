@@ -5,8 +5,8 @@ It enters sparse (identity fields only from the adapter), accumulates
 classification fields from the enricher, and assessment fields from the scorer.
 By the time it reaches the gate callback, it is fully populated.
 
-All dimension types (EventKind, Mechanism, Effect, etc.) are codegen'd from
-classify/schema.yaml — see _generated.py.
+All dimension types (EventKind, Mechanism, Effect, etc.) are StrEnums generated
+by datamodel-code-generator from classify/schema.yaml — see _generated.py.
 """
 
 from __future__ import annotations
@@ -19,38 +19,19 @@ from typing import Any
 
 from tracemill._generated import (
     Action,
-    Action_VALUES,
     Capability,
-    Capability_VALUES,
     Decision,
     Effect,
-    Effect_VALUES,
     EventKind,
-    EventKind_VALUES,
     Mechanism,
-    Mechanism_VALUES,
     Recommendation,
-    Recommendation_VALUES,
     RiskBand,
-    RiskBand_VALUES,
     Role,
-    Role_VALUES,
     Scope,
-    Scope_VALUES,
     Structure,
-    Structure_VALUES,
 )
 
 SCHEMA_VERSION = "1"
-
-
-def _check(value: str, allowed: frozenset[str], field_name: str) -> None:
-    """Raise ValueError if value is not in the allowed set."""
-    if value not in allowed:
-        raise ValueError(
-            f"Invalid {field_name}: {value!r}. "
-            f"Must be one of: {sorted(allowed)}"
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +44,9 @@ class Trace:
         3. Scorer fills assessment fields (risk_score, suggested_action, etc.)
         4. Gate callback receives the fully-enriched Trace
         5. Sinks persist the final Trace
+
+    All enum fields accept raw strings and coerce to StrEnum members in
+    __post_init__. Invalid values raise ValueError immediately.
     """
 
     # ─── Identity (adapter fills) ─────────────────────────────────────────────
@@ -100,37 +84,36 @@ class Trace:
 
     schema_version: str = SCHEMA_VERSION
 
-    # ─── Post-init: freeze raw_event + validate enum fields ───────────────────
+    # ─── Post-init: freeze raw_event + coerce strings to StrEnums ─────────────
 
     def __post_init__(self) -> None:
-        # Freeze raw_event: deep-copy if mutable dict, then wrap as read-only proxy
+        # Freeze raw_event: deep-copy mutable dict, wrap as read-only proxy
         raw = self.raw_event
         if isinstance(raw, dict) and not isinstance(raw, MappingProxyType):
-            frozen = MappingProxyType(copy.deepcopy(raw))
-            object.__setattr__(self, "raw_event", frozen)
+            object.__setattr__(self, "raw_event", MappingProxyType(copy.deepcopy(raw)))
 
-        # Validate enum scalars
-        _check(self.kind, EventKind_VALUES, "kind")
+        # Coerce scalar enums (StrEnum constructor validates + raises ValueError)
+        object.__setattr__(self, "kind", EventKind(self.kind))
         if self.mechanism is not None:
-            _check(self.mechanism, Mechanism_VALUES, "mechanism")
+            object.__setattr__(self, "mechanism", Mechanism(self.mechanism))
         if self.effect is not None:
-            _check(self.effect, Effect_VALUES, "effect")
+            object.__setattr__(self, "effect", Effect(self.effect))
         if self.risk_band is not None:
-            _check(self.risk_band, RiskBand_VALUES, "risk_band")
+            object.__setattr__(self, "risk_band", RiskBand(self.risk_band))
         if self.suggested_action is not None:
-            _check(self.suggested_action, Recommendation_VALUES, "suggested_action")
+            object.__setattr__(self, "suggested_action", Recommendation(self.suggested_action))
 
-        # Validate enum tuples
-        for v in self.scope:
-            _check(v, Scope_VALUES, "scope")
-        for v in self.role:
-            _check(v, Role_VALUES, "role")
-        for v in self.action:
-            _check(v, Action_VALUES, "action")
-        for v in self.capability:
-            _check(v, Capability_VALUES, "capability")
-        for v in self.structure:
-            _check(v, Structure_VALUES, "structure")
+        # Coerce tuple enums
+        if self.scope:
+            object.__setattr__(self, "scope", tuple(Scope(v) for v in self.scope))
+        if self.role:
+            object.__setattr__(self, "role", tuple(Role(v) for v in self.role))
+        if self.action:
+            object.__setattr__(self, "action", tuple(Action(v) for v in self.action))
+        if self.capability:
+            object.__setattr__(self, "capability", tuple(Capability(v) for v in self.capability))
+        if self.structure:
+            object.__setattr__(self, "structure", tuple(Structure(v) for v in self.structure))
 
     # ─── Lifecycle checks ─────────────────────────────────────────────────────
 
@@ -149,13 +132,13 @@ class Trace:
     def with_classification(
         self,
         *,
-        mechanism: Mechanism | None = None,
-        effect: Effect | None = None,
-        scope: tuple[Scope, ...] = (),
-        role: tuple[Role, ...] = (),
-        action: tuple[Action, ...] = (),
-        capability: tuple[Capability, ...] = (),
-        structure: tuple[Structure, ...] = (),
+        mechanism: Mechanism | str | None = None,
+        effect: Effect | str | None = None,
+        scope: tuple[Scope | str, ...] = (),
+        role: tuple[Role | str, ...] = (),
+        action: tuple[Action | str, ...] = (),
+        capability: tuple[Capability | str, ...] = (),
+        structure: tuple[Structure | str, ...] = (),
         canonical_tool: str | None = None,
     ) -> Trace:
         """Return a new Trace with classification fields populated."""
@@ -175,8 +158,8 @@ class Trace:
         self,
         *,
         risk_score: int | None = None,
-        risk_band: RiskBand | None = None,
-        suggested_action: Recommendation | None = None,
+        risk_band: RiskBand | str | None = None,
+        suggested_action: Recommendation | str | None = None,
         reason: str | None = None,
     ) -> Trace:
         """Return a new Trace with assessment fields populated."""
@@ -198,7 +181,7 @@ class Trace:
         cls,
         *,
         id: str,
-        kind: EventKind,
+        kind: EventKind | str,
         session_id: str,
         timestamp: datetime,
         source_key: str,
@@ -207,7 +190,7 @@ class Trace:
         """Factory — identical to direct construction.
 
         Kept as a named constructor for readability. __post_init__ handles
-        deep-copy + freeze of raw_event on all construction paths.
+        deep-copy + freeze of raw_event and enum coercion on all paths.
         """
         return cls(
             id=id,

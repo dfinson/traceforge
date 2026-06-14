@@ -41,3 +41,10 @@ line-length = 100
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tracemill"]
+
+[dependency-groups]
+dev = [
+    "datamodel-code-generator>=0.63.0",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.4.0",
+]

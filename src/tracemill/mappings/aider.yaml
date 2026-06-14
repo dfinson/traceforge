@@ -17,6 +17,7 @@ framework_version: ">=0.70"
 ingestion_mode: file_watch
 type_field: event
 timestamp_field: time
+default_kind: raw
 
 # ── Event Definitions ──
 # 21 real events verified from source (main.py, base_coder.py, watch.py, onboarding.py)
@@ -137,3 +138,74 @@ events:
     kind: config.auto_model
     payload:
       model: properties.model
+
+  # ── User commands (dynamically generated from /command input) ──
+  # These all have empty properties — they record which slash-command was used.
+  # Unmapped command_* variants fall through to default_kind: raw.
+  command_add:
+    kind: user.command
+    payload: {}
+
+  command_drop:
+    kind: user.command
+    payload: {}
+
+  command_ask:
+    kind: user.command
+    payload: {}
+
+  command_code:
+    kind: user.command
+    payload: {}
+
+  command_commit:
+    kind: user.command
+    payload: {}
+
+  command_run:
+    kind: user.command
+    payload: {}
+
+  command_undo:
+    kind: user.command
+    payload: {}
+
+  command_clear:
+    kind: user.command
+    payload: {}
+
+  command_model:
+    kind: user.command
+    payload: {}
+
+  command_paste:
+    kind: user.command
+    payload: {}
+
+  command_web:
+    kind: user.command
+    payload: {}
+
+  command_exit:
+    kind: user.command
+    payload: {}
+
+  command_edit:
+    kind: user.command
+    payload: {}
+
+  command_read-only:
+    kind: user.command
+    payload: {}
+
+  command_chat-mode:
+    kind: user.command
+    payload: {}
+
+  command_reasoning-effort:
+    kind: user.command
+    payload: {}
+
+  command_ok:
+    kind: user.command
+    payload: {}

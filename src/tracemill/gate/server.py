@@ -3,9 +3,10 @@
 The server runs in a background thread inside the Pipeline process. When a gate
 request arrives (from `tracemill gate --stdin`), it:
   1. Deserializes the event JSON
-  2. Calls pipeline.score_tool_call(payload)
-  3. Fires the tool_preflight_gate callback
-  4. Returns the Verdict as JSON
+  2. Calls pipeline._score_and_gate_preflight(payload)
+  3. Returns the Verdict as JSON
+
+Uses the same policy chain as all gate_* methods for consistent behavior.
 """
 
 from __future__ import annotations
@@ -22,20 +23,24 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from tracemill.governance.pipeline import GovernancePipeline
-    from tracemill.sdk.verdict import PreflightGate, Verdict
 
 
 class GateServer:
-    """IPC server for cross-process gating."""
+    """IPC server for cross-process gating.
+
+    Used by CLI-based frameworks (Claude Code, Copilot CLI, Codex CLI, etc.)
+    that can't inject Python hooks but can shell out to `tracemill gate --stdin`.
+    
+    The server uses the pipeline's policy chain (same as gate_* methods) rather
+    than a standalone callback. This ensures consistent behavior across all paths.
+    """
 
     def __init__(
         self,
         pipeline: "GovernancePipeline",
-        tool_preflight_gate: "PreflightGate",
         sock_path: str | None = None,
     ) -> None:
         self._pipeline = pipeline
-        self._tool_preflight_gate = tool_preflight_gate
         self._sock_path = sock_path or self._default_sock_path()
         self._server: socket.socket | None = None
         self._thread: threading.Thread | None = None
@@ -136,14 +141,8 @@ class GateServer:
             conn.close()
 
     def _process_gate_request(self, payload: dict) -> dict:
-        """Score and gate a tool call, returning verdict as dict."""
-        trace = self._pipeline._score_event(payload)
-        if self._tool_preflight_gate is not None:
-            verdict = self._tool_preflight_gate(trace)
-        else:
-            from tracemill.sdk.verdict import Verdict
-            verdict = Verdict.allow()
-
+        """Score and gate a tool call using the pipeline's policy chain."""
+        trace, verdict = self._pipeline._score_and_gate_preflight(payload)
         return {
             "decision": verdict.decision.value,
             "reason": verdict.reason,

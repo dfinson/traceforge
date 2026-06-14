@@ -574,6 +574,7 @@ class GovernancePipeline:
         """Execute the preflight gate chain. Returns first DENY or ALLOW.
 
         All gates come from the GatePolicy. No per-method overrides.
+        Fail-closed: if any gate raises, returns DENY.
         """
         from tracemill.sdk.verdict import Verdict
 
@@ -583,7 +584,13 @@ class GovernancePipeline:
         # Run policy chain
         if self.policy and self.policy.has_preflight:
             for gate in self.policy.preflight_gates:
-                verdict = gate(request, ctx)
+                try:
+                    verdict = gate(request, ctx)
+                except Exception as exc:
+                    # Fail-closed: gate exception = DENY
+                    deny = Verdict.deny(f"gate error (fail-closed): {type(exc).__name__}: {exc}")
+                    self._record_denial(session_id, deny)
+                    return deny
                 if verdict.denied:
                     self._record_denial(session_id, verdict)
                     return verdict
@@ -603,6 +610,7 @@ class GovernancePipeline:
         """Execute the postflight gate chain. Returns most restrictive action.
 
         Priority: TERMINATE > SUPPRESS > REDACT > ALERT > ACCEPT.
+        Fail-closed: if any gate raises, returns TERMINATE.
         """
         from tracemill.sdk.gate_types import PostflightAction, PostflightVerdict
 
@@ -623,7 +631,14 @@ class GovernancePipeline:
         # Run policy chain
         if self.policy and self.policy.has_postflight:
             for gate in self.policy.postflight_gates:
-                pv = gate(result, ctx)
+                try:
+                    pv = gate(result, ctx)
+                except Exception as exc:
+                    # Fail-closed: gate exception = SUPPRESS (not TERMINATE to avoid crashing)
+                    pv = PostflightVerdict(
+                        action=PostflightAction.SUPPRESS,
+                        reason=f"postflight gate error (fail-closed): {type(exc).__name__}: {exc}",
+                    )
                 if _SEVERITY.get(pv.action, 0) > _SEVERITY.get(most_severe.action, 0):
                     most_severe = pv
 
@@ -1648,66 +1663,126 @@ class GovernancePipeline:
             evidence=evidence,
         )
 
-    # ─── Framework methods ─────────────────────────────────────────────────────
+    # ─── Framework gating methods ────────────────────────────────────────────────
+    #
+    # Each method integrates tracemill into a framework's native blocking mechanism.
+    # Session identity is extracted from the framework's own context — no session_id kwarg.
+    # Postflight verdicts (SUPPRESS/TERMINATE/REDACT) are enforced via framework-native signals.
 
-    def _score_and_gate_preflight(self, payload: dict, *, session_id: str) -> tuple:
+    def _score_and_gate_preflight(self, payload: dict) -> tuple:
         """Score a tool call and run the preflight gate chain. Thread-safe.
-        
+
         Returns (trace, verdict) tuple. Verdict is ALLOW or DENY.
+        Session ID comes from payload["session_id"].
         """
         from tracemill.sdk.verdict import Verdict
 
+        session_id = payload.get("session_id", "unknown")
         with self._gate_lock:
             trace = self._score_event(payload)
         verdict = self._run_preflight(trace, session_id=session_id)
         return trace, verdict
 
-    def attach_crewai(self, *, session_id: str = "sdk") -> None:
+    def _enforce_postflight(
+        self,
+        trace: "EventTrace",
+        *,
+        session_id: str,
+        output: dict | None = None,
+        duration_ms: int | None = None,
+        error: str | None = None,
+    ) -> "PostflightVerdict":
+        """Run postflight chain and return the verdict for caller enforcement.
+
+        Callers must check verdict.action and act:
+          - ACCEPT: return result normally
+          - REDACT: strip keys from output before returning
+          - SUPPRESS: return empty/neutral output to the model
+          - TERMINATE: raise/signal session termination
+          - ALERT: return result normally but log alert
+        """
+        return self._run_postflight(
+            trace, session_id=session_id,
+            output=output, duration_ms=duration_ms, error=error,
+        )
+
+    @staticmethod
+    def _apply_postflight_to_output(pv: "PostflightVerdict", result: str) -> str:
+        """Apply a postflight verdict to a string result.
+
+        Returns the (possibly redacted/suppressed) output string.
+        Raises RuntimeError on TERMINATE.
+        """
+        from tracemill.sdk.gate_types import PostflightAction
+
+        if pv.action == PostflightAction.ACCEPT or pv.action == PostflightAction.ALERT:
+            return result
+        if pv.action == PostflightAction.SUPPRESS:
+            return "[output suppressed by policy]"
+        if pv.action == PostflightAction.REDACT:
+            redacted = result
+            for key in pv.redaction_keys:
+                redacted = redacted.replace(key, "[REDACTED]")
+            return redacted
+        if pv.action == PostflightAction.TERMINATE:
+            raise RuntimeError(f"Session terminated by policy: {pv.reason}")
+        return result
+
+    def gate_crewai(self) -> None:
         """Register tracemill into CrewAI's before/after tool_call hooks.
 
         Blocking: returns False to CrewAI when preflight returns DENY.
-        Requires: crewai installed with hooks support.
+        Session ID: extracted from CrewAI's ctx.crew.fingerprint or generated.
         """
         from crewai.hooks.decorators import after_tool_call, before_tool_call
 
         pipeline = self
+        # Bounded trace stash — evicts oldest entries to prevent unbounded growth.
+        # Max 1000 pending tool calls is generous for any real CrewAI session.
+        _traces: dict[str, "EventTrace"] = {}
+        _MAX_PENDING = 1000
 
         @before_tool_call
         def _tracemill_hook(ctx):
+            sid = getattr(getattr(ctx, "crew", None), "fingerprint", None) or "crewai"
             payload = {
                 "tool_name": ctx.tool_name,
                 "tool_input": ctx.tool_input,
-                "session_id": session_id,
+                "session_id": sid,
                 "tool_call_id": getattr(ctx, "tool_call_id", None),
             }
-            trace, verdict = pipeline._score_and_gate_preflight(
-                payload, session_id=session_id
-            )
+            trace, verdict = pipeline._score_and_gate_preflight(payload)
             if verdict.denied:
                 return False
+            # Stash for postflight (bounded)
+            call_key = f"{sid}:{ctx.tool_name}:{id(ctx)}"
+            if len(_traces) >= _MAX_PENDING:
+                # Evict oldest entry
+                _traces.pop(next(iter(_traces)), None)
+            _traces[call_key] = trace
             return None
 
         @after_tool_call
         def _tracemill_postflight(ctx):
-            payload = {
-                "tool_name": ctx.tool_name,
-                "tool_input": ctx.tool_input,
-                "session_id": session_id,
-                "tool_call_id": getattr(ctx, "tool_call_id", None),
-            }
-            with pipeline._gate_lock:
-                trace = pipeline._score_event(payload)
+            sid = getattr(getattr(ctx, "crew", None), "fingerprint", None) or "crewai"
+            call_key = f"{sid}:{ctx.tool_name}:{id(ctx)}"
+            trace = _traces.pop(call_key, None)
+            if trace is None:
+                return
             output = getattr(ctx, "output", None)
-            pipeline._run_postflight(
-                trace, session_id=session_id,
+            pv = pipeline._enforce_postflight(
+                trace, session_id=sid,
                 output={"result": output} if output else None,
             )
+            from tracemill.sdk.gate_types import PostflightAction
+            if pv.action == PostflightAction.TERMINATE:
+                raise RuntimeError(f"Session terminated by policy: {pv.reason}")
 
-    def attach_langchain(self, tool, *, session_id: str = "sdk"):
+    def gate_langchain(self, tool):
         """Wrap a LangChain tool's _run with tracemill gating.
 
         Blocking: raises ToolException when preflight returns DENY.
-        Requires: langchain-core installed.
+        Session ID: uses tool invocation config's configurable.thread_id or "langchain".
         """
         from langchain_core.tools.base import ToolException
 
@@ -1717,20 +1792,31 @@ class GovernancePipeline:
         def _guarded_run(*args, **kwargs):
             import time
 
-            tool_input = kwargs if kwargs else {"input": args[0]} if args else {}
+            sid = "langchain"
+            config = kwargs.get("config") or kwargs.get("run_manager")
+            if hasattr(config, "configurable"):
+                sid = config.configurable.get("thread_id", sid)
+
+            # Extract tool-relevant input (exclude LangChain internal keys)
+            _INTERNAL_KEYS = {"config", "run_manager", "callbacks", "tags", "metadata"}
+            if kwargs:
+                tool_input = {k: v for k, v in kwargs.items() if k not in _INTERNAL_KEYS}
+            elif args:
+                tool_input = {"input": args[0]}
+            else:
+                tool_input = {}
             payload = {
                 "tool_name": tool.name,
                 "tool_input": tool_input,
-                "session_id": session_id,
+                "session_id": sid,
             }
-            trace, verdict = pipeline._score_and_gate_preflight(
-                payload, session_id=session_id
-            )
+            trace, verdict = pipeline._score_and_gate_preflight(payload)
             if verdict.denied:
                 raise ToolException(f"Denied: {verdict.reason}")
 
             t0 = time.monotonic()
             error = None
+            result = None
             try:
                 result = original_run(*args, **kwargs)
             except Exception as exc:
@@ -1738,23 +1824,30 @@ class GovernancePipeline:
                 raise
             finally:
                 duration_ms = int((time.monotonic() - t0) * 1000)
-                pipeline._run_postflight(
-                    trace, session_id=session_id,
+                pv = pipeline._enforce_postflight(
+                    trace, session_id=sid,
                     output={"result": result} if error is None else None,
                     duration_ms=duration_ms,
                     error=error,
                 )
+            from tracemill.sdk.gate_types import PostflightAction
+            if pv.action == PostflightAction.TERMINATE:
+                raise RuntimeError(f"Session terminated by policy: {pv.reason}")
+            if pv.action == PostflightAction.SUPPRESS:
+                return "[output suppressed by policy]"
+            if pv.action == PostflightAction.REDACT and isinstance(result, str):
+                return pipeline._apply_postflight_to_output(pv, result)
             return result
 
         tool._run = _guarded_run
         tool.handle_tool_error = True
         return tool
 
-    def attach_langgraph(self, tools, *, session_id: str = "sdk"):
+    def gate_langgraph(self, tools):
         """Return a ToolNode with tracemill gating via wrap_tool_call.
 
         Blocking: returns denial ToolMessage without calling execute.
-        Requires: langgraph installed.
+        Session ID: from request config's configurable.thread_id or "langgraph".
         """
         from langgraph.prebuilt import ToolNode
 
@@ -1766,15 +1859,18 @@ class GovernancePipeline:
             from langchain_core.messages import ToolMessage
 
             native_id = request.tool_call.get("id")
+            # LangGraph passes thread_id via config
+            sid = "langgraph"
+            if hasattr(request, "config") and hasattr(request.config, "configurable"):
+                sid = request.config.configurable.get("thread_id", sid)
+
             payload = {
                 "tool_name": request.tool_call["name"],
                 "tool_input": request.tool_call["args"],
-                "session_id": session_id,
+                "session_id": sid,
                 "tool_call_id": native_id,
             }
-            trace, verdict = pipeline._score_and_gate_preflight(
-                payload, session_id=session_id
-            )
+            trace, verdict = pipeline._score_and_gate_preflight(payload)
             if verdict.denied:
                 return ToolMessage(
                     content=f"Denied: {verdict.reason}",
@@ -1786,34 +1882,48 @@ class GovernancePipeline:
             t0 = time.monotonic()
             result = execute(request)
             duration_ms = int((time.monotonic() - t0) * 1000)
-            pipeline._run_postflight(
-                trace, session_id=session_id,
+            pv = pipeline._enforce_postflight(
+                trace, session_id=sid,
                 output={"content": getattr(result, "content", str(result))},
                 duration_ms=duration_ms,
             )
+            from tracemill.sdk.gate_types import PostflightAction
+            if pv.action == PostflightAction.TERMINATE:
+                return ToolMessage(
+                    content=f"Session terminated: {pv.reason}",
+                    tool_call_id=native_id,
+                    name=request.tool_call["name"],
+                    status="error",
+                )
+            if pv.action == PostflightAction.SUPPRESS:
+                return ToolMessage(
+                    content="[output suppressed by policy]",
+                    tool_call_id=native_id,
+                    name=request.tool_call["name"],
+                    status="success",
+                )
             return result
 
         return ToolNode(tools, wrap_tool_call=_tracemill_wrapper)
 
-    def attach_semantic_kernel(self, kernel, *, session_id: str = "sdk") -> None:
+    def gate_semantic_kernel(self, kernel) -> None:
         """Register tracemill as a Semantic Kernel auto function invocation filter.
 
         Blocking: skips next_handler and injects denial FunctionResult.
-        Requires: semantic-kernel installed.
+        Session ID: from kernel's service_id or "semantic_kernel".
         """
 
         pipeline = self
 
         @kernel.filter(filter_type="auto_function_invocation")
         async def _tracemill_filter(context, next_handler):
+            sid = getattr(kernel, "service_id", None) or "semantic_kernel"
             payload = {
                 "tool_name": context.function.name,
                 "tool_input": dict(context.arguments),
-                "session_id": session_id,
+                "session_id": sid,
             }
-            trace, verdict = pipeline._score_and_gate_preflight(
-                payload, session_id=session_id
-            )
+            trace, verdict = pipeline._score_and_gate_preflight(payload)
             if verdict.denied:
                 from semantic_kernel.functions import FunctionResult
 
@@ -1824,62 +1934,70 @@ class GovernancePipeline:
                 context.terminate = True
                 return
             await next_handler(context)
-            # Postflight with result
             result_val = getattr(context.function_result, "value", None)
-            pipeline._run_postflight(
-                trace, session_id=session_id,
+            pv = pipeline._enforce_postflight(
+                trace, session_id=sid,
                 output={"result": str(result_val)} if result_val else None,
             )
+            from tracemill.sdk.gate_types import PostflightAction
+            if pv.action == PostflightAction.TERMINATE:
+                context.terminate = True
+            elif pv.action == PostflightAction.SUPPRESS:
+                from semantic_kernel.functions import FunctionResult
+                context.function_result = FunctionResult(
+                    function=context.function.metadata,
+                    value="[output suppressed by policy]",
+                )
 
-    def attach_autogen(self, tools, *, session_id: str = "sdk"):
-        """Return a TracemillWorkbench that gates tool calls for AutoGen v0.4.
+    def gate_maf(self):
+        """Return a FunctionMiddleware for Microsoft Agent Framework (MAF).
 
-        Blocking: returns synthetic ToolResult without executing the tool.
-        Requires: autogen-core installed.
+        Blocking: raises MiddlewareTermination or skips call_next to deny.
+        Session ID: from context.session.conversation_id or "maf".
         """
-        from autogen_core.tools import StaticWorkbench
+        from agent_framework import FunctionMiddleware, MiddlewareTermination
 
         pipeline = self
 
-        class _TracemillWorkbench(StaticWorkbench):
-            async def call_tool(self, name, arguments=None, cancellation_token=None, call_id=None):
+        class TracemillMiddleware(FunctionMiddleware):
+            async def process(self, context, call_next):
                 import time
 
-                from autogen_core.tools import TextResultContent, ToolResult
-
+                session = getattr(context, "session", None)
+                sid = getattr(session, "conversation_id", None) or "maf"
                 payload = {
-                    "tool_name": name,
-                    "tool_input": arguments or {},
-                    "session_id": session_id,
-                    "tool_call_id": call_id,
+                    "tool_name": context.function.name,
+                    "tool_input": context.arguments or {},
+                    "session_id": sid,
+                    "tool_call_id": getattr(context, "call_id", None),
                 }
-                trace, verdict = pipeline._score_and_gate_preflight(
-                    payload, session_id=session_id
-                )
+                trace, verdict = pipeline._score_and_gate_preflight(payload)
                 if verdict.denied:
-                    return ToolResult(
-                        name=name,
-                        result=[TextResultContent(content=f"Denied: {verdict.reason}")],
-                        is_error=False,
-                    )
+                    raise MiddlewareTermination(f"Denied: {verdict.reason}")
 
                 t0 = time.monotonic()
-                result = await super().call_tool(name, arguments, cancellation_token, call_id)
+                await call_next(context)
                 duration_ms = int((time.monotonic() - t0) * 1000)
-                pipeline._run_postflight(
-                    trace, session_id=session_id,
-                    output={"result": str(result)},
+
+                result = getattr(context, "result", None)
+                pv = pipeline._enforce_postflight(
+                    trace, session_id=sid,
+                    output={"result": str(result)} if result else None,
                     duration_ms=duration_ms,
                 )
-                return result
+                from tracemill.sdk.gate_types import PostflightAction
+                if pv.action == PostflightAction.TERMINATE:
+                    raise MiddlewareTermination(f"Session terminated: {pv.reason}")
+                if pv.action == PostflightAction.SUPPRESS:
+                    context.result = "[output suppressed by policy]"
 
-        return _TracemillWorkbench(tools)
+        return TracemillMiddleware()
 
-    def attach_smolagents(self, agent_cls=None, *, session_id: str = "sdk"):
+    def gate_smolagents(self, agent_cls=None):
         """Return a TracemillAgent subclass that gates tool calls for smolagents.
 
         Blocking: returns denial string as observation without executing the tool.
-        Requires: smolagents installed.
+        Session ID: from agent.session_id or "smolagents".
         """
         if agent_cls is None:
             from smolagents import ToolCallingAgent
@@ -1891,34 +2009,40 @@ class GovernancePipeline:
             def execute_tool_call(self, tool_name: str, arguments) -> any:
                 import time
 
+                sid = getattr(self, "session_id", None) or "smolagents"
                 payload = {
                     "tool_name": tool_name,
                     "tool_input": arguments if isinstance(arguments, dict) else {"raw": arguments},
-                    "session_id": session_id,
+                    "session_id": sid,
                 }
-                trace, verdict = pipeline._score_and_gate_preflight(
-                    payload, session_id=session_id
-                )
+                trace, verdict = pipeline._score_and_gate_preflight(payload)
                 if verdict.denied:
                     return f"[BLOCKED] {verdict.reason}"
 
                 t0 = time.monotonic()
                 result = super().execute_tool_call(tool_name, arguments)
                 duration_ms = int((time.monotonic() - t0) * 1000)
-                pipeline._run_postflight(
-                    trace, session_id=session_id,
+                pv = pipeline._enforce_postflight(
+                    trace, session_id=sid,
                     output={"result": str(result)},
                     duration_ms=duration_ms,
                 )
+                from tracemill.sdk.gate_types import PostflightAction
+                if pv.action == PostflightAction.TERMINATE:
+                    raise RuntimeError(f"Session terminated by policy: {pv.reason}")
+                if pv.action == PostflightAction.SUPPRESS:
+                    return "[output suppressed by policy]"
+                if pv.action == PostflightAction.REDACT and isinstance(result, str):
+                    return pipeline._apply_postflight_to_output(pv, result)
                 return result
 
         return _TracemillAgent
 
-    def attach_pydantic_ai(self, agent, *, session_id: str = "sdk") -> None:
+    def gate_pydantic_ai(self, agent) -> None:
         """Register tracemill as Pydantic AI tool-execute hooks (before/after).
 
         Blocking: raises SkipToolExecution with denial reason on preflight.
-        Requires: pydantic-ai installed.
+        Session ID: from ctx.run_id (Pydantic AI's native UUID7 run ID).
         """
 
         pipeline = self
@@ -1927,34 +2051,37 @@ class GovernancePipeline:
         async def _tracemill_before_tool(ctx, tool_def, args):
             from pydantic_ai.exceptions import SkipToolExecution
 
+            sid = str(getattr(ctx, "run_id", None) or "pydantic_ai")
             payload = {
                 "tool_name": tool_def.name,
                 "tool_input": args if isinstance(args, dict) else {"raw": args},
-                "session_id": session_id,
+                "session_id": sid,
             }
-            trace, verdict = pipeline._score_and_gate_preflight(
-                payload, session_id=session_id
-            )
+            trace, verdict = pipeline._score_and_gate_preflight(payload)
             if verdict.denied:
                 raise SkipToolExecution(f"Denied: {verdict.reason}")
-            # Stash trace for postflight
             ctx._tracemill_trace = trace
+            ctx._tracemill_session_id = sid
 
         @agent.tool_hook("after")
         async def _tracemill_after_tool(ctx, tool_def, args, result):
             trace = getattr(ctx, "_tracemill_trace", None)
             if trace is None:
                 return
-            pipeline._run_postflight(
-                trace, session_id=session_id,
+            sid = getattr(ctx, "_tracemill_session_id", "pydantic_ai")
+            pv = pipeline._enforce_postflight(
+                trace, session_id=sid,
                 output={"result": str(result)} if result else None,
             )
+            from tracemill.sdk.gate_types import PostflightAction
+            if pv.action == PostflightAction.TERMINATE:
+                raise RuntimeError(f"Session terminated by policy: {pv.reason}")
 
-    def attach_openai_agents(self, agent, *, session_id: str = "sdk"):
+    def gate_openai_agents(self, agent):
         """Register tracemill as an OpenAI Agents SDK input guardrail.
 
         Blocking: raises GuardrailTripwireTriggered which rejects the tool call.
-        Requires: openai-agents installed.
+        Session ID: from agent.name or "openai_agents".
         """
 
         pipeline = self
@@ -1963,14 +2090,13 @@ class GovernancePipeline:
 
         @input_guardrail
         async def tracemill_guardrail(ctx, agent_instance, input_data):
+            sid = getattr(agent_instance, "name", None) or "openai_agents"
             payload = {
                 "tool_name": getattr(input_data, "tool_name", "unknown"),
                 "tool_input": getattr(input_data, "tool_input", {}),
-                "session_id": session_id,
+                "session_id": sid,
             }
-            trace, verdict = pipeline._score_and_gate_preflight(
-                payload, session_id=session_id
-            )
+            trace, verdict = pipeline._score_and_gate_preflight(payload)
             if verdict.denied:
                 return GuardrailFunctionOutput(
                     output_info=verdict.reason,

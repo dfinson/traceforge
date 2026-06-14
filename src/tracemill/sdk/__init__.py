@@ -11,7 +11,9 @@ Usage:
     policy = GatePolicy().preflight(my_preflight)
 
     pipeline = Pipeline.create(policy=policy)
-    pipeline.attach_openai(session_id="s1")
+    pipeline.gate_crewai()          # CrewAI hooks
+    pipeline.gate_langchain(tool)   # LangChain tool wrap
+    pipeline.gate_maf()             # MAF middleware
 
 The preflight callback returns a Verdict. Tracemill enforces it using each framework's
 native blocking mechanism. The postflight callback receives the tool output for audit.

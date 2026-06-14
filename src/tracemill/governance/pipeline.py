@@ -474,9 +474,10 @@ class GovernancePipeline:
             source_key=event.source_event_key,
             raw_event=raw,
             parent_tool_call_id=raw.get("parent_tool_call_id"),
-            # Tool identity
+            # Tool identity (gen_ai.tool.* aligned)
             tool_name=raw.get("tool_name"),
             tool_input=raw.get("tool_input") or {},
+            tool_result=raw.get("tool_result") or raw.get("result"),
             target_resource=raw.get("target_resource"),
             # Classification
             mechanism=cls.mechanism if cls else None,

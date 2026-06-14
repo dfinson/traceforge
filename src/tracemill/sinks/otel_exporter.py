@@ -111,6 +111,21 @@ class OtelExporterSink(StorageSink):
                 attributes.append(
                     {"key": "gen_ai.tool.name", "value": {"stringValue": str(tool_name)}}
                 )
+            tool_args = event.payload.get("arguments") or event.payload.get("tool_input")
+            if tool_args:
+                attributes.append(
+                    {"key": "gen_ai.tool.call.arguments", "value": {"stringValue": str(tool_args) if not isinstance(tool_args, str) else tool_args}}
+                )
+            tool_result = event.payload.get("result") or event.payload.get("tool_result")
+            if tool_result:
+                attributes.append(
+                    {"key": "gen_ai.tool.call.result", "value": {"stringValue": str(tool_result)}}
+                )
+            tool_call_id = event.payload.get("tool_call_id")
+            if tool_call_id:
+                attributes.append(
+                    {"key": "gen_ai.tool.call.id", "value": {"stringValue": str(tool_call_id)}}
+                )
 
         gov = event.metadata.governance if event.metadata else None
         if gov is not None:

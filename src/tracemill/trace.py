@@ -88,9 +88,13 @@ class EventTrace:
     parent_tool_call_id: str | None = None
 
     # ─── Tool identity (adapter fills for tool.call.* events) ─────────────────
+    #   gen_ai.tool.name          → tool_name
+    #   gen_ai.tool.call.arguments → tool_input
+    #   gen_ai.tool.call.result    → tool_result
 
     tool_name: str | None = None
     tool_input: MappingProxyType = field(default_factory=lambda: EMPTY_MAP)
+    tool_result: str | None = None
     target_resource: str | None = None
 
     # ─── Classification (enricher fills) ──────────────────────────────────────
@@ -265,6 +269,7 @@ class EventTrace:
         parent_tool_call_id: str | None = None,
         tool_name: str | None = None,
         tool_input: dict[str, Any] | MappingProxyType | None = None,
+        tool_result: str | None = None,
         target_resource: str | None = None,
     ) -> EventTrace:
         """Factory for adapter use.
@@ -282,5 +287,6 @@ class EventTrace:
             parent_tool_call_id=parent_tool_call_id,
             tool_name=tool_name,
             tool_input=tool_input or EMPTY_MAP,
+            tool_result=tool_result,
             target_resource=target_resource,
         )

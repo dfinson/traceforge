@@ -1,6 +1,6 @@
-"""Tests for the Assessment API (GovernancePipeline.assess).
+"""Tests for the Assessment API (GovernancePipeline.score_tool_call).
 
-assess() returns SessionMeta — the same shape sinks receive.
+score_tool_call() returns Trace — the unified pipeline type.
 """
 
 from pathlib import Path
@@ -12,7 +12,8 @@ from tracemill.classify.config import get_default_engine
 from tracemill.governance.budget import BudgetTracker
 from tracemill.governance.labeler import GovernanceLabeler
 from tracemill.governance.persistence import SystemStore
-from tracemill.governance.pipeline import GovernancePipeline, RecommendedAction, SessionMeta
+from tracemill.governance.pipeline import GovernancePipeline, RecommendedAction
+from tracemill.trace import Trace
 
 
 @pytest.fixture
@@ -44,16 +45,16 @@ def pipeline(store, rules, engine):
     )
 
 
-def _action(meta: SessionMeta) -> RecommendedAction:
-    """Extract recommended action from SessionMeta."""
-    if meta.recommendation is None:
+def _action(trace: Trace) -> RecommendedAction:
+    """Extract recommended action from Trace."""
+    if trace.recommendation is None:
         return RecommendedAction.ALLOW
-    return meta.recommendation.recommended_action
+    return RecommendedAction(trace.recommendation)
 
 
-def _score(meta: SessionMeta) -> int:
+def _score(trace: Trace) -> int:
     """Extract risk score."""
-    return meta.risk_assessment.score if meta.risk_assessment else 0
+    return trace.risk_score if trace.risk_score is not None else 0
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -65,29 +66,29 @@ class TestGracefulPayloads:
 
     def test_empty_payload_does_not_crash(self, pipeline):
         result = pipeline.score_tool_call({})
-        assert isinstance(result, SessionMeta)
+        assert isinstance(result, Trace)
 
     def test_none_payload_does_not_crash(self, pipeline):
         result = pipeline.score_tool_call(None)
-        assert isinstance(result, SessionMeta)
+        assert isinstance(result, Trace)
 
     def test_string_payload_does_not_crash(self, pipeline):
         result = pipeline.score_tool_call("not a dict")
-        assert isinstance(result, SessionMeta)
+        assert isinstance(result, Trace)
 
     def test_missing_tool_name_still_assesses(self, pipeline):
         result = pipeline.score_tool_call({"tool_input": {}, "session_id": "s1"})
-        assert isinstance(result, SessionMeta)
+        assert isinstance(result, Trace)
 
     def test_missing_session_id_gets_anonymous(self, pipeline):
         result = pipeline.score_tool_call({"tool_name": "bash", "tool_input": {"command": "ls"}})
-        assert isinstance(result, SessionMeta)
+        assert isinstance(result, Trace)
 
     def test_tool_input_not_dict_treated_as_empty(self, pipeline):
         result = pipeline.score_tool_call({
             "tool_name": "bash", "tool_input": "string", "session_id": "s1"
         })
-        assert isinstance(result, SessionMeta)
+        assert isinstance(result, Trace)
 
     def test_non_serializable_tool_input_uses_default_str(self, pipeline):
         result = pipeline.score_tool_call({
@@ -95,11 +96,11 @@ class TestGracefulPayloads:
             "tool_input": {"obj": object()},
             "session_id": "s1",
         })
-        assert isinstance(result, SessionMeta)
+        assert isinstance(result, Trace)
 
     def test_numeric_tool_name_coerced(self, pipeline):
         result = pipeline.score_tool_call({"tool_name": 123, "tool_input": {}, "session_id": "s1"})
-        assert isinstance(result, SessionMeta)
+        assert isinstance(result, Trace)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -161,7 +162,7 @@ class TestShellClassification:
             "session_id": "s1",
         })
         assert _score(result) > 0
-        assert result.classification is not None
+        assert result.classified
 
     def test_empty_command_still_works(self, pipeline):
         result = pipeline.score_tool_call({
@@ -169,7 +170,7 @@ class TestShellClassification:
             "tool_input": {"command": ""},
             "session_id": "s1",
         })
-        assert isinstance(result, SessionMeta)
+        assert isinstance(result, Trace)
         assert _action(result) == RecommendedAction.ALLOW
 
     def test_no_command_key_still_works(self, pipeline):
@@ -178,7 +179,7 @@ class TestShellClassification:
             "tool_input": {"something_else": "value"},
             "session_id": "s1",
         })
-        assert isinstance(result, SessionMeta)
+        assert isinstance(result, Trace)
 
     def test_cmd_key_recognized(self, pipeline):
         result = pipeline.score_tool_call({
@@ -218,7 +219,7 @@ class TestPipeDetection:
             "tool_input": {"command": "cat /etc/passwd | grep root"},
             "session_id": "s1",
         })
-        assert result.classification is not None
+        assert result.classified
 
     def test_unspaced_pipe(self, pipeline):
         result = pipeline.score_tool_call({
@@ -234,7 +235,7 @@ class TestPipeDetection:
             "tool_input": {"command": "test -f x || echo missing"},
             "session_id": "s1",
         })
-        assert isinstance(result, SessionMeta)
+        assert isinstance(result, Trace)
 
     def test_quoted_pipe_not_split(self, pipeline):
         result = pipeline.score_tool_call({
@@ -242,7 +243,7 @@ class TestPipeDetection:
             "tool_input": {"command": 'echo "a|b"'},
             "session_id": "s1",
         })
-        assert isinstance(result, SessionMeta)
+        assert isinstance(result, Trace)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -266,7 +267,7 @@ class TestDialectDispatch:
             "tool_input": {"command": "Get-Process"},
             "session_id": "s1",
         })
-        assert isinstance(result, SessionMeta)
+        assert isinstance(result, Trace)
 
     def test_cmd_dispatch(self, pipeline):
         result = pipeline.score_tool_call({
@@ -291,7 +292,7 @@ class TestMcpTools:
             "server_namespace": "filesystem",
             "session_id": "s1",
         })
-        assert isinstance(result, SessionMeta)
+        assert isinstance(result, Trace)
         assert _score(result) > 0
 
     def test_mcp_no_double_prefix(self, pipeline):
@@ -301,7 +302,7 @@ class TestMcpTools:
             "server_namespace": "filesystem",
             "session_id": "s1",
         })
-        assert isinstance(result, SessionMeta)
+        assert isinstance(result, Trace)
 
     def test_mcp_already_prefixed(self, pipeline):
         result = pipeline.score_tool_call({
@@ -310,7 +311,7 @@ class TestMcpTools:
             "server_namespace": "filesystem",
             "session_id": "s1",
         })
-        assert isinstance(result, SessionMeta)
+        assert isinstance(result, Trace)
 
     def test_mcp_server_name_passthrough(self, pipeline):
         result = pipeline.score_tool_call({
@@ -320,7 +321,7 @@ class TestMcpTools:
             "mcp_server_name": "my-fs-server",
             "session_id": "s1",
         })
-        assert isinstance(result, SessionMeta)
+        assert isinstance(result, Trace)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -336,7 +337,7 @@ class TestNonShellTools:
             "tool_input": {"foo": "bar"},
             "session_id": "s1",
         })
-        assert isinstance(result, SessionMeta)
+        assert isinstance(result, Trace)
 
     def test_coding_tool(self, pipeline):
         result = pipeline.score_tool_call({
@@ -344,7 +345,7 @@ class TestNonShellTools:
             "tool_input": {"path": "src/main.py", "content": "print('hi')"},
             "session_id": "s1",
         })
-        assert isinstance(result, SessionMeta)
+        assert isinstance(result, Trace)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -362,8 +363,8 @@ class TestFailClosed:
                 "session_id": "s1",
             })
         assert _action(result) == RecommendedAction.ESCALATE
-        assert "internal_error" in result.recommendation.reason_code
-        assert "RuntimeError" in result.recommendation.reason_code
+        assert "internal_error" in result.reason
+        assert "RuntimeError" in result.reason
 
     def test_preflight_error_returns_escalate(self, pipeline):
         with patch.object(pipeline, "preflight_event", side_effect=RuntimeError("crash")):
@@ -373,7 +374,7 @@ class TestFailClosed:
                 "session_id": "s1",
             })
         assert _action(result) == RecommendedAction.ESCALATE
-        assert result.classification is not None  # classification succeeded
+        assert result.classified  # classification succeeded
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -465,7 +466,7 @@ class TestReadOnly:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Result structure (SessionMeta fields)
+# Result structure (Trace fields)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
@@ -477,13 +478,13 @@ class TestResultStructure:
             "tool_input": {"command": "echo test"},
             "session_id": "s1",
         })
-        assert hasattr(result, "classification")
-        assert hasattr(result, "risk_assessment")
+        assert hasattr(result, "mechanism")
+        assert hasattr(result, "effect")
+        assert hasattr(result, "risk_score")
+        assert hasattr(result, "risk_band")
         assert hasattr(result, "recommendation")
-        assert hasattr(result, "budget_snapshot")
-        assert hasattr(result, "drift")
-        assert hasattr(result, "mcp_alerts")
-        assert hasattr(result, "evidence")
+        assert hasattr(result, "reason")
+        assert hasattr(result, "raw_event")
 
     def test_risk_score_is_int(self, pipeline):
         result = pipeline.score_tool_call({
@@ -499,7 +500,7 @@ class TestResultStructure:
             "tool_input": {"command": "git status"},
             "session_id": "s1",
         })
-        assert result.classification is not None
+        assert result.classified
 
     def test_risk_assessment_populated(self, pipeline):
         result = pipeline.score_tool_call({
@@ -507,7 +508,7 @@ class TestResultStructure:
             "tool_input": {"command": "ls"},
             "session_id": "s1",
         })
-        assert result.risk_assessment is not None
+        assert result.assessed
 
     def test_frozen_dataclass(self, pipeline):
         result = pipeline.score_tool_call({
@@ -516,7 +517,7 @@ class TestResultStructure:
             "session_id": "s1",
         })
         with pytest.raises(Exception):
-            result.classification = None
+            result.mechanism = None  # type: ignore[misc]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -550,7 +551,7 @@ class TestFactory:
             "tool_input": {"command": "ls"},
             "session_id": "s1",
         })
-        assert isinstance(result, SessionMeta)
+        assert isinstance(result, Trace)
 
     def test_with_governance_config(self):
         from tracemill.config import BudgetConfig, GovernanceConfig
@@ -564,6 +565,6 @@ class TestFactory:
             "tool_input": {"command": "echo hi"},
             "session_id": "s1",
         })
-        assert isinstance(result, SessionMeta)
+        assert isinstance(result, Trace)
 
 

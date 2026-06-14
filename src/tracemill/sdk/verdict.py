@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from tracemill.trace import Trace
@@ -84,25 +84,3 @@ class PostflightGate(Protocol):
     """
 
     def __call__(self, trace: "Trace") -> Verdict: ...
-
-
-# ─── Backwards Compat ─────────────────────────────────────────────────────────
-
-
-def interpret_callback_result(result: Any) -> Verdict:
-    """Normalize a legacy callback return value into a Verdict.
-
-    Supports backwards-compat:
-      - Verdict instance → passthrough
-      - None → ALLOW (no opinion)
-      - True → ALLOW
-      - False → DENY (default reason)
-      - Any other truthy value → ALLOW
-    """
-    if isinstance(result, Verdict):
-        return result
-    if result is None or result is True:
-        return Verdict.allow()
-    if result is False:
-        return Verdict.deny("denied by policy")
-    return Verdict.allow()

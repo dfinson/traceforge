@@ -34,7 +34,6 @@ from tracemill.sdk.verdict import (  # noqa: E402
     PostflightGate,
     PreflightGate,
     Verdict,
-    interpret_callback_result,
 )
 from tracemill.trace import Trace  # noqa: E402
 

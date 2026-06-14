@@ -22,7 +22,6 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from tracemill.governance.pipeline import GovernancePipeline
-    from tracemill.governance.results import SessionMeta
     from tracemill.sdk.verdict import PreflightGate, Verdict
 
 
@@ -138,9 +137,9 @@ class GateServer:
 
     def _process_gate_request(self, payload: dict) -> dict:
         """Score and gate a tool call, returning verdict as dict."""
-        event, meta = self._pipeline._score_event(payload)
+        trace = self._pipeline._score_event(payload)
         if self._tool_preflight_gate is not None:
-            verdict = self._tool_preflight_gate(event, meta)
+            verdict = self._tool_preflight_gate(trace)
         else:
             from tracemill.sdk.verdict import Verdict
             verdict = Verdict.allow()
@@ -148,8 +147,8 @@ class GateServer:
         return {
             "decision": verdict.decision.value,
             "reason": verdict.reason,
-            "score": meta.risk_assessment.score if meta.risk_assessment else None,
-            "level": meta.risk_assessment.level if meta.risk_assessment else None,
+            "score": trace.risk_score,
+            "level": trace.risk_band,
         }
 
     @staticmethod

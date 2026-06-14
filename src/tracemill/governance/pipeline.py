@@ -418,10 +418,10 @@ class GovernancePipeline:
             pipe_segments=pipe_segments,
         )
 
-    def score_tool_call(self, payload: dict) -> "SessionMeta":
+    def score_tool_call(self, payload: dict) -> "Trace":
         """Score a pending tool call against current session state.
 
-        Pure scoring — returns SessionMeta. Does NOT fire any callbacks.
+        Pure scoring — returns a fully-enriched Trace. Does NOT fire any callbacks.
         Downstream apps decide what to do with the result.
 
         Args:
@@ -434,28 +434,62 @@ class GovernancePipeline:
                 - ``project_root``: str
 
         Returns:
-            SessionMeta — same shape sinks receive in the observation pipeline.
+            Trace — the unified pipeline type with classification + assessment.
         """
-        _event, meta = self._score_event(payload)
-        return meta
+        return self._score_event(payload)
 
-    def _score_event(self, payload: dict) -> "tuple[ToolCallEvent, SessionMeta]":
-        """Internal: build event from dict, score it, return both."""
+    def _score_event(self, payload: dict) -> "Trace":
+        """Internal: build event from dict, score it, return Trace."""
         from tracemill.governance.types import ToolCallEvent
+        from tracemill.trace import Trace
 
         event = ToolCallEvent.from_dict(payload)
         try:
             ctx = self.enrich_event(event)
         except Exception as exc:
-            return event, self._fail_closed(exc)
+            meta = self._fail_closed(exc)
+            return self._meta_to_trace(payload, event, meta)
 
         try:
             meta = self.preflight_event(ctx)
         except Exception as exc:
-            return event, self._fail_closed(exc, classification=ctx.base_classification)
+            meta = self._fail_closed(exc, classification=ctx.base_classification)
+            return self._meta_to_trace(payload, event, meta)
 
         self._persist_score(event.source_event_key, event.session_id, meta)
-        return event, meta
+        return self._meta_to_trace(payload, event, meta)
+
+    def _meta_to_trace(self, payload: dict, event: "ToolCallEvent", meta: "SessionMeta") -> "Trace":
+        """Convert internal pipeline types into a unified Trace."""
+        from tracemill.trace import Trace
+
+        cls = meta.classification
+        risk = meta.risk_assessment
+        rec = meta.recommendation
+        raw = payload if isinstance(payload, dict) else {}
+
+        return Trace(
+            id=event.event_id,
+            kind="tool.call.started",
+            session_id=event.session_id,
+            timestamp=event.timestamp,
+            source_key=event.source_event_key,
+            raw_event=raw,
+            # Classification
+            mechanism=cls.mechanism if cls else None,
+            effect=cls.effect if cls else None,
+            scope=tuple(cls.scope) if cls else (),
+            role=tuple(cls.role) if cls else (),
+            action=tuple(cls.action) if cls else (),
+            capability=tuple(cls.capability) if cls else (),
+            structure=tuple(cls.structure) if cls else (),
+            canonical_tool=raw.get("tool_name"),
+            # Assessment
+            risk_score=risk.score if risk else None,
+            risk_band=risk.level if risk else None,
+            recommendation=rec.recommended_action.value if rec else None,
+            reason=rec.reason_code if rec else None,
+        )
 
     def score_tool_call_event(self, event: "tracemill.types.SessionEvent") -> "SessionMeta":
         """Score an enriched SessionEvent via the canonical bridge.
@@ -1474,7 +1508,7 @@ class GovernancePipeline:
         """
         from crewai.hooks.decorators import after_tool_call, before_tool_call
 
-        from tracemill.sdk.verdict import Verdict, interpret_callback_result
+        from tracemill.sdk.verdict import Verdict
 
         pipeline = self
 
@@ -1485,9 +1519,9 @@ class GovernancePipeline:
                 "tool_input": ctx.tool_input,
                 "session_id": session_id,
             }
-            event, meta = pipeline._score_event(payload)
+            trace = pipeline._score_event(payload)
             if tool_preflight_gate is not None:
-                verdict = tool_preflight_gate(event, meta)
+                verdict = tool_preflight_gate(trace)
                 if not verdict.allowed:
                     return False  # CrewAI blocks execution
             return None  # allow
@@ -1495,13 +1529,13 @@ class GovernancePipeline:
         if tool_postflight_gate is not None:
             @after_tool_call
             def _tracemill_postflight(ctx):
-                from tracemill.governance.types import ToolCallEvent
-                post_event = ToolCallEvent.from_dict({
+                payload = {
                     "tool_name": ctx.tool_name,
                     "tool_input": ctx.tool_input,
                     "session_id": session_id,
-                })
-                tool_postflight_gate(post_event)
+                }
+                trace = pipeline._score_event(payload)
+                tool_postflight_gate(trace)
 
     def attach_langchain(self, tool, *, session_id: str = "sdk", tool_preflight_gate: "PreflightGate | None" = None, tool_postflight_gate: "PostflightGate | None" = None):
         """Wrap a LangChain tool's _run with tracemill gating.
@@ -1522,14 +1556,14 @@ class GovernancePipeline:
                 "tool_input": tool_input,
                 "session_id": session_id,
             }
-            event, meta = pipeline._score_event(payload)
+            trace = pipeline._score_event(payload)
             if tool_preflight_gate is not None:
-                verdict = tool_preflight_gate(event, meta)
+                verdict = tool_preflight_gate(trace)
                 if not verdict.allowed:
                     raise ToolException(f"Denied: {verdict.reason}")
             result = original_run(*args, **kwargs)
             if tool_postflight_gate is not None:
-                tool_postflight_gate(event)
+                tool_postflight_gate(trace)
             return result
 
         tool._run = _guarded_run
@@ -1554,9 +1588,9 @@ class GovernancePipeline:
                 "tool_input": request.tool_call["args"],
                 "session_id": session_id,
             }
-            event, meta = pipeline._score_event(payload)
+            trace = pipeline._score_event(payload)
             if tool_preflight_gate is not None:
-                verdict = tool_preflight_gate(event, meta)
+                verdict = tool_preflight_gate(trace)
                 if not verdict.allowed:
                     return ToolMessage(
                         content=f"Denied: {verdict.reason}",
@@ -1566,7 +1600,7 @@ class GovernancePipeline:
                     )
             result = execute(request)
             if tool_postflight_gate is not None:
-                tool_postflight_gate(event)
+                tool_postflight_gate(trace)
             return result
 
         return ToolNode(tools, wrap_tool_call=_tracemill_wrapper)
@@ -1587,7 +1621,7 @@ class GovernancePipeline:
                         postflight(block, result)
                         results.append(result)
         """
-        from tracemill.sdk.verdict import Verdict, interpret_callback_result
+        from tracemill.sdk.verdict import Verdict
 
         pipeline = self
 
@@ -1597,9 +1631,9 @@ class GovernancePipeline:
                 "tool_input": block.input,
                 "session_id": session_id,
             }
-            event, meta = pipeline._score_event(payload)
+            trace = pipeline._score_event(payload)
             if tool_preflight_gate is not None:
-                verdict = tool_preflight_gate(event, meta)
+                verdict = tool_preflight_gate(trace)
                 if not verdict.allowed:
                     return verdict, {
                         "type": "tool_result",
@@ -1611,13 +1645,13 @@ class GovernancePipeline:
 
         def _postflight(block, result):
             if tool_postflight_gate is not None:
-                from tracemill.governance.types import ToolCallEvent
-                post_event = ToolCallEvent.from_dict({
+                payload = {
                     "tool_name": block.name,
                     "tool_input": block.input,
                     "session_id": session_id,
-                })
-                tool_postflight_gate(post_event)
+                }
+                trace = pipeline._score_event(payload)
+                tool_postflight_gate(trace)
 
         return _preflight, _postflight
 
@@ -1638,7 +1672,7 @@ class GovernancePipeline:
         """
         import json as _json
 
-        from tracemill.sdk.verdict import Verdict, interpret_callback_result
+        from tracemill.sdk.verdict import Verdict
 
         pipeline = self
 
@@ -1652,9 +1686,9 @@ class GovernancePipeline:
                 "tool_input": tool_input,
                 "session_id": session_id,
             }
-            event, meta = pipeline._score_event(payload)
+            trace = pipeline._score_event(payload)
             if tool_preflight_gate is not None:
-                verdict = tool_preflight_gate(event, meta)
+                verdict = tool_preflight_gate(trace)
                 if not verdict.allowed:
                     return verdict, {
                         "role": "tool",
@@ -1665,17 +1699,17 @@ class GovernancePipeline:
 
         def _postflight(tc, result):
             if tool_postflight_gate is not None:
-                from tracemill.governance.types import ToolCallEvent
                 try:
                     tool_input = _json.loads(tc.function.arguments)
                 except (ValueError, TypeError):
                     tool_input = {"_raw": tc.function.arguments}
-                post_event = ToolCallEvent.from_dict({
+                payload = {
                     "tool_name": tc.function.name,
                     "tool_input": tool_input,
                     "session_id": session_id,
-                })
-                tool_postflight_gate(post_event)
+                }
+                trace = pipeline._score_event(payload)
+                tool_postflight_gate(trace)
 
         return _preflight, _postflight
 
@@ -1696,9 +1730,9 @@ class GovernancePipeline:
                 "tool_input": dict(context.arguments),
                 "session_id": session_id,
             }
-            event, meta = pipeline._score_event(payload)
+            trace = pipeline._score_event(payload)
             if tool_preflight_gate is not None:
-                verdict = tool_preflight_gate(event, meta)
+                verdict = tool_preflight_gate(trace)
                 if not verdict.allowed:
                     from semantic_kernel.functions import FunctionResult
 
@@ -1710,8 +1744,7 @@ class GovernancePipeline:
                     return
             await next_handler(context)
             if tool_postflight_gate is not None:
-                result_val = context.function_result.value if context.function_result else None
-                tool_postflight_gate(event)
+                tool_postflight_gate(trace)
 
     def attach_autogen(self, tools, *, session_id: str = "sdk", tool_preflight_gate: "PreflightGate | None" = None, tool_postflight_gate: "PostflightGate | None" = None):
         """Return a TracemillWorkbench that gates tool calls for AutoGen v0.4.
@@ -1737,9 +1770,9 @@ class GovernancePipeline:
                     "tool_input": arguments or {},
                     "session_id": session_id,
                 }
-                event, meta = pipeline._score_event(payload)
+                trace = pipeline._score_event(payload)
                 if _tool_preflight_gate is not None:
-                    verdict = _tool_preflight_gate(event, meta)
+                    verdict = _tool_preflight_gate(trace)
                     if not verdict.allowed:
                         return ToolResult(
                             name=name,
@@ -1748,7 +1781,7 @@ class GovernancePipeline:
                         )
                 result = await super().call_tool(name, arguments, cancellation_token, call_id)
                 if _tool_postflight_gate is not None:
-                    _tool_postflight_gate(event)
+                    _tool_postflight_gate(trace)
                 return result
 
         return _TracemillWorkbench(tools)
@@ -1777,14 +1810,14 @@ class GovernancePipeline:
                     "tool_input": arguments if isinstance(arguments, dict) else {"raw": arguments},
                     "session_id": session_id,
                 }
-                event, meta = pipeline._score_event(payload)
+                trace = pipeline._score_event(payload)
                 if _tool_preflight_gate is not None:
-                    verdict = _tool_preflight_gate(event, meta)
+                    verdict = _tool_preflight_gate(trace)
                     if not verdict.allowed:
                         return f"[BLOCKED] {verdict.reason}"
                 result = super().execute_tool_call(tool_name, arguments)
                 if _tool_postflight_gate is not None:
-                    _tool_postflight_gate(event)
+                    _tool_postflight_gate(trace)
                 return result
 
         return _TracemillAgent
@@ -1808,22 +1841,22 @@ class GovernancePipeline:
                 "tool_input": args if isinstance(args, dict) else {"raw": args},
                 "session_id": session_id,
             }
-            event, meta = pipeline._score_event(payload)
+            trace = pipeline._score_event(payload)
             if tool_preflight_gate is not None:
-                verdict = tool_preflight_gate(event, meta)
+                verdict = tool_preflight_gate(trace)
                 if not verdict.allowed:
                     raise SkipToolExecution(f"Denied: {verdict.reason}")
 
         if tool_postflight_gate is not None:
             @agent.tool_hook("after")
             async def _tracemill_after_tool(ctx, tool_def, args, result):
-                from tracemill.governance.types import ToolCallEvent
-                post_event = ToolCallEvent.from_dict({
+                payload = {
                     "tool_name": tool_def.name,
                     "tool_input": args if isinstance(args, dict) else {"raw": args},
                     "session_id": session_id,
-                })
-                tool_postflight_gate(post_event)
+                }
+                trace = pipeline._score_event(payload)
+                tool_postflight_gate(trace)
 
     def attach_openai_agents(self, agent, *, session_id: str = "sdk", tool_preflight_gate: "PreflightGate | None" = None, tool_postflight_gate: "PostflightGate | None" = None):
         """Register tracemill as an OpenAI Agents SDK input guardrail.
@@ -1844,9 +1877,9 @@ class GovernancePipeline:
                 "tool_input": getattr(input_data, "tool_input", {}),
                 "session_id": session_id,
             }
-            event, meta = pipeline._score_event(payload)
+            trace = pipeline._score_event(payload)
             if tool_preflight_gate is not None:
-                verdict = tool_preflight_gate(event, meta)
+                verdict = tool_preflight_gate(trace)
                 if not verdict.allowed:
                     return GuardrailFunctionOutput(
                         output_info=verdict.reason,

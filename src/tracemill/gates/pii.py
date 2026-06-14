@@ -1,33 +1,34 @@
-"""PII detection and redaction postflight gate powered by Microsoft Presidio.
+"""PII detection and redaction postflight gate — zero external dependencies.
 
-Scans tool output for personally identifiable information and returns
-REDACT (replace PII spans with placeholders) or SUPPRESS (block entirely
-on critical PII like SSN/credit cards).
+Regex patterns extracted from Microsoft Presidio recognizers + tracemill additions
+(API keys, secrets). Patterns live in pii_patterns.yaml alongside this module.
 
-Requires optional dependency: pip install tracemill[pii]
-  → presidio-analyzer + presidio-anonymizer
+No NLP model, no spaCy, no Presidio dependency. Pure regex + context boost + checksum
+validation (Luhn for credit cards, mod-97 for IBAN).
 
 Usage:
     from tracemill.gates.pii import pii_postflight_gate, PiiGateConfig
     from tracemill.sdk import GatePolicy
 
-    # Default config — scans for common PII, redacts with type labels
     policy = GatePolicy().postflight(pii_postflight_gate())
 
-    # Custom config — strict mode, only scan specific entities
+    # Custom: stricter threshold, only specific entities
     config = PiiGateConfig(
         score_threshold=0.7,
-        entities=["US_SSN", "CREDIT_CARD", "EMAIL_ADDRESS"],
-        critical_entities=["US_SSN", "CREDIT_CARD"],
-        allow_list=["localhost", "example.com"],
+        entities=("US_SSN", "CREDIT_CARD", "API_KEY"),
+        allow_list=("myservice.internal",),
     )
     policy = GatePolicy().postflight(pii_postflight_gate(config))
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+import yaml
 
 if TYPE_CHECKING:
     from tracemill.sdk.gate_types import GateContext, PostflightVerdict, ToolCallResult
@@ -42,185 +43,293 @@ class PiiGateConfig:
     """Configuration for the PII postflight gate.
 
     Attributes:
-        score_threshold: Minimum confidence score (0.0–1.0) for a PII detection
-            to be considered a finding. Lower = more sensitive, more false positives.
-            Default 0.5 balances precision/recall.
-        entities: Which PII entity types to scan for. None = all available.
-            Examples: PERSON, EMAIL_ADDRESS, PHONE_NUMBER, CREDIT_CARD, US_SSN,
-            IP_ADDRESS, IBAN_CODE, URL, LOCATION.
-        critical_entities: Entity types that trigger SUPPRESS (block entire output)
-            instead of REDACT. Empty = never suppress, always redact.
-        allow_list: Values that should never be flagged (e.g., known-safe domains,
-            test data). Case-insensitive comparison.
-        language: Text language for NLP analysis. Default "en".
-        nlp_engine: Which Presidio NLP engine to use.
-            "spacy" (default) — full NER (detects PERSON, LOCATION, etc.)
-            "slim_spacy" — regex-only, no NER model needed (faster, smaller)
-        suppress_on_critical: If True, return SUPPRESS when critical PII is found.
-            If False, always REDACT (even critical entities).
+        score_threshold: Minimum final confidence (0.0–1.0) for a detection to
+            count as a finding. Default 0.5.
+        entities: Which entity types to scan for. None = all loaded from YAML.
+        critical_entities: Entity types that trigger SUPPRESS. None = use YAML 'critical' field.
+        allow_list: Additional values to never flag (merged with YAML default_allow_list).
+        suppress_on_critical: If True, critical PII → SUPPRESS. If False, always REDACT.
     """
 
     score_threshold: float = 0.5
     entities: tuple[str, ...] | None = None
-    critical_entities: tuple[str, ...] = ("US_SSN", "CREDIT_CARD", "IBAN_CODE", "US_PASSPORT")
+    critical_entities: tuple[str, ...] | None = None
     allow_list: tuple[str, ...] = ()
-    language: str = "en"
-    nlp_engine: str = "spacy"
     suppress_on_critical: bool = True
 
-    # Advanced: additional PatternRecognizer definitions as frozen tuples of (name, entity, regex, score)
-    ad_hoc_patterns: tuple[tuple[str, str, str, float], ...] = ()
+
+# ─── Pattern Data ─────────────────────────────────────────────────────────────
 
 
-# ─── Default entity set (common PII without excessive false positives) ────────
-
-DEFAULT_ENTITIES: tuple[str, ...] = (
-    "PERSON",
-    "EMAIL_ADDRESS",
-    "PHONE_NUMBER",
-    "CREDIT_CARD",
-    "US_SSN",
-    "IBAN_CODE",
-    "IP_ADDRESS",
-    "US_PASSPORT",
-    "US_BANK_NUMBER",
-    "URL",
-)
+@dataclass(frozen=True, slots=True)
+class _CompiledPattern:
+    name: str
+    regex: re.Pattern[str]
+    base_score: float
 
 
-# ─── Engine Management ────────────────────────────────────────────────────────
+@dataclass(frozen=True, slots=True)
+class _EntityDef:
+    entity_type: str
+    critical: bool
+    context_words: frozenset[str]
+    patterns: tuple[_CompiledPattern, ...]
+    validator: str | None
 
 
-class _PresidioEngines:
-    """Lazy-loaded singleton for Presidio engines.
+@dataclass(frozen=True, slots=True)
+class PiiMatch:
+    """A single PII detection result."""
 
-    Engines are expensive to create (loads spaCy model). We initialize once
-    per config and cache using the frozen config as key.
-    """
+    entity_type: str
+    start: int
+    end: int
+    score: float
+    pattern_name: str
+    text: str
 
-    _instances: dict[PiiGateConfig, "_PresidioEngines"] = {}
 
-    def __init__(self, config: PiiGateConfig) -> None:
-        try:
-            from presidio_analyzer import AnalyzerEngine, PatternRecognizer, Pattern
-            from presidio_anonymizer import AnonymizerEngine
-        except ImportError as e:
-            raise ImportError(
-                "PII gate requires presidio. Install with: pip install tracemill[pii] "
-                "or: pip install presidio-analyzer presidio-anonymizer"
-            ) from e
+# ─── YAML Loading (module-level singleton) ────────────────────────────────────
 
-        self.analyzer = AnalyzerEngine()
-        self.anonymizer = AnonymizerEngine()
-        self.config = config
+_DATA: dict | None = None
+_ENTITIES: tuple[_EntityDef, ...] = ()
+_ALLOW_SET: frozenset[str] = frozenset()
+_CONTEXT_BOOST: float = 0.25
+_CONTEXT_WINDOW: int = 50
 
-        # Register ad-hoc pattern recognizers
-        for name, entity, regex, score in config.ad_hoc_patterns:
-            recognizer = PatternRecognizer(
-                supported_entity=entity,
-                name=name,
-                patterns=[Pattern(name=name, regex=regex, score=score)],
+
+def _load_patterns() -> None:
+    """Load and compile patterns from pii_patterns.yaml. Called once."""
+    global _DATA, _ENTITIES, _ALLOW_SET, _CONTEXT_BOOST, _CONTEXT_WINDOW
+
+    yaml_path = Path(__file__).parent / "pii_patterns.yaml"
+    with open(yaml_path, "r", encoding="utf-8") as f:
+        _DATA = yaml.safe_load(f)
+
+    _CONTEXT_BOOST = _DATA.get("context_boost", 0.25)
+    _CONTEXT_WINDOW = _DATA.get("context_window", 50)
+    _ALLOW_SET = frozenset(v.lower() for v in _DATA.get("default_allow_list", []))
+
+    entities: list[_EntityDef] = []
+    for ent in _DATA.get("entities", []):
+        compiled: list[_CompiledPattern] = []
+        for p in ent.get("patterns", []):
+            compiled.append(
+                _CompiledPattern(
+                    name=p["name"],
+                    regex=re.compile(p["regex"], re.IGNORECASE),
+                    base_score=p["score"],
+                )
             )
-            self.analyzer.registry.add_recognizer(recognizer)
-
-    @classmethod
-    def get(cls, config: PiiGateConfig) -> "_PresidioEngines":
-        """Get or create engines for a given config. Thread-safe under GIL."""
-        existing = cls._instances.get(config)
-        if existing is not None:
-            return existing
-        instance = cls(config)
-        # setdefault is atomic under CPython GIL — if another thread raced,
-        # we'll get their instance back and ours will be GC'd
-        return cls._instances.setdefault(config, instance)
+        entities.append(
+            _EntityDef(
+                entity_type=ent["entity_type"],
+                critical=ent.get("critical", False),
+                context_words=frozenset(w.lower() for w in ent.get("context", [])),
+                patterns=tuple(compiled),
+                validator=ent.get("validator"),
+            )
+        )
+    _ENTITIES = tuple(entities)
 
 
-# ─── Gate Implementation ──────────────────────────────────────────────────────
+def _ensure_loaded() -> None:
+    if _DATA is None:
+        _load_patterns()
 
 
-def pii_postflight_gate(
-    config: PiiGateConfig | None = None,
-) -> "PostflightGate":
+# ─── Validators ───────────────────────────────────────────────────────────────
+
+
+def _luhn_check(digits: str) -> bool:
+    """Luhn algorithm for credit card validation."""
+    cleaned = re.sub(r"[\s\-]", "", digits)
+    if not cleaned.isdigit() or len(cleaned) < 12:
+        return False
+    total = 0
+    for i, ch in enumerate(reversed(cleaned)):
+        n = int(ch)
+        if i % 2 == 1:
+            n *= 2
+            if n > 9:
+                n -= 9
+        total += n
+    return total % 10 == 0
+
+
+def _iban_check(value: str) -> bool:
+    """IBAN mod-97 validation (ISO 7064)."""
+    cleaned = re.sub(r"\s", "", value).upper()
+    if len(cleaned) < 15 or not cleaned[:2].isalpha() or not cleaned[2:4].isdigit():
+        return False
+    # Move country + check digits to end
+    rearranged = cleaned[4:] + cleaned[:4]
+    # Convert letters to digits (A=10, B=11, ..., Z=35)
+    numeric = ""
+    for ch in rearranged:
+        if ch.isdigit():
+            numeric += ch
+        else:
+            numeric += str(ord(ch) - 55)
+    try:
+        return int(numeric) % 97 == 1
+    except (ValueError, OverflowError):
+        return False
+
+
+_VALIDATORS: dict[str, callable] = {
+    "luhn": _luhn_check,
+    "iban": _iban_check,
+}
+
+
+# ─── Detection Engine ─────────────────────────────────────────────────────────
+
+
+def scan_text(
+    text: str,
+    *,
+    entities: tuple[str, ...] | None = None,
+    score_threshold: float = 0.5,
+    allow_list: frozenset[str] = frozenset(),
+) -> list[PiiMatch]:
+    """Scan text for PII. Returns matches above score_threshold.
+
+    This is the core detection function — usable standalone or via the gate.
+    """
+    _ensure_loaded()
+
+    merged_allow = _ALLOW_SET | frozenset(v.lower() for v in allow_list)
+    text_lower = text.lower()
+    matches: list[PiiMatch] = []
+
+    for entity_def in _ENTITIES:
+        if entities and entity_def.entity_type not in entities:
+            continue
+
+        for pat in entity_def.patterns:
+            for m in pat.regex.finditer(text):
+                matched_text = m.group()
+
+                # Allow list check
+                if matched_text.lower() in merged_allow:
+                    continue
+
+                # Base score
+                score = pat.base_score
+
+                # Context boost: check surrounding text for context words
+                start_ctx = max(0, m.start() - _CONTEXT_WINDOW)
+                end_ctx = min(len(text), m.end() + _CONTEXT_WINDOW)
+                window = text_lower[start_ctx:end_ctx]
+                if entity_def.context_words:
+                    for cw in entity_def.context_words:
+                        if cw in window:
+                            score = min(1.0, score + _CONTEXT_BOOST)
+                            break  # One context match is enough
+
+                # Validator (checksum) → promotes to 1.0 or demotes to 0
+                if entity_def.validator and entity_def.validator in _VALIDATORS:
+                    validator_fn = _VALIDATORS[entity_def.validator]
+                    if validator_fn(matched_text):
+                        score = 1.0
+                    else:
+                        score = max(0.0, score - 0.3)
+
+                if score >= score_threshold:
+                    matches.append(
+                        PiiMatch(
+                            entity_type=entity_def.entity_type,
+                            start=m.start(),
+                            end=m.end(),
+                            score=score,
+                            pattern_name=pat.name,
+                            text=matched_text,
+                        )
+                    )
+
+    # Deduplicate overlapping spans — higher score wins
+    matches.sort(key=lambda x: (-x.score, x.start))
+    deduped: list[PiiMatch] = []
+    taken_ranges: list[tuple[int, int]] = []
+    for match in matches:
+        overlaps = any(
+            match.start < end and match.end > start for start, end in taken_ranges
+        )
+        if not overlaps:
+            deduped.append(match)
+            taken_ranges.append((match.start, match.end))
+
+    return deduped
+
+
+# ─── Gate Factory ─────────────────────────────────────────────────────────────
+
+
+def pii_postflight_gate(config: PiiGateConfig | None = None) -> "PostflightGate":
     """Create a PII postflight gate with the given configuration.
 
     Returns a callable matching the PostflightGate protocol.
-
-    The gate:
-    1. Extracts text from tool output
-    2. Runs Presidio AnalyzerEngine to detect PII spans
-    3. If critical PII found and suppress_on_critical=True → SUPPRESS
-    4. Otherwise → REDACT with detected PII spans as redaction_keys
+    Zero external dependencies — uses regex patterns from pii_patterns.yaml.
     """
     from tracemill.sdk.gate_types import PostflightAction, PostflightVerdict
 
     cfg = config or PiiGateConfig()
 
+    # Pre-resolve critical entities from YAML if not overridden
+    _ensure_loaded()
+    if cfg.critical_entities is not None:
+        critical_set = frozenset(cfg.critical_entities)
+    else:
+        critical_set = frozenset(e.entity_type for e in _ENTITIES if e.critical)
+
     def _gate(result: "ToolCallResult", ctx: "GateContext") -> "PostflightVerdict":
-        # Extract text to scan
         text = _extract_text(result)
-        if not text or len(text.strip()) == 0:
+        if not text or not text.strip():
             return PostflightVerdict(action=PostflightAction.ACCEPT)
 
-        # Lazy-init engines
         try:
-            engines = _PresidioEngines.get(cfg)
-        except ImportError:
-            # If presidio not installed, fail-closed: suppress
-            return PostflightVerdict(
-                action=PostflightAction.SUPPRESS,
-                reason="PII gate: presidio not installed, cannot scan — suppressing output",
-            )
-
-        # Run analysis
-        try:
-            findings = engines.analyzer.analyze(
-                text=text,
-                language=cfg.language,
+            findings = scan_text(
+                text,
+                entities=cfg.entities,
                 score_threshold=cfg.score_threshold,
-                entities=list(cfg.entities) if cfg.entities else None,
-                allow_list=list(cfg.allow_list) if cfg.allow_list else None,
+                allow_list=frozenset(cfg.allow_list),
             )
         except Exception as e:
-            # Fail-closed: if analysis crashes, suppress
+            # Fail-closed
             return PostflightVerdict(
                 action=PostflightAction.SUPPRESS,
-                reason=f"PII gate: analysis failed ({type(e).__name__}: {e}) — suppressing",
+                reason=f"PII gate: scan failed ({type(e).__name__}: {e}) — suppressing",
             )
 
         if not findings:
             return PostflightVerdict(action=PostflightAction.ACCEPT)
 
         # Check for critical entities
-        if cfg.suppress_on_critical and cfg.critical_entities:
-            critical_set = frozenset(cfg.critical_entities)
-            critical_found = [
-                r for r in findings if r.entity_type in critical_set
-            ]
+        if cfg.suppress_on_critical:
+            critical_found = [f for f in findings if f.entity_type in critical_set]
             if critical_found:
-                types = sorted({r.entity_type for r in critical_found})
+                types = sorted({f.entity_type for f in critical_found})
                 return PostflightVerdict(
                     action=PostflightAction.SUPPRESS,
                     reason=f"Critical PII detected: {', '.join(types)}",
                 )
 
-        # REDACT: extract the PII spans from original text as redaction_keys
-        # Deduplicate — same substring may appear multiple times but we want unique keys
+        # REDACT: use matched text spans as redaction_keys
         seen: set[str] = set()
         redaction_keys: list[str] = []
-        for r in sorted(findings, key=lambda x: x.end - x.start, reverse=True):
-            span_text = text[r.start : r.end]
-            if span_text and span_text not in seen:
-                seen.add(span_text)
-                redaction_keys.append(span_text)
+        for f in sorted(findings, key=lambda x: len(x.text), reverse=True):
+            if f.text not in seen:
+                seen.add(f.text)
+                redaction_keys.append(f.text)
 
-        types_summary = sorted({r.entity_type for r in findings})
+        types_summary = sorted({f.entity_type for f in findings})
         return PostflightVerdict(
             action=PostflightAction.REDACT,
             reason=f"PII detected: {', '.join(types_summary)}",
             redaction_keys=tuple(redaction_keys),
         )
 
-    # Annotate for protocol compliance and debugging
     _gate.__qualname__ = "pii_postflight_gate.<locals>._gate"
     _gate.__doc__ = f"PII postflight gate (threshold={cfg.score_threshold})"
     return _gate  # type: ignore[return-value]
@@ -230,13 +339,8 @@ def pii_postflight_gate(
 
 
 def _extract_text(result: "ToolCallResult") -> str:
-    """Extract scannable text from a ToolCallResult.
-
-    Concatenates string values from the output mapping + error field.
-    """
+    """Extract scannable text from a ToolCallResult."""
     parts: list[str] = []
-
-    # output is a MappingProxyType — iterate string values
     if result.output:
         for v in result.output.values():
             if isinstance(v, str):
@@ -245,8 +349,6 @@ def _extract_text(result: "ToolCallResult") -> str:
                 for item in v:
                     if isinstance(item, str):
                         parts.append(item)
-
     if result.error:
         parts.append(result.error)
-
     return "\n".join(parts)

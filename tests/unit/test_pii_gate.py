@@ -1,21 +1,23 @@
-"""Tests for tracemill.gates.pii — PII detection postflight gate.
+"""Tests for tracemill.gates.pii — native regex PII detection gate.
 
-Mocks Presidio engines to avoid spaCy model dependency in CI.
+No mocks — tests the actual regex patterns, validators, and gate logic.
 """
 
 from __future__ import annotations
 
 from types import MappingProxyType
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from tracemill.gates.pii import (
-    DEFAULT_ENTITIES,
     PiiGateConfig,
-    _PresidioEngines,
-    _extract_text,
+    PiiMatch,
+    _iban_check,
+    _luhn_check,
+    scan_text,
     pii_postflight_gate,
+    _extract_text,
 )
 from tracemill.sdk.gate_types import (
     GateContext,
@@ -61,14 +63,218 @@ def _make_ctx() -> GateContext:
     )
 
 
-class FakeRecognizerResult:
-    """Mimics presidio_analyzer.RecognizerResult for mocking."""
+# ─── Tests: Validators ───────────────────────────────────────────────────────
 
-    def __init__(self, entity_type: str, start: int, end: int, score: float = 0.85):
-        self.entity_type = entity_type
-        self.start = start
-        self.end = end
-        self.score = score
+
+class TestLuhn:
+    def test_valid_visa(self):
+        assert _luhn_check("4111111111111111") is True
+
+    def test_valid_with_spaces(self):
+        assert _luhn_check("4111 1111 1111 1111") is True
+
+    def test_valid_with_dashes(self):
+        assert _luhn_check("4111-1111-1111-1111") is True
+
+    def test_invalid(self):
+        assert _luhn_check("4111111111111112") is False
+
+    def test_short(self):
+        assert _luhn_check("12345") is False
+
+    def test_amex(self):
+        assert _luhn_check("378282246310005") is True
+
+
+class TestIban:
+    def test_valid_gb(self):
+        assert _iban_check("GB29 NWBK 6016 1331 9268 19") is True
+
+    def test_valid_de(self):
+        assert _iban_check("DE89370400440532013000") is True
+
+    def test_invalid_checksum(self):
+        assert _iban_check("GB29 NWBK 6016 1331 9268 18") is False
+
+    def test_too_short(self):
+        assert _iban_check("GB29") is False
+
+
+# ─── Tests: scan_text ─────────────────────────────────────────────────────────
+
+
+class TestScanText:
+    def test_detects_email(self):
+        matches = scan_text("contact john@example.com for info", score_threshold=0.4)
+        assert any(m.entity_type == "EMAIL_ADDRESS" for m in matches)
+        email_match = next(m for m in matches if m.entity_type == "EMAIL_ADDRESS")
+        assert email_match.text == "john@example.com"
+
+    def test_detects_ssn_with_dashes(self):
+        matches = scan_text("SSN: 123-45-6789", score_threshold=0.4)
+        assert any(m.entity_type == "US_SSN" for m in matches)
+        ssn = next(m for m in matches if m.entity_type == "US_SSN")
+        assert ssn.text == "123-45-6789"
+
+    def test_ssn_context_boosts_score(self):
+        # With context word "social security"
+        matches_ctx = scan_text("social security number: 234-56-7890", score_threshold=0.4)
+        # Without context
+        matches_raw = scan_text("reference 234-56-7890 end", score_threshold=0.4)
+        ssn_ctx = next((m for m in matches_ctx if m.entity_type == "US_SSN"), None)
+        ssn_raw = next((m for m in matches_raw if m.entity_type == "US_SSN"), None)
+        assert ssn_ctx is not None
+        assert ssn_raw is not None
+        assert ssn_ctx.score > ssn_raw.score
+
+    def test_detects_credit_card_with_luhn(self):
+        # Valid Visa number
+        matches = scan_text("card: 4111 1111 1111 1111", score_threshold=0.4)
+        cc = next((m for m in matches if m.entity_type == "CREDIT_CARD"), None)
+        assert cc is not None
+        assert cc.score == 1.0  # Luhn validated → max score
+
+    def test_rejects_invalid_credit_card(self):
+        # Invalid Luhn
+        matches = scan_text("card: 4111 1111 1111 1112", score_threshold=0.5)
+        cc = next((m for m in matches if m.entity_type == "CREDIT_CARD"), None)
+        # Score drops below threshold after failed validation
+        assert cc is None
+
+    def test_detects_ipv4(self):
+        matches = scan_text("server at 192.168.1.100 is down", score_threshold=0.4)
+        ip = next((m for m in matches if m.entity_type == "IP_ADDRESS"), None)
+        assert ip is not None
+        assert ip.text == "192.168.1.100"
+
+    def test_allow_list_skips_localhost(self):
+        matches = scan_text("connecting to 127.0.0.1", score_threshold=0.1)
+        ip = next((m for m in matches if m.text == "127.0.0.1"), None)
+        assert ip is None
+
+    def test_allow_list_custom(self):
+        matches = scan_text(
+            "email: ops@internal.co",
+            score_threshold=0.4,
+            allow_list=frozenset(["ops@internal.co"]),
+        )
+        assert not any(m.text == "ops@internal.co" for m in matches)
+
+    def test_detects_github_pat(self):
+        matches = scan_text("token: ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ1234567890", score_threshold=0.4)
+        key = next((m for m in matches if m.entity_type == "API_KEY"), None)
+        assert key is not None
+        assert key.score >= 0.9
+
+    def test_detects_openai_key(self):
+        matches = scan_text("sk-abcdefghijklmnopqrstuvwx", score_threshold=0.4)
+        key = next((m for m in matches if m.entity_type == "API_KEY"), None)
+        assert key is not None
+
+    def test_detects_aws_access_key(self):
+        matches = scan_text("AKIAIOSFODNN7EXAMPLE", score_threshold=0.4)
+        key = next((m for m in matches if m.entity_type == "API_KEY"), None)
+        assert key is not None
+        assert key.score >= 0.9
+
+    def test_entity_filter(self):
+        text = "email: a@b.com, SSN: 123-45-6789"
+        matches = scan_text(text, entities=("EMAIL_ADDRESS",), score_threshold=0.4)
+        assert all(m.entity_type == "EMAIL_ADDRESS" for m in matches)
+
+    def test_no_overlapping_spans(self):
+        text = "key is sk-abcdefghijklmnopqrst1234567890abcdefghijklmnopqr"
+        matches = scan_text(text, score_threshold=0.1)
+        # No two matches should overlap
+        for i, a in enumerate(matches):
+            for b in matches[i + 1:]:
+                assert a.end <= b.start or b.end <= a.start, (
+                    f"Overlap: {a.text}[{a.start}:{a.end}] vs {b.text}[{b.start}:{b.end}]"
+                )
+
+    def test_empty_text(self):
+        matches = scan_text("", score_threshold=0.4)
+        assert matches == []
+
+    def test_no_false_positive_on_plain_text(self):
+        matches = scan_text("The quick brown fox jumps over the lazy dog.", score_threshold=0.5)
+        assert matches == []
+
+
+# ─── Tests: Gate Integration ──────────────────────────────────────────────────
+
+
+class TestPiiGate:
+    def test_clean_output_accepts(self):
+        gate = pii_postflight_gate()
+        result = _make_result(output={"content": "Build succeeded. 247 tests passed."})
+        verdict = gate(result, _make_ctx())
+        assert verdict.action == PostflightAction.ACCEPT
+
+    def test_email_in_output_redacts(self):
+        gate = pii_postflight_gate()
+        result = _make_result(output={"content": "User email: alice@company.com found"})
+        verdict = gate(result, _make_ctx())
+        assert verdict.action == PostflightAction.REDACT
+        assert "alice@company.com" in verdict.redaction_keys
+
+    def test_ssn_in_output_suppresses(self):
+        gate = pii_postflight_gate()
+        result = _make_result(output={"content": "SSN: 123-45-6789"})
+        verdict = gate(result, _make_ctx())
+        assert verdict.action == PostflightAction.SUPPRESS
+        assert "US_SSN" in verdict.reason
+
+    def test_credit_card_suppresses(self):
+        gate = pii_postflight_gate()
+        result = _make_result(output={"content": "credit card 4111 1111 1111 1111"})
+        verdict = gate(result, _make_ctx())
+        assert verdict.action == PostflightAction.SUPPRESS
+
+    def test_api_key_suppresses(self):
+        gate = pii_postflight_gate()
+        result = _make_result(output={"content": "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ1234567890"})
+        verdict = gate(result, _make_ctx())
+        assert verdict.action == PostflightAction.SUPPRESS
+
+    def test_suppress_disabled_redacts_instead(self):
+        cfg = PiiGateConfig(suppress_on_critical=False)
+        gate = pii_postflight_gate(cfg)
+        result = _make_result(output={"content": "SSN: 123-45-6789"})
+        verdict = gate(result, _make_ctx())
+        assert verdict.action == PostflightAction.REDACT
+        assert "123-45-6789" in verdict.redaction_keys
+
+    def test_custom_threshold_filters_weak(self):
+        # High threshold should filter out weak matches
+        cfg = PiiGateConfig(score_threshold=0.9)
+        gate = pii_postflight_gate(cfg)
+        # Phone numbers have base score 0.4 — won't pass 0.9
+        result = _make_result(output={"content": "Call 555-123-4567"})
+        verdict = gate(result, _make_ctx())
+        assert verdict.action == PostflightAction.ACCEPT
+
+    def test_empty_output_accepts(self):
+        gate = pii_postflight_gate()
+        result = _make_result(output={})
+        verdict = gate(result, _make_ctx())
+        assert verdict.action == PostflightAction.ACCEPT
+
+    def test_error_field_scanned(self):
+        gate = pii_postflight_gate()
+        result = _make_result(output={}, error="Error: user alice@corp.com not found")
+        verdict = gate(result, _make_ctx())
+        assert verdict.action == PostflightAction.REDACT
+        assert "alice@corp.com" in verdict.redaction_keys
+
+    def test_multiple_pii_types_in_reason(self):
+        gate = pii_postflight_gate(PiiGateConfig(suppress_on_critical=False))
+        result = _make_result(output={
+            "content": "Email: bob@x.com, IP: 10.20.30.40"
+        })
+        verdict = gate(result, _make_ctx())
+        assert verdict.action == PostflightAction.REDACT
+        assert "EMAIL_ADDRESS" in verdict.reason
 
 
 # ─── Tests: _extract_text ─────────────────────────────────────────────────────
@@ -87,214 +293,9 @@ class TestExtractText:
         assert "line1" in text
         assert "line2" in text
 
-    def test_error_included(self):
-        result = _make_result(output={"x": "y"}, error="secret error: SSN 123-45-6789")
-        text = _extract_text(result)
-        assert "SSN 123-45-6789" in text
-
-    def test_empty_output(self):
-        result = _make_result(output={})
-        text = _extract_text(result)
-        assert text == ""
-
-    def test_non_string_values_skipped(self):
-        result = _make_result(output={"count": 42, "flag": True, "name": "Alice"})
+    def test_non_string_skipped(self):
+        result = _make_result(output={"count": 42, "name": "Alice"})
         text = _extract_text(result)
         assert "Alice" in text
         assert "42" not in text
 
-
-# ─── Tests: PiiGateConfig ─────────────────────────────────────────────────────
-
-
-class TestPiiGateConfig:
-    def test_defaults(self):
-        cfg = PiiGateConfig()
-        assert cfg.score_threshold == 0.5
-        assert cfg.language == "en"
-        assert cfg.suppress_on_critical is True
-        assert "US_SSN" in cfg.critical_entities
-        assert "CREDIT_CARD" in cfg.critical_entities
-
-    def test_custom_entities(self):
-        cfg = PiiGateConfig(entities=("EMAIL_ADDRESS", "PHONE_NUMBER"))
-        assert cfg.entities == ("EMAIL_ADDRESS", "PHONE_NUMBER")
-
-    def test_frozen(self):
-        cfg = PiiGateConfig()
-        with pytest.raises(Exception):
-            cfg.score_threshold = 0.9  # type: ignore
-
-
-# ─── Tests: pii_postflight_gate (mocked Presidio) ────────────────────────────
-
-
-class TestPiiGateMocked:
-    """Tests with mocked Presidio engines."""
-
-    def setup_method(self):
-        # Clear engine cache between tests
-        _PresidioEngines._instances.clear()
-
-    @patch("tracemill.gates.pii._PresidioEngines.get")
-    def test_no_findings_returns_accept(self, mock_get):
-        engines = MagicMock()
-        engines.analyzer.analyze.return_value = []
-        mock_get.return_value = engines
-
-        gate = pii_postflight_gate()
-        result = _make_result(output={"content": "no pii here"})
-        verdict = gate(result, _make_ctx())
-
-        assert verdict.action == PostflightAction.ACCEPT
-        assert verdict.redaction_keys == ()
-
-    @patch("tracemill.gates.pii._PresidioEngines.get")
-    def test_non_critical_pii_returns_redact(self, mock_get):
-        engines = MagicMock()
-        # Simulate finding an email at positions 10-25
-        text = "Contact: john@example.com for info"
-        engines.analyzer.analyze.return_value = [
-            FakeRecognizerResult("EMAIL_ADDRESS", 9, 25, 0.95),
-        ]
-        mock_get.return_value = engines
-
-        gate = pii_postflight_gate()
-        result = _make_result(output={"content": text})
-        verdict = gate(result, _make_ctx())
-
-        assert verdict.action == PostflightAction.REDACT
-        assert "john@example.com" in verdict.redaction_keys
-        assert "EMAIL_ADDRESS" in verdict.reason
-
-    @patch("tracemill.gates.pii._PresidioEngines.get")
-    def test_critical_pii_returns_suppress(self, mock_get):
-        engines = MagicMock()
-        text = "SSN: 123-45-6789"
-        engines.analyzer.analyze.return_value = [
-            FakeRecognizerResult("US_SSN", 5, 16, 0.95),
-        ]
-        mock_get.return_value = engines
-
-        gate = pii_postflight_gate()
-        result = _make_result(output={"content": text})
-        verdict = gate(result, _make_ctx())
-
-        assert verdict.action == PostflightAction.SUPPRESS
-        assert "US_SSN" in verdict.reason
-
-    @patch("tracemill.gates.pii._PresidioEngines.get")
-    def test_critical_pii_redact_when_suppress_disabled(self, mock_get):
-        engines = MagicMock()
-        text = "SSN: 123-45-6789"
-        engines.analyzer.analyze.return_value = [
-            FakeRecognizerResult("US_SSN", 5, 16, 0.95),
-        ]
-        mock_get.return_value = engines
-
-        cfg = PiiGateConfig(suppress_on_critical=False)
-        gate = pii_postflight_gate(cfg)
-        result = _make_result(output={"content": text})
-        verdict = gate(result, _make_ctx())
-
-        assert verdict.action == PostflightAction.REDACT
-        assert "123-45-6789" in verdict.redaction_keys
-
-    @patch("tracemill.gates.pii._PresidioEngines.get")
-    def test_multiple_findings_deduplicated(self, mock_get):
-        engines = MagicMock()
-        # Same email appears twice in text
-        text = "from john@x.com to john@x.com"
-        engines.analyzer.analyze.return_value = [
-            FakeRecognizerResult("EMAIL_ADDRESS", 5, 15, 0.9),
-            FakeRecognizerResult("EMAIL_ADDRESS", 19, 29, 0.9),
-        ]
-        mock_get.return_value = engines
-
-        gate = pii_postflight_gate()
-        result = _make_result(output={"content": text})
-        verdict = gate(result, _make_ctx())
-
-        assert verdict.action == PostflightAction.REDACT
-        # Deduplicated: same span text appears only once
-        assert verdict.redaction_keys.count("john@x.com") == 1
-
-    def test_empty_output_returns_accept(self):
-        gate = pii_postflight_gate()
-        result = _make_result(output={})
-        verdict = gate(result, _make_ctx())
-        assert verdict.action == PostflightAction.ACCEPT
-
-    @patch("tracemill.gates.pii._PresidioEngines.get")
-    def test_analyzer_crash_returns_suppress(self, mock_get):
-        """Fail-closed: if Presidio crashes, suppress output."""
-        engines = MagicMock()
-        engines.analyzer.analyze.side_effect = RuntimeError("model corrupt")
-        mock_get.return_value = engines
-
-        gate = pii_postflight_gate()
-        result = _make_result(output={"content": "some text"})
-        verdict = gate(result, _make_ctx())
-
-        assert verdict.action == PostflightAction.SUPPRESS
-        assert "analysis failed" in verdict.reason
-
-    @patch("tracemill.gates.pii._PresidioEngines.get")
-    def test_import_error_returns_suppress(self, mock_get):
-        """Fail-closed: if presidio not installed, suppress."""
-        mock_get.side_effect = ImportError("No module named presidio_analyzer")
-
-        gate = pii_postflight_gate()
-        result = _make_result(output={"content": "some text"})
-        verdict = gate(result, _make_ctx())
-
-        assert verdict.action == PostflightAction.SUPPRESS
-        assert "not installed" in verdict.reason
-
-    @patch("tracemill.gates.pii._PresidioEngines.get")
-    def test_config_entities_forwarded(self, mock_get):
-        """Verify that config.entities is passed to analyzer.analyze()."""
-        engines = MagicMock()
-        engines.analyzer.analyze.return_value = []
-        mock_get.return_value = engines
-
-        cfg = PiiGateConfig(entities=("EMAIL_ADDRESS", "PHONE_NUMBER"))
-        gate = pii_postflight_gate(cfg)
-        result = _make_result(output={"content": "test"})
-        gate(result, _make_ctx())
-
-        call_kwargs = engines.analyzer.analyze.call_args[1]
-        assert call_kwargs["entities"] == ["EMAIL_ADDRESS", "PHONE_NUMBER"]
-
-    @patch("tracemill.gates.pii._PresidioEngines.get")
-    def test_allow_list_forwarded(self, mock_get):
-        """Verify that config.allow_list is passed to analyzer."""
-        engines = MagicMock()
-        engines.analyzer.analyze.return_value = []
-        mock_get.return_value = engines
-
-        cfg = PiiGateConfig(allow_list=("localhost", "example.com"))
-        gate = pii_postflight_gate(cfg)
-        result = _make_result(output={"content": "test"})
-        gate(result, _make_ctx())
-
-        call_kwargs = engines.analyzer.analyze.call_args[1]
-        assert call_kwargs["allow_list"] == ["localhost", "example.com"]
-
-
-# ─── Tests: DEFAULT_ENTITIES ─────────────────────────────────────────────────
-
-
-class TestDefaultEntities:
-    def test_includes_common_types(self):
-        assert "PERSON" in DEFAULT_ENTITIES
-        assert "EMAIL_ADDRESS" in DEFAULT_ENTITIES
-        assert "CREDIT_CARD" in DEFAULT_ENTITIES
-        assert "US_SSN" in DEFAULT_ENTITIES
-        assert "IP_ADDRESS" in DEFAULT_ENTITIES
-
-    def test_no_high_fp_types(self):
-        # ORGANIZATION has too many false positives (disabled in Presidio defaults too)
-        assert "ORGANIZATION" not in DEFAULT_ENTITIES
-        # DATE_TIME would flag every timestamp in tool output
-        assert "DATE_TIME" not in DEFAULT_ENTITIES

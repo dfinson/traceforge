@@ -62,7 +62,29 @@ def watch(config_path: str | None, frameworks: str | None, once: bool, no_score:
     db_path = Path.home() / ".tracemill" / "system.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     store = SystemStore(db_path)
-    pipeline = create_default_pipeline(store)
+
+    # Load policy from config if available
+    policy = None
+    if config and config.get("governance", {}).get("tool_preflight_gate"):
+        from tracemill.sdk.gate_policy import GatePolicy
+        dotted = config["governance"]["tool_preflight_gate"]
+        from tracemill.governance.pipeline import _import_dotted
+        gate_fn = _import_dotted(dotted)
+        policy = GatePolicy().preflight(gate_fn)
+
+    pipeline = create_default_pipeline(store, policy=policy)
+
+    # Start Gate IPC server (for CLI-based frameworks: Claude Code, Copilot CLI, etc.)
+    from tracemill.gate.server import GateServer
+    gate_server = GateServer(pipeline)
+    gate_server.start()
+    click.echo(f"Gate IPC server listening on {gate_server.sock_path}")
+
+    # Register a default session so CLI clients can find us without knowing session_id upfront.
+    # Detected framework sessions are also registered individually.
+    gate_server.register_session("_default")
+    for p in pipelines:
+        gate_server.register_session(p.name)
 
     # Start Score API
     score_server: ScoreServer | None = None
@@ -80,6 +102,9 @@ def watch(config_path: str | None, frameworks: str | None, once: bool, no_score:
     except KeyboardInterrupt:
         click.echo("\nShutting down...")
     finally:
+        from tracemill.gate.registry import unregister_pid
+        gate_server.stop()
+        unregister_pid()
         if score_server:
             score_server.stop()
         store.close()

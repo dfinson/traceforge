@@ -61,8 +61,8 @@ def gate_from_stdin(*, format: str = "claude-code") -> None:
     # Read event from stdin
     event_raw = sys.stdin.read()
     if not event_raw.strip():
-        # Empty input = allow (fail-open for empty events)
-        _output_allow(format)
+        # Empty input = deny (fail-closed — agent hook failed to produce data)
+        _output_deny(format, "empty event (fail-closed)")
         return
 
     try:
@@ -82,6 +82,9 @@ def gate_from_stdin(*, format: str = "claude-code") -> None:
     # Look up socket
     sock_path = lookup_session(session_id)
     if not sock_path:
+        # Fall back to default session (tracemill watch registers as "_default")
+        sock_path = lookup_session("_default")
+    if not sock_path:
         # Session not registered = deny (fail-closed)
         _output_deny(format, f"session {session_id} not registered with any pipeline")
         return
@@ -92,8 +95,12 @@ def gate_from_stdin(*, format: str = "claude-code") -> None:
         "tool_input": event.get("tool_input") or event.get("tool", {}).get("input", {}),
         "session_id": session_id,
     }
+    if event.get("tool_call_id"):
+        payload["tool_call_id"] = event["tool_call_id"]
     if event.get("server_namespace"):
         payload["server_namespace"] = event["server_namespace"]
+    if event.get("mcp_server_name"):
+        payload["mcp_server_name"] = event["mcp_server_name"]
 
     # Send to Pipeline IPC
     try:

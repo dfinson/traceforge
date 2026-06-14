@@ -14,7 +14,7 @@ from __future__ import annotations
 import copy
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from tracemill._generated import (
     Action,
@@ -79,52 +79,6 @@ class Trace:
     # ─── Serialization version ────────────────────────────────────────────────
 
     schema_version: str = SCHEMA_VERSION
-
-    # ─── Convenience properties for gate authors ──────────────────────────────
-
-    @property
-    def tool_name(self) -> str | None:
-        """The canonical tool name (or raw tool_name from the event)."""
-        return self.canonical_tool or self.raw_event.get("tool_name")
-
-    @property
-    def tool_input(self) -> dict[str, Any]:
-        """The tool's input arguments from the raw event."""
-        return self.raw_event.get("tool_input", {})
-
-    @property
-    def is_destructive(self) -> bool:
-        """True if the tool effect is destructive."""
-        return self.effect == "destructive"
-
-    @property
-    def is_mutating(self) -> bool:
-        """True if the tool effect is mutating or destructive."""
-        return self.effect in ("mutating", "destructive")
-
-    @property
-    def is_read_only(self) -> bool:
-        """True if the tool effect is read_only."""
-        return self.effect == "read_only"
-
-    @property
-    def is_network(self) -> bool:
-        """True if the mechanism involves network access."""
-        return self.mechanism is not None and self.mechanism.startswith("network")
-
-    @property
-    def is_shell(self) -> bool:
-        """True if the mechanism is process.shell."""
-        return self.mechanism == "process.shell"
-
-    @property
-    def requires_escalation(self) -> bool:
-        """True if the scorer recommends escalation or denial."""
-        return self.suggested_action in ("escalate", "deny")
-
-    def has_capability(self, cap: str) -> bool:
-        """Check if this trace has a specific capability flag."""
-        return cap in self.capability
 
     # ─── Lifecycle checks ─────────────────────────────────────────────────────
 

@@ -258,7 +258,7 @@ class GovernanceConfig(StrictModel):
     rules_path: str | None = None  # custom rules YAML override
     pii_scanning: bool = True
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
-    tool_gate_policy: str | None = None  # dotted import path (e.g. "myapp.policies.my_policy")
+    tool_preflight_gate: str | None = None  # dotted import path (e.g. "myapp.policies.my_policy")
 
 
 # ─── Score API Config ────────────────────────────────────────────────────────

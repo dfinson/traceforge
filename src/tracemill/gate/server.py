@@ -4,7 +4,7 @@ The server runs in a background thread inside the Pipeline process. When a gate
 request arrives (from `tracemill gate --stdin`), it:
   1. Deserializes the event JSON
   2. Calls pipeline.score_tool_call(payload)
-  3. Fires the tool_gate_policy callback
+  3. Fires the tool_preflight_gate callback
   4. Returns the Verdict as JSON
 """
 
@@ -32,11 +32,11 @@ class GateServer:
     def __init__(
         self,
         pipeline: "GovernancePipeline",
-        tool_gate_policy: "Callable[[dict, SessionMeta], Verdict | bool | None]",
+        tool_preflight_gate: "Callable[[dict, SessionMeta], Verdict | bool | None]",
         sock_path: str | None = None,
     ) -> None:
         self._pipeline = pipeline
-        self._tool_gate_policy = tool_gate_policy
+        self._tool_preflight_gate = tool_preflight_gate
         self._sock_path = sock_path or self._default_sock_path()
         self._server: socket.socket | None = None
         self._thread: threading.Thread | None = None
@@ -141,8 +141,8 @@ class GateServer:
         from tracemill.sdk.verdict import interpret_callback_result
 
         meta = self._pipeline.score_tool_call(payload)
-        if self._tool_gate_policy is not None:
-            verdict = interpret_callback_result(self._tool_gate_policy(payload, meta))
+        if self._tool_preflight_gate is not None:
+            verdict = interpret_callback_result(self._tool_preflight_gate(payload, meta))
         else:
             # No callback = allow everything
             from tracemill.sdk.verdict import Verdict

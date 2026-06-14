@@ -11,7 +11,7 @@ from tracemill.governance.pipeline import GovernancePipeline
 def create_default_pipeline(
     store: SystemStore,
     project_root: str | None = None,
-    tool_gate_policy=None,
+    tool_preflight_gate=None,
 ) -> GovernancePipeline:
     """Create a GovernancePipeline with all default components.
 
@@ -37,5 +37,5 @@ def create_default_pipeline(
         rules=rules,
         engine=engine,
         project_root=project_root,
-        tool_gate_policy=tool_gate_policy,
+        tool_preflight_gate=tool_preflight_gate,
     )

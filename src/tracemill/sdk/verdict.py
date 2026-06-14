@@ -17,7 +17,7 @@ class Decision(Enum):
 
 @dataclass(frozen=True, slots=True)
 class Verdict:
-    """A gating decision returned by a tool_gate_policy callback.
+    """A gating decision returned by a tool_preflight_gate callback.
 
     Args:
         decision: ALLOW, DENY, or ESCALATE.

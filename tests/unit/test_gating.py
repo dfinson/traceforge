@@ -279,8 +279,8 @@ class TestSessionIdExtraction:
         trace, _ = pipeline._score_and_gate_preflight(payload)
         assert trace.session_id == "my-session-42"
 
-    def test_missing_session_id_uses_unknown(self):
-        """Missing session_id defaults to 'unknown' in _score_and_gate_preflight."""
+    def test_missing_session_id_generates_anon(self):
+        """Missing session_id gets an auto-generated anon-* ID from ToolCallEvent."""
         calls = []
 
         def spy_gate(req, ctx):
@@ -290,9 +290,8 @@ class TestSessionIdExtraction:
         pipeline = _make_pipeline(preflight=spy_gate)
         payload = {"tool_name": "x", "tool_input": {}}
         pipeline._score_and_gate_preflight(payload)
-        # The GateContext uses the session_id from payload (defaulting to "unknown")
-        # But the trace still uses whatever ToolCallEvent extracted
         assert len(calls) == 1
+        assert calls[0].startswith("anon-")
 
 
 # ─── GateContext State Tracking ───────────────────────────────────────────────

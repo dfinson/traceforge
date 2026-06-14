@@ -600,7 +600,7 @@ class GovernancePipeline:
                     self._record_denial(session_id, verdict)
                     return verdict
 
-        self._record_allow(session_id)
+        self._record_allow(session_id, tool_call_id=trace.tool_call_id)
         return Verdict.allow()
 
     def _run_postflight(
@@ -661,10 +661,12 @@ class GovernancePipeline:
         state._denied_count += 1
         state._prior_verdicts.append(verdict)  # deque(maxlen=100) auto-evicts
 
-    def _record_allow(self, session_id: str) -> None:
+    def _record_allow(self, session_id: str, *, tool_call_id: str | None = None) -> None:
         """Record an allow in session state."""
         state = self._ensure_gate_state(session_id)
         state._tool_call_count += 1
+        if tool_call_id:
+            state._prior_tool_call_ids.append(tool_call_id)  # deque(maxlen=100) auto-evicts
 
     def _ensure_gate_state(self, session_id: str):
         """Lazily create minimal session state for gate context tracking.
@@ -1693,11 +1695,12 @@ class GovernancePipeline:
         """Score a tool call and run the preflight gate chain. Thread-safe.
 
         Returns (trace, verdict) tuple. Verdict is ALLOW or DENY.
-        Session ID comes from payload["session_id"].
+        Session ID is derived from the trace (which normalizes from payload).
         """
-        session_id = payload.get("session_id", "unknown")
         with self._gate_lock:
             trace = self._score_event(payload)
+        # Use trace.session_id for consistency — it normalizes empty/missing values
+        session_id = trace.session_id
         verdict = self._run_preflight(trace, session_id=session_id)
         return trace, verdict
 

@@ -3,13 +3,13 @@
 Usage:
     from tracemill.sdk import Pipeline, Verdict, Decision
 
-    def my_preflight(payload, meta):
+    def my_preflight(event, meta):
         if meta.risk_assessment and meta.risk_assessment.score > 60:
             return Verdict.deny(f"score {meta.risk_assessment.score} exceeds threshold")
         return Verdict.allow()
 
-    def my_postflight(payload):
-        print(f"Tool {payload['tool_name']} returned: {payload['tool_output']}")
+    def my_postflight(event):
+        return Verdict.allow()  # audit only
 
     # From config (one call):
     pipeline = Pipeline.from_config(tool_preflight_gate=my_preflight)
@@ -32,14 +32,13 @@ if TYPE_CHECKING:
 from tracemill.governance.pipeline import GovernancePipeline as Pipeline  # noqa: E402
 from tracemill.sdk.verdict import (  # noqa: E402
     Decision,
-    GatePayload,
     PostflightGate,
     PreflightGate,
     Verdict,
     interpret_callback_result,
 )
 
-__all__ = ["Pipeline", "Verdict", "Decision", "PreflightGate", "PostflightGate", "GatePayload"]
+__all__ = ["Pipeline", "Verdict", "Decision", "PreflightGate", "PostflightGate"]
 
 
 def _default_db_path() -> str:

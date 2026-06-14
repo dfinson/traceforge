@@ -4,23 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Protocol, TypedDict, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-
-# ─── Payload Types ────────────────────────────────────────────────────────────
-
-
-class GatePayload(TypedDict, total=False):
-    """Payload passed to preflight and postflight gate callbacks.
-
-    All fields are present on both pre and post — tool_output is populated
-    after execution.
-    """
-
-    tool_name: str
-    tool_input: dict
-    tool_output: Any
-    session_id: str
+if TYPE_CHECKING:
+    from tracemill.governance.types import SessionEvent
 
 
 # ─── Decision & Verdict ───────────────────────────────────────────────────────
@@ -36,7 +23,7 @@ class Decision(Enum):
 
 @dataclass(frozen=True, slots=True)
 class Verdict:
-    """A gating decision returned by a tool_preflight_gate callback.
+    """A gating decision returned by a gate callback.
 
     Args:
         decision: ALLOW, DENY, or ESCALATE.
@@ -79,31 +66,31 @@ class Verdict:
 
 @runtime_checkable
 class PreflightGate(Protocol):
-    """Strongly-typed protocol for tool_preflight_gate callbacks.
+    """Protocol for tool_preflight_gate callbacks.
 
-    Receives the tool call payload and scoring metadata.
+    Receives the event and scoring metadata.
     Must return a Verdict (ALLOW, DENY, or ESCALATE).
     """
 
-    def __call__(self, payload: GatePayload, meta: Any) -> Verdict: ...
+    def __call__(self, event: "SessionEvent", meta: Any) -> Verdict: ...
 
 
 @runtime_checkable
 class PostflightGate(Protocol):
-    """Strongly-typed protocol for tool_postflight_gate callbacks.
+    """Protocol for tool_postflight_gate callbacks.
 
-    Receives the tool call payload including the execution result.
-    Must return a Verdict (typically ALLOW for audit-pass, DENY to flag retroactively).
+    Receives the event after execution.
+    Must return a Verdict.
     """
 
-    def __call__(self, payload: GatePayload) -> Verdict: ...
+    def __call__(self, event: "SessionEvent") -> Verdict: ...
 
 
-# ─── Interpretation ───────────────────────────────────────────────────────────
+# ─── Backwards Compat ─────────────────────────────────────────────────────────
 
 
 def interpret_callback_result(result: Any) -> Verdict:
-    """Normalize a callback return value into a Verdict.
+    """Normalize a legacy callback return value into a Verdict.
 
     Supports backwards-compat:
       - Verdict instance → passthrough
@@ -118,5 +105,4 @@ def interpret_callback_result(result: Any) -> Verdict:
         return Verdict.allow()
     if result is False:
         return Verdict.deny("denied by policy")
-    # Any other truthy value = allow
     return Verdict.allow()

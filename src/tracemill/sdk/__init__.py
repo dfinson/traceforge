@@ -1,14 +1,14 @@
 """Tracemill SDK — pipeline setup and gating.
 
 Usage:
-    from tracemill.sdk import Pipeline, Verdict, Decision
+    from tracemill.sdk import Pipeline, Trace, Verdict, Decision
 
-    def my_preflight(event, meta):
-        if meta.risk_assessment and meta.risk_assessment.score > 60:
-            return Verdict.deny(f"score {meta.risk_assessment.score} exceeds threshold")
+    def my_preflight(trace: Trace) -> Verdict:
+        if trace.risk_score and trace.risk_score > 60:
+            return Verdict.deny(f"score {trace.risk_score} exceeds threshold")
         return Verdict.allow()
 
-    def my_postflight(event):
+    def my_postflight(trace: Trace) -> Verdict:
         return Verdict.allow()  # audit only
 
     # From config (one call):
@@ -26,7 +26,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from tracemill.governance.results import SessionMeta
     from tracemill.sdk.verdict import PostflightGate, PreflightGate
 
 from tracemill.governance.pipeline import GovernancePipeline as Pipeline  # noqa: E402
@@ -37,8 +36,9 @@ from tracemill.sdk.verdict import (  # noqa: E402
     Verdict,
     interpret_callback_result,
 )
+from tracemill.trace import Trace  # noqa: E402
 
-__all__ = ["Pipeline", "Verdict", "Decision", "PreflightGate", "PostflightGate"]
+__all__ = ["Pipeline", "Trace", "Verdict", "Decision", "PreflightGate", "PostflightGate"]
 
 
 def _default_db_path() -> str:

@@ -7,7 +7,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from tracemill.governance.types import SessionEvent
+    from tracemill.trace import Trace
 
 
 # ─── Decision & Verdict ───────────────────────────────────────────────────────
@@ -68,22 +68,22 @@ class Verdict:
 class PreflightGate(Protocol):
     """Protocol for tool_preflight_gate callbacks.
 
-    Receives the event and scoring metadata.
+    Receives the fully-enriched Trace (identity + classification + assessment).
     Must return a Verdict (ALLOW, DENY, or ESCALATE).
     """
 
-    def __call__(self, event: "SessionEvent", meta: Any) -> Verdict: ...
+    def __call__(self, trace: "Trace") -> Verdict: ...
 
 
 @runtime_checkable
 class PostflightGate(Protocol):
     """Protocol for tool_postflight_gate callbacks.
 
-    Receives the event after execution.
+    Receives the Trace after tool execution.
     Must return a Verdict.
     """
 
-    def __call__(self, event: "SessionEvent") -> Verdict: ...
+    def __call__(self, trace: "Trace") -> Verdict: ...
 
 
 # ─── Backwards Compat ─────────────────────────────────────────────────────────

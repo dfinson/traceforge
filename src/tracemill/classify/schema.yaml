@@ -1,0 +1,251 @@
+# Tracemill Tier 1 Schema — Source of truth for all dimension types.
+# Codegen reads this to produce src/tracemill/_generated.py.
+# CI enforces: make types && git diff --exit-code
+openapi: "3.1.0"
+info:
+  title: Tracemill Taxonomy Schema
+  version: "1.0.0"
+  description: >
+    Defines the finite vocabulary for every typed dimension in the Trace pipeline.
+    Tier 2 knowledge-base YAMLs are validated against these enums at runtime.
+
+components:
+  schemas:
+
+    EventKind:
+      type: string
+      description: "Canonical event kinds in <domain>.<object>.<phase> grammar."
+      enum:
+        - agent.completed
+        - agent.failed
+        - agent.handoff
+        - agent.spawned
+        - browser.action
+        - browser.launched
+        - browser.result
+        - checkpoint.created
+        - checkpoint.restored
+        - command.completed
+        - command.failed
+        - command.output
+        - command.started
+        - file.created
+        - file.deleted
+        - file.edited
+        - file.read
+        - guardrail.failed
+        - guardrail.passed
+        - guardrail.started
+        - hook.completed
+        - hook.failed
+        - hook.started
+        - input.received
+        - input.requested
+        - knowledge.query.completed
+        - knowledge.query.started
+        - llm.call.completed
+        - llm.call.failed
+        - llm.call.started
+        - llm.output.chunk
+        - llm.thinking.chunk
+        - mcp.connection.completed
+        - mcp.connection.failed
+        - mcp.connection.started
+        - memory.query.completed
+        - memory.query.started
+        - memory.save.completed
+        - memory.save.started
+        - message.assistant
+        - message.assistant.chunk
+        - message.system
+        - message.user
+        - permission.denied
+        - permission.granted
+        - permission.requested
+        - planning.completed
+        - planning.failed
+        - planning.started
+        - raw
+        - reasoning.completed
+        - reasoning.started
+        - session.abort
+        - session.ended
+        - session.error
+        - session.idle
+        - session.info
+        - session.paused
+        - session.resumed
+        - session.started
+        - session.warning
+        - skill.invoked
+        - task.completed
+        - task.failed
+        - task.started
+        - telemetry.usage
+        - tool.call.completed
+        - tool.call.failed
+        - tool.call.started
+        - tool.output
+        - tool.progress
+        - tool.result.chunk
+        - tool.validation.failed
+        - turn.ended
+        - turn.skipped
+        - turn.started
+        - workflow.completed
+        - workflow.failed
+        - workflow.started
+
+    Mechanism:
+      type: string
+      description: "How the tool interacts with the environment."
+      enum:
+        - communication.system
+        - communication.user
+        - database
+        - database.nosql
+        - database.sql
+        - delegation.agent
+        - filesystem
+        - network.http
+        - process
+        - process.shell
+
+    Effect:
+      type: string
+      description: "What the tool does to state."
+      enum:
+        - destructive
+        - mutating
+        - read_only
+
+    Scope:
+      type: string
+      description: "What domain the action targets."
+      enum:
+        - artifact.build_output
+        - artifact.config
+        - artifact.container_image
+        - artifact.dependency
+        - artifact.documentation
+        - artifact.repository
+        - artifact.source_code
+        - artifact.test_code
+        - configuration.ci_cd
+        - configuration.dependency
+        - configuration.infrastructure
+        - external.api
+        - external.service
+        - state.deployment
+        - state.repository
+        - system.network
+        - system.os
+        - system.secrets
+
+    Role:
+      type: string
+      description: "What persona the tool fills."
+      enum:
+        - communicator.system_reporter
+        - communicator.user_prompt
+        - executor.container_runtime
+        - executor.script_runner
+        - modifier.file_editor
+        - orchestrator.ci_cd
+        - orchestrator.package_manager
+        - orchestrator.task_runner
+        - persistence.cache
+        - persistence.database
+        - persistence.version_control
+        - retriever.api_client
+        - retriever.file_browser
+        - retriever.search_index
+        - retriever.web_scraper
+        - validator.security_scanner
+        - validator.test_runner
+
+    Action:
+      type: string
+      description: "What verb the tool performs."
+      enum:
+        - analyze
+        - configure
+        - deliver
+        - deliver.push
+        - execute
+        - execute.run_script
+        - generate
+        - modify
+        - modify.edit
+        - modify.merge
+        - modify.rebase
+        - persist
+        - persist.commit
+        - persist.stage
+        - persist.write
+        - remove
+        - remove.delete
+        - retrieve
+        - retrieve.browse
+        - retrieve.diff
+        - retrieve.read
+        - retrieve.search
+        - validate
+        - validate.security_scan
+
+    Capability:
+      type: string
+      description: "What capabilities/risks the tool exposes."
+      enum:
+        - budget_pressure
+        - credential_exposure
+        - elevated_privilege
+        - filesystem_read
+        - filesystem_write
+        - human_interaction
+        - integrity_unverified
+        - mcp_drift
+        - network_inbound
+        - network_outbound
+        - pii_exposure
+        - subprocess
+        - uses_credentials
+
+    Structure:
+      type: string
+      description: "Structural patterns detected in the invocation."
+      enum:
+        - conditional
+        - ifc_violation
+        - interactive
+        - parallel
+        - phase_anomaly
+        - piped
+        - sequential
+        - tainted_flow
+
+    RiskBand:
+      type: string
+      description: "Risk severity tier."
+      enum:
+        - safe
+        - caution
+        - danger
+        - critical
+
+    Recommendation:
+      type: string
+      description: "Governance action to take."
+      enum:
+        - allow
+        - deny
+        - escalate
+        - warn
+
+    Decision:
+      type: string
+      description: "Gate verdict outcome."
+      enum:
+        - allow
+        - deny
+        - escalate

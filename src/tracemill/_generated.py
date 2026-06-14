@@ -1,6 +1,6 @@
 """Auto-generated from classify/schema.yaml — DO NOT EDIT.
 
-Generated at: 2026-06-14T09:10:51Z
+Generated at: 2026-06-14T09:20:53Z
 Re-generate: python scripts/generate_types.py
 """
 
@@ -90,6 +90,87 @@ EventKind = Literal[
     "workflow.failed",
     "workflow.started",
 ]
+EventKind_VALUES: frozenset[str] = frozenset({
+    "agent.completed",
+    "agent.failed",
+    "agent.handoff",
+    "agent.spawned",
+    "browser.action",
+    "browser.launched",
+    "browser.result",
+    "checkpoint.created",
+    "checkpoint.restored",
+    "command.completed",
+    "command.failed",
+    "command.output",
+    "command.started",
+    "file.created",
+    "file.deleted",
+    "file.edited",
+    "file.read",
+    "guardrail.failed",
+    "guardrail.passed",
+    "guardrail.started",
+    "hook.completed",
+    "hook.failed",
+    "hook.started",
+    "input.received",
+    "input.requested",
+    "knowledge.query.completed",
+    "knowledge.query.started",
+    "llm.call.completed",
+    "llm.call.failed",
+    "llm.call.started",
+    "llm.output.chunk",
+    "llm.thinking.chunk",
+    "mcp.connection.completed",
+    "mcp.connection.failed",
+    "mcp.connection.started",
+    "memory.query.completed",
+    "memory.query.started",
+    "memory.save.completed",
+    "memory.save.started",
+    "message.assistant",
+    "message.assistant.chunk",
+    "message.system",
+    "message.user",
+    "permission.denied",
+    "permission.granted",
+    "permission.requested",
+    "planning.completed",
+    "planning.failed",
+    "planning.started",
+    "raw",
+    "reasoning.completed",
+    "reasoning.started",
+    "session.abort",
+    "session.ended",
+    "session.error",
+    "session.idle",
+    "session.info",
+    "session.paused",
+    "session.resumed",
+    "session.started",
+    "session.warning",
+    "skill.invoked",
+    "task.completed",
+    "task.failed",
+    "task.started",
+    "telemetry.usage",
+    "tool.call.completed",
+    "tool.call.failed",
+    "tool.call.started",
+    "tool.output",
+    "tool.progress",
+    "tool.result.chunk",
+    "tool.validation.failed",
+    "turn.ended",
+    "turn.skipped",
+    "turn.started",
+    "workflow.completed",
+    "workflow.failed",
+    "workflow.started",
+})
 
 # How the tool interacts with the environment.
 Mechanism = Literal[
@@ -105,9 +186,23 @@ Mechanism = Literal[
     "process.shell",
     "unknown",
 ]
+Mechanism_VALUES: frozenset[str] = frozenset({
+    "communication.system",
+    "communication.user",
+    "database",
+    "database.nosql",
+    "database.sql",
+    "delegation.agent",
+    "filesystem",
+    "network.http",
+    "process",
+    "process.shell",
+    "unknown",
+})
 
 # What the tool does to state.
 Effect = Literal["destructive", "mutating", "read_only"]
+Effect_VALUES: frozenset[str] = frozenset({"destructive", "mutating", "read_only"})
 
 # What domain the action targets.
 Scope = Literal[
@@ -130,6 +225,26 @@ Scope = Literal[
     "system.os",
     "system.secrets",
 ]
+Scope_VALUES: frozenset[str] = frozenset({
+    "artifact.build_output",
+    "artifact.config",
+    "artifact.container_image",
+    "artifact.dependency",
+    "artifact.documentation",
+    "artifact.repository",
+    "artifact.source_code",
+    "artifact.test_code",
+    "configuration.ci_cd",
+    "configuration.dependency",
+    "configuration.infrastructure",
+    "external.api",
+    "external.service",
+    "state.deployment",
+    "state.repository",
+    "system.network",
+    "system.os",
+    "system.secrets",
+})
 
 # What persona the tool fills.
 Role = Literal[
@@ -151,34 +266,139 @@ Role = Literal[
     "validator.security_scanner",
     "validator.test_runner",
 ]
+Role_VALUES: frozenset[str] = frozenset({
+    "communicator.system_reporter",
+    "communicator.user_prompt",
+    "executor.container_runtime",
+    "executor.script_runner",
+    "modifier.file_editor",
+    "orchestrator.ci_cd",
+    "orchestrator.package_manager",
+    "orchestrator.task_runner",
+    "persistence.cache",
+    "persistence.database",
+    "persistence.version_control",
+    "retriever.api_client",
+    "retriever.file_browser",
+    "retriever.search_index",
+    "retriever.web_scraper",
+    "validator.security_scanner",
+    "validator.test_runner",
+})
 
 # What verb the tool performs.
 Action = Literal[
     "analyze",
+    "analyze.diff",
+    "analyze.measure",
+    "analyze.profile",
     "configure",
+    "configure.install",
+    "configure.provision",
+    "configure.setup",
     "deliver",
+    "deliver.deploy",
+    "deliver.publish",
     "deliver.push",
+    "deliver.release",
     "execute",
+    "execute.repl",
     "execute.run_script",
+    "execute.script",
+    "execute.service",
     "generate",
+    "generate.code",
+    "generate.documentation",
+    "generate.scaffold",
     "modify",
     "modify.edit",
     "modify.merge",
     "modify.rebase",
     "persist",
     "persist.commit",
+    "persist.install",
     "persist.stage",
     "persist.write",
     "remove",
+    "remove.clean",
     "remove.delete",
+    "remove.teardown",
+    "remove.uninstall",
     "retrieve",
     "retrieve.browse",
     "retrieve.diff",
+    "retrieve.query",
     "retrieve.read",
     "retrieve.search",
+    "transform",
+    "transform.bundle",
+    "transform.compile",
+    "transform.format",
+    "transform.refactor",
+    "transform.transpile",
     "validate",
+    "validate.build_check",
+    "validate.lint",
     "validate.security_scan",
+    "validate.test",
+    "validate.typecheck",
 ]
+Action_VALUES: frozenset[str] = frozenset({
+    "analyze",
+    "analyze.diff",
+    "analyze.measure",
+    "analyze.profile",
+    "configure",
+    "configure.install",
+    "configure.provision",
+    "configure.setup",
+    "deliver",
+    "deliver.deploy",
+    "deliver.publish",
+    "deliver.push",
+    "deliver.release",
+    "execute",
+    "execute.repl",
+    "execute.run_script",
+    "execute.script",
+    "execute.service",
+    "generate",
+    "generate.code",
+    "generate.documentation",
+    "generate.scaffold",
+    "modify",
+    "modify.edit",
+    "modify.merge",
+    "modify.rebase",
+    "persist",
+    "persist.commit",
+    "persist.install",
+    "persist.stage",
+    "persist.write",
+    "remove",
+    "remove.clean",
+    "remove.delete",
+    "remove.teardown",
+    "remove.uninstall",
+    "retrieve",
+    "retrieve.browse",
+    "retrieve.diff",
+    "retrieve.query",
+    "retrieve.read",
+    "retrieve.search",
+    "transform",
+    "transform.bundle",
+    "transform.compile",
+    "transform.format",
+    "transform.refactor",
+    "transform.transpile",
+    "validate",
+    "validate.build_check",
+    "validate.lint",
+    "validate.security_scan",
+    "validate.test",
+    "validate.typecheck",
+})
 
 # What capabilities/risks the tool exposes.
 Capability = Literal[
@@ -196,6 +416,21 @@ Capability = Literal[
     "subprocess",
     "uses_credentials",
 ]
+Capability_VALUES: frozenset[str] = frozenset({
+    "budget_pressure",
+    "credential_exposure",
+    "elevated_privilege",
+    "filesystem_read",
+    "filesystem_write",
+    "human_interaction",
+    "integrity_unverified",
+    "mcp_drift",
+    "network_inbound",
+    "network_outbound",
+    "pii_exposure",
+    "subprocess",
+    "uses_credentials",
+})
 
 # Structural patterns detected in the invocation.
 Structure = Literal[
@@ -208,14 +443,27 @@ Structure = Literal[
     "sequential",
     "tainted_flow",
 ]
+Structure_VALUES: frozenset[str] = frozenset({
+    "conditional",
+    "ifc_violation",
+    "interactive",
+    "parallel",
+    "phase_anomaly",
+    "piped",
+    "sequential",
+    "tainted_flow",
+})
 
 # Risk severity tier.
-RiskBand = Literal["caution", "critical", "danger", "safe"]
+RiskBand = Literal["caution", "critical", "danger", "safe", "unknown"]
+RiskBand_VALUES: frozenset[str] = frozenset({"caution", "critical", "danger", "safe", "unknown"})
 
 # Governance action to take.
 Recommendation = Literal["allow", "deny", "escalate", "warn"]
+Recommendation_VALUES: frozenset[str] = frozenset({"allow", "deny", "escalate", "warn"})
 
 # Gate verdict outcome.
 Decision = Literal["allow", "deny", "escalate"]
+Decision_VALUES: frozenset[str] = frozenset({"allow", "deny", "escalate"})
 
-__all__ = ["EventKind", "Mechanism", "Effect", "Scope", "Role", "Action", "Capability", "Structure", "RiskBand", "Recommendation", "Decision"]
+__all__ = ["EventKind", "Mechanism", "Effect", "Scope", "Role", "Action", "Capability", "Structure", "RiskBand", "Recommendation", "Decision", "EventKind_VALUES", "Mechanism_VALUES", "Effect_VALUES", "Scope_VALUES", "Role_VALUES", "Action_VALUES", "Capability_VALUES", "Structure_VALUES", "RiskBand_VALUES", "Recommendation_VALUES", "Decision_VALUES"]

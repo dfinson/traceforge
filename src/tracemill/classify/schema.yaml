@@ -170,29 +170,59 @@ components:
       description: "What verb the tool performs."
       enum:
         - analyze
+        - analyze.diff
+        - analyze.measure
+        - analyze.profile
         - configure
+        - configure.install
+        - configure.provision
+        - configure.setup
         - deliver
+        - deliver.deploy
+        - deliver.publish
         - deliver.push
+        - deliver.release
         - execute
+        - execute.repl
         - execute.run_script
+        - execute.script
+        - execute.service
         - generate
+        - generate.code
+        - generate.documentation
+        - generate.scaffold
         - modify
         - modify.edit
         - modify.merge
         - modify.rebase
         - persist
         - persist.commit
+        - persist.install
         - persist.stage
         - persist.write
         - remove
+        - remove.clean
         - remove.delete
+        - remove.teardown
+        - remove.uninstall
         - retrieve
         - retrieve.browse
         - retrieve.diff
+        - retrieve.query
         - retrieve.read
         - retrieve.search
+        - transform
+        - transform.bundle
+        - transform.compile
+        - transform.format
+        - transform.refactor
+        - transform.transpile
         - validate
+        - validate.build_check
+        - validate.lint
         - validate.security_scan
+        - validate.test
+        - validate.typecheck
 
     Capability:
       type: string
@@ -233,6 +263,7 @@ components:
         - caution
         - danger
         - critical
+        - unknown
 
     Recommendation:
       type: string

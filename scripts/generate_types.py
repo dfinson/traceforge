@@ -64,12 +64,22 @@ def main() -> int:
         if desc:
             lines.append(f"# {desc}")
         lines.append(type_line)
+
+        # Emit frozenset of valid values for runtime validation
+        values_name = f"{name}_VALUES"
+        values_items = ", ".join(f'"{v}"' for v in sorted(enum_values))
+        values_line = f"{values_name}: frozenset[str] = frozenset({{{values_items}}})"
+        if len(values_line) > 100:
+            vitems = ",\n    ".join(f'"{v}"' for v in sorted(enum_values))
+            values_line = f"{values_name}: frozenset[str] = frozenset({{\n    {vitems},\n}})"
+        lines.append(values_line)
         lines.append("")
 
     # Add __all__
     all_names = [name for name in schemas if schemas[name].get("enum")]
     all_str = ", ".join(f'"{n}"' for n in all_names)
-    lines.append(f"__all__ = [{all_str}]")
+    values_str = ", ".join(f'"{n}_VALUES"' for n in all_names)
+    lines.append(f"__all__ = [{all_str}, {values_str}]")
     lines.append("")
 
     OUTPUT_PATH.write_text("\n".join(lines), encoding="utf-8")

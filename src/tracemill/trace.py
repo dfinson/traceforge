@@ -14,23 +14,43 @@ from __future__ import annotations
 import copy
 from dataclasses import dataclass, field, replace
 from datetime import datetime
+from types import MappingProxyType
 from typing import Any
 
 from tracemill._generated import (
     Action,
+    Action_VALUES,
     Capability,
+    Capability_VALUES,
     Decision,
     Effect,
+    Effect_VALUES,
     EventKind,
+    EventKind_VALUES,
     Mechanism,
+    Mechanism_VALUES,
     Recommendation,
+    Recommendation_VALUES,
     RiskBand,
+    RiskBand_VALUES,
     Role,
+    Role_VALUES,
     Scope,
+    Scope_VALUES,
     Structure,
+    Structure_VALUES,
 )
 
 SCHEMA_VERSION = "1"
+
+
+def _check(value: str, allowed: frozenset[str], field_name: str) -> None:
+    """Raise ValueError if value is not in the allowed set."""
+    if value not in allowed:
+        raise ValueError(
+            f"Invalid {field_name}: {value!r}. "
+            f"Must be one of: {sorted(allowed)}"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,7 +72,7 @@ class Trace:
     session_id: str
     timestamp: datetime
     source_key: str
-    raw_event: dict[str, Any] = field(repr=False, compare=False)
+    raw_event: dict[str, Any] | MappingProxyType = field(repr=False, compare=False)
 
     # ─── Classification (enricher fills) ──────────────────────────────────────
 
@@ -79,6 +99,38 @@ class Trace:
     # ─── Serialization version ────────────────────────────────────────────────
 
     schema_version: str = SCHEMA_VERSION
+
+    # ─── Post-init: freeze raw_event + validate enum fields ───────────────────
+
+    def __post_init__(self) -> None:
+        # Freeze raw_event: deep-copy if mutable dict, then wrap as read-only proxy
+        raw = self.raw_event
+        if isinstance(raw, dict) and not isinstance(raw, MappingProxyType):
+            frozen = MappingProxyType(copy.deepcopy(raw))
+            object.__setattr__(self, "raw_event", frozen)
+
+        # Validate enum scalars
+        _check(self.kind, EventKind_VALUES, "kind")
+        if self.mechanism is not None:
+            _check(self.mechanism, Mechanism_VALUES, "mechanism")
+        if self.effect is not None:
+            _check(self.effect, Effect_VALUES, "effect")
+        if self.risk_band is not None:
+            _check(self.risk_band, RiskBand_VALUES, "risk_band")
+        if self.suggested_action is not None:
+            _check(self.suggested_action, Recommendation_VALUES, "suggested_action")
+
+        # Validate enum tuples
+        for v in self.scope:
+            _check(v, Scope_VALUES, "scope")
+        for v in self.role:
+            _check(v, Role_VALUES, "role")
+        for v in self.action:
+            _check(v, Action_VALUES, "action")
+        for v in self.capability:
+            _check(v, Capability_VALUES, "capability")
+        for v in self.structure:
+            _check(v, Structure_VALUES, "structure")
 
     # ─── Lifecycle checks ─────────────────────────────────────────────────────
 
@@ -152,12 +204,16 @@ class Trace:
         source_key: str,
         raw_event: dict[str, Any],
     ) -> Trace:
-        """Factory that deep-copies raw_event to ensure thread safety."""
+        """Factory — identical to direct construction.
+
+        Kept as a named constructor for readability. __post_init__ handles
+        deep-copy + freeze of raw_event on all construction paths.
+        """
         return cls(
             id=id,
             kind=kind,
             session_id=session_id,
             timestamp=timestamp,
             source_key=source_key,
-            raw_event=copy.deepcopy(raw_event),
+            raw_event=raw_event,
         )

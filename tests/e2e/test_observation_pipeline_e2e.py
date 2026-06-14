@@ -353,7 +353,13 @@ class TestFullPipelineAllFrameworks:
             "tool": "bash",
             "input": '{"command": "whoami"}',
         },
-        # maf.yaml excluded: uses 'spans' field not supported by FrameworkMapping schema
+        # maf.yaml: OTel span mapping — no events dict, but loads without error.
+        # Sends span name as type → falls through to default_kind (raw).
+        "maf.yaml": {
+            "type": "agents.adapter.process",
+            "timestamp": "2025-06-01T10:00:00Z",
+            "activity_type": "message",
+        },
     }
 
     @pytest.mark.parametrize("yaml_name", sorted(FRAMEWORK_EVENTS.keys()))

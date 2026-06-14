@@ -61,6 +61,13 @@ class EventMapping(StrictModel):
     payload: dict[str, str] = Field(default_factory=dict)  # field_name → dot-path
 
 
+class SpanMapping(StrictModel):
+    """Mapping for an OTel span name → canonical kind + attribute extraction."""
+
+    kind: str  # canonical EventKind string
+    attributes: dict[str, str] = Field(default_factory=dict)  # payload_field → otel_attr_key
+
+
 class FrameworkMapping(StrictModel):
     """Declarative mapping config for a framework's JSON events."""
 
@@ -72,6 +79,7 @@ class FrameworkMapping(StrictModel):
     default_kind: str = EventKind.RAW  # kind for unmapped event types
     preprocessor: str | None = None  # registered preprocessor name (optional)
     events: dict[str, EventMapping] = Field(default_factory=dict)  # raw_type → mapping
+    spans: dict[str, SpanMapping] = Field(default_factory=dict)  # otel_span_name → mapping
 
 
 # ─── Adapter ─────────────────────────────────────────────────────────────────

@@ -487,7 +487,7 @@ class GovernancePipeline:
             # Assessment
             risk_score=risk.score if risk else None,
             risk_band=risk.level if risk else None,
-            recommendation=rec.recommended_action.value if rec else None,
+            suggested_action=rec.recommended_action.value if rec else None,
             reason=rec.reason_code if rec else None,
         )
 

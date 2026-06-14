@@ -11,9 +11,10 @@ classify/schema.yaml — see _generated.py.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from typing import Any
+from typing import Any, Mapping
 
 from tracemill._generated import (
     Action,
@@ -29,6 +30,8 @@ from tracemill._generated import (
     Structure,
 )
 
+SCHEMA_VERSION = "1"
+
 
 @dataclass(frozen=True, slots=True)
 class Trace:
@@ -37,7 +40,7 @@ class Trace:
     Lifecycle:
         1. Adapter creates with identity fields + raw_event
         2. Enricher fills classification fields (mechanism, effect, etc.)
-        3. Scorer fills assessment fields (risk_score, recommendation, etc.)
+        3. Scorer fills assessment fields (risk_score, suggested_action, etc.)
         4. Gate callback receives the fully-enriched Trace
         5. Sinks persist the final Trace
     """
@@ -66,8 +69,74 @@ class Trace:
 
     risk_score: int | None = None
     risk_band: RiskBand | None = None
-    recommendation: Recommendation | None = None
+    suggested_action: Recommendation | None = None
     reason: str | None = None
+
+    # ─── Extensible attributes (experimental dimensions) ──────────────────────
+
+    labels: tuple[tuple[str, str], ...] = ()
+
+    # ─── Serialization version ────────────────────────────────────────────────
+
+    schema_version: str = SCHEMA_VERSION
+
+    # ─── Convenience properties for gate authors ──────────────────────────────
+
+    @property
+    def tool_name(self) -> str | None:
+        """The canonical tool name (or raw tool_name from the event)."""
+        return self.canonical_tool or self.raw_event.get("tool_name")
+
+    @property
+    def tool_input(self) -> dict[str, Any]:
+        """The tool's input arguments from the raw event."""
+        return self.raw_event.get("tool_input", {})
+
+    @property
+    def is_destructive(self) -> bool:
+        """True if the tool effect is destructive."""
+        return self.effect == "destructive"
+
+    @property
+    def is_mutating(self) -> bool:
+        """True if the tool effect is mutating or destructive."""
+        return self.effect in ("mutating", "destructive")
+
+    @property
+    def is_read_only(self) -> bool:
+        """True if the tool effect is read_only."""
+        return self.effect == "read_only"
+
+    @property
+    def is_network(self) -> bool:
+        """True if the mechanism involves network access."""
+        return self.mechanism is not None and self.mechanism.startswith("network")
+
+    @property
+    def is_shell(self) -> bool:
+        """True if the mechanism is process.shell."""
+        return self.mechanism == "process.shell"
+
+    @property
+    def requires_escalation(self) -> bool:
+        """True if the scorer recommends escalation or denial."""
+        return self.suggested_action in ("escalate", "deny")
+
+    def has_capability(self, cap: str) -> bool:
+        """Check if this trace has a specific capability flag."""
+        return cap in self.capability
+
+    # ─── Lifecycle checks ─────────────────────────────────────────────────────
+
+    @property
+    def classified(self) -> bool:
+        """True if enricher has run."""
+        return self.mechanism is not None
+
+    @property
+    def assessed(self) -> bool:
+        """True if scorer has run."""
+        return self.risk_score is not None
 
     # ─── Mutation helpers (frozen dataclass — returns new instance) ────────────
 
@@ -101,7 +170,7 @@ class Trace:
         *,
         risk_score: int | None = None,
         risk_band: RiskBand | None = None,
-        recommendation: Recommendation | None = None,
+        suggested_action: Recommendation | None = None,
         reason: str | None = None,
     ) -> Trace:
         """Return a new Trace with assessment fields populated."""
@@ -109,16 +178,32 @@ class Trace:
             self,
             risk_score=risk_score,
             risk_band=risk_band,
-            recommendation=recommendation,
+            suggested_action=suggested_action,
             reason=reason,
         )
 
-    @property
-    def classified(self) -> bool:
-        """True if enricher has run."""
-        return self.mechanism is not None
+    def with_labels(self, **kwargs: str) -> Trace:
+        """Return a new Trace with additional labels for experimental dimensions."""
+        new_labels = self.labels + tuple(kwargs.items())
+        return replace(self, labels=new_labels)
 
-    @property
-    def assessed(self) -> bool:
-        """True if scorer has run."""
-        return self.risk_score is not None
+    @classmethod
+    def create(
+        cls,
+        *,
+        id: str,
+        kind: EventKind,
+        session_id: str,
+        timestamp: datetime,
+        source_key: str,
+        raw_event: dict[str, Any],
+    ) -> Trace:
+        """Factory that deep-copies raw_event to ensure thread safety."""
+        return cls(
+            id=id,
+            kind=kind,
+            session_id=session_id,
+            timestamp=timestamp,
+            source_key=source_key,
+            raw_event=copy.deepcopy(raw_event),
+        )

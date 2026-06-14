@@ -47,9 +47,9 @@ def pipeline(store, rules, engine):
 
 def _action(trace: Trace) -> RecommendedAction:
     """Extract recommended action from Trace."""
-    if trace.recommendation is None:
+    if trace.suggested_action is None:
         return RecommendedAction.ALLOW
-    return RecommendedAction(trace.recommendation)
+    return RecommendedAction(trace.suggested_action)
 
 
 def _score(trace: Trace) -> int:
@@ -482,7 +482,7 @@ class TestResultStructure:
         assert hasattr(result, "effect")
         assert hasattr(result, "risk_score")
         assert hasattr(result, "risk_band")
-        assert hasattr(result, "recommendation")
+        assert hasattr(result, "suggested_action")
         assert hasattr(result, "reason")
         assert hasattr(result, "raw_event")
 

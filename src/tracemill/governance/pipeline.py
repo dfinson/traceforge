@@ -1482,7 +1482,7 @@ class GovernancePipeline:
             }
             meta = pipeline.score_tool_call(payload)
             if tool_preflight_gate is not None:
-                verdict = interpret_callback_result(tool_preflight_gate(payload, meta))
+                verdict = tool_preflight_gate(payload, meta)
                 if not verdict.allowed:
                     return False  # CrewAI blocks execution
             return None  # allow
@@ -1507,8 +1507,6 @@ class GovernancePipeline:
         """
         from langchain_core.tools.base import ToolException
 
-        from tracemill.sdk.verdict import interpret_callback_result
-
         pipeline = self
         original_run = tool._run
 
@@ -1521,7 +1519,7 @@ class GovernancePipeline:
             }
             meta = pipeline.score_tool_call(payload)
             if tool_preflight_gate is not None:
-                verdict = interpret_callback_result(tool_preflight_gate(payload, meta))
+                verdict = tool_preflight_gate(payload, meta)
                 if not verdict.allowed:
                     raise ToolException(f"Denied: {verdict.reason}")
             result = original_run(*args, **kwargs)
@@ -1541,8 +1539,6 @@ class GovernancePipeline:
         """
         from langgraph.prebuilt import ToolNode
 
-        from tracemill.sdk.verdict import interpret_callback_result
-
         pipeline = self
 
         def _tracemill_wrapper(request, execute):
@@ -1555,7 +1551,7 @@ class GovernancePipeline:
             }
             meta = pipeline.score_tool_call(payload)
             if tool_preflight_gate is not None:
-                verdict = interpret_callback_result(tool_preflight_gate(payload, meta))
+                verdict = tool_preflight_gate(payload, meta)
                 if not verdict.allowed:
                     return ToolMessage(
                         content=f"Denied: {verdict.reason}",
@@ -1598,7 +1594,7 @@ class GovernancePipeline:
             }
             meta = pipeline.score_tool_call(payload)
             if tool_preflight_gate is not None:
-                verdict = interpret_callback_result(tool_preflight_gate(payload, meta))
+                verdict = tool_preflight_gate(payload, meta)
                 if not verdict.allowed:
                     return verdict, {
                         "type": "tool_result",
@@ -1652,7 +1648,7 @@ class GovernancePipeline:
             }
             meta = pipeline.score_tool_call(payload)
             if tool_preflight_gate is not None:
-                verdict = interpret_callback_result(tool_preflight_gate(payload, meta))
+                verdict = tool_preflight_gate(payload, meta)
                 if not verdict.allowed:
                     return verdict, {
                         "role": "tool",
@@ -1683,7 +1679,6 @@ class GovernancePipeline:
         Sets context.terminate = True to stop the auto-invoke loop.
         Requires: semantic-kernel installed.
         """
-        from tracemill.sdk.verdict import interpret_callback_result
 
         pipeline = self
 
@@ -1696,7 +1691,7 @@ class GovernancePipeline:
             }
             meta = pipeline.score_tool_call(payload)
             if tool_preflight_gate is not None:
-                verdict = interpret_callback_result(tool_preflight_gate(payload, meta))
+                verdict = tool_preflight_gate(payload, meta)
                 if not verdict.allowed:
                     from semantic_kernel.functions import FunctionResult
 
@@ -1722,8 +1717,6 @@ class GovernancePipeline:
         """
         from autogen_core.tools import StaticWorkbench
 
-        from tracemill.sdk.verdict import interpret_callback_result
-
         pipeline = self
         _tool_preflight_gate = tool_preflight_gate
         _tool_postflight_gate = tool_postflight_gate
@@ -1739,7 +1732,7 @@ class GovernancePipeline:
                 }
                 meta = pipeline.score_tool_call(payload)
                 if _tool_preflight_gate is not None:
-                    verdict = interpret_callback_result(_tool_preflight_gate(payload, meta))
+                    verdict = _tool_preflight_gate(payload, meta)
                     if not verdict.allowed:
                         return ToolResult(
                             name=name,
@@ -1766,8 +1759,6 @@ class GovernancePipeline:
             from smolagents import ToolCallingAgent
             agent_cls = ToolCallingAgent
 
-        from tracemill.sdk.verdict import interpret_callback_result
-
         pipeline = self
         _tool_preflight_gate = tool_preflight_gate
         _tool_postflight_gate = tool_postflight_gate
@@ -1781,7 +1772,7 @@ class GovernancePipeline:
                 }
                 meta = pipeline.score_tool_call(payload)
                 if _tool_preflight_gate is not None:
-                    verdict = interpret_callback_result(_tool_preflight_gate(payload, meta))
+                    verdict = _tool_preflight_gate(payload, meta)
                     if not verdict.allowed:
                         return f"[BLOCKED] {verdict.reason}"
                 result = super().execute_tool_call(tool_name, arguments)
@@ -1798,7 +1789,6 @@ class GovernancePipeline:
         The model sees the denial as the tool's result and can adapt.
         Requires: pydantic-ai installed.
         """
-        from tracemill.sdk.verdict import interpret_callback_result
 
         pipeline = self
 
@@ -1813,7 +1803,7 @@ class GovernancePipeline:
             }
             meta = pipeline.score_tool_call(payload)
             if tool_preflight_gate is not None:
-                verdict = interpret_callback_result(tool_preflight_gate(payload, meta))
+                verdict = tool_preflight_gate(payload, meta)
                 if not verdict.allowed:
                     raise SkipToolExecution(f"Denied: {verdict.reason}")
 
@@ -1834,7 +1824,6 @@ class GovernancePipeline:
         The model receives the rejection message.
         Requires: openai-agents installed.
         """
-        from tracemill.sdk.verdict import interpret_callback_result
 
         pipeline = self
 
@@ -1849,7 +1838,7 @@ class GovernancePipeline:
             }
             meta = pipeline.score_tool_call(payload)
             if tool_preflight_gate is not None:
-                verdict = interpret_callback_result(tool_preflight_gate(payload, meta))
+                verdict = tool_preflight_gate(payload, meta)
                 if not verdict.allowed:
                     return GuardrailFunctionOutput(
                         output_info=verdict.reason,

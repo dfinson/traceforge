@@ -32,15 +32,14 @@ if TYPE_CHECKING:
 from tracemill.governance.pipeline import GovernancePipeline as Pipeline  # noqa: E402
 from tracemill.sdk.verdict import (  # noqa: E402
     Decision,
+    GatePayload,
     PostflightGate,
     PreflightGate,
-    ToolCallPayload,
-    ToolResultPayload,
     Verdict,
     interpret_callback_result,
 )
 
-__all__ = ["Pipeline", "Verdict", "Decision", "PreflightGate", "PostflightGate", "ToolCallPayload", "ToolResultPayload"]
+__all__ = ["Pipeline", "Verdict", "Decision", "PreflightGate", "PostflightGate", "GatePayload"]
 
 
 def _default_db_path() -> str:

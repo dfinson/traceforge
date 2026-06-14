@@ -138,13 +138,10 @@ class GateServer:
 
     def _process_gate_request(self, payload: dict) -> dict:
         """Score and gate a tool call, returning verdict as dict."""
-        from tracemill.sdk.verdict import interpret_callback_result
-
         meta = self._pipeline.score_tool_call(payload)
         if self._tool_preflight_gate is not None:
-            verdict = interpret_callback_result(self._tool_preflight_gate(payload, meta))
+            verdict = self._tool_preflight_gate(payload, meta)
         else:
-            # No callback = allow everything
             from tracemill.sdk.verdict import Verdict
             verdict = Verdict.allow()
 

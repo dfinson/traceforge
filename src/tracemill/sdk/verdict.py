@@ -10,16 +10,12 @@ from typing import Any, Protocol, TypedDict, runtime_checkable
 # ─── Payload Types ────────────────────────────────────────────────────────────
 
 
-class ToolCallPayload(TypedDict):
-    """Payload passed to preflight/postflight gate callbacks."""
+class GatePayload(TypedDict, total=False):
+    """Payload passed to preflight and postflight gate callbacks.
 
-    tool_name: str
-    tool_input: dict
-    session_id: str
-
-
-class ToolResultPayload(TypedDict):
-    """Payload passed to postflight gate callbacks (includes output)."""
+    All fields are present on both pre and post — tool_output is populated
+    after execution.
+    """
 
     tool_name: str
     tool_input: dict
@@ -85,11 +81,11 @@ class Verdict:
 class PreflightGate(Protocol):
     """Strongly-typed protocol for tool_preflight_gate callbacks.
 
-    Receives the tool call payload and scoring metadata, returns a Verdict
-    (or bool/None for backwards compat via interpret_callback_result).
+    Receives the tool call payload and scoring metadata.
+    Must return a Verdict (ALLOW, DENY, or ESCALATE).
     """
 
-    def __call__(self, payload: ToolCallPayload, meta: Any) -> Verdict | bool | None: ...
+    def __call__(self, payload: GatePayload, meta: Any) -> Verdict: ...
 
 
 @runtime_checkable
@@ -97,10 +93,10 @@ class PostflightGate(Protocol):
     """Strongly-typed protocol for tool_postflight_gate callbacks.
 
     Receives the tool call payload including the execution result.
-    Return value is ignored (fire-and-forget audit/logging).
+    Must return a Verdict (typically ALLOW for audit-pass, DENY to flag retroactively).
     """
 
-    def __call__(self, payload: ToolResultPayload) -> None: ...
+    def __call__(self, payload: GatePayload) -> Verdict: ...
 
 
 # ─── Interpretation ───────────────────────────────────────────────────────────

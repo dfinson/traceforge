@@ -90,7 +90,7 @@ tracemill was extracted from CodePlane as a standalone library. CodePlane's obse
 │                       STORAGE SINKS                                     │
 │                                                                        │
 │  CallbackSink (user-provided async functions)                          │
-│  ⬜ SqliteSink     ⬜ JsonlSink     ⬜ S3Sink     ⬜ OtelSink          │
+│  SqliteSink     JsonlSink     S3Sink     OtelSink     WebhookSink     │
 │                                                                        │
 │  Sinks implement: on_event(), on_span(), on_usage(), flush(), close()  │
 └────────────────────────────────────────────────────────────────────────┘
@@ -704,10 +704,12 @@ class StorageSink(ABC):
 | Sink | Status | Description |
 |------|--------|-------------|
 | `CallbackSink` | ✅ Done | Delegates to user-provided async callables. For SDK/library consumers that embed tracemill in Python. |
-| `SqliteSink` | ⬜ Planned | Local SQLite storage with WAL mode, schema migration, batch inserts. Configured via `type: sqlite` in YAML. |
-| `JsonlSink` | ⬜ Planned | Append-only JSONL files with optional size-based rotation. Configured via `type: jsonl` in YAML. |
-| `S3Sink` | ⬜ Planned | Cloud object storage with buffered upload and key formatting. Configured via `type: s3` in YAML. |
-| `OtelSink` | ⬜ Planned | Export spans to an OpenTelemetry collector. Configured via `type: otel` in YAML. |
+| `SqliteSink` | ✅ Done | Local SQLite storage with WAL mode, schema migration, batch inserts. Configured via `type: sqlite` in YAML. |
+| `JsonlSink` | ✅ Done | Append-only JSONL files with optional size-based rotation. Configured via `type: jsonl` in YAML. |
+| `S3Sink` | ✅ Done | Cloud object storage with buffered upload and key formatting. Configured via `type: s3` in YAML. Requires `boto3` (optional dep). |
+| `OtelSink` | ✅ Done | Export spans to an OpenTelemetry collector. Configured via `type: otel` in YAML. |
+| `ConsoleSink` | ✅ Done | Pretty-print governance results to terminal. Configured via `type: console` in YAML. |
+| `WebhookSink` | ✅ Done | POST governance results to a webhook URL. Configured via `type: webhook` in YAML. |
 
 ### Configuration examples
 

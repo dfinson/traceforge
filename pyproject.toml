@@ -27,6 +27,12 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff>=0.4",
 ]
+s3 = [
+    "boto3>=1.28",
+]
+full = [
+    "boto3>=1.28",
+]
 
 [project.scripts]
 tracemill = "tracemill.cli:main"

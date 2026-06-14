@@ -1745,17 +1745,18 @@ class GovernancePipeline:
         @before_tool_call
         def _tracemill_hook(ctx):
             sid = getattr(getattr(ctx, "crew", None), "fingerprint", None) or "crewai"
+            call_id = getattr(ctx, "tool_call_id", None) or f"{ctx.tool_name}:{id(ctx)}"
             payload = {
                 "tool_name": ctx.tool_name,
                 "tool_input": ctx.tool_input,
                 "session_id": sid,
-                "tool_call_id": getattr(ctx, "tool_call_id", None),
+                "tool_call_id": call_id,
             }
             trace, verdict = pipeline._score_and_gate_preflight(payload)
             if verdict.denied:
                 return False
             # Stash for postflight (bounded)
-            call_key = f"{sid}:{ctx.tool_name}:{id(ctx)}"
+            call_key = f"{sid}:{call_id}"
             if len(_traces) >= _MAX_PENDING:
                 # Evict oldest entry
                 _traces.pop(next(iter(_traces)), None)
@@ -1765,7 +1766,8 @@ class GovernancePipeline:
         @after_tool_call
         def _tracemill_postflight(ctx):
             sid = getattr(getattr(ctx, "crew", None), "fingerprint", None) or "crewai"
-            call_key = f"{sid}:{ctx.tool_name}:{id(ctx)}"
+            call_id = getattr(ctx, "tool_call_id", None) or f"{ctx.tool_name}:{id(ctx)}"
+            call_key = f"{sid}:{call_id}"
             trace = _traces.pop(call_key, None)
             if trace is None:
                 return
@@ -1880,7 +1882,19 @@ class GovernancePipeline:
                 )
 
             t0 = time.monotonic()
-            result = execute(request)
+            error = None
+            try:
+                result = execute(request)
+            except Exception as exc:
+                error = str(exc)
+                duration_ms = int((time.monotonic() - t0) * 1000)
+                pipeline._enforce_postflight(
+                    trace, session_id=sid,
+                    duration_ms=duration_ms,
+                    error=error,
+                )
+                raise
+
             duration_ms = int((time.monotonic() - t0) * 1000)
             pv = pipeline._enforce_postflight(
                 trace, session_id=sid,
@@ -1920,7 +1934,7 @@ class GovernancePipeline:
             sid = getattr(kernel, "service_id", None) or "semantic_kernel"
             payload = {
                 "tool_name": context.function.name,
-                "tool_input": dict(context.arguments),
+                "tool_input": dict(context.arguments) if context.arguments else {},
                 "session_id": sid,
             }
             trace, verdict = pipeline._score_and_gate_preflight(payload)
@@ -1976,15 +1990,22 @@ class GovernancePipeline:
                     raise MiddlewareTermination(f"Denied: {verdict.reason}")
 
                 t0 = time.monotonic()
-                await call_next(context)
-                duration_ms = int((time.monotonic() - t0) * 1000)
+                error = None
+                try:
+                    await call_next(context)
+                except Exception as exc:
+                    error = str(exc)
+                    raise
+                finally:
+                    duration_ms = int((time.monotonic() - t0) * 1000)
+                    result = getattr(context, "result", None)
+                    pv = pipeline._enforce_postflight(
+                        trace, session_id=sid,
+                        output={"result": str(result)} if result and not error else None,
+                        duration_ms=duration_ms,
+                        error=error,
+                    )
 
-                result = getattr(context, "result", None)
-                pv = pipeline._enforce_postflight(
-                    trace, session_id=sid,
-                    output={"result": str(result)} if result else None,
-                    duration_ms=duration_ms,
-                )
                 from tracemill.sdk.gate_types import PostflightAction
                 if pv.action == PostflightAction.TERMINATE:
                     raise MiddlewareTermination(f"Session terminated: {pv.reason}")
@@ -2020,13 +2041,21 @@ class GovernancePipeline:
                     return f"[BLOCKED] {verdict.reason}"
 
                 t0 = time.monotonic()
-                result = super().execute_tool_call(tool_name, arguments)
-                duration_ms = int((time.monotonic() - t0) * 1000)
-                pv = pipeline._enforce_postflight(
-                    trace, session_id=sid,
-                    output={"result": str(result)},
-                    duration_ms=duration_ms,
-                )
+                error = None
+                result = None
+                try:
+                    result = super().execute_tool_call(tool_name, arguments)
+                except Exception as exc:
+                    error = str(exc)
+                    raise
+                finally:
+                    duration_ms = int((time.monotonic() - t0) * 1000)
+                    pv = pipeline._enforce_postflight(
+                        trace, session_id=sid,
+                        output={"result": str(result)} if error is None else None,
+                        duration_ms=duration_ms,
+                        error=error,
+                    )
                 from tracemill.sdk.gate_types import PostflightAction
                 if pv.action == PostflightAction.TERMINATE:
                     raise RuntimeError(f"Session terminated by policy: {pv.reason}")
@@ -2046,6 +2075,8 @@ class GovernancePipeline:
         """
 
         pipeline = self
+        # External trace stash keyed by (run_id, tool_name) — avoids touching frozen ctx
+        _pending: dict[str, "EventTrace"] = {}
 
         @agent.tool_hook("before")
         async def _tracemill_before_tool(ctx, tool_def, args):
@@ -2060,15 +2091,16 @@ class GovernancePipeline:
             trace, verdict = pipeline._score_and_gate_preflight(payload)
             if verdict.denied:
                 raise SkipToolExecution(f"Denied: {verdict.reason}")
-            ctx._tracemill_trace = trace
-            ctx._tracemill_session_id = sid
+            stash_key = f"{sid}:{tool_def.name}:{id(args)}"
+            _pending[stash_key] = trace
 
         @agent.tool_hook("after")
         async def _tracemill_after_tool(ctx, tool_def, args, result):
-            trace = getattr(ctx, "_tracemill_trace", None)
+            sid = str(getattr(ctx, "run_id", None) or "pydantic_ai")
+            stash_key = f"{sid}:{tool_def.name}:{id(args)}"
+            trace = _pending.pop(stash_key, None)
             if trace is None:
                 return
-            sid = getattr(ctx, "_tracemill_session_id", "pydantic_ai")
             pv = pipeline._enforce_postflight(
                 trace, session_id=sid,
                 output={"result": str(result)} if result else None,
@@ -2080,8 +2112,12 @@ class GovernancePipeline:
     def gate_openai_agents(self, agent):
         """Register tracemill as an OpenAI Agents SDK input guardrail.
 
-        Blocking: raises GuardrailTripwireTriggered which rejects the tool call.
+        Blocking: raises GuardrailTripwireTriggered which rejects the entire turn.
         Session ID: from agent.name or "openai_agents".
+
+        NOTE: Input guardrails fire on the agent's input message, NOT on individual
+        tool calls. For per-tool-call gating, use needs_approval=True on tools and
+        integrate via the approval handler pattern (see gating spec §5b).
         """
 
         pipeline = self

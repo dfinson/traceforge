@@ -362,3 +362,122 @@ class TestS3SinkSpanUsageAutoFlush:
         mock_client.put_object.assert_not_called()
         await sink.on_usage(make_usage())
         mock_client.put_object.assert_called_once()
+
+
+class TestS3SinkSessionIdSanitization:
+    """Test that session_id is sanitized in object keys."""
+
+    def test_path_traversal_sanitized(self):
+        from tracemill.sinks.s3 import S3Sink
+
+        with patch("tracemill.sinks.s3._require_boto3") as mock_req:
+            mock_req.return_value = MagicMock()
+            sink = S3Sink(bucket="b", prefix="")
+
+        key = sink._make_object_key("../../etc/passwd")
+        first_segment = key.split("/")[0]
+        # Only safe chars: alphanumeric, dash, underscore
+        assert ".." not in first_segment
+        assert "/" not in first_segment
+        # Slashes and dots all replaced with underscore
+        assert first_segment == "______etc_passwd"
+
+    def test_unicode_sanitized(self):
+        from tracemill.sinks.s3 import S3Sink
+
+        with patch("tracemill.sinks.s3._require_boto3") as mock_req:
+            mock_req.return_value = MagicMock()
+            sink = S3Sink(bucket="b", prefix="")
+
+        key = sink._make_object_key("session-über-café")
+        assert "session-" in key
+        # Non-ASCII replaced with underscores
+        assert "ü" not in key
+        assert "é" not in key
+
+    def test_long_session_id_truncated(self):
+        from tracemill.sinks.s3 import S3Sink
+
+        with patch("tracemill.sinks.s3._require_boto3") as mock_req:
+            mock_req.return_value = MagicMock()
+            sink = S3Sink(bucket="b", prefix="")
+
+        long_id = "a" * 300
+        key = sink._make_object_key(long_id)
+        # First segment should be at most 128 chars
+        first_segment = key.split("/")[0]
+        assert len(first_segment) <= 128
+
+
+class TestS3SinkMixedContent:
+    """Test buffer with mixed event types."""
+
+    async def test_mixed_events_spans_usage_in_one_flush(self):
+        from tracemill.sinks.s3 import S3Sink
+
+        mock_boto3_mod = MagicMock()
+        mock_client = MagicMock()
+        mock_boto3_mod.client.return_value = mock_client
+
+        with patch("tracemill.sinks.s3._require_boto3", return_value=mock_boto3_mod):
+            sink = S3Sink(bucket="b", buffer_size=100, flush_interval=9999)
+
+        sink._client = mock_client
+
+        await sink.on_event(make_event(session_id="mixed"))
+        await sink.on_span(make_span(session_id="mixed"))
+        await sink.on_usage(make_usage(session_id="mixed"))
+
+        assert len(sink._buffer) == 3
+
+        await sink.flush()
+
+        call_kwargs = mock_client.put_object.call_args[1]
+        body = call_kwargs["Body"].decode("utf-8")
+        lines = [json.loads(line) for line in body.strip().split("\n")]
+        assert len(lines) == 3
+        # First is an event (has "kind"), second is span, third is usage
+        assert "kind" in lines[0]
+        assert lines[1]["type"] == "span"
+        assert lines[2]["type"] == "usage"
+
+
+class TestS3SinkIdempotency:
+    """Test double-close and double-flush are safe."""
+
+    async def test_double_close_is_safe(self):
+        from tracemill.sinks.s3 import S3Sink
+
+        mock_boto3_mod = MagicMock()
+        mock_client = MagicMock()
+        mock_boto3_mod.client.return_value = mock_client
+
+        with patch("tracemill.sinks.s3._require_boto3", return_value=mock_boto3_mod):
+            sink = S3Sink(bucket="b", buffer_size=100)
+
+        sink._client = mock_client
+        await sink.on_event(make_event())
+
+        await sink.close()
+        await sink.close()  # second close should be no-op
+
+        # put_object called only once (first close flushes, second is empty)
+        mock_client.put_object.assert_called_once()
+
+    async def test_double_flush_is_safe(self):
+        from tracemill.sinks.s3 import S3Sink
+
+        mock_boto3_mod = MagicMock()
+        mock_client = MagicMock()
+        mock_boto3_mod.client.return_value = mock_client
+
+        with patch("tracemill.sinks.s3._require_boto3", return_value=mock_boto3_mod):
+            sink = S3Sink(bucket="b", buffer_size=100)
+
+        sink._client = mock_client
+        await sink.on_event(make_event())
+
+        await sink.flush()
+        await sink.flush()  # second flush on empty buffer
+
+        mock_client.put_object.assert_called_once()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from enum import StrEnum
 
 from tracemill.trace import EventTrace
@@ -91,8 +92,6 @@ def _format_event_verbose(event: SessionEvent) -> str:
         if event.metadata.governance:
             lines.append(f"  governance: {event.metadata.governance}")
     # Truncated raw payload excerpt
-    import json
-
     payload_str = json.dumps(event.payload, default=str)
     if len(payload_str) > 200:
         payload_str = payload_str[:200] + "..."
@@ -148,8 +147,6 @@ def _format_trace_verbose(trace: EventTrace) -> str:
     if trace.reason:
         lines.append(f"  reason:      {trace.reason}")
     # Raw event excerpt
-    import json
-
     raw_str = json.dumps(dict(trace.raw_event) if trace.raw_event else {}, default=str)
     if len(raw_str) > 200:
         raw_str = raw_str[:200] + "..."

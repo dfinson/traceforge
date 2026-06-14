@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from datetime import datetime, timezone
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_BUFFER_SIZE = 100
 _DEFAULT_FLUSH_INTERVAL_SECONDS = 60.0
+_SAFE_SESSION_RE = re.compile(r"[^a-zA-Z0-9_\-]")
 
 
 def _require_boto3():
@@ -75,12 +77,17 @@ class S3Sink(StorageSink):
         return self._client
 
     def _make_object_key(self, session_id: str) -> str:
-        """Generate the S3 object key for the current flush."""
+        """Generate the S3 object key for the current flush.
+
+        Sanitizes session_id to prevent unexpected characters in S3 keys.
+        """
+        sanitized = _SAFE_SESSION_RE.sub("_", session_id)[:128]
+        sanitized = sanitized or "unknown"
         now = datetime.now(timezone.utc)
         date_str = now.strftime("%Y-%m-%d")
         timestamp_str = now.strftime("%Y%m%dT%H%M%S")
         short_uuid = uuid.uuid4().hex[:8]
-        return f"{self._prefix}{session_id}/{date_str}/{timestamp_str}-{short_uuid}.jsonl"
+        return f"{self._prefix}{sanitized}/{date_str}/{timestamp_str}-{short_uuid}.jsonl"
 
     def _serialize_event(self, event: SessionEvent) -> dict:
         return {

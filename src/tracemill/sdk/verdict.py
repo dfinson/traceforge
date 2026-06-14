@@ -8,10 +8,11 @@ from typing import Any
 
 
 class Decision(Enum):
-    """The binary outcome of a gating decision."""
+    """The outcome of a gating decision."""
 
     ALLOW = "allow"
     DENY = "deny"
+    ESCALATE = "escalate"
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,8 +20,8 @@ class Verdict:
     """A gating decision returned by a tool_gate_policy callback.
 
     Args:
-        decision: ALLOW or DENY.
-        reason: Human-readable reason propagated to the LLM on denial.
+        decision: ALLOW, DENY, or ESCALATE.
+        reason: Human-readable reason propagated to the LLM on denial/escalation.
     """
 
     decision: Decision
@@ -34,6 +35,10 @@ class Verdict:
     def denied(self) -> bool:
         return self.decision == Decision.DENY
 
+    @property
+    def escalated(self) -> bool:
+        return self.decision == Decision.ESCALATE
+
     @staticmethod
     def allow() -> Verdict:
         """Convenience factory for ALLOW."""
@@ -43,6 +48,11 @@ class Verdict:
     def deny(reason: str = "") -> Verdict:
         """Convenience factory for DENY with reason."""
         return Verdict(decision=Decision.DENY, reason=reason)
+
+    @staticmethod
+    def escalate(reason: str = "") -> Verdict:
+        """Convenience factory for ESCALATE — defer to human or higher-level policy."""
+        return Verdict(decision=Decision.ESCALATE, reason=reason)
 
 
 def interpret_callback_result(result: Any) -> Verdict:

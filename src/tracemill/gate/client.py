@@ -103,8 +103,11 @@ def gate_from_stdin(*, format: str = "claude-code") -> None:
         return
 
     # Output verdict
-    if verdict.get("decision") == "deny":
+    decision = verdict.get("decision", "allow")
+    if decision == "deny":
         _output_deny(format, verdict.get("reason", ""))
+    elif decision == "escalate":
+        _output_deny(format, verdict.get("reason", "") or "escalated — requires human approval")
     else:
         _output_allow(format)
 

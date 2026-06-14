@@ -1482,7 +1482,7 @@ class GovernancePipeline:
             meta = pipeline.score_tool_call(payload)
             if tool_gate_policy is not None:
                 verdict = interpret_callback_result(tool_gate_policy(payload, meta))
-                if verdict.denied:
+                if not verdict.allowed:
                     return False  # CrewAI blocks execution
             return None  # allow
 
@@ -1510,7 +1510,7 @@ class GovernancePipeline:
             meta = pipeline.score_tool_call(payload)
             if tool_gate_policy is not None:
                 verdict = interpret_callback_result(tool_gate_policy(payload, meta))
-                if verdict.denied:
+                if not verdict.allowed:
                     raise ToolException(f"Denied: {verdict.reason}")
             return original_run(*args, **kwargs)
 
@@ -1541,7 +1541,7 @@ class GovernancePipeline:
             meta = pipeline.score_tool_call(payload)
             if tool_gate_policy is not None:
                 verdict = interpret_callback_result(tool_gate_policy(payload, meta))
-                if verdict.denied:
+                if not verdict.allowed:
                     return ToolMessage(
                         content=f"Denied: {verdict.reason}",
                         tool_call_id=request.tool_call["id"],
@@ -1578,7 +1578,7 @@ class GovernancePipeline:
             meta = pipeline.score_tool_call(payload)
             if tool_gate_policy is not None:
                 verdict = interpret_callback_result(tool_gate_policy(payload, meta))
-                if verdict.denied:
+                if not verdict.allowed:
                     return verdict, {
                         "type": "tool_result",
                         "tool_use_id": block.id,
@@ -1616,7 +1616,7 @@ class GovernancePipeline:
             meta = pipeline.score_tool_call(payload)
             if tool_gate_policy is not None:
                 verdict = interpret_callback_result(tool_gate_policy(payload, meta))
-                if verdict.denied:
+                if not verdict.allowed:
                     return verdict, {
                         "role": "tool",
                         "tool_call_id": tc.id,
@@ -1647,7 +1647,7 @@ class GovernancePipeline:
             meta = pipeline.score_tool_call(payload)
             if tool_gate_policy is not None:
                 verdict = interpret_callback_result(tool_gate_policy(payload, meta))
-                if verdict.denied:
+                if not verdict.allowed:
                     from semantic_kernel.functions import FunctionResult
 
                     context.function_result = FunctionResult(
@@ -1686,7 +1686,7 @@ class GovernancePipeline:
                 meta = pipeline.score_tool_call(payload)
                 if _tool_gate_policy is not None:
                     verdict = interpret_callback_result(_tool_gate_policy(payload, meta))
-                    if verdict.denied:
+                    if not verdict.allowed:
                         return ToolResult(
                             name=name,
                             result=[TextResultContent(content=f"Denied: {verdict.reason}")],
@@ -1724,7 +1724,7 @@ class GovernancePipeline:
                 meta = pipeline.score_tool_call(payload)
                 if _tool_gate_policy is not None:
                     verdict = interpret_callback_result(_tool_gate_policy(payload, meta))
-                    if verdict.denied:
+                    if not verdict.allowed:
                         return f"[BLOCKED] {verdict.reason}"
                 return super().execute_tool_call(tool_name, arguments)
 
@@ -1753,7 +1753,7 @@ class GovernancePipeline:
             meta = pipeline.score_tool_call(payload)
             if tool_gate_policy is not None:
                 verdict = interpret_callback_result(tool_gate_policy(payload, meta))
-                if verdict.denied:
+                if not verdict.allowed:
                     raise SkipToolExecution(f"Denied: {verdict.reason}")
 
     def attach_openai_agents(self, agent, *, session_id: str = "sdk", tool_gate_policy=None):
@@ -1780,7 +1780,7 @@ class GovernancePipeline:
             meta = pipeline.score_tool_call(payload)
             if tool_gate_policy is not None:
                 verdict = interpret_callback_result(tool_gate_policy(payload, meta))
-                if verdict.denied:
+                if not verdict.allowed:
                     return GuardrailFunctionOutput(
                         output_info=verdict.reason,
                         tripwire_triggered=True,

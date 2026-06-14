@@ -1,0 +1,45 @@
+# Continue.dev — YAML mapping for tracemill
+#
+# Continue.dev stores full session conversations in:
+#   ~/.continue/sessions/{sessionId}.json
+#
+# The "continue" preprocessor flattens the history array into per-message
+# dicts with a synthesized "block_type" discriminator.
+#
+# Source: continuedev/continue (core/util/history.ts)
+# Verified against: Continue.dev session JSON structure
+
+framework: continue
+framework_version: "1.x"
+ingestion_mode: file_watch
+type_field: block_type
+default_kind: raw
+preprocessor: continue
+
+events:
+  # ── User messages ─────────────────────────────────────────────────────────
+  user.message:
+    kind: message.user
+    payload:
+      content: content
+
+  # ── Assistant messages ────────────────────────────────────────────────────
+  assistant.message:
+    kind: message.assistant
+    payload:
+      content: content
+
+  # ── Tool calls ────────────────────────────────────────────────────────────
+  assistant.tool_use:
+    kind: tool.call.started
+    payload:
+      tool_call_id: tool_call_id
+      tool_name: tool_name
+      arguments: arguments
+
+  # ── Tool results ──────────────────────────────────────────────────────────
+  tool.result:
+    kind: tool.call.completed
+    payload:
+      tool_call_id: tool_call_id
+      result: content

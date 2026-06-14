@@ -10,6 +10,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
+    "click>=8.1",
     "httpx>=0.25",
     "pydantic>=2.0",
     "pyyaml>=6.0",
@@ -27,6 +28,9 @@ dev = [
     "ruff>=0.4",
 ]
 
+[project.scripts]
+tracemill = "tracemill.cli:main"
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
@@ -37,3 +41,10 @@ line-length = 100
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tracemill"]
+
+[dependency-groups]
+dev = [
+    "datamodel-code-generator>=0.63.0",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.4.0",
+]

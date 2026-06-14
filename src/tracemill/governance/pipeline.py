@@ -5,12 +5,24 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from enum import StrEnum
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Callable, Literal
+
+from tracemill.governance.results import (
+    Evidence,
+    EvidencePointer,
+    EscalationContext,
+    Phase3Result,
+    RecommendationResult,
+    RecommendedAction,
+    RiskRecommendation,
+    SessionMeta,
+    TransformSuggestion,
+)
 
 if TYPE_CHECKING:
+    import tracemill.types
+
     from tracemill.classify.config import ClassificationEngine
     from tracemill.classify.core import Classification
     from tracemill.classify.risk import RiskAssessment
@@ -29,14 +41,9 @@ if TYPE_CHECKING:
         ToolCallEvent,
         ToolResultEvent,
     )
-
-
-class RecommendedAction(StrEnum):
-    ALLOW = "allow"
-    WARN = "warn"
-    ESCALATE = "escalate"
-    DENY = "deny"
-    TRANSFORM = "transform"
+    from tracemill.sdk.gate_policy import GatePolicy
+    from tracemill.sdk.gate_types import GateContext, PostflightVerdict, ToolCallRequest, ToolCallResult
+    from tracemill.sdk.verdict import PostflightGate, PreflightGate, Verdict
 
 
 def _decode_budget_dims(raw: list | None) -> tuple[tuple[str, int], ...]:
@@ -52,105 +59,15 @@ def _decode_budget_dims(raw: list | None) -> tuple[tuple[str, int], ...]:
     return tuple(result)
 
 
-@dataclass(frozen=True)
-class TransformSuggestion:
-    """Materialized by Phase 3 from TransformTemplate + event-specific data."""
-    target_kind: str  # "shell_flag", "shell_arg", "tool_arg", "file_content"
-    path: str  # AST node path (shell) or JSONPath (mcp tool args)
-    original: str
-    replacement: str | None  # None = suggest removal
-    rationale: str
-    confidence: str = "medium"  # "high", "medium", "low"
+def _import_dotted(dotted_path: str):
+    """Import a callable from a dotted module path (e.g. 'myapp.policies.my_policy')."""
+    module_path, _, attr_name = dotted_path.rpartition(".")
+    if not module_path:
+        raise ImportError(f"Invalid dotted path: {dotted_path!r} (need module.attr)")
+    import importlib
+    module = importlib.import_module(module_path)
+    return getattr(module, attr_name)
 
-
-@dataclass(frozen=True)
-class EscalationContext:
-    """Rich metadata for escalate/deny — full classification context."""
-    canonical_id: str
-    classification: "Classification"
-    recommended_action: "RecommendedAction"
-    reason_code: str
-    mitre_techniques: tuple[str, ...]
-    drift: "DriftAssessment | None"
-    budget_snapshot: "BudgetSnapshot | None"
-    pii_taint: bool
-    ifc_violations: int
-    tool_name: str
-    tool_args_summary: str  # Sanitized — no secrets
-    session_id: str
-    timestamp: datetime
-
-
-@dataclass(frozen=True)
-class EvidencePointer:
-    """What triggered this evidence."""
-    event_id: str
-    rule_id: str
-    detector: str
-    payload_pointer: str | None = None
-
-
-@dataclass(frozen=True)
-class Evidence:
-    """Emitted for warn/escalate/deny recommendations."""
-    canonical_id: str
-    timestamp: datetime
-    session_id: str
-    mechanism: str
-    effect: str | None
-    scope: tuple[str, ...]
-    role: tuple[str, ...]
-    action: tuple[str, ...]
-    capability: tuple[str, ...]
-    structure: tuple[str, ...]
-    source_labels: tuple[str, ...]
-    recommended_action: RecommendedAction
-    risk_score: int
-    risk_factors: tuple[str, ...]
-    mitre_techniques: tuple[str, ...]
-    pointers: tuple[EvidencePointer, ...]
-    escalation: EscalationContext | None = None
-
-
-@dataclass(frozen=True)
-class RiskRecommendation:
-    """Full recommendation with canonical identity."""
-    recommended_action: RecommendedAction
-    assessment: "RiskAssessment"
-    reason_code: str
-    canonical_id: str
-    message: str | None = None
-    transform: TransformSuggestion | None = None
-
-
-@dataclass(frozen=True)
-class RecommendationResult:
-    """Phase 3 output envelope."""
-    recommendation: RiskRecommendation
-    evidence: Evidence | None = None
-
-
-@dataclass(frozen=True)
-class Phase3Result:
-    """Always produced by Phase 3."""
-    risk_assessment: "RiskAssessment"
-    recommendation_result: RecommendationResult | None = None
-
-
-@dataclass(frozen=True)
-class SessionMeta:
-    """Full classification output. Attached to event payload under `_governance` key.
-
-    For lifecycle events (session_start/end), Phase 2/3 fields are None.
-    canonical_id is accessed via recommendation.canonical_id (no separate field).
-    """
-    classification: "Classification | None"
-    risk_assessment: "RiskAssessment | None"
-    recommendation: RiskRecommendation | None = None
-    budget_snapshot: "BudgetSnapshot | None" = None
-    drift: "DriftAssessment | None" = None
-    mcp_alerts: tuple = ()  # tuple[MCPIntegrityAlert, ...]
-    evidence: Evidence | None = None
 
 
 class GovernancePipeline:
@@ -164,19 +81,736 @@ class GovernancePipeline:
         rules: "list[Rule]",
         engine: "ClassificationEngine",
         thresholds: "BudgetThresholds | None" = None,
+        project_root: str | None = None,
+        policy: "GatePolicy | None" = None,
     ) -> None:
+        import threading
+
         self._store = store
         self._labeler = labeler
         self._budget = budget_tracker
         self._rules = rules
         self._engine = engine
         self._thresholds = thresholds
+        self._project_root = project_root
+        self.policy: "GatePolicy | None" = policy
+        self._gate_lock = threading.Lock()
         self._states: dict[str, "SessionState"] = {}
         self._write_failures: dict[str, int] = {}  # session_id → consecutive failure count
         self._MAX_WRITE_FAILURES = 10
         self._phase23_attempts: dict[str, int] = {}  # source_event_key → attempt count
         self._phase23_session_keys: dict[str, set[str]] = {}  # session_id → set of event keys with attempts
         self._MAX_PHASE23_ATTEMPTS = 3
+
+    @classmethod
+    def create(
+        cls,
+        config: "GovernanceConfig | None" = None,
+        *,
+        policy: "GatePolicy | None" = None,
+    ) -> "GovernancePipeline":
+        """Construct a ready-to-use pipeline from config.
+
+        Usage::
+
+            from tracemill.governance.pipeline import GovernancePipeline
+            from tracemill.sdk import GatePolicy
+
+            # Zero-config (all defaults)
+            pipeline = GovernancePipeline.create()
+
+            # With gate policy
+            policy = GatePolicy().preflight(my_gate)
+            pipeline = GovernancePipeline.create(policy=policy)
+
+        Args:
+            config: GovernanceConfig instance. Defaults to GovernanceConfig()
+                    (in-memory DB, PII scanning on, no budget caps).
+            policy: Optional GatePolicy with registered gates.
+        """
+        from pathlib import Path
+
+        from tracemill.classify.config import get_default_engine
+        from tracemill.config.models import GovernanceConfig
+        from tracemill.governance.budget import BudgetThresholds, BudgetTracker
+        from tracemill.governance.labeler import GovernanceLabeler
+        from tracemill.governance.persistence import SystemStore
+        from tracemill.governance.rules import parse_rules
+
+        if config is None:
+            config = GovernanceConfig()
+
+        store = SystemStore(config.db_path or ":memory:")
+        engine = get_default_engine()
+
+        # Rules: custom path or bundled defaults
+        if config.rules_path:
+            rules_path = Path(config.rules_path)
+        else:
+            rules_path = Path(__file__).parent.parent / "classify" / "data" / "recommendation_rules.yaml"
+        rules = parse_rules(rules_path)
+
+        # Budget thresholds from config
+        thresholds = BudgetThresholds(
+            max_tool_calls=config.budget.max_tool_calls,
+            max_by_effect=config.budget.max_by_effect,
+            max_by_capability=config.budget.max_by_capability,
+            max_by_scope=config.budget.max_by_scope,
+        )
+
+        # PII scanner
+        pii_scanner = None
+        if config.pii_scanning:
+            from tracemill.governance.pii import PIIScanner
+            pii_scanner = PIIScanner()
+
+        instance = cls(
+            store=store,
+            labeler=GovernanceLabeler(pii_scanner=pii_scanner),
+            budget_tracker=BudgetTracker(thresholds=thresholds),
+            rules=rules,
+            engine=engine,
+            thresholds=thresholds,
+            policy=policy,
+        )
+        instance._project_root = config.project_root
+        return instance
+
+    @classmethod
+    def from_config(cls, path=None, *, policy: "GatePolicy | None" = None) -> "GovernancePipeline":
+        """Create a fully-configured pipeline from a tracemill.yaml file.
+
+        Args:
+            path: Path to tracemill.yaml. None uses standard discovery
+                  (TRACEMILL_CONFIG env, ./tracemill.yaml, ~/.tracemill/config.yaml).
+            policy: GatePolicy override. If None, loads the preflight gate from config's
+                  dotted import path (governance.tool_preflight_gate) into a new policy.
+
+        Usage:
+            pipeline = Pipeline.from_config()
+            pipeline = Pipeline.from_config(policy=my_policy)
+        """
+        import os
+
+        from tracemill.config.loader import load_config
+
+        old_env = os.environ.get("TRACEMILL_CONFIG")
+        if path is not None:
+            os.environ["TRACEMILL_CONFIG"] = str(path)
+        try:
+            config = load_config()
+        finally:
+            if path is not None:
+                if old_env is None:
+                    os.environ.pop("TRACEMILL_CONFIG", None)
+                else:
+                    os.environ["TRACEMILL_CONFIG"] = old_env
+
+        instance = cls.create(config.governance)
+
+        # Resolve policy: explicit arg > config dotted path > None
+        if policy is not None:
+            instance.policy = policy
+        elif config.governance.tool_preflight_gate:
+            from tracemill.sdk.gate_policy import GatePolicy
+            gate_fn = _import_dotted(config.governance.tool_preflight_gate)
+            auto_policy = GatePolicy().preflight(gate_fn)
+            instance.policy = auto_policy
+
+        return instance
+
+    def context_from_session_event(self, event: "tracemill.types.SessionEvent") -> "EnrichmentContext":
+        """Bridge: convert an enriched SessionEvent (from adapters/Enricher) into an EnrichmentContext.
+
+        This is the canonical path for observation pipeline events. The Enricher
+        has already classified the event and stored the result in event.metadata.
+        We extract that classification and build the governance context.
+        """
+        from tracemill.governance.types import EnrichmentContext, ToolCallEvent
+
+        # Extract classification (already computed by Enricher)
+        classification = event.metadata.classification
+        if classification is None:
+            from tracemill.classify.core import Classification, Mechanism
+            classification = Classification(mechanism=Mechanism.UNKNOWN, effect=None)
+
+        # Build governance ToolCallEvent from SessionEvent fields
+        tool_name = event.payload.get("tool_name", "")
+        arguments = event.payload.get("arguments", {})
+        server_namespace = event.payload.get("server_namespace")
+
+        import json as _json
+        tool_args_json = _json.dumps(arguments, default=str) if isinstance(arguments, dict) else str(arguments)
+
+        gov_event = ToolCallEvent(
+            event_id=event.id,
+            session_id=event.session_id,
+            timestamp=event.timestamp,
+            source_event_key=event.id,
+            span_id=event.metadata.span_id or event.id,
+            tool_name=tool_name,
+            server_namespace=server_namespace,
+            tool_args_json=tool_args_json,
+            source_event_id=None,
+            mcp_server_name=event.payload.get("mcp_server_name") or server_namespace,
+            tool_description=event.payload.get("tool_description"),
+            tool_schema_json=event.payload.get("tool_schema_json"),
+        )
+
+        # Build command analysis for shell tools
+        command = ""
+        if isinstance(arguments, dict):
+            command = arguments.get("command", "") or arguments.get("cmd", "")
+        elif isinstance(arguments, str):
+            command = arguments
+        command_analysis = self._build_command_analysis(command) if command else None
+
+        # Derive engine literal
+        mech_str = (classification.mechanism.value if hasattr(classification.mechanism, "value")
+                    else str(classification.mechanism)).lower()
+        if "shell" in mech_str or "process" in mech_str:
+            engine_literal: Literal["shell", "mcp", "coding"] = "shell"
+        elif "mcp" in mech_str:
+            engine_literal = "mcp"
+        else:
+            engine_literal = "coding"
+
+        return EnrichmentContext(
+            event=gov_event,
+            base_classification=classification,
+            command_analysis=command_analysis,
+            session_state=None,
+            mcp_profiles=None,
+            project_root=self._project_root,
+            engine=engine_literal,
+            drift_baseline=None,
+            mcp_profile_key=server_namespace,
+        )
+
+    def enrich_event(self, event: "ToolCallEvent") -> "EnrichmentContext":
+        """Classify a governance ToolCallEvent and build its EnrichmentContext.
+
+        Used by the assess pathway (raw dict → ToolCallEvent.from_dict → here).
+        For observation pipeline events, use context_from_session_event instead.
+        """
+        import json as _json
+
+        from tracemill.classify.tools import classify_tool, normalize_tool_name
+        from tracemill.governance.types import EnrichmentContext
+
+        tool_name = event.tool_name
+        server_namespace = event.server_namespace
+
+        # MCP namespace synthesis
+        classify_name = tool_name
+        if server_namespace and not tool_name.startswith("mcp__"):
+            prefix = f"{server_namespace}__"
+            base = tool_name[len(prefix):] if tool_name.startswith(prefix) else tool_name
+            classify_name = f"mcp__{server_namespace}__{base}"
+
+        canonical = normalize_tool_name(classify_name, engine=self._engine)
+        is_shell = canonical == "shell"
+
+        if is_shell:
+            tool_input = _json.loads(event.tool_args_json) if event.tool_args_json else {}
+            command = tool_input.get("command", "") or tool_input.get("cmd", "") if isinstance(tool_input, dict) else ""
+            classification = self._classify_shell_for_assess(tool_name, command)
+            command_analysis = self._build_command_analysis(command) if command else None
+        else:
+            classification = classify_tool(classify_name, engine=self._engine)
+            command_analysis = None
+
+        # Derive engine literal
+        mech_str = (classification.mechanism.value if hasattr(classification.mechanism, "value")
+                    else str(classification.mechanism)).lower()
+        if "shell" in mech_str or "process" in mech_str:
+            engine_literal = "shell"
+        elif "mcp" in mech_str:
+            engine_literal = "mcp"
+        else:
+            engine_literal = "coding"
+
+        return EnrichmentContext(
+            event=event,
+            base_classification=classification,
+            command_analysis=command_analysis,
+            session_state=None,
+            mcp_profiles=None,
+            project_root=self._project_root,
+            engine=engine_literal,
+            drift_baseline=None,
+            mcp_profile_key=server_namespace,
+        )
+
+    def _classify_shell_for_assess(self, tool_name: str, command: str):
+        """Shell dialect dispatch for assessment."""
+        from tracemill.classify.cmd import classify_cmd_command
+        from tracemill.classify.coding import CodingMechanism
+        from tracemill.classify.core import Classification
+        from tracemill.classify.powershell import classify_powershell_command
+        from tracemill.classify.shell import classify_shell
+
+        if not command:
+            return Classification(mechanism=CodingMechanism.PROCESS_SHELL, effect=None)
+        lower = tool_name.lower()
+        if lower in ("powershell", "pwsh"):
+            return classify_powershell_command(command, engine=self._engine)
+        if lower == "cmd":
+            return classify_cmd_command(command, engine=self._engine)
+        return classify_shell(command, engine=self._engine)
+
+    def _build_command_analysis(self, command: str):
+        """Build CommandAnalysis using the shell classifier's unwrap logic."""
+        import shlex
+
+        from tracemill.classify.shell import _unwrap_binary
+        from tracemill.governance.types import CommandAnalysis, PipeSegment
+
+        if not command or not command.strip():
+            return None
+        try:
+            tokens = shlex.split(command)
+        except ValueError:
+            tokens = command.split()
+        if not tokens:
+            return None
+
+        binary, _subcmd, flags, _caps = _unwrap_binary(tokens, engine=self._engine)
+        targets = tuple(t for t in tokens[1:] if not t.startswith("-") and t != binary)
+
+        pipe_segments = None
+        if "|" in command and "||" not in command and "|&" not in command:
+            try:
+                lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+                lexer.whitespace_split = False
+                all_tokens = list(lexer)
+                if "|" in all_tokens:
+                    segments: list[PipeSegment] = []
+                    current: list[str] = []
+                    for tok in all_tokens:
+                        if tok == "|":
+                            if current:
+                                b, _s, f, _c = _unwrap_binary(current, engine=self._engine)
+                                t = tuple(x for x in current[1:] if not x.startswith("-") and x != b)
+                                segments.append(PipeSegment(binary=b or current[0], flags=tuple(f), targets=t))
+                            current = []
+                        else:
+                            current.append(tok)
+                    if current:
+                        b, _s, f, _c = _unwrap_binary(current, engine=self._engine)
+                        t = tuple(x for x in current[1:] if not x.startswith("-") and x != b)
+                        segments.append(PipeSegment(binary=b or current[0], flags=tuple(f), targets=t))
+                    if len(segments) > 1:
+                        pipe_segments = tuple(segments)
+            except ValueError:
+                pass
+
+        return CommandAnalysis(
+            command=command,
+            binary=binary or tokens[0],
+            flags=tuple(flags),
+            targets=targets,
+            pipe_segments=pipe_segments,
+        )
+
+    def score_tool_call(self, payload: dict) -> "EventTrace":
+        """Score a pending tool call against current session state.
+
+        Pure scoring — returns a fully-enriched EventTrace. Does NOT fire any callbacks.
+        Downstream apps decide what to do with the result.
+
+        Args:
+            payload: Dict with at minimum:
+                - ``tool_name``: str
+                - ``tool_input``: dict
+                - ``session_id``: str
+              Optional:
+                - ``server_namespace``: str
+                - ``project_root``: str
+
+        Returns:
+            EventTrace — the unified pipeline type with classification + assessment.
+        """
+        return self._score_event(payload)
+
+    def _score_event(self, payload: dict) -> "EventTrace":
+        """Internal: build event from dict, score it, return EventTrace."""
+        from tracemill.governance.types import ToolCallEvent
+        from tracemill.trace import EventTrace
+
+        event = ToolCallEvent.from_dict(payload)
+        try:
+            ctx = self.enrich_event(event)
+        except Exception as exc:
+            meta = self._fail_closed(exc)
+            return self._meta_to_trace(payload, event, meta, kind="tool.call.started")
+
+        try:
+            meta = self.preflight_event(ctx)
+        except Exception as exc:
+            meta = self._fail_closed(exc, classification=ctx.base_classification)
+            return self._meta_to_trace(payload, event, meta, kind="tool.call.started")
+
+        self._persist_score(event.source_event_key, event.session_id, meta)
+        return self._meta_to_trace(payload, event, meta, kind="tool.call.started")
+
+    def _meta_to_trace(self, payload: dict, event: "ToolCallEvent", meta: "SessionMeta", *, kind: str = "tool.call.started") -> "EventTrace":
+        """Convert internal pipeline types into a unified EventTrace."""
+        import uuid
+
+        from tracemill.trace import EventTrace
+
+        cls = meta.classification
+        risk = meta.risk_assessment
+        rec = meta.recommendation
+        raw = payload if isinstance(payload, dict) else {}
+
+        return EventTrace(
+            id=event.event_id,
+            kind=kind,
+            session_id=event.session_id,
+            tool_call_id=raw.get("tool_call_id") or str(uuid.uuid4()),
+            timestamp=event.timestamp,
+            source_key=event.source_event_key,
+            raw_event=raw,
+            parent_tool_call_id=raw.get("parent_tool_call_id"),
+            # Tool identity (gen_ai.tool.* aligned)
+            tool_name=raw.get("tool_name"),
+            tool_input=raw.get("tool_input") or {},
+            tool_result=raw.get("tool_result") or raw.get("result"),
+            target_resource=raw.get("target_resource"),
+            # Classification
+            mechanism=cls.mechanism if cls else None,
+            effect=cls.effect if cls else None,
+            scope=tuple(cls.scope) if cls else (),
+            role=tuple(cls.role) if cls else (),
+            action=tuple(cls.action) if cls else (),
+            capability=tuple(cls.capability) if cls else (),
+            structure=tuple(cls.structure) if cls else (),
+            canonical_tool=raw.get("tool_name"),
+            # Assessment
+            risk_score=risk.score if risk else None,
+            risk_band=risk.level if risk else None,
+            suggested_action=rec.recommended_action.value if rec else None,
+            reason=rec.reason_code if rec else None,
+            # Stage
+            stage="assessed" if risk else ("classified" if cls else "adapted"),
+        )
+
+    # ─── Central gate execution helpers ───────────────────────────────────────
+
+    def _build_gate_context(self, session_id: str) -> "GateContext":
+        """Build a GateContext from current session state."""
+        from tracemill.sdk.gate_types import GateContext
+
+        state = self._states.get(session_id)
+        tool_call_count = state._tool_call_count if state else 0
+        denied_count = state._denied_count if state else 0
+        prior_verdicts = tuple(state._prior_verdicts) if state else ()
+        prior_ids = tuple(state._prior_tool_call_ids) if state else ()
+
+        return GateContext(
+            session_id=session_id,
+            tool_call_count=tool_call_count,
+            denied_count=denied_count,
+            prior_verdicts=prior_verdicts,
+            prior_tool_call_ids=prior_ids,
+        )
+
+    def _to_tool_call_request(self, trace: "EventTrace") -> "ToolCallRequest":
+        """Convert a fully-assessed EventTrace into a gate-facing ToolCallRequest."""
+        from tracemill.sdk.gate_types import ToolCallRequest
+
+        return ToolCallRequest(
+            tool=trace.canonical_tool or trace.tool_name or "unknown",
+            input=trace.tool_input,
+            target=trace.target_resource,
+            mechanism=trace.mechanism or "unknown",
+            effect=trace.effect or "read_only",
+            capabilities=trace.capability,
+            scope=trace.scope,
+            role=trace.role,
+            action=trace.action,
+            risk_score=trace.risk_score or 0,
+            risk_band=trace.risk_band or "unknown",
+            suggested_action=trace.suggested_action or "allow",
+            reason=trace.reason or "",
+            session_id=trace.session_id,
+            tool_call_id=trace.tool_call_id,
+            event_trace=trace,
+        )
+
+    def _to_tool_call_result(
+        self,
+        trace: "EventTrace",
+        *,
+        output: dict | None = None,
+        duration_ms: int | None = None,
+        error: str | None = None,
+    ) -> "ToolCallResult":
+        """Convert a fully-assessed EventTrace + output into a gate-facing ToolCallResult."""
+        from tracemill.sdk.gate_types import ToolCallResult
+        from tracemill.trace import _deep_freeze, EMPTY_MAP
+
+        return ToolCallResult(
+            tool=trace.canonical_tool or trace.tool_name or "unknown",
+            input=trace.tool_input,
+            target=trace.target_resource,
+            output=_deep_freeze(output) if output else EMPTY_MAP,
+            duration_ms=duration_ms,
+            error=error,
+            mechanism=trace.mechanism or "unknown",
+            effect=trace.effect or "read_only",
+            capabilities=trace.capability,
+            risk_score=trace.risk_score or 0,
+            risk_band=trace.risk_band or "unknown",
+            suggested_action=trace.suggested_action or "allow",
+            reason=trace.reason or "",
+            session_id=trace.session_id,
+            tool_call_id=trace.tool_call_id,
+            event_trace=trace,
+        )
+
+    def _run_preflight(self, trace: "EventTrace", *, session_id: str) -> "Verdict":
+        """Execute the preflight gate chain. Returns first DENY or ALLOW.
+
+        All gates come from the GatePolicy. No per-method overrides.
+        Fail-closed: if any gate or internal logic raises, returns DENY.
+        """
+        from tracemill.sdk.verdict import Verdict
+
+        try:
+            request = self._to_tool_call_request(trace)
+            ctx = self._build_gate_context(session_id)
+        except Exception as exc:
+            deny = Verdict.deny(f"gate setup error (fail-closed): {type(exc).__name__}: {exc}")
+            self._record_denial(session_id, deny)
+            return deny
+
+        # Run policy chain
+        if self.policy and self.policy.has_preflight:
+            for gate in self.policy.preflight_gates:
+                try:
+                    verdict = gate(request, ctx)
+                except Exception as exc:
+                    # Fail-closed: gate exception = DENY
+                    deny = Verdict.deny(f"gate error (fail-closed): {type(exc).__name__}: {exc}")
+                    self._record_denial(session_id, deny)
+                    return deny
+                if verdict.denied:
+                    self._record_denial(session_id, verdict)
+                    return verdict
+
+        self._record_allow(session_id, tool_call_id=trace.tool_call_id)
+        return Verdict.allow()
+
+    def _run_postflight(
+        self,
+        trace: "EventTrace",
+        *,
+        session_id: str,
+        output: dict | None = None,
+        duration_ms: int | None = None,
+        error: str | None = None,
+    ) -> "PostflightVerdict":
+        """Execute the postflight gate chain. Returns most restrictive action.
+
+        Priority: TERMINATE > SUPPRESS > REDACT > ALERT > ACCEPT.
+        Fail-closed: if any gate or setup raises, returns SUPPRESS.
+        """
+        from tracemill.sdk.gate_types import PostflightAction, PostflightVerdict
+
+        try:
+            result = self._to_tool_call_result(trace, output=output, duration_ms=duration_ms, error=error)
+            ctx = self._build_gate_context(session_id)
+        except Exception as exc:
+            return PostflightVerdict(
+                action=PostflightAction.SUPPRESS,
+                reason=f"postflight setup error (fail-closed): {type(exc).__name__}: {exc}",
+            )
+
+        # Action severity ordering
+        _SEVERITY = {
+            PostflightAction.ACCEPT: 0,
+            PostflightAction.ALERT: 1,
+            PostflightAction.REDACT: 2,
+            PostflightAction.SUPPRESS: 3,
+            PostflightAction.TERMINATE: 4,
+        }
+
+        most_severe = PostflightVerdict()
+
+        # Run policy chain
+        if self.policy and self.policy.has_postflight:
+            for gate in self.policy.postflight_gates:
+                try:
+                    pv = gate(result, ctx)
+                except Exception as exc:
+                    # Fail-closed: gate exception = SUPPRESS (not TERMINATE to avoid crashing)
+                    pv = PostflightVerdict(
+                        action=PostflightAction.SUPPRESS,
+                        reason=f"postflight gate error (fail-closed): {type(exc).__name__}: {exc}",
+                    )
+                if _SEVERITY.get(pv.action, 0) > _SEVERITY.get(most_severe.action, 0):
+                    most_severe = pv
+
+        return most_severe
+
+    def _record_denial(self, session_id: str, verdict: "Verdict") -> None:
+        """Record a denial in session state for GateContext tracking."""
+        state = self._ensure_gate_state(session_id)
+        state._denied_count += 1
+        state._prior_verdicts.append(verdict)  # deque(maxlen=100) auto-evicts
+
+    def _record_allow(self, session_id: str, *, tool_call_id: str | None = None) -> None:
+        """Record an allow in session state."""
+        state = self._ensure_gate_state(session_id)
+        state._tool_call_count += 1
+        if tool_call_id:
+            state._prior_tool_call_ids.append(tool_call_id)  # deque(maxlen=100) auto-evicts
+
+    def _ensure_gate_state(self, session_id: str):
+        """Lazily create minimal session state for gate context tracking.
+
+        Uses setdefault for thread-safety (CPython dict operations are atomic
+        under the GIL for single-bytecode-instruction calls).
+        """
+        if session_id not in self._states:
+            from tracemill.governance.state import SessionState
+            self._states.setdefault(session_id, SessionState(session_id=session_id))
+        return self._states[session_id]
+
+    def score_tool_call_event(self, event: "tracemill.types.SessionEvent") -> "SessionMeta":
+        """Score an enriched SessionEvent via the canonical bridge.
+
+        Same as score_tool_call but accepts a SessionEvent (from adapters/Enricher)
+        instead of a raw dict.
+
+        Returns:
+            SessionMeta — same shape sinks receive in the observation pipeline.
+        """
+        try:
+            ctx = self.context_from_session_event(event)
+        except Exception as exc:
+            return self._fail_closed(exc)
+
+        try:
+            meta = self.preflight_event(ctx)
+        except Exception as exc:
+            return self._fail_closed(exc, classification=ctx.base_classification)
+
+        self._persist_score(ctx.event.source_event_key, ctx.event.session_id, meta)
+        return meta
+
+    def _persist_score(self, source_event_key: str, session_id: str, meta: "SessionMeta") -> None:
+        """Persist a scoring result to the audit trail.
+
+        Uses a distinct source_event_key (score:{id}) that never collides with
+        observation events. If the same tool call later executes and arrives via
+        the standard pipeline, both records coexist — enabling correlation of
+        'what we recommended' vs 'what actually happened'.
+        """
+        try:
+            meta_dict = self._serialize_meta(meta)
+            meta_dict["scored"] = True
+            meta_json = json.dumps(meta_dict)
+            now = datetime.now(timezone.utc).isoformat()
+            self._store.execute_in_transaction(
+                "INSERT OR IGNORE INTO processed_events (source_event_key, session_id, session_meta_json, processed_at) VALUES (?, ?, ?, ?)",
+                (source_event_key, session_id, meta_json, now),
+            )
+            self._store.commit()
+            self._store.cache_processed(source_event_key, meta_json)
+        except Exception:
+            # Best-effort persistence — scoring result was already returned to caller.
+            # If this fails, the score is still usable but won't be in the audit trail.
+            try:
+                self._store.rollback()
+            except Exception:
+                pass
+
+    def _fail_closed(self, exc: Exception, classification=None) -> "SessionMeta":
+        """Produce a SessionMeta that signals ESCALATE due to internal error."""
+        from tracemill.classify.risk import RiskAssessment
+
+        reason = f"internal_error: {type(exc).__name__}"
+        risk = RiskAssessment(
+            score=0,
+            level="unknown",
+            confidence="low",
+            factors=(reason,),
+            mitre=(),
+            version="1",
+        )
+        recommendation = RiskRecommendation(
+            recommended_action=RecommendedAction.ESCALATE,
+            assessment=risk,
+            reason_code=reason,
+            canonical_id="error",
+        )
+        return SessionMeta(
+            classification=classification,
+            risk_assessment=risk,
+            recommendation=recommendation,
+        )
+
+    def preflight_event(self, ctx: "EnrichmentContext") -> "SessionMeta":
+        """Simulate full pipeline (Phase 1/2/3) without persisting state changes.
+
+        Creates a transient copy of session state, applies Phase 1 mutations
+        (budget, taint, drift) to it, then runs Phase 2/3 against the result.
+        The real state and DB are never modified.
+
+        Used by .score_tool_call() to predict what the pipeline would produce if the
+        event actually executed, without committing any side effects.
+        """
+        from tracemill.governance.state import SessionState
+
+        session_id = ctx.event.session_id
+
+        # Use cached state if available; otherwise start fresh (thread-safe,
+        # avoids cross-thread sqlite3 access for unknown sessions)
+        if session_id in self._states:
+            state = self._states[session_id]
+        else:
+            state = SessionState(session_id=session_id)
+
+        # Thread-safe clone — never touches state._db
+        transient = state.clone_detached()
+
+        # ── Phase 1 simulation (non-persisted) ──
+        phase = self._infer_phase(ctx)
+        if phase:
+            transient.update_phase_window(phase)
+        self._budget.increment(ctx, transient)
+        if self._labeler.has_ifc:
+            ifc_src_labels: set[str] = set()
+            self._labeler.check_ifc(ctx, ifc_src_labels, transient)
+        transient.record_event(None)
+        self._budget.check_pressure(transient)
+
+        # ── Phase 2/3 (side-effect-free) ──
+        snapshot = transient.snapshot()
+        enrichment_ctx = self._with_snapshot(ctx, snapshot)
+
+        gov_result = self._labeler.label(enrichment_ctx)
+        phase3 = self._phase3(enrichment_ctx, gov_result, snapshot)
+
+        rec = None
+        evidence = None
+        if phase3.recommendation_result:
+            rec = phase3.recommendation_result.recommendation
+            evidence = phase3.recommendation_result.evidence
+
+        return SessionMeta(
+            classification=gov_result.classification,
+            risk_assessment=phase3.risk_assessment,
+            recommendation=rec,
+            budget_snapshot=snapshot.budget,
+            drift=gov_result.drift_result,
+            mcp_alerts=gov_result.mcp_alerts,
+            evidence=evidence,
+        )
 
     def get_or_create_state(self, session_id: str) -> "SessionState":
         """Get or create session state."""
@@ -1051,3 +1685,542 @@ class GovernancePipeline:
             mcp_alerts=mcp_alerts,
             evidence=evidence,
         )
+
+    # ─── Framework gating methods ────────────────────────────────────────────────
+    #
+    # Each method integrates tracemill into a framework's native blocking mechanism.
+    # Session identity is extracted from the framework's own context — no session_id kwarg.
+    # Postflight verdicts (SUPPRESS/TERMINATE/REDACT) are enforced via framework-native signals.
+
+    def _score_and_gate_preflight(self, payload: dict) -> tuple:
+        """Score a tool call and run the preflight gate chain. Thread-safe.
+
+        Returns (trace, verdict) tuple. Verdict is ALLOW or DENY.
+        Session ID is derived from the trace (which normalizes from payload).
+        """
+        with self._gate_lock:
+            trace = self._score_event(payload)
+        # Use trace.session_id for consistency — it normalizes empty/missing values
+        session_id = trace.session_id
+        verdict = self._run_preflight(trace, session_id=session_id)
+        return trace, verdict
+
+    def _enforce_postflight(
+        self,
+        trace: "EventTrace",
+        *,
+        session_id: str,
+        output: dict | None = None,
+        duration_ms: int | None = None,
+        error: str | None = None,
+    ) -> "PostflightVerdict":
+        """Run postflight chain and return the verdict for caller enforcement.
+
+        Callers must check verdict.action and act:
+          - ACCEPT: return result normally
+          - REDACT: strip keys from output before returning
+          - SUPPRESS: return empty/neutral output to the model
+          - TERMINATE: raise/signal session termination
+          - ALERT: return result normally but log alert
+        """
+        return self._run_postflight(
+            trace, session_id=session_id,
+            output=output, duration_ms=duration_ms, error=error,
+        )
+
+    @staticmethod
+    def _apply_postflight_to_output(pv: "PostflightVerdict", result: str) -> str:
+        """Apply a postflight verdict to a string result.
+
+        Returns the (possibly redacted/suppressed) output string.
+        Raises RuntimeError on TERMINATE.
+        """
+        from tracemill.sdk.gate_types import PostflightAction
+
+        if pv.action == PostflightAction.ACCEPT or pv.action == PostflightAction.ALERT:
+            return result
+        if pv.action == PostflightAction.SUPPRESS:
+            return "[output suppressed by policy]"
+        if pv.action == PostflightAction.REDACT:
+            redacted = result
+            for key in pv.redaction_keys:
+                redacted = redacted.replace(key, "[REDACTED]")
+            return redacted
+        if pv.action == PostflightAction.TERMINATE:
+            raise RuntimeError(f"Session terminated by policy: {pv.reason}")
+        return result
+
+    def gate_crewai(self) -> None:
+        """Register tracemill into CrewAI's before/after tool_call hooks.
+
+        Blocking: returns False to CrewAI when preflight returns DENY.
+        Session ID: extracted from CrewAI's ctx.crew.fingerprint or generated.
+
+        WARNING: CrewAI hooks are global. Calling this multiple times registers
+        duplicate hooks. Use once per process.
+        """
+        if getattr(self, "_crewai_gated", False):
+            return
+        self._crewai_gated = True
+
+        from crewai.hooks.decorators import after_tool_call, before_tool_call
+
+        pipeline = self
+        # Bounded trace stash — evicts oldest entries to prevent unbounded growth.
+        # Max 1000 pending tool calls is generous for any real CrewAI session.
+        _traces: dict[str, "EventTrace"] = {}
+        _MAX_PENDING = 1000
+
+        @before_tool_call
+        def _tracemill_hook(ctx):
+            sid = getattr(getattr(ctx, "crew", None), "fingerprint", None) or "crewai"
+            call_id = getattr(ctx, "tool_call_id", None) or f"{ctx.tool_name}:{id(ctx)}"
+            payload = {
+                "tool_name": ctx.tool_name,
+                "tool_input": ctx.tool_input,
+                "session_id": sid,
+                "tool_call_id": call_id,
+            }
+            trace, verdict = pipeline._score_and_gate_preflight(payload)
+            if verdict.denied:
+                return False
+            # Stash for postflight (bounded)
+            call_key = f"{sid}:{call_id}"
+            if len(_traces) >= _MAX_PENDING:
+                # Evict oldest entry
+                _traces.pop(next(iter(_traces)), None)
+            _traces[call_key] = trace
+            return None
+
+        @after_tool_call
+        def _tracemill_postflight(ctx):
+            sid = getattr(getattr(ctx, "crew", None), "fingerprint", None) or "crewai"
+            call_id = getattr(ctx, "tool_call_id", None) or f"{ctx.tool_name}:{id(ctx)}"
+            call_key = f"{sid}:{call_id}"
+            trace = _traces.pop(call_key, None)
+            if trace is None:
+                return
+            output = getattr(ctx, "output", None)
+            pv = pipeline._enforce_postflight(
+                trace, session_id=sid,
+                output={"result": output} if output else None,
+            )
+            from tracemill.sdk.gate_types import PostflightAction
+            if pv.action == PostflightAction.TERMINATE:
+                raise RuntimeError(f"Session terminated by policy: {pv.reason}")
+            if pv.action == PostflightAction.SUPPRESS:
+                ctx.output = "[output suppressed by policy]"
+            elif pv.action == PostflightAction.REDACT and isinstance(output, str):
+                ctx.output = pipeline._apply_postflight_to_output(pv, output)
+
+    def gate_langchain(self, tool):
+        """Wrap a LangChain tool's _run with tracemill gating.
+
+        Blocking: raises ToolException when preflight returns DENY.
+        Session ID: uses tool invocation config's configurable.thread_id or "langchain".
+        Idempotent: calling twice on same tool is a no-op.
+        """
+        if getattr(tool, "_tracemill_gated", False):
+            return tool
+        tool._tracemill_gated = True
+
+        from langchain_core.tools.base import ToolException
+
+        pipeline = self
+        original_run = tool._run
+
+        def _guarded_run(*args, config=None, run_manager=None, **kwargs):
+            import time
+
+            sid = "langchain"
+            if config and isinstance(config, dict):
+                configurable = config.get("configurable", {})
+                if isinstance(configurable, dict):
+                    sid = configurable.get("thread_id", sid)
+            elif hasattr(config, "configurable"):
+                sid = config.configurable.get("thread_id", sid)
+
+            # Extract tool-relevant input (exclude LangChain internal keys)
+            _INTERNAL_KEYS = {"config", "run_manager", "callbacks", "tags", "metadata"}
+            if kwargs:
+                tool_input = {k: v for k, v in kwargs.items() if k not in _INTERNAL_KEYS}
+            elif args:
+                tool_input = {"input": args[0]}
+            else:
+                tool_input = {}
+            payload = {
+                "tool_name": tool.name,
+                "tool_input": tool_input,
+                "session_id": sid,
+            }
+            trace, verdict = pipeline._score_and_gate_preflight(payload)
+            if verdict.denied:
+                raise ToolException(f"Denied: {verdict.reason}")
+
+            t0 = time.monotonic()
+            error = None
+            result = None
+            try:
+                result = original_run(*args, config=config, run_manager=run_manager, **kwargs)
+            except Exception as exc:
+                error = str(exc)
+                raise
+            finally:
+                duration_ms = int((time.monotonic() - t0) * 1000)
+                pv = pipeline._enforce_postflight(
+                    trace, session_id=sid,
+                    output={"result": result} if error is None else None,
+                    duration_ms=duration_ms,
+                    error=error,
+                )
+            from tracemill.sdk.gate_types import PostflightAction
+            if pv.action == PostflightAction.TERMINATE:
+                raise RuntimeError(f"Session terminated by policy: {pv.reason}")
+            if pv.action == PostflightAction.SUPPRESS:
+                return "[output suppressed by policy]"
+            if pv.action == PostflightAction.REDACT and isinstance(result, str):
+                return pipeline._apply_postflight_to_output(pv, result)
+            return result
+
+        tool._run = _guarded_run
+        tool.handle_tool_error = True
+        return tool
+
+    def gate_langgraph(self, tools):
+        """Return a ToolNode with tracemill gating via wrap_tool_call.
+
+        Blocking: returns denial ToolMessage without calling execute.
+        Session ID: from request config's configurable.thread_id or "langgraph".
+        """
+        from langgraph.prebuilt import ToolNode
+
+        pipeline = self
+
+        def _tracemill_wrapper(request, execute):
+            import time
+
+            from langchain_core.messages import ToolMessage
+
+            native_id = request.tool_call.get("id")
+            # LangGraph passes thread_id via config
+            sid = "langgraph"
+            if hasattr(request, "config") and hasattr(request.config, "configurable"):
+                sid = request.config.configurable.get("thread_id", sid)
+
+            payload = {
+                "tool_name": request.tool_call["name"],
+                "tool_input": request.tool_call["args"],
+                "session_id": sid,
+                "tool_call_id": native_id,
+            }
+            trace, verdict = pipeline._score_and_gate_preflight(payload)
+            if verdict.denied:
+                return ToolMessage(
+                    content=f"Denied: {verdict.reason}",
+                    tool_call_id=native_id,
+                    name=request.tool_call["name"],
+                    status="error",
+                )
+
+            t0 = time.monotonic()
+            error = None
+            try:
+                result = execute(request)
+            except Exception as exc:
+                error = str(exc)
+                duration_ms = int((time.monotonic() - t0) * 1000)
+                pipeline._enforce_postflight(
+                    trace, session_id=sid,
+                    duration_ms=duration_ms,
+                    error=error,
+                )
+                raise
+
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            pv = pipeline._enforce_postflight(
+                trace, session_id=sid,
+                output={"content": getattr(result, "content", str(result))},
+                duration_ms=duration_ms,
+            )
+            from tracemill.sdk.gate_types import PostflightAction
+            if pv.action == PostflightAction.TERMINATE:
+                return ToolMessage(
+                    content=f"Session terminated: {pv.reason}",
+                    tool_call_id=native_id,
+                    name=request.tool_call["name"],
+                    status="error",
+                )
+            if pv.action == PostflightAction.SUPPRESS:
+                return ToolMessage(
+                    content="[output suppressed by policy]",
+                    tool_call_id=native_id,
+                    name=request.tool_call["name"],
+                    status="success",
+                )
+            if pv.action == PostflightAction.REDACT:
+                content = getattr(result, "content", str(result))
+                redacted = pipeline._apply_postflight_to_output(pv, content)
+                return ToolMessage(
+                    content=redacted,
+                    tool_call_id=native_id,
+                    name=request.tool_call["name"],
+                    status="success",
+                )
+            return result
+
+        return ToolNode(tools, wrap_tool_call=_tracemill_wrapper)
+
+    def gate_semantic_kernel(self, kernel) -> None:
+        """Register tracemill as a Semantic Kernel auto function invocation filter.
+
+        Blocking: skips next_handler and injects denial FunctionResult.
+        Session ID: from kernel's service_id or "semantic_kernel".
+        """
+
+        pipeline = self
+
+        @kernel.filter(filter_type="auto_function_invocation")
+        async def _tracemill_filter(context, next_handler):
+            sid = getattr(kernel, "service_id", None) or "semantic_kernel"
+            payload = {
+                "tool_name": context.function.name,
+                "tool_input": dict(context.arguments) if context.arguments else {},
+                "session_id": sid,
+            }
+            trace, verdict = pipeline._score_and_gate_preflight(payload)
+            if verdict.denied:
+                from semantic_kernel.functions import FunctionResult
+
+                context.function_result = FunctionResult(
+                    function=context.function.metadata,
+                    value=f"Tool blocked by policy: {verdict.reason}",
+                )
+                context.terminate = True
+                return
+            await next_handler(context)
+            result_val = getattr(context.function_result, "value", None)
+            pv = pipeline._enforce_postflight(
+                trace, session_id=sid,
+                output={"result": str(result_val)} if result_val else None,
+            )
+            from tracemill.sdk.gate_types import PostflightAction
+            if pv.action == PostflightAction.TERMINATE:
+                context.terminate = True
+            elif pv.action == PostflightAction.SUPPRESS:
+                from semantic_kernel.functions import FunctionResult
+                context.function_result = FunctionResult(
+                    function=context.function.metadata,
+                    value="[output suppressed by policy]",
+                )
+            elif pv.action == PostflightAction.REDACT and result_val:
+                from semantic_kernel.functions import FunctionResult
+                redacted = pipeline._apply_postflight_to_output(pv, str(result_val))
+                context.function_result = FunctionResult(
+                    function=context.function.metadata,
+                    value=redacted,
+                )
+
+    def gate_maf(self):
+        """Return a FunctionMiddleware for Microsoft Agent Framework (MAF).
+
+        Blocking: raises MiddlewareTermination or skips call_next to deny.
+        Session ID: from context.session.conversation_id or "maf".
+        """
+        from agent_framework import FunctionMiddleware, MiddlewareTermination
+
+        pipeline = self
+
+        class TracemillMiddleware(FunctionMiddleware):
+            async def process(self, context, call_next):
+                import time
+
+                session = getattr(context, "session", None)
+                sid = getattr(session, "conversation_id", None) or "maf"
+                payload = {
+                    "tool_name": context.function.name,
+                    "tool_input": context.arguments or {},
+                    "session_id": sid,
+                    "tool_call_id": getattr(context, "call_id", None),
+                }
+                trace, verdict = pipeline._score_and_gate_preflight(payload)
+                if verdict.denied:
+                    raise MiddlewareTermination(f"Denied: {verdict.reason}")
+
+                t0 = time.monotonic()
+                error = None
+                try:
+                    await call_next(context)
+                except Exception as exc:
+                    error = str(exc)
+                    raise
+                finally:
+                    duration_ms = int((time.monotonic() - t0) * 1000)
+                    result = getattr(context, "result", None)
+                    pv = pipeline._enforce_postflight(
+                        trace, session_id=sid,
+                        output={"result": str(result)} if result and not error else None,
+                        duration_ms=duration_ms,
+                        error=error,
+                    )
+
+                from tracemill.sdk.gate_types import PostflightAction
+                if pv.action == PostflightAction.TERMINATE:
+                    raise MiddlewareTermination(f"Session terminated: {pv.reason}")
+                if pv.action == PostflightAction.SUPPRESS:
+                    context.result = "[output suppressed by policy]"
+                elif pv.action == PostflightAction.REDACT:
+                    result = getattr(context, "result", None)
+                    if isinstance(result, str):
+                        context.result = pipeline._apply_postflight_to_output(pv, result)
+
+        return TracemillMiddleware()
+
+    def gate_smolagents(self, agent_cls=None):
+        """Return a TracemillAgent subclass that gates tool calls for smolagents.
+
+        Blocking: returns denial string as observation without executing the tool.
+        Session ID: from agent.session_id or "smolagents".
+        """
+        if agent_cls is None:
+            from smolagents import ToolCallingAgent
+            agent_cls = ToolCallingAgent
+
+        pipeline = self
+
+        class _TracemillAgent(agent_cls):
+            def execute_tool_call(self, tool_name: str, arguments) -> any:
+                import time
+
+                sid = getattr(self, "session_id", None) or "smolagents"
+                payload = {
+                    "tool_name": tool_name,
+                    "tool_input": arguments if isinstance(arguments, dict) else {"raw": arguments},
+                    "session_id": sid,
+                }
+                trace, verdict = pipeline._score_and_gate_preflight(payload)
+                if verdict.denied:
+                    return f"[BLOCKED] {verdict.reason}"
+
+                t0 = time.monotonic()
+                error = None
+                result = None
+                try:
+                    result = super().execute_tool_call(tool_name, arguments)
+                except Exception as exc:
+                    error = str(exc)
+                    raise
+                finally:
+                    duration_ms = int((time.monotonic() - t0) * 1000)
+                    pv = pipeline._enforce_postflight(
+                        trace, session_id=sid,
+                        output={"result": str(result)} if error is None else None,
+                        duration_ms=duration_ms,
+                        error=error,
+                    )
+                from tracemill.sdk.gate_types import PostflightAction
+                if pv.action == PostflightAction.TERMINATE:
+                    raise RuntimeError(f"Session terminated by policy: {pv.reason}")
+                if pv.action == PostflightAction.SUPPRESS:
+                    return "[output suppressed by policy]"
+                if pv.action == PostflightAction.REDACT and isinstance(result, str):
+                    return pipeline._apply_postflight_to_output(pv, result)
+                return result
+
+        return _TracemillAgent
+
+    def gate_pydantic_ai(self, agent) -> None:
+        """Register tracemill as Pydantic AI tool-execute hooks (before/after).
+
+        Blocking: raises SkipToolExecution with denial reason on preflight.
+        Session ID: from ctx.run_id (Pydantic AI's native UUID7 run ID).
+        Idempotent: calling twice on same agent is a no-op.
+        """
+        if getattr(agent, "_tracemill_gated", False):
+            return
+        agent._tracemill_gated = True
+
+        pipeline = self
+        # External trace stash keyed by (run_id, tool_name) — avoids touching frozen ctx
+        _pending: dict[str, "EventTrace"] = {}
+        _MAX_PENDING = 1000
+
+        @agent.tool_hook("before")
+        async def _tracemill_before_tool(ctx, tool_def, args):
+            from pydantic_ai.exceptions import SkipToolExecution
+
+            sid = str(getattr(ctx, "run_id", None) or "pydantic_ai")
+            payload = {
+                "tool_name": tool_def.name,
+                "tool_input": args if isinstance(args, dict) else {"raw": args},
+                "session_id": sid,
+            }
+            trace, verdict = pipeline._score_and_gate_preflight(payload)
+            if verdict.denied:
+                raise SkipToolExecution(f"Denied: {verdict.reason}")
+            stash_key = f"{sid}:{tool_def.name}:{id(args)}"
+            if len(_pending) >= _MAX_PENDING:
+                _pending.pop(next(iter(_pending)), None)
+            _pending[stash_key] = trace
+
+        @agent.tool_hook("after")
+        async def _tracemill_after_tool(ctx, tool_def, args, result):
+            sid = str(getattr(ctx, "run_id", None) or "pydantic_ai")
+            stash_key = f"{sid}:{tool_def.name}:{id(args)}"
+            trace = _pending.pop(stash_key, None)
+            if trace is None:
+                return
+            pv = pipeline._enforce_postflight(
+                trace, session_id=sid,
+                output={"result": str(result)} if result else None,
+            )
+            from tracemill.sdk.gate_types import PostflightAction
+            if pv.action == PostflightAction.TERMINATE:
+                raise RuntimeError(f"Session terminated by policy: {pv.reason}")
+            if pv.action == PostflightAction.SUPPRESS:
+                # Return replacement string — Pydantic AI after hooks can return modified output
+                return "[output suppressed by policy]"
+            if pv.action == PostflightAction.REDACT and isinstance(result, str):
+                return pipeline._apply_postflight_to_output(pv, result)
+
+    def gate_openai_agents(self, agent):
+        """Register tracemill as an OpenAI Agents SDK input guardrail.
+
+        Blocking: raises GuardrailTripwireTriggered which rejects the entire turn.
+        Session ID: from agent.name or "openai_agents".
+        Idempotent: calling twice on same agent is a no-op.
+
+        NOTE: Input guardrails fire on the agent's input message, NOT on individual
+        tool calls. For per-tool-call gating, use needs_approval=True on tools and
+        integrate via the approval handler pattern (see gating spec §5b).
+        """
+        if getattr(agent, "_tracemill_gated", False):
+            return agent
+        agent._tracemill_gated = True
+
+        pipeline = self
+
+        from agents import input_guardrail, GuardrailFunctionOutput
+
+        @input_guardrail
+        async def tracemill_guardrail(ctx, agent_instance, input_data):
+            sid = getattr(agent_instance, "name", None) or "openai_agents"
+            payload = {
+                "tool_name": getattr(input_data, "tool_name", "unknown"),
+                "tool_input": getattr(input_data, "tool_input", {}),
+                "session_id": sid,
+            }
+            trace, verdict = pipeline._score_and_gate_preflight(payload)
+            if verdict.denied:
+                return GuardrailFunctionOutput(
+                    output_info=verdict.reason,
+                    tripwire_triggered=True,
+                )
+            return GuardrailFunctionOutput(
+                output_info="allowed",
+                tripwire_triggered=False,
+            )
+
+        if not hasattr(agent, "input_guardrails"):
+            agent.input_guardrails = []
+        agent.input_guardrails.append(tracemill_guardrail)
+        return agent

@@ -15,6 +15,7 @@ from typing import Any, Final, Literal
 
 from pydantic import Field, field_validator
 
+from tracemill.governance.results import SessionMeta
 from tracemill.models import FrozenModel
 
 
@@ -206,6 +207,9 @@ class EventMetadata(FrozenModel):
     tool_display: str | None = None
     tool_intent: str | None = None
     duration_ms: float | None = None
+
+    # --- Governance (populated by enrichment pipeline before sink emission) ---
+    governance: SessionMeta | None = None
 
     @field_validator("duration_ms")
     @classmethod

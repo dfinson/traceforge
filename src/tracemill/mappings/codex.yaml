@@ -1,0 +1,113 @@
+# Codex CLI — YAML mapping for tracemill
+#
+# OpenAI Codex CLI stores rollout logs in:
+#   ~/.codex/sessions/rollout-{timestamp}-{uuid}.jsonl
+#
+# Each line: {"timestamp": "...", "type": "...", "payload": {...}}
+# The "codex" preprocessor flattens the double-type nesting (type + payload.type)
+# into a single "block_type" discriminator.
+#
+# Source: openai/codex (codex-rs/protocol/src/protocol.rs)
+# Schema: RolloutLine → RolloutItem (session_meta | response_item | event_msg)
+# Tool calls arrive via two paths:
+#   1. response_item.function_call → model's request (shell tool)
+#   2. event_msg.mcp_tool_call_begin/end → MCP tool execution lifecycle
+
+framework: codex
+framework_version: "1.x"
+ingestion_mode: file_watch
+type_field: block_type
+default_kind: raw
+preprocessor: codex
+
+events:
+  # ── Session metadata (first line of every file) ────────────────────────────
+  session.meta:
+    kind: session.start
+    payload:
+      session_id: session_id
+      model_provider: model_provider
+      cwd: cwd
+      cli_version: cli_version
+
+  # ── Shell tool calls (model → built-in shell) ─────────────────────────────
+  tool.shell_call:
+    kind: tool.call.started
+    payload:
+      tool_call_id: call_id
+      tool_name: tool_name
+      arguments: arguments
+
+  tool.shell_result:
+    kind: tool.call.completed
+    payload:
+      tool_call_id: call_id
+      result: output
+
+  # ── Exec lifecycle (actual execution) ──────────────────────────────────────
+  tool.exec_begin:
+    kind: tool.exec.started
+    payload:
+      tool_call_id: call_id
+      command: command
+      cwd: cwd
+
+  tool.exec_end:
+    kind: tool.exec.completed
+    payload:
+      tool_call_id: call_id
+      command: command
+      cwd: cwd
+      exit_code: exit_code
+      stdout: stdout
+      stderr: stderr
+
+  # ── MCP tool calls ─────────────────────────────────────────────────────────
+  tool.mcp_call:
+    kind: tool.call.started
+    payload:
+      tool_call_id: call_id
+      tool_name: tool_name
+      server: server
+      arguments: arguments
+
+  tool.mcp_result:
+    kind: tool.call.completed
+    payload:
+      tool_call_id: call_id
+      tool_name: tool_name
+      is_error: is_error
+      result: output
+
+  # ── Custom tool calls ──────────────────────────────────────────────────────
+  tool.custom_call:
+    kind: tool.call.started
+    payload:
+      tool_call_id: call_id
+      tool_name: tool_name
+      arguments: arguments
+
+  tool.custom_result:
+    kind: tool.call.completed
+    payload:
+      tool_call_id: call_id
+      tool_name: tool_name
+      result: output
+
+  # ── Approval requests ──────────────────────────────────────────────────────
+  tool.approval_request:
+    kind: tool.approval.requested
+    payload:
+      tool_call_id: call_id
+      command: command
+
+  # ── Messages ───────────────────────────────────────────────────────────────
+  message.user:
+    kind: message.user
+    payload:
+      content: content
+
+  message.assistant:
+    kind: message.assistant
+    payload:
+      content: content

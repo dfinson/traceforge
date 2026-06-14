@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import hashlib
-from collections import Counter
+from collections import Counter, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -93,6 +93,11 @@ class SessionState:
     _last_sequence: int | None = None
     _gap_ordinal: int = 0
     _db: sqlite3.Connection | None = None
+    # Gate tracking fields
+    _tool_call_count: int = 0
+    _denied_count: int = 0
+    _prior_verdicts: deque = field(default_factory=lambda: deque(maxlen=100))
+    _prior_tool_call_ids: deque = field(default_factory=lambda: deque(maxlen=100))
 
     PHASE_WINDOW_SIZE: int = 20
     TAINT_LEDGER_MAX: int = 200
@@ -193,6 +198,33 @@ class SessionState:
                         return True
         self._pressure = False
         return False
+
+    def clone_detached(self) -> "SessionState":
+        """Create a mutable deep copy with no DB connection (for preflight simulation).
+
+        This is safe to call concurrently — it never touches self._db.
+        The returned copy has _db=None so persist calls are no-ops.
+        """
+        from collections import Counter as _Counter
+        from copy import deepcopy
+
+        return SessionState(
+            session_id=self.session_id,
+            _budget_counters={k: _Counter(v) for k, v in self._budget_counters.items()},
+            _total_tool_calls=self._total_tool_calls,
+            _total_tokens=self._total_tokens,
+            _elapsed_seconds=self._elapsed_seconds,
+            _pressure=self._pressure,
+            _phase_window=list(self._phase_window),
+            _taint_ledger=deepcopy(self._taint_ledger),
+            _last_assistant_event_id=self._last_assistant_event_id,
+            _last_user_event_id=self._last_user_event_id,
+            _event_count=self._event_count,
+            _dropped_events=self._dropped_events,
+            _last_sequence=self._last_sequence,
+            _gap_ordinal=self._gap_ordinal,
+            _db=None,
+        )
 
     def snapshot(self) -> SessionStateSnapshot:
         """Create frozen snapshot for Phase 2/3."""

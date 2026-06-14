@@ -359,7 +359,7 @@ class TestMappedJsonFullPipeline:
             assert ev.session_id == "test-session"
 
     def test_aider_session(self):
-        """Simulate an Aider session."""
+        """Simulate an Aider session using real --analytics-log JSONL format."""
         adapter = MappedJsonAdapter.from_yaml(
             str(
                 Path(__file__).resolve().parents[1]
@@ -373,69 +373,75 @@ class TestMappedJsonFullPipeline:
         )
         events_raw = [
             {
-                "event": "session_start",
-                "timestamp": "2024-06-01T10:00:00Z",
-                "session_id": "aid-1",
-                "main_model": "gpt-4",
-                "cwd": "/project",
+                "event": "launched",
+                "properties": {},
+                "user_id": "u-1",
+                "time": 1717236000,
+            },
+            {
+                "event": "cli session",
+                "properties": {
+                    "main_model": "gpt-4",
+                    "weak_model": "gpt-4o-mini",
+                    "editor_model": "gpt-4",
+                    "edit_format": "diff",
+                },
+                "user_id": "u-1",
+                "time": 1717236001,
+            },
+            {
+                "event": "message_send_starting",
+                "properties": {},
+                "user_id": "u-1",
+                "time": 1717236002,
             },
             {
                 "event": "message_send",
-                "timestamp": "2024-06-01T10:00:01Z",
-                "session_id": "aid-1",
-                "content": "Add tests",
-                "role": "user",
+                "properties": {
+                    "main_model": "gpt-4",
+                    "edit_format": "diff",
+                    "prompt_tokens": 800,
+                    "completion_tokens": 400,
+                    "total_tokens": 1200,
+                    "cost": 0.05,
+                    "total_cost": 0.12,
+                },
+                "user_id": "u-1",
+                "time": 1717236005,
             },
             {
-                "event": "llm_start",
-                "timestamp": "2024-06-01T10:00:02Z",
-                "session_id": "aid-1",
-                "model": "gpt-4",
-                "input_tokens": 800,
+                "event": "repo",
+                "properties": {"num_files": 42},
+                "user_id": "u-1",
+                "time": 1717236006,
             },
             {
-                "event": "llm_completion",
-                "timestamp": "2024-06-01T10:00:05Z",
-                "session_id": "aid-1",
-                "model": "gpt-4",
-                "input_tokens": 800,
-                "output_tokens": 400,
-                "cost": 0.05,
+                "event": "exit",
+                "properties": {"reason": "Completed main CLI coder.run"},
+                "user_id": "u-1",
+                "time": 1717236010,
             },
-            {
-                "event": "file_edit",
-                "timestamp": "2024-06-01T10:00:06Z",
-                "session_id": "aid-1",
-                "fname": "tests/test_new.py",
-                "content": "def test_hello(): ...",
-            },
-            {
-                "event": "command_run",
-                "timestamp": "2024-06-01T10:00:07Z",
-                "session_id": "aid-1",
-                "command": "pytest tests/",
-            },
-            {"event": "session_end", "timestamp": "2024-06-01T10:00:10Z", "session_id": "aid-1"},
         ]
 
         all_events = []
         for evt in events_raw:
             all_events.extend(adapter.parse(json.dumps(evt)))
 
-        assert len(all_events) == 7
+        assert len(all_events) == 6
         kinds = [e.kind for e in all_events]
         assert kinds[0] == "session.started"
-        assert kinds[1] == "message.user"
+        assert kinds[1] == "session.configured"
         assert kinds[2] == "llm.call.started"
         assert kinds[3] == "llm.call.completed"
-        assert kinds[4] == "file.edited"
-        assert kinds[5] == "command.started"
-        assert kinds[6] == "session.ended"
+        assert kinds[4] == "context.repository"
+        assert kinds[5] == "session.ended"
 
-        # Payload extraction
-        assert all_events[0].payload["model"] == "gpt-4"
-        assert all_events[3].payload["cost_usd"] == 0.05
-        assert all_events[4].payload["path"] == "tests/test_new.py"
+        # Payload extraction via dot-path into properties.*
+        assert all_events[1].payload["model"] == "gpt-4"
+        assert all_events[3].payload["cost"] == 0.05
+        assert all_events[3].payload["input_tokens"] == 800
+        assert all_events[4].payload["num_files"] == 42
+        assert all_events[5].payload["reason"] == "Completed main CLI coder.run"
 
     def test_goose_session(self):
         """Simulate Goose events from SQLite rows."""

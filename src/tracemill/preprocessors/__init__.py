@@ -13,11 +13,14 @@ from tracemill.preprocessors.registry import (
 
 # Import all preprocessor modules to trigger registration
 import tracemill.preprocessors.cline  # noqa: F401
+import tracemill.preprocessors.continue_dev  # noqa: F401
 import tracemill.preprocessors.goose  # noqa: F401
 import tracemill.preprocessors.openhands  # noqa: F401
 import tracemill.preprocessors.pydantic_ai  # noqa: F401
 import tracemill.preprocessors.claude  # noqa: F401
 import tracemill.preprocessors.smolagents  # noqa: F401
+import tracemill.preprocessors.codex  # noqa: F401
+import tracemill.preprocessors.amazonq  # noqa: F401
 
 __all__ = [
     "PreprocessorFn",

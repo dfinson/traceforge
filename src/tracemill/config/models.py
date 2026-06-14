@@ -142,6 +142,34 @@ class JsonlSinkConfig(StrictModel):
     rotate_size_mb: float | None = None
 
 
+class ConsoleSinkConfig(StrictModel):
+    """Pretty-print governance results to terminal."""
+
+    type: Literal["console"] = "console"
+    filter: list[str] = Field(default_factory=lambda: ["warn", "deny", "escalate"])
+    color: bool = True
+
+
+class WebhookSinkConfig(StrictModel):
+    """POST governance results to a webhook URL."""
+
+    type: Literal["webhook"] = "webhook"
+    url: str
+    filter: list[str] = Field(default_factory=lambda: ["deny", "escalate"])
+    timeout: float = 10.0
+    max_retries: int = 3
+    headers: dict[str, str] = Field(default_factory=dict)
+
+
+class OtelSinkConfig(StrictModel):
+    """Export governance results as OTel spans."""
+
+    type: Literal["otel"] = "otel"
+    endpoint: str = "http://localhost:4318/v1/traces"
+    service_name: str = "tracemill"
+    headers: dict[str, str] = Field(default_factory=dict)
+
+
 class S3SinkConfig(StrictModel):
     """S3-compatible object store sink."""
 
@@ -154,7 +182,7 @@ class S3SinkConfig(StrictModel):
 
 # Discriminated union of all serializable sink types
 SinkConfig = Annotated[
-    SqliteSinkConfig | JsonlSinkConfig | S3SinkConfig,
+    SqliteSinkConfig | JsonlSinkConfig | ConsoleSinkConfig | WebhookSinkConfig | OtelSinkConfig | S3SinkConfig,
     Field(discriminator="type"),
 ]
 
@@ -189,6 +217,71 @@ class SDKConfig(StrictModel):
     max_queue_size: int = Field(default=10000, ge=1)
 
 
+# ─── Governance Config ────────────────────────────────────────────────────────
+
+
+class BudgetConfig(StrictModel):
+    """Budget thresholds for governance scoring."""
+
+    max_tool_calls: int | None = None
+    max_by_effect: dict[str, int] | None = None
+    max_by_capability: dict[str, int] | None = None
+    max_by_scope: dict[str, int] | None = None
+
+
+class GovernanceConfig(StrictModel):
+    """Governance pipeline configuration.
+
+    Same shape in YAML and SDK::
+
+        # tracemill.yaml
+        governance:
+          db_path: ./tracemill.db
+          project_root: .
+          pii_scanning: true
+          budget:
+            max_tool_calls: 200
+            max_by_effect:
+              destructive: 10
+
+        # SDK equivalent
+        GovernanceConfig(
+            db_path="./tracemill.db",
+            project_root=".",
+            pii_scanning=True,
+            budget=BudgetConfig(max_tool_calls=200, max_by_effect={"destructive": 10}),
+        )
+    """
+
+    db_path: str | None = None  # None = in-memory
+    project_root: str | None = None
+    rules_path: str | None = None  # custom rules YAML override
+    pii_scanning: bool = True
+    budget: BudgetConfig = Field(default_factory=BudgetConfig)
+    tool_preflight_gate: str | None = None  # dotted import path (e.g. "myapp.policies.my_policy")
+
+
+# ─── Score API Config ────────────────────────────────────────────────────────
+
+
+class ScoreAPIConfig(StrictModel):
+    """Configuration for the preflight scoring HTTP endpoint."""
+
+    enabled: bool = True
+    listen: str = "localhost:7331"
+    socket: str | None = None  # Unix socket alternative (lower latency)
+
+
+# ─── Auto-Detect Config ──────────────────────────────────────────────────────
+
+
+class AutoDetectConfig(StrictModel):
+    """Framework auto-detection settings."""
+
+    enabled: bool = True
+    frameworks: list[str] = Field(default_factory=list)  # empty = detect all known
+
+
 # ─── Root Config ─────────────────────────────────────────────────────────────
 
 
@@ -215,6 +308,15 @@ class TracemillConfig(StrictModel):
 
     # SDK-mode configuration
     sdk: SDKConfig = Field(default_factory=SDKConfig)
+
+    # Governance pipeline configuration
+    governance: GovernanceConfig = Field(default_factory=GovernanceConfig)
+
+    # Score API (preflight scoring endpoint)
+    score: ScoreAPIConfig = Field(default_factory=ScoreAPIConfig)
+
+    # Auto-detection of installed frameworks
+    auto_detect: AutoDetectConfig = Field(default_factory=AutoDetectConfig)
 
     @field_validator("pipelines")
     @classmethod

@@ -1804,6 +1804,10 @@ class GovernancePipeline:
             from tracemill.sdk.gate_types import PostflightAction
             if pv.action == PostflightAction.TERMINATE:
                 raise RuntimeError(f"Session terminated by policy: {pv.reason}")
+            if pv.action == PostflightAction.SUPPRESS:
+                ctx.output = "[output suppressed by policy]"
+            elif pv.action == PostflightAction.REDACT and isinstance(output, str):
+                ctx.output = pipeline._apply_postflight_to_output(pv, output)
 
     def gate_langchain(self, tool):
         """Wrap a LangChain tool's _run with tracemill gating.
@@ -1946,6 +1950,15 @@ class GovernancePipeline:
                     name=request.tool_call["name"],
                     status="success",
                 )
+            if pv.action == PostflightAction.REDACT:
+                content = getattr(result, "content", str(result))
+                redacted = pipeline._apply_postflight_to_output(pv, content)
+                return ToolMessage(
+                    content=redacted,
+                    tool_call_id=native_id,
+                    name=request.tool_call["name"],
+                    status="success",
+                )
             return result
 
         return ToolNode(tools, wrap_tool_call=_tracemill_wrapper)
@@ -1991,6 +2004,13 @@ class GovernancePipeline:
                 context.function_result = FunctionResult(
                     function=context.function.metadata,
                     value="[output suppressed by policy]",
+                )
+            elif pv.action == PostflightAction.REDACT and result_val:
+                from semantic_kernel.functions import FunctionResult
+                redacted = pipeline._apply_postflight_to_output(pv, str(result_val))
+                context.function_result = FunctionResult(
+                    function=context.function.metadata,
+                    value=redacted,
                 )
 
     def gate_maf(self):
@@ -2041,6 +2061,10 @@ class GovernancePipeline:
                     raise MiddlewareTermination(f"Session terminated: {pv.reason}")
                 if pv.action == PostflightAction.SUPPRESS:
                     context.result = "[output suppressed by policy]"
+                elif pv.action == PostflightAction.REDACT:
+                    result = getattr(context, "result", None)
+                    if isinstance(result, str):
+                        context.result = pipeline._apply_postflight_to_output(pv, result)
 
         return TracemillMiddleware()
 
@@ -2145,6 +2169,11 @@ class GovernancePipeline:
             from tracemill.sdk.gate_types import PostflightAction
             if pv.action == PostflightAction.TERMINATE:
                 raise RuntimeError(f"Session terminated by policy: {pv.reason}")
+            if pv.action == PostflightAction.SUPPRESS:
+                # Return replacement string — Pydantic AI after hooks can return modified output
+                return "[output suppressed by policy]"
+            if pv.action == PostflightAction.REDACT and isinstance(result, str):
+                return pipeline._apply_postflight_to_output(pv, result)
 
     def gate_openai_agents(self, agent):
         """Register tracemill as an OpenAI Agents SDK input guardrail.

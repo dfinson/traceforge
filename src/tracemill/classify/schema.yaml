@@ -110,6 +110,7 @@ components:
         - network.http
         - process
         - process.shell
+        - unknown
 
     Effect:
       type: string

@@ -1,6 +1,6 @@
 """Auto-generated from classify/schema.yaml — DO NOT EDIT.
 
-Generated at: 2026-06-14T08:59:05Z
+Generated at: 2026-06-14T09:10:51Z
 Re-generate: python scripts/generate_types.py
 """
 
@@ -103,6 +103,7 @@ Mechanism = Literal[
     "network.http",
     "process",
     "process.shell",
+    "unknown",
 ]
 
 # What the tool does to state.

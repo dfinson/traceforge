@@ -11,7 +11,7 @@ classify/schema.yaml — see _generated.py.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any
 
@@ -49,7 +49,7 @@ class Trace:
     session_id: str
     timestamp: datetime
     source_key: str
-    raw_event: dict[str, Any]
+    raw_event: dict[str, Any] = field(repr=False, compare=False)
 
     # ─── Classification (enricher fills) ──────────────────────────────────────
 

@@ -448,18 +448,18 @@ class GovernancePipeline:
             ctx = self.enrich_event(event)
         except Exception as exc:
             meta = self._fail_closed(exc)
-            return self._meta_to_trace(payload, event, meta)
+            return self._meta_to_trace(payload, event, meta, kind="tool.call.started")
 
         try:
             meta = self.preflight_event(ctx)
         except Exception as exc:
             meta = self._fail_closed(exc, classification=ctx.base_classification)
-            return self._meta_to_trace(payload, event, meta)
+            return self._meta_to_trace(payload, event, meta, kind="tool.call.started")
 
         self._persist_score(event.source_event_key, event.session_id, meta)
-        return self._meta_to_trace(payload, event, meta)
+        return self._meta_to_trace(payload, event, meta, kind="tool.call.started")
 
-    def _meta_to_trace(self, payload: dict, event: "ToolCallEvent", meta: "SessionMeta") -> "Trace":
+    def _meta_to_trace(self, payload: dict, event: "ToolCallEvent", meta: "SessionMeta", *, kind: str = "tool.call.started") -> "Trace":
         """Convert internal pipeline types into a unified Trace."""
         from tracemill.trace import Trace
 
@@ -470,7 +470,7 @@ class GovernancePipeline:
 
         return Trace(
             id=event.event_id,
-            kind="tool.call.started",
+            kind=kind,
             session_id=event.session_id,
             timestamp=event.timestamp,
             source_key=event.source_event_key,

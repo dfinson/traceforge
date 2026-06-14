@@ -22,7 +22,7 @@ from tracemill.parsers.aider import AiderPreParser
 from tracemill.pipeline import EventPipeline
 from tracemill.sinks.base import StorageSink
 from tracemill.sinks.callback import CallbackSink
-from tracemill.trace import Trace
+from tracemill.trace import EventTrace
 from tracemill.types import (
     KNOWN_KINDS,
     EventKind,
@@ -56,7 +56,7 @@ __all__ = [
     "SessionEvent",
     "StorageSink",
     "TelemetrySpan",
-    "Trace",
+    "EventTrace",
     "UsageRecord",
     "Visibility",
     "classify_cmd_command",

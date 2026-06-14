@@ -7,7 +7,8 @@ from enum import Enum
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from tracemill.trace import Trace
+    from tracemill.sdk.gate_types import GateContext, PostflightVerdict, ToolCallRequest, ToolCallResult
+    from tracemill.trace import EventTrace
 
 
 # ─── Decision & Verdict ───────────────────────────────────────────────────────
@@ -18,7 +19,6 @@ class Decision(Enum):
 
     ALLOW = "allow"
     DENY = "deny"
-    ESCALATE = "escalate"
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,8 +26,8 @@ class Verdict:
     """A gating decision returned by a gate callback.
 
     Args:
-        decision: ALLOW, DENY, or ESCALATE.
-        reason: Human-readable reason propagated to the LLM on denial/escalation.
+        decision: ALLOW or DENY.
+        reason: Human-readable reason propagated to the LLM on denial.
     """
 
     decision: Decision
@@ -41,10 +41,6 @@ class Verdict:
     def denied(self) -> bool:
         return self.decision == Decision.DENY
 
-    @property
-    def escalated(self) -> bool:
-        return self.decision == Decision.ESCALATE
-
     @staticmethod
     def allow() -> Verdict:
         """Convenience factory for ALLOW."""
@@ -55,32 +51,27 @@ class Verdict:
         """Convenience factory for DENY with reason."""
         return Verdict(decision=Decision.DENY, reason=reason)
 
-    @staticmethod
-    def escalate(reason: str = "") -> Verdict:
-        """Convenience factory for ESCALATE — defer to human or higher-level policy."""
-        return Verdict(decision=Decision.ESCALATE, reason=reason)
-
 
 # ─── Callback Protocols ───────────────────────────────────────────────────────
 
 
 @runtime_checkable
 class PreflightGate(Protocol):
-    """Protocol for tool_preflight_gate callbacks.
+    """Protocol for preflight gate callbacks.
 
-    Receives the fully-enriched Trace (identity + classification + assessment).
-    Must return a Verdict (ALLOW, DENY, or ESCALATE).
+    Receives a ToolCallRequest (policy-focused view) and GateContext.
+    Must return a Verdict (ALLOW or DENY).
     """
 
-    def __call__(self, trace: "Trace") -> Verdict: ...
+    def __call__(self, request: "ToolCallRequest", ctx: "GateContext") -> Verdict: ...
 
 
 @runtime_checkable
 class PostflightGate(Protocol):
-    """Protocol for tool_postflight_gate callbacks.
+    """Protocol for postflight gate callbacks.
 
-    Receives the Trace after tool execution.
-    Must return a Verdict.
+    Receives a ToolCallResult (includes tool output) and GateContext.
+    Must return a PostflightVerdict.
     """
 
-    def __call__(self, trace: "Trace") -> Verdict: ...
+    def __call__(self, result: "ToolCallResult", ctx: "GateContext") -> "PostflightVerdict": ...

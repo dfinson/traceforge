@@ -1,6 +1,6 @@
 """Tests for the Assessment API (GovernancePipeline.score_tool_call).
 
-score_tool_call() returns Trace — the unified pipeline type.
+score_tool_call() returns EventTrace — the unified pipeline type.
 """
 
 from pathlib import Path
@@ -13,7 +13,7 @@ from tracemill.governance.budget import BudgetTracker
 from tracemill.governance.labeler import GovernanceLabeler
 from tracemill.governance.persistence import SystemStore
 from tracemill.governance.pipeline import GovernancePipeline, RecommendedAction
-from tracemill.trace import Trace
+from tracemill.trace import EventTrace
 
 
 @pytest.fixture
@@ -45,16 +45,16 @@ def pipeline(store, rules, engine):
     )
 
 
-def _action(trace: Trace) -> RecommendedAction:
-    """Extract recommended action from Trace."""
-    if trace.suggested_action is None:
+def _action(EventTrace: EventTrace) -> RecommendedAction:
+    """Extract recommended action from EventTrace."""
+    if EventTrace.suggested_action is None:
         return RecommendedAction.ALLOW
-    return RecommendedAction(trace.suggested_action)
+    return RecommendedAction(EventTrace.suggested_action)
 
 
-def _score(trace: Trace) -> int:
+def _score(EventTrace: EventTrace) -> int:
     """Extract risk score."""
-    return trace.risk_score if trace.risk_score is not None else 0
+    return EventTrace.risk_score if EventTrace.risk_score is not None else 0
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -66,29 +66,29 @@ class TestGracefulPayloads:
 
     def test_empty_payload_does_not_crash(self, pipeline):
         result = pipeline.score_tool_call({})
-        assert isinstance(result, Trace)
+        assert isinstance(result, EventTrace)
 
     def test_none_payload_does_not_crash(self, pipeline):
         result = pipeline.score_tool_call(None)
-        assert isinstance(result, Trace)
+        assert isinstance(result, EventTrace)
 
     def test_string_payload_does_not_crash(self, pipeline):
         result = pipeline.score_tool_call("not a dict")
-        assert isinstance(result, Trace)
+        assert isinstance(result, EventTrace)
 
     def test_missing_tool_name_still_assesses(self, pipeline):
         result = pipeline.score_tool_call({"tool_input": {}, "session_id": "s1"})
-        assert isinstance(result, Trace)
+        assert isinstance(result, EventTrace)
 
     def test_missing_session_id_gets_anonymous(self, pipeline):
         result = pipeline.score_tool_call({"tool_name": "bash", "tool_input": {"command": "ls"}})
-        assert isinstance(result, Trace)
+        assert isinstance(result, EventTrace)
 
     def test_tool_input_not_dict_treated_as_empty(self, pipeline):
         result = pipeline.score_tool_call({
             "tool_name": "bash", "tool_input": "string", "session_id": "s1"
         })
-        assert isinstance(result, Trace)
+        assert isinstance(result, EventTrace)
 
     def test_non_serializable_tool_input_uses_default_str(self, pipeline):
         result = pipeline.score_tool_call({
@@ -96,11 +96,11 @@ class TestGracefulPayloads:
             "tool_input": {"obj": object()},
             "session_id": "s1",
         })
-        assert isinstance(result, Trace)
+        assert isinstance(result, EventTrace)
 
     def test_numeric_tool_name_coerced(self, pipeline):
         result = pipeline.score_tool_call({"tool_name": 123, "tool_input": {}, "session_id": "s1"})
-        assert isinstance(result, Trace)
+        assert isinstance(result, EventTrace)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -170,7 +170,7 @@ class TestShellClassification:
             "tool_input": {"command": ""},
             "session_id": "s1",
         })
-        assert isinstance(result, Trace)
+        assert isinstance(result, EventTrace)
         assert _action(result) == RecommendedAction.ALLOW
 
     def test_no_command_key_still_works(self, pipeline):
@@ -179,7 +179,7 @@ class TestShellClassification:
             "tool_input": {"something_else": "value"},
             "session_id": "s1",
         })
-        assert isinstance(result, Trace)
+        assert isinstance(result, EventTrace)
 
     def test_cmd_key_recognized(self, pipeline):
         result = pipeline.score_tool_call({
@@ -235,7 +235,7 @@ class TestPipeDetection:
             "tool_input": {"command": "test -f x || echo missing"},
             "session_id": "s1",
         })
-        assert isinstance(result, Trace)
+        assert isinstance(result, EventTrace)
 
     def test_quoted_pipe_not_split(self, pipeline):
         result = pipeline.score_tool_call({
@@ -243,7 +243,7 @@ class TestPipeDetection:
             "tool_input": {"command": 'echo "a|b"'},
             "session_id": "s1",
         })
-        assert isinstance(result, Trace)
+        assert isinstance(result, EventTrace)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -267,7 +267,7 @@ class TestDialectDispatch:
             "tool_input": {"command": "Get-Process"},
             "session_id": "s1",
         })
-        assert isinstance(result, Trace)
+        assert isinstance(result, EventTrace)
 
     def test_cmd_dispatch(self, pipeline):
         result = pipeline.score_tool_call({
@@ -292,7 +292,7 @@ class TestMcpTools:
             "server_namespace": "filesystem",
             "session_id": "s1",
         })
-        assert isinstance(result, Trace)
+        assert isinstance(result, EventTrace)
         assert _score(result) > 0
 
     def test_mcp_no_double_prefix(self, pipeline):
@@ -302,7 +302,7 @@ class TestMcpTools:
             "server_namespace": "filesystem",
             "session_id": "s1",
         })
-        assert isinstance(result, Trace)
+        assert isinstance(result, EventTrace)
 
     def test_mcp_already_prefixed(self, pipeline):
         result = pipeline.score_tool_call({
@@ -311,7 +311,7 @@ class TestMcpTools:
             "server_namespace": "filesystem",
             "session_id": "s1",
         })
-        assert isinstance(result, Trace)
+        assert isinstance(result, EventTrace)
 
     def test_mcp_server_name_passthrough(self, pipeline):
         result = pipeline.score_tool_call({
@@ -321,7 +321,7 @@ class TestMcpTools:
             "mcp_server_name": "my-fs-server",
             "session_id": "s1",
         })
-        assert isinstance(result, Trace)
+        assert isinstance(result, EventTrace)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -337,7 +337,7 @@ class TestNonShellTools:
             "tool_input": {"foo": "bar"},
             "session_id": "s1",
         })
-        assert isinstance(result, Trace)
+        assert isinstance(result, EventTrace)
 
     def test_coding_tool(self, pipeline):
         result = pipeline.score_tool_call({
@@ -345,7 +345,7 @@ class TestNonShellTools:
             "tool_input": {"path": "src/main.py", "content": "print('hi')"},
             "session_id": "s1",
         })
-        assert isinstance(result, Trace)
+        assert isinstance(result, EventTrace)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -466,7 +466,7 @@ class TestReadOnly:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Result structure (Trace fields)
+# Result structure (EventTrace fields)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
@@ -551,7 +551,7 @@ class TestFactory:
             "tool_input": {"command": "ls"},
             "session_id": "s1",
         })
-        assert isinstance(result, Trace)
+        assert isinstance(result, EventTrace)
 
     def test_with_governance_config(self):
         from tracemill.config import BudgetConfig, GovernanceConfig
@@ -565,6 +565,6 @@ class TestFactory:
             "tool_input": {"command": "echo hi"},
             "session_id": "s1",
         })
-        assert isinstance(result, Trace)
+        assert isinstance(result, EventTrace)
 
 

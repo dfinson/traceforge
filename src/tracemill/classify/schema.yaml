@@ -280,4 +280,3 @@ components:
       enum:
         - allow
         - deny
-        - escalate

@@ -1,6 +1,6 @@
-"""The unified pipeline type: Trace.
+"""The unified pipeline type: EventTrace.
 
-A Trace is the single object that flows through the entire tracemill pipeline.
+An EventTrace is the single object that flows through the entire tracemill pipeline.
 It enters sparse (identity fields only from the adapter), accumulates
 classification fields from the enricher, and assessment fields from the scorer.
 By the time it reaches the gate callback, it is fully populated.
@@ -14,6 +14,7 @@ from __future__ import annotations
 import copy
 from dataclasses import dataclass, field, replace
 from datetime import datetime
+from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
 
@@ -31,19 +32,46 @@ from tracemill._generated import (
     Structure,
 )
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
+
+# Sentinel for "field not provided" in mutation helpers
+_UNSET: Any = object()
+
+# Empty frozen map constant
+EMPTY_MAP: MappingProxyType = MappingProxyType({})
+
+
+class TraceStage(StrEnum):
+    """Lifecycle stage of an EventTrace in the pipeline."""
+
+    ADAPTED = "adapted"
+    CLASSIFIED = "classified"
+    ASSESSED = "assessed"
+
+
+def _deep_freeze(obj: Any) -> Any:
+    """Recursively freeze a nested structure into immutable types."""
+    if isinstance(obj, MappingProxyType):
+        return obj
+    if isinstance(obj, dict):
+        return MappingProxyType({k: _deep_freeze(v) for k, v in obj.items()})
+    if isinstance(obj, (list, tuple)):
+        return tuple(_deep_freeze(v) for v in obj)
+    if isinstance(obj, set):
+        return frozenset(_deep_freeze(v) for v in obj)
+    return obj
 
 
 @dataclass(frozen=True, slots=True)
-class Trace:
+class EventTrace:
     """The atomic unit of tracemill. One per observed event.
 
     Lifecycle:
         1. Adapter creates with identity fields + raw_event
         2. Enricher fills classification fields (mechanism, effect, etc.)
         3. Scorer fills assessment fields (risk_score, suggested_action, etc.)
-        4. Gate callback receives the fully-enriched Trace
-        5. Sinks persist the final Trace
+        4. Gate callback receives the fully-enriched EventTrace
+        5. Sinks persist the final EventTrace
 
     All enum fields accept raw strings and coerce to StrEnum members in
     __post_init__. Invalid values raise ValueError immediately.
@@ -54,9 +82,17 @@ class Trace:
     id: str
     kind: EventKind
     session_id: str
+    tool_call_id: str
     timestamp: datetime
     source_key: str
     raw_event: dict[str, Any] | MappingProxyType = field(repr=False, compare=False)
+    parent_tool_call_id: str | None = None
+
+    # ─── Tool identity (adapter fills for tool.call.* events) ─────────────────
+
+    tool_name: str | None = None
+    tool_input: MappingProxyType = field(default_factory=lambda: EMPTY_MAP)
+    target_resource: str | None = None
 
     # ─── Classification (enricher fills) ──────────────────────────────────────
 
@@ -76,24 +112,36 @@ class Trace:
     suggested_action: Recommendation | None = None
     reason: str | None = None
 
-    # ─── Extensible attributes (experimental dimensions) ──────────────────────
+    # ─── Lifecycle ────────────────────────────────────────────────────────────
 
-    labels: tuple[tuple[str, str], ...] = ()
+    stage: TraceStage = TraceStage.ADAPTED
 
-    # ─── Serialization version ────────────────────────────────────────────────
+    # ─── Extensions ───────────────────────────────────────────────────────────
 
+    attributes: MappingProxyType = field(default_factory=lambda: EMPTY_MAP)
     schema_version: str = SCHEMA_VERSION
 
-    # ─── Post-init: freeze raw_event + coerce strings to StrEnums ─────────────
+    # ─── Post-init: deep-freeze + coerce strings to StrEnums ──────────────────
 
     def __post_init__(self) -> None:
-        # Freeze raw_event: deep-copy mutable dict, wrap as read-only proxy
+        # Deep-freeze all mapping fields
         raw = self.raw_event
         if isinstance(raw, dict) and not isinstance(raw, MappingProxyType):
-            object.__setattr__(self, "raw_event", MappingProxyType(copy.deepcopy(raw)))
+            object.__setattr__(self, "raw_event", _deep_freeze(raw))
+        elif isinstance(raw, MappingProxyType):
+            pass  # already frozen
+        
+        ti = self.tool_input
+        if isinstance(ti, dict) and not isinstance(ti, MappingProxyType):
+            object.__setattr__(self, "tool_input", _deep_freeze(ti))
+
+        attrs = self.attributes
+        if isinstance(attrs, dict) and not isinstance(attrs, MappingProxyType):
+            object.__setattr__(self, "attributes", _deep_freeze(attrs))
 
         # Coerce scalar enums (StrEnum constructor validates + raises ValueError)
         object.__setattr__(self, "kind", EventKind(self.kind))
+        object.__setattr__(self, "stage", TraceStage(self.stage))
         if self.mechanism is not None:
             object.__setattr__(self, "mechanism", Mechanism(self.mechanism))
         if self.effect is not None:
@@ -115,66 +163,94 @@ class Trace:
         if self.structure:
             object.__setattr__(self, "structure", tuple(Structure(v) for v in self.structure))
 
+    # ─── OTel correlation aliases ─────────────────────────────────────────────
+
+    @property
+    def trace_id(self) -> str:
+        """OTel alias: session_id → trace_id."""
+        return self.session_id
+
+    @property
+    def span_id(self) -> str:
+        """OTel alias: tool_call_id → span_id."""
+        return self.tool_call_id
+
+    @property
+    def parent_span_id(self) -> str | None:
+        """OTel alias: parent_tool_call_id → parent_span_id."""
+        return self.parent_tool_call_id
+
     # ─── Lifecycle checks ─────────────────────────────────────────────────────
 
     @property
     def classified(self) -> bool:
         """True if enricher has run."""
-        return self.mechanism is not None
+        return self.stage in (TraceStage.CLASSIFIED, TraceStage.ASSESSED)
 
     @property
     def assessed(self) -> bool:
         """True if scorer has run."""
-        return self.risk_score is not None
+        return self.stage == TraceStage.ASSESSED
 
     # ─── Mutation helpers (frozen dataclass — returns new instance) ────────────
 
     def with_classification(
         self,
         *,
-        mechanism: Mechanism | str | None = None,
-        effect: Effect | str | None = None,
-        scope: tuple[Scope | str, ...] = (),
-        role: tuple[Role | str, ...] = (),
-        action: tuple[Action | str, ...] = (),
-        capability: tuple[Capability | str, ...] = (),
-        structure: tuple[Structure | str, ...] = (),
-        canonical_tool: str | None = None,
-    ) -> Trace:
-        """Return a new Trace with classification fields populated."""
-        return replace(
-            self,
-            mechanism=mechanism,
-            effect=effect,
-            scope=scope,
-            role=role,
-            action=action,
-            capability=capability,
-            structure=structure,
-            canonical_tool=canonical_tool,
-        )
+        mechanism=_UNSET,
+        effect=_UNSET,
+        scope=_UNSET,
+        role=_UNSET,
+        action=_UNSET,
+        capability=_UNSET,
+        structure=_UNSET,
+        canonical_tool=_UNSET,
+    ) -> EventTrace:
+        """Return a new EventTrace with classification fields populated.
+        
+        Sentinel-based: omitted fields preserve existing values.
+        """
+        kwargs: dict[str, Any] = {}
+        if mechanism is not _UNSET:
+            kwargs["mechanism"] = mechanism
+        if effect is not _UNSET:
+            kwargs["effect"] = effect
+        if scope is not _UNSET:
+            kwargs["scope"] = scope
+        if role is not _UNSET:
+            kwargs["role"] = role
+        if action is not _UNSET:
+            kwargs["action"] = action
+        if capability is not _UNSET:
+            kwargs["capability"] = capability
+        if structure is not _UNSET:
+            kwargs["structure"] = structure
+        if canonical_tool is not _UNSET:
+            kwargs["canonical_tool"] = canonical_tool
+        return replace(self, stage=TraceStage.CLASSIFIED, **kwargs)
 
     def with_assessment(
         self,
         *,
-        risk_score: int | None = None,
-        risk_band: RiskBand | str | None = None,
-        suggested_action: Recommendation | str | None = None,
-        reason: str | None = None,
-    ) -> Trace:
-        """Return a new Trace with assessment fields populated."""
-        return replace(
-            self,
-            risk_score=risk_score,
-            risk_band=risk_band,
-            suggested_action=suggested_action,
-            reason=reason,
-        )
-
-    def with_labels(self, **kwargs: str) -> Trace:
-        """Return a new Trace with additional labels for experimental dimensions."""
-        new_labels = self.labels + tuple(kwargs.items())
-        return replace(self, labels=new_labels)
+        risk_score=_UNSET,
+        risk_band=_UNSET,
+        suggested_action=_UNSET,
+        reason=_UNSET,
+    ) -> EventTrace:
+        """Return a new EventTrace with assessment fields populated.
+        
+        Sentinel-based: omitted fields preserve existing values.
+        """
+        kwargs: dict[str, Any] = {}
+        if risk_score is not _UNSET:
+            kwargs["risk_score"] = risk_score
+        if risk_band is not _UNSET:
+            kwargs["risk_band"] = risk_band
+        if suggested_action is not _UNSET:
+            kwargs["suggested_action"] = suggested_action
+        if reason is not _UNSET:
+            kwargs["reason"] = reason
+        return replace(self, stage=TraceStage.ASSESSED, **kwargs)
 
     @classmethod
     def create(
@@ -183,20 +259,29 @@ class Trace:
         id: str,
         kind: EventKind | str,
         session_id: str,
+        tool_call_id: str,
         timestamp: datetime,
         source_key: str,
         raw_event: dict[str, Any],
-    ) -> Trace:
-        """Factory — identical to direct construction.
+        parent_tool_call_id: str | None = None,
+        tool_name: str | None = None,
+        tool_input: dict[str, Any] | MappingProxyType | None = None,
+        target_resource: str | None = None,
+    ) -> EventTrace:
+        """Factory for adapter use.
 
-        Kept as a named constructor for readability. __post_init__ handles
-        deep-copy + freeze of raw_event and enum coercion on all paths.
+        __post_init__ handles deep-freeze + enum coercion on all paths.
         """
         return cls(
             id=id,
             kind=kind,
             session_id=session_id,
+            tool_call_id=tool_call_id,
             timestamp=timestamp,
             source_key=source_key,
             raw_event=raw_event,
+            parent_tool_call_id=parent_tool_call_id,
+            tool_name=tool_name,
+            tool_input=tool_input or EMPTY_MAP,
+            target_resource=target_resource,
         )

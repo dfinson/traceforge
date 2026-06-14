@@ -1829,12 +1829,15 @@ class GovernancePipeline:
         pipeline = self
         original_run = tool._run
 
-        def _guarded_run(*args, **kwargs):
+        def _guarded_run(*args, config=None, run_manager=None, **kwargs):
             import time
 
             sid = "langchain"
-            config = kwargs.get("config") or kwargs.get("run_manager")
-            if hasattr(config, "configurable"):
+            if config and isinstance(config, dict):
+                configurable = config.get("configurable", {})
+                if isinstance(configurable, dict):
+                    sid = configurable.get("thread_id", sid)
+            elif hasattr(config, "configurable"):
                 sid = config.configurable.get("thread_id", sid)
 
             # Extract tool-relevant input (exclude LangChain internal keys)
@@ -1858,7 +1861,7 @@ class GovernancePipeline:
             error = None
             result = None
             try:
-                result = original_run(*args, **kwargs)
+                result = original_run(*args, config=config, run_manager=run_manager, **kwargs)
             except Exception as exc:
                 error = str(exc)
                 raise

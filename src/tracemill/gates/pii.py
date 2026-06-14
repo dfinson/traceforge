@@ -26,7 +26,7 @@ Usage:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -58,8 +58,6 @@ class PiiGateConfig:
             "slim_spacy" — regex-only, no NER model needed (faster, smaller)
         suppress_on_critical: If True, return SUPPRESS when critical PII is found.
             If False, always REDACT (even critical entities).
-        replacement_template: How to format replacement text. Default "<{entity_type}>".
-            Use "{entity_type}" placeholder for the detected type.
     """
 
     score_threshold: float = 0.5
@@ -69,7 +67,6 @@ class PiiGateConfig:
     language: str = "en"
     nlp_engine: str = "spacy"
     suppress_on_critical: bool = True
-    replacement_template: str = "<{entity_type}>"
 
     # Advanced: additional PatternRecognizer definitions as frozen tuples of (name, entity, regex, score)
     ad_hoc_patterns: tuple[tuple[str, str, str, float], ...] = ()
@@ -195,8 +192,9 @@ def pii_postflight_gate(
 
         # Check for critical entities
         if cfg.suppress_on_critical and cfg.critical_entities:
+            critical_set = frozenset(cfg.critical_entities)
             critical_found = [
-                r for r in findings if r.entity_type in cfg.critical_entities
+                r for r in findings if r.entity_type in critical_set
             ]
             if critical_found:
                 types = sorted({r.entity_type for r in critical_found})

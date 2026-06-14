@@ -574,12 +574,17 @@ class GovernancePipeline:
         """Execute the preflight gate chain. Returns first DENY or ALLOW.
 
         All gates come from the GatePolicy. No per-method overrides.
-        Fail-closed: if any gate raises, returns DENY.
+        Fail-closed: if any gate or internal logic raises, returns DENY.
         """
         from tracemill.sdk.verdict import Verdict
 
-        request = self._to_tool_call_request(trace)
-        ctx = self._build_gate_context(session_id)
+        try:
+            request = self._to_tool_call_request(trace)
+            ctx = self._build_gate_context(session_id)
+        except Exception as exc:
+            deny = Verdict.deny(f"gate setup error (fail-closed): {type(exc).__name__}: {exc}")
+            self._record_denial(session_id, deny)
+            return deny
 
         # Run policy chain
         if self.policy and self.policy.has_preflight:
@@ -646,16 +651,24 @@ class GovernancePipeline:
 
     def _record_denial(self, session_id: str, verdict: "Verdict") -> None:
         """Record a denial in session state for GateContext tracking."""
-        state = self._states.get(session_id)
-        if state:
-            state._denied_count += 1
-            state._prior_verdicts.append(verdict)
+        state = self._ensure_gate_state(session_id)
+        state._denied_count += 1
+        state._prior_verdicts.append(verdict)
+        # Cap history to last 100 verdicts to prevent unbounded growth
+        if len(state._prior_verdicts) > 100:
+            state._prior_verdicts = state._prior_verdicts[-100:]
 
     def _record_allow(self, session_id: str) -> None:
         """Record an allow in session state."""
-        state = self._states.get(session_id)
-        if state:
-            state._tool_call_count += 1
+        state = self._ensure_gate_state(session_id)
+        state._tool_call_count += 1
+
+    def _ensure_gate_state(self, session_id: str):
+        """Lazily create minimal session state for gate context tracking."""
+        if session_id not in self._states:
+            from tracemill.governance.state import SessionState
+            self._states[session_id] = SessionState(session_id=session_id)
+        return self._states[session_id]
 
     def score_tool_call_event(self, event: "tracemill.types.SessionEvent") -> "SessionMeta":
         """Score an enriched SessionEvent via the canonical bridge.
@@ -1675,8 +1688,6 @@ class GovernancePipeline:
         Returns (trace, verdict) tuple. Verdict is ALLOW or DENY.
         Session ID comes from payload["session_id"].
         """
-        from tracemill.sdk.verdict import Verdict
-
         session_id = payload.get("session_id", "unknown")
         with self._gate_lock:
             trace = self._score_event(payload)

@@ -309,8 +309,6 @@ class TestGateContextTracking:
             return Verdict.deny("nope")
 
         pipeline = _make_pipeline(preflight=counting_gate)
-        # Need to initialize session state
-        pipeline.get_or_create_state("s1")
 
         for _ in range(3):
             payload = {"tool_name": "x", "tool_input": {}, "session_id": "s1"}
@@ -326,7 +324,6 @@ class TestGateContextTracking:
             return Verdict.allow()
 
         pipeline = _make_pipeline(preflight=counting_gate)
-        pipeline.get_or_create_state("s1")
 
         for _ in range(3):
             payload = {"tool_name": "x", "tool_input": {}, "session_id": "s1"}

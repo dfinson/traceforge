@@ -178,3 +178,187 @@ class TestS3SinkPayload:
         await sink.on_usage(make_usage())
         assert len(sink._buffer) == 1
         assert sink._buffer[0]["type"] == "usage"
+
+
+class TestS3SinkLazyClient:
+    """Test lazy client creation with region/endpoint."""
+
+    async def test_get_client_with_region_and_endpoint(self):
+        from tracemill.sinks.s3 import S3Sink
+
+        mock_boto3_mod = MagicMock()
+        mock_client = MagicMock()
+        mock_boto3_mod.client.return_value = mock_client
+
+        with patch("tracemill.sinks.s3._require_boto3", return_value=mock_boto3_mod):
+            sink = S3Sink(
+                bucket="b",
+                region="eu-west-1",
+                endpoint_url="http://localhost:9000",
+                buffer_size=1,
+            )
+
+        # Client should be None until first use
+        assert sink._client is None
+
+        # Trigger client creation via flush path
+        sink._buffer = [{"test": "data"}]
+        sink._session_id = "sess"
+        await sink._flush_buffer()
+
+        mock_boto3_mod.client.assert_called_once_with(
+            "s3", region_name="eu-west-1", endpoint_url="http://localhost:9000"
+        )
+
+    async def test_get_client_no_region_no_endpoint(self):
+        from tracemill.sinks.s3 import S3Sink
+
+        mock_boto3_mod = MagicMock()
+        mock_client = MagicMock()
+        mock_boto3_mod.client.return_value = mock_client
+
+        with patch("tracemill.sinks.s3._require_boto3", return_value=mock_boto3_mod):
+            sink = S3Sink(bucket="b", buffer_size=1)
+
+        sink._buffer = [{"test": "data"}]
+        sink._session_id = "sess"
+        await sink._flush_buffer()
+
+        mock_boto3_mod.client.assert_called_once_with("s3")
+
+    async def test_get_client_cached(self):
+        from tracemill.sinks.s3 import S3Sink
+
+        mock_boto3_mod = MagicMock()
+        mock_client = MagicMock()
+        mock_boto3_mod.client.return_value = mock_client
+
+        with patch("tracemill.sinks.s3._require_boto3", return_value=mock_boto3_mod):
+            sink = S3Sink(bucket="b", buffer_size=1)
+
+        sink._buffer = [{"a": 1}]
+        sink._session_id = "s"
+        await sink._flush_buffer()
+        sink._buffer = [{"b": 2}]
+        await sink._flush_buffer()
+
+        # Only created once
+        assert mock_boto3_mod.client.call_count == 1
+
+
+class TestS3SinkTimeFlush:
+    """Test time-based flush trigger."""
+
+    async def test_time_based_flush(self):
+        import time
+
+        from tracemill.sinks.s3 import S3Sink
+
+        mock_boto3_mod = MagicMock()
+        mock_client = MagicMock()
+        mock_boto3_mod.client.return_value = mock_client
+
+        with patch("tracemill.sinks.s3._require_boto3", return_value=mock_boto3_mod):
+            sink = S3Sink(bucket="b", buffer_size=1000, flush_interval=0.0)
+
+        sink._client = mock_client
+        # Set last flush time far in the past to trigger time-based flush
+        sink._last_flush_time = time.monotonic() - 100
+
+        await sink.on_event(make_event())
+        # Should have flushed due to time elapsed
+        mock_client.put_object.assert_called_once()
+        assert len(sink._buffer) == 0
+
+
+class TestS3SinkErrorHandling:
+    """Test error handling on S3 upload failure."""
+
+    async def test_upload_failure_logs_error_clears_buffer(self):
+        from tracemill.sinks.s3 import S3Sink
+
+        mock_boto3_mod = MagicMock()
+        mock_client = MagicMock()
+        mock_client.put_object.side_effect = Exception("Network error")
+        mock_boto3_mod.client.return_value = mock_client
+
+        with patch("tracemill.sinks.s3._require_boto3", return_value=mock_boto3_mod):
+            sink = S3Sink(bucket="b", buffer_size=1)
+
+        sink._client = mock_client
+        # Should not raise, just log
+        await sink.on_event(make_event())
+        # Buffer should still be cleared after error
+        assert len(sink._buffer) == 0
+
+    async def test_flush_unknown_session_uses_fallback(self):
+        from tracemill.sinks.s3 import S3Sink
+
+        mock_boto3_mod = MagicMock()
+        mock_client = MagicMock()
+        mock_boto3_mod.client.return_value = mock_client
+
+        with patch("tracemill.sinks.s3._require_boto3", return_value=mock_boto3_mod):
+            sink = S3Sink(bucket="b", buffer_size=100)
+
+        sink._client = mock_client
+        # Manually add to buffer without session_id set
+        sink._buffer = [{"test": "data"}]
+        await sink._flush_buffer()
+
+        call_kwargs = mock_client.put_object.call_args[1]
+        assert "unknown/" in call_kwargs["Key"]
+
+
+class TestS3SinkRequireBoto3Success:
+    """Test _require_boto3 when boto3 IS available."""
+
+    def test_returns_boto3_module(self):
+        from tracemill.sinks.s3 import _require_boto3
+
+        # Since boto3 isn't installed, we patch it
+        fake_boto3 = MagicMock()
+        with patch.dict(sys.modules, {"boto3": fake_boto3}):
+            with patch("builtins.__import__", wraps=__import__):
+                # The actual function uses import boto3, so mock at module level
+                result = _require_boto3()
+                # Should return the module from sys.modules
+                assert result is not None
+
+
+class TestS3SinkSpanUsageAutoFlush:
+    """Test that span/usage can trigger auto-flush when buffer is full."""
+
+    async def test_span_triggers_flush_at_threshold(self):
+        from tracemill.sinks.s3 import S3Sink
+
+        mock_boto3_mod = MagicMock()
+        mock_client = MagicMock()
+        mock_boto3_mod.client.return_value = mock_client
+
+        with patch("tracemill.sinks.s3._require_boto3", return_value=mock_boto3_mod):
+            sink = S3Sink(bucket="b", buffer_size=2, flush_interval=9999)
+
+        sink._client = mock_client
+
+        await sink.on_span(make_span())
+        mock_client.put_object.assert_not_called()
+        await sink.on_span(make_span())
+        mock_client.put_object.assert_called_once()
+
+    async def test_usage_triggers_flush_at_threshold(self):
+        from tracemill.sinks.s3 import S3Sink
+
+        mock_boto3_mod = MagicMock()
+        mock_client = MagicMock()
+        mock_boto3_mod.client.return_value = mock_client
+
+        with patch("tracemill.sinks.s3._require_boto3", return_value=mock_boto3_mod):
+            sink = S3Sink(bucket="b", buffer_size=2, flush_interval=9999)
+
+        sink._client = mock_client
+
+        await sink.on_usage(make_usage())
+        mock_client.put_object.assert_not_called()
+        await sink.on_usage(make_usage())
+        mock_client.put_object.assert_called_once()

@@ -4,7 +4,30 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, Protocol, TypedDict, runtime_checkable
+
+
+# ─── Payload Types ────────────────────────────────────────────────────────────
+
+
+class ToolCallPayload(TypedDict):
+    """Payload passed to preflight/postflight gate callbacks."""
+
+    tool_name: str
+    tool_input: dict
+    session_id: str
+
+
+class ToolResultPayload(TypedDict):
+    """Payload passed to postflight gate callbacks (includes output)."""
+
+    tool_name: str
+    tool_input: dict
+    tool_output: Any
+    session_id: str
+
+
+# ─── Decision & Verdict ───────────────────────────────────────────────────────
 
 
 class Decision(Enum):
@@ -53,6 +76,34 @@ class Verdict:
     def escalate(reason: str = "") -> Verdict:
         """Convenience factory for ESCALATE — defer to human or higher-level policy."""
         return Verdict(decision=Decision.ESCALATE, reason=reason)
+
+
+# ─── Callback Protocols ───────────────────────────────────────────────────────
+
+
+@runtime_checkable
+class PreflightGate(Protocol):
+    """Strongly-typed protocol for tool_preflight_gate callbacks.
+
+    Receives the tool call payload and scoring metadata, returns a Verdict
+    (or bool/None for backwards compat via interpret_callback_result).
+    """
+
+    def __call__(self, payload: ToolCallPayload, meta: Any) -> Verdict | bool | None: ...
+
+
+@runtime_checkable
+class PostflightGate(Protocol):
+    """Strongly-typed protocol for tool_postflight_gate callbacks.
+
+    Receives the tool call payload including the execution result.
+    Return value is ignored (fire-and-forget audit/logging).
+    """
+
+    def __call__(self, payload: ToolResultPayload) -> None: ...
+
+
+# ─── Interpretation ───────────────────────────────────────────────────────────
 
 
 def interpret_callback_result(result: Any) -> Verdict:

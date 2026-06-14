@@ -41,6 +41,7 @@ if TYPE_CHECKING:
         ToolCallEvent,
         ToolResultEvent,
     )
+    from tracemill.sdk.verdict import PostflightGate, PreflightGate
 
 
 def _decode_budget_dims(raw: list | None) -> tuple[tuple[str, int], ...]:
@@ -79,7 +80,7 @@ class GovernancePipeline:
         engine: "ClassificationEngine",
         thresholds: "BudgetThresholds | None" = None,
         project_root: str | None = None,
-        tool_preflight_gate: "Callable[[dict, SessionMeta], None] | None" = None,
+        tool_preflight_gate: "PreflightGate | None" = None,
     ) -> None:
         self._store = store
         self._labeler = labeler
@@ -181,7 +182,7 @@ class GovernancePipeline:
         return PipelineBuilder()
 
     @classmethod
-    def from_config(cls, path=None, *, tool_preflight_gate=None) -> "GovernancePipeline":
+    def from_config(cls, path=None, *, tool_preflight_gate: "PreflightGate | None" = None) -> "GovernancePipeline":
         """Create a fully-configured pipeline from a tracemill.yaml file.
 
         Args:
@@ -1459,7 +1460,7 @@ class GovernancePipeline:
 
     # ─── Framework attach methods ───────────────────────────────────────────
 
-    def attach_crewai(self, *, session_id: str = "sdk", tool_preflight_gate=None, tool_postflight_gate=None) -> None:
+    def attach_crewai(self, *, session_id: str = "sdk", tool_preflight_gate: "PreflightGate | None" = None, tool_postflight_gate: "PostflightGate | None" = None) -> None:
         """Register tracemill into CrewAI's before/after tool_call hooks.
 
         Blocking: returns False to CrewAI when preflight callback returns DENY/ESCALATE.
@@ -1497,7 +1498,7 @@ class GovernancePipeline:
                 }
                 tool_postflight_gate(payload)
 
-    def attach_langchain(self, tool, *, session_id: str = "sdk", tool_preflight_gate=None, tool_postflight_gate=None):
+    def attach_langchain(self, tool, *, session_id: str = "sdk", tool_preflight_gate: "PreflightGate | None" = None, tool_postflight_gate: "PostflightGate | None" = None):
         """Wrap a LangChain tool's _run with tracemill gating.
 
         Blocking: raises ToolException when preflight callback returns DENY/ESCALATE.
@@ -1532,7 +1533,7 @@ class GovernancePipeline:
         tool.handle_tool_error = True
         return tool
 
-    def attach_langgraph(self, tools, *, session_id: str = "sdk", tool_preflight_gate=None, tool_postflight_gate=None):
+    def attach_langgraph(self, tools, *, session_id: str = "sdk", tool_preflight_gate: "PreflightGate | None" = None, tool_postflight_gate: "PostflightGate | None" = None):
         """Return a ToolNode with tracemill gating via wrap_tool_call.
 
         Blocking: returns denial ToolMessage without calling execute.
@@ -1569,7 +1570,7 @@ class GovernancePipeline:
 
         return ToolNode(tools, wrap_tool_call=_tracemill_wrapper)
 
-    def attach_anthropic(self, *, session_id: str = "sdk", tool_preflight_gate=None, tool_postflight_gate=None):
+    def attach_anthropic(self, *, session_id: str = "sdk", tool_preflight_gate: "PreflightGate | None" = None, tool_postflight_gate: "PostflightGate | None" = None):
         """Return gate functions for the Anthropic tool-use loop.
 
         Returns (preflight, postflight) tuple.
@@ -1618,7 +1619,7 @@ class GovernancePipeline:
 
         return _preflight, _postflight
 
-    def attach_openai(self, *, session_id: str = "sdk", tool_preflight_gate=None, tool_postflight_gate=None):
+    def attach_openai(self, *, session_id: str = "sdk", tool_preflight_gate: "PreflightGate | None" = None, tool_postflight_gate: "PostflightGate | None" = None):
         """Return gate functions for OpenAI ChatCompletionMessageToolCall.
 
         Returns (preflight, postflight) tuple.
@@ -1675,7 +1676,7 @@ class GovernancePipeline:
 
         return _preflight, _postflight
 
-    def attach_semantic_kernel(self, kernel, *, session_id: str = "sdk", tool_preflight_gate=None, tool_postflight_gate=None) -> None:
+    def attach_semantic_kernel(self, kernel, *, session_id: str = "sdk", tool_preflight_gate: "PreflightGate | None" = None, tool_postflight_gate: "PostflightGate | None" = None) -> None:
         """Register tracemill as a Semantic Kernel auto function invocation filter.
 
         Blocking: skips next_handler and injects denial FunctionResult.
@@ -1710,7 +1711,7 @@ class GovernancePipeline:
                 result_val = context.function_result.value if context.function_result else None
                 tool_postflight_gate({**payload, "tool_output": result_val})
 
-    def attach_autogen(self, tools, *, session_id: str = "sdk", tool_preflight_gate=None, tool_postflight_gate=None):
+    def attach_autogen(self, tools, *, session_id: str = "sdk", tool_preflight_gate: "PreflightGate | None" = None, tool_postflight_gate: "PostflightGate | None" = None):
         """Return a TracemillWorkbench that gates tool calls for AutoGen v0.4.
 
         Blocking: returns synthetic ToolResult without executing the tool.
@@ -1752,7 +1753,7 @@ class GovernancePipeline:
 
         return _TracemillWorkbench(tools)
 
-    def attach_smolagents(self, agent_cls=None, *, session_id: str = "sdk", tool_preflight_gate=None, tool_postflight_gate=None):
+    def attach_smolagents(self, agent_cls=None, *, session_id: str = "sdk", tool_preflight_gate: "PreflightGate | None" = None, tool_postflight_gate: "PostflightGate | None" = None):
         """Return a TracemillAgent subclass that gates tool calls for smolagents.
 
         Blocking: returns denial string as observation without executing the tool.
@@ -1790,7 +1791,7 @@ class GovernancePipeline:
 
         return _TracemillAgent
 
-    def attach_pydantic_ai(self, agent, *, session_id: str = "sdk", tool_preflight_gate=None, tool_postflight_gate=None) -> None:
+    def attach_pydantic_ai(self, agent, *, session_id: str = "sdk", tool_preflight_gate: "PreflightGate | None" = None, tool_postflight_gate: "PostflightGate | None" = None) -> None:
         """Register tracemill as Pydantic AI tool-execute hooks (before/after).
 
         Blocking: raises SkipToolExecution with denial reason on preflight.
@@ -1826,7 +1827,7 @@ class GovernancePipeline:
                     "session_id": session_id,
                 })
 
-    def attach_openai_agents(self, agent, *, session_id: str = "sdk", tool_preflight_gate=None, tool_postflight_gate=None):
+    def attach_openai_agents(self, agent, *, session_id: str = "sdk", tool_preflight_gate: "PreflightGate | None" = None, tool_postflight_gate: "PostflightGate | None" = None):
         """Register tracemill as an OpenAI Agents SDK input guardrail.
 
         Blocking: raises GuardrailTripwireTriggered which rejects the tool call.

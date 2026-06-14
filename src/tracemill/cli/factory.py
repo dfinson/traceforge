@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tracemill.governance.persistence import SystemStore
 from tracemill.governance.pipeline import GovernancePipeline
+
+if TYPE_CHECKING:
+    from tracemill.sdk.verdict import PreflightGate
 
 
 def create_default_pipeline(
     store: SystemStore,
     project_root: str | None = None,
-    tool_preflight_gate=None,
+    tool_preflight_gate: "PreflightGate | None" = None,
 ) -> GovernancePipeline:
     """Create a GovernancePipeline with all default components.
 

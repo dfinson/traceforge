@@ -18,12 +18,12 @@ import struct
 import sys
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from tracemill.governance.pipeline import GovernancePipeline
     from tracemill.governance.results import SessionMeta
-    from tracemill.sdk.verdict import Verdict
+    from tracemill.sdk.verdict import PreflightGate, Verdict
 
 
 class GateServer:
@@ -32,7 +32,7 @@ class GateServer:
     def __init__(
         self,
         pipeline: "GovernancePipeline",
-        tool_preflight_gate: "Callable[[dict, SessionMeta], Verdict | bool | None]",
+        tool_preflight_gate: "PreflightGate",
         sock_path: str | None = None,
     ) -> None:
         self._pipeline = pipeline

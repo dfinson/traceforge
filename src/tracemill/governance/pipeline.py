@@ -615,12 +615,18 @@ class GovernancePipeline:
         """Execute the postflight gate chain. Returns most restrictive action.
 
         Priority: TERMINATE > SUPPRESS > REDACT > ALERT > ACCEPT.
-        Fail-closed: if any gate raises, returns TERMINATE.
+        Fail-closed: if any gate or setup raises, returns SUPPRESS.
         """
         from tracemill.sdk.gate_types import PostflightAction, PostflightVerdict
 
-        result = self._to_tool_call_result(trace, output=output, duration_ms=duration_ms, error=error)
-        ctx = self._build_gate_context(session_id)
+        try:
+            result = self._to_tool_call_result(trace, output=output, duration_ms=duration_ms, error=error)
+            ctx = self._build_gate_context(session_id)
+        except Exception as exc:
+            return PostflightVerdict(
+                action=PostflightAction.SUPPRESS,
+                reason=f"postflight setup error (fail-closed): {type(exc).__name__}: {exc}",
+            )
 
         # Action severity ordering
         _SEVERITY = {
@@ -1744,7 +1750,14 @@ class GovernancePipeline:
 
         Blocking: returns False to CrewAI when preflight returns DENY.
         Session ID: extracted from CrewAI's ctx.crew.fingerprint or generated.
+
+        WARNING: CrewAI hooks are global. Calling this multiple times registers
+        duplicate hooks. Use once per process.
         """
+        if getattr(self, "_crewai_gated", False):
+            return
+        self._crewai_gated = True
+
         from crewai.hooks.decorators import after_tool_call, before_tool_call
 
         pipeline = self
@@ -1796,7 +1809,12 @@ class GovernancePipeline:
 
         Blocking: raises ToolException when preflight returns DENY.
         Session ID: uses tool invocation config's configurable.thread_id or "langchain".
+        Idempotent: calling twice on same tool is a no-op.
         """
+        if getattr(tool, "_tracemill_gated", False):
+            return tool
+        tool._tracemill_gated = True
+
         from langchain_core.tools.base import ToolException
 
         pipeline = self
@@ -2083,11 +2101,16 @@ class GovernancePipeline:
 
         Blocking: raises SkipToolExecution with denial reason on preflight.
         Session ID: from ctx.run_id (Pydantic AI's native UUID7 run ID).
+        Idempotent: calling twice on same agent is a no-op.
         """
+        if getattr(agent, "_tracemill_gated", False):
+            return
+        agent._tracemill_gated = True
 
         pipeline = self
         # External trace stash keyed by (run_id, tool_name) — avoids touching frozen ctx
         _pending: dict[str, "EventTrace"] = {}
+        _MAX_PENDING = 1000
 
         @agent.tool_hook("before")
         async def _tracemill_before_tool(ctx, tool_def, args):
@@ -2103,6 +2126,8 @@ class GovernancePipeline:
             if verdict.denied:
                 raise SkipToolExecution(f"Denied: {verdict.reason}")
             stash_key = f"{sid}:{tool_def.name}:{id(args)}"
+            if len(_pending) >= _MAX_PENDING:
+                _pending.pop(next(iter(_pending)), None)
             _pending[stash_key] = trace
 
         @agent.tool_hook("after")
@@ -2125,11 +2150,15 @@ class GovernancePipeline:
 
         Blocking: raises GuardrailTripwireTriggered which rejects the entire turn.
         Session ID: from agent.name or "openai_agents".
+        Idempotent: calling twice on same agent is a no-op.
 
         NOTE: Input guardrails fire on the agent's input message, NOT on individual
         tool calls. For per-tool-call gating, use needs_approval=True on tools and
         integrate via the approval handler pattern (see gating spec §5b).
         """
+        if getattr(agent, "_tracemill_gated", False):
+            return agent
+        agent._tracemill_gated = True
 
         pipeline = self
 

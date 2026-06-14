@@ -1,146 +1,139 @@
-# Aider event mapping for MappedJsonAdapter
-# Targets: aider >= 0.70 (structured JSON events in .aider.events.json)
-# Source: paul-gauthier/aider event logging format.
-# Note: Aider's primary logs are markdown (.aider.chat.history.md) which
-# require a separate AiderPreParser before feeding into this adapter.
+# Aider analytics JSONL mapping for MappedJsonAdapter
+# Targets: aider >= 0.70 analytics log (--analytics-log <path>)
+# Source: Aider-AI/aider:aider/analytics.py — verified 2026-06-14
+#
+# Aider writes JSONL to a USER-SPECIFIED path via --analytics-log flag.
+# There is NO default structured output file. Users must configure:
+#   aider --analytics-log .aider.analytics.jsonl
+#
+# JSONL schema (4 top-level fields):
+#   {"event": str, "properties": dict, "user_id": str, "time": unix_int}
+#
+# The markdown chat history (.aider.chat.history.md) uses AiderPreParser
+# via aider_markdown.yaml — that mapping is separate and independent.
 
 framework: aider
 framework_version: ">=0.70"
 ingestion_mode: file_watch
 type_field: event
-timestamp_field: timestamp
+timestamp_field: time
+
+# ── Event Definitions ──
+# 21 real events verified from source (main.py, base_coder.py, watch.py, onboarding.py)
 
 events:
-  # ── Message events ──
+  # ── Core LLM interaction ──
   message_send:
-    kind: message.user
-    payload:
-      content: content
-      role: role
-  message_received:
-    kind: message.assistant
-    payload:
-      content: content
-      model: model
-
-  # ── LLM calls ──
-  llm_start:
-    kind: llm.call.started
-    payload:
-      model: model
-      input_tokens: input_tokens
-  llm_completion:
     kind: llm.call.completed
     payload:
-      model: model
-      input_tokens: input_tokens
-      output_tokens: output_tokens
-      cost_usd: cost
+      model: properties.main_model
+      edit_format: properties.edit_format
+      input_tokens: properties.prompt_tokens
+      output_tokens: properties.completion_tokens
+      total_tokens: properties.total_tokens
+      cost: properties.cost
+      total_cost: properties.total_cost
 
-  # ── Telemetry (from LLM completions) ──
-  usage_report:
-    kind: telemetry.usage
-    payload:
-      input_tokens: input_tokens
-      output_tokens: output_tokens
-      cost_usd: cost
-      model: model
-  llm_error:
-    kind: llm.call.failed
-    payload:
-      error: error
-      model: model
-
-  # ── File operations ──
-  file_edit:
-    kind: file.edited
-    payload:
-      path: fname
-      content: content
-  file_add:
-    kind: file.created
-    payload:
-      path: fname
-  file_drop:
-    kind: file.deleted
-    payload:
-      path: fname
-
-  # ── Commands ──
-  command_run:
-    kind: command.started
-    payload:
-      command: command
-  command_output:
-    kind: command.completed
-    payload:
-      content: output
-      exit_code: exit_code
-
-  # ── Git operations ──
-  git_commit:
-    kind: tool.call.completed
-    payload:
-      tool_name: git
-      result: commit_hash
-      message: commit_message
-  git_diff:
-    kind: file.read
-    payload:
-      content: diff
-
-  # ── Linting / testing ──
-  lint_run:
-    kind: tool.call.started
-    payload:
-      tool_name: linter
-      arguments: files
-  lint_result:
-    kind: tool.call.completed
-    payload:
-      tool_name: linter
-      result: output
-      success: passed
-  test_run:
-    kind: tool.call.started
-    payload:
-      tool_name: test_runner
-      arguments: command
-  test_result:
-    kind: tool.call.completed
-    payload:
-      tool_name: test_runner
-      result: output
-      success: passed
-
-  # ── Repo map ──
-  repo_map:
-    kind: knowledge.query.completed
-    payload:
-      content: map_content
-
-  # ── Architect mode ──
-  architect_plan:
-    kind: planning.started
-    payload:
-      content: plan
-  architect_edit:
-    kind: planning.completed
-    payload:
-      content: edits
-
-  # ── Session ──
-  session_start:
-    kind: session.started
-    payload:
-      model: main_model
-      cwd: cwd
-  session_end:
-    kind: session.ended
+  message_send_starting:
+    kind: llm.call.started
     payload: {}
 
-  # ── Errors ──
-  error:
-    kind: session.error
+  message_send_exception:
+    kind: llm.call.error
     payload:
-      message: message
+      error: properties.exception
+
+  # ── Session lifecycle ──
+  launched:
+    kind: session.started
+    payload: {}
+
+  "cli session":
+    kind: session.configured
+    payload:
+      model: properties.main_model
+      weak_model: properties.weak_model
+      editor_model: properties.editor_model
+      edit_format: properties.edit_format
+
+  "gui session":
+    kind: session.configured
+    payload: {}
+
+  exit:
+    kind: session.ended
+    payload:
+      reason: properties.reason
+
+  # ── Repository context ──
+  repo:
+    kind: context.repository
+    payload:
+      num_files: properties.num_files
+
+  no-repo:
+    kind: context.no_repository
+    payload: {}
+
+  # ── Configuration ──
+  auto_commits:
+    kind: config.auto_commits
+    payload:
+      enabled: properties.enabled
+
+  "copy-paste mode":
+    kind: config.copy_paste
+    payload: {}
+
+  "model warning":
+    kind: config.model_warning
+    payload:
+      model: properties.main_model
+      weak_model: properties.weak_model
+      editor_model: properties.editor_model
+
+  # ── AI-comment file watcher ──
+  "ai-comments file-add":
+    kind: watch.file_added
+    payload: {}
+
+  "ai-comments execute":
+    kind: watch.execute
+    payload: {}
+
+  # ── OAuth onboarding ──
+  oauth_flow_initiated:
+    kind: auth.oauth_started
+    payload:
+      provider: properties.provider
+
+  oauth_flow_success:
+    kind: auth.oauth_success
+    payload:
+      provider: properties.provider
+
+  oauth_flow_failure:
+    kind: auth.oauth_failed
+    payload: {}
+
+  oauth_flow_failed:
+    kind: auth.oauth_failed
+    payload:
+      provider: properties.provider
+      reason: properties.reason
+
+  oauth_flow_code_received:
+    kind: auth.oauth_code_received
+    payload:
+      provider: properties.provider
+
+  oauth_flow_save_failed:
+    kind: auth.oauth_save_failed
+    payload:
+      provider: properties.provider
+      reason: properties.reason
+
+  auto_model_selection:
+    kind: config.auto_model
+    payload:
+      model: properties.model

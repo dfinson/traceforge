@@ -854,63 +854,75 @@ class TestSmolagentsRealData:
 
 
 class TestAiderJsonRealData:
-    """Tests for aider.yaml — verifies mapping works with expected JSONL shape."""
+    """Tests for aider.yaml — verifies mapping works with real aider analytics JSONL format.
 
-    def test_session_start(self):
+    Real format: {"event": str, "properties": dict, "user_id": str, "time": unix_int}
+    Source: Aider-AI/aider:aider/analytics.py — verified 2026-06-14
+    """
+
+    def test_launched(self):
         event = {
-            "event": "session_start",
-            "timestamp": "2024-06-01T10:00:00Z",
-            "main_model": "gpt-4o",
-            "cwd": "/home/user/project",
+            "event": "launched",
+            "properties": {},
+            "user_id": "abc-123",
+            "time": 1717236000,
         }
         results = _parse_event("aider.yaml", event)
         assert len(results) == 1
         assert results[0].kind == EventKind.SESSION_STARTED
-        assert results[0].payload["model"] == "gpt-4o"
 
-    def test_llm_completion(self):
+    def test_cli_session(self):
         event = {
-            "event": "llm_completion",
-            "timestamp": "2024-06-01T10:00:05Z",
-            "model": "gpt-4o",
-            "input_tokens": 800,
-            "output_tokens": 400,
-            "cost": 0.05,
+            "event": "cli session",
+            "properties": {
+                "main_model": "gpt-4o",
+                "weak_model": "gpt-4o-mini",
+                "editor_model": "gpt-4o",
+                "edit_format": "diff",
+            },
+            "user_id": "abc-123",
+            "time": 1717236001,
+        }
+        results = _parse_event("aider.yaml", event)
+        assert len(results) == 1
+        assert results[0].kind == "session.configured"
+        assert results[0].payload["model"] == "gpt-4o"
+        assert results[0].payload["edit_format"] == "diff"
+
+    def test_message_send(self):
+        event = {
+            "event": "message_send",
+            "properties": {
+                "main_model": "gpt-4o",
+                "edit_format": "diff",
+                "prompt_tokens": 800,
+                "completion_tokens": 400,
+                "total_tokens": 1200,
+                "cost": 0.05,
+                "total_cost": 0.12,
+            },
+            "user_id": "abc-123",
+            "time": 1717236005,
         }
         results = _parse_event("aider.yaml", event)
         assert len(results) == 1
         assert results[0].kind == EventKind.LLM_CALL_COMPLETED
-        assert results[0].payload["cost_usd"] == 0.05
         assert results[0].payload["input_tokens"] == 800
+        assert results[0].payload["output_tokens"] == 400
+        assert results[0].payload["cost"] == 0.05
+        assert results[0].payload["model"] == "gpt-4o"
 
-    def test_file_edit(self):
+    def test_exit(self):
         event = {
-            "event": "file_edit",
-            "timestamp": "2024-06-01T10:00:10Z",
-            "fname": "src/main.py",
-            "content": "def hello():\n    pass",
+            "event": "exit",
+            "properties": {"reason": "Completed main CLI coder.run"},
+            "user_id": "abc-123",
+            "time": 1717236010,
         }
         results = _parse_event("aider.yaml", event)
         assert len(results) == 1
-        assert results[0].kind == EventKind.FILE_EDITED
-        assert results[0].payload["path"] == "src/main.py"
-
-    def test_git_commit(self):
-        event = {
-            "event": "git_commit",
-            "timestamp": "2024-06-01T10:00:15Z",
-            "commit_hash": "abc1234",
-            "commit_message": "fix: resolve auth bug",
-        }
-        results = _parse_event("aider.yaml", event)
-        assert len(results) == 1
-        assert results[0].kind == EventKind.TOOL_CALL_COMPLETED
-        # YAML maps: result: commit_hash, message: commit_message
-        assert results[0].payload["result"] == "abc1234"
-        assert results[0].payload["message"] == "fix: resolve auth bug"
-        # tool_name: git — tries to extract field "git" which doesn't exist
-        # This is a YAML BUG: should be a literal, not a path
-        assert "tool_name" not in results[0].payload
+        assert results[0].kind == EventKind.SESSION_ENDED
+        assert results[0].payload["reason"] == "Completed main CLI coder.run"
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -925,7 +937,7 @@ class TestCompatibilityMatrix:
         "yaml_name,status",
         [
             ("langgraph.yaml", "works"),  # event field matches real astream_events
-            ("aider.yaml", "aspirational"),  # event names are plausible but unverified
+            ("aider.yaml", "works"),  # maps real --analytics-log JSONL format
             ("aider_markdown.yaml", "works"),  # parser output is controlled by us
             ("sweagent.yaml", "works"),  # role field matches all 4 real roles
             ("goose.yaml", "partial"),  # user/assistant match, tools need preprocessor

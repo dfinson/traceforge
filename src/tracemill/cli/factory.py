@@ -9,13 +9,13 @@ from tracemill.governance.persistence import SystemStore
 from tracemill.governance.pipeline import GovernancePipeline
 
 if TYPE_CHECKING:
-    from tracemill.sdk.verdict import PreflightGate
+    from tracemill.sdk.gate_policy import GatePolicy
 
 
 def create_default_pipeline(
     store: SystemStore,
     project_root: str | None = None,
-    tool_preflight_gate: "PreflightGate | None" = None,
+    policy: "GatePolicy | None" = None,
 ) -> GovernancePipeline:
     """Create a GovernancePipeline with all default components.
 
@@ -41,5 +41,5 @@ def create_default_pipeline(
         rules=rules,
         engine=engine,
         project_root=project_root,
-        tool_preflight_gate=tool_preflight_gate,
+        policy=policy,
     )

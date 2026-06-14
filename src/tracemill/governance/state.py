@@ -93,6 +93,11 @@ class SessionState:
     _last_sequence: int | None = None
     _gap_ordinal: int = 0
     _db: sqlite3.Connection | None = None
+    # Gate tracking fields
+    _tool_call_count: int = 0
+    _denied_count: int = 0
+    _prior_verdicts: list = field(default_factory=list)
+    _prior_tool_call_ids: list[str] = field(default_factory=list)
 
     PHASE_WINDOW_SIZE: int = 20
     TAINT_LEDGER_MAX: int = 200

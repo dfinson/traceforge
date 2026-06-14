@@ -27,6 +27,9 @@ type_field: type
 timestamp_field: ts
 preprocessor: cline
 
+motivation_events: ["say.text"]
+motivation_field: content
+
 events:
   # ── Say subtypes (preprocessor synthesizes "say.<subtype>") ──
   # Verified against ClineSay type in ExtensionMessage.ts (38 values)

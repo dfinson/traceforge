@@ -81,8 +81,17 @@ class FrameworkMapping(StrictModel):
     events: dict[str, EventMapping] = Field(default_factory=dict)  # raw_type → mapping
     spans: dict[str, SpanMapping] = Field(default_factory=dict)  # otel_span_name → mapping
 
+    # Motivation tracking: which raw event types provide assistant "motivation"
+    # text that explains the intent behind subsequent tool calls.
+    motivation_events: list[str] = Field(default_factory=list)
+    # Which payload field (after mapping) contains the motivation text.
+    motivation_field: str = "content"
+
 
 # ─── Adapter ─────────────────────────────────────────────────────────────────
+
+
+_TOOL_CALL_KINDS = frozenset({EventKind.TOOL_CALL_STARTED, EventKind.TOOL_CALL_COMPLETED})
 
 
 class MappedJsonAdapter(JsonLineAdapter):
@@ -95,6 +104,7 @@ class MappedJsonAdapter(JsonLineAdapter):
     def __init__(self, mapping: FrameworkMapping, session_id: str):
         self._mapping = mapping
         self._session_id = session_id
+        self._last_motivation: str | None = None
 
     @property
     def framework(self) -> str:
@@ -157,10 +167,22 @@ class MappedJsonAdapter(JsonLineAdapter):
         if kind == EventKind.RAW or not event_mapping:
             payload["original_type"] = raw_type
 
+        # Track motivation from designated assistant message events
+        if raw_type in self._mapping.motivation_events:
+            self._last_motivation = self._extract_motivation(payload)
+
+        # Determine tool_intent for tool call events
+        tool_intent = (
+            self._last_motivation
+            if kind in _TOOL_CALL_KINDS and self._last_motivation is not None
+            else None
+        )
+
         metadata = EventMetadata(
             source_framework=self._mapping.framework,
             ingestion_mode=self._mapping.ingestion_mode,
             raw_kind=raw_type,
+            tool_intent=tool_intent,
         )
 
         yield SessionEvent(
@@ -170,6 +192,22 @@ class MappedJsonAdapter(JsonLineAdapter):
             payload=payload,
             metadata=metadata,
         )
+
+    def _extract_motivation(self, payload: dict[str, Any]) -> str | None:
+        """Extract motivation text from the payload using the configured field."""
+        value = payload.get(self._mapping.motivation_field)
+        if value is None:
+            return None
+        # List-type content (e.g. Claude content blocks): join text items
+        if isinstance(value, list):
+            text_parts = [str(item) for item in value if item]
+            value = "\n".join(text_parts)
+        else:
+            value = str(value)
+        # Empty string → treat as None
+        if not value.strip():
+            return None
+        return value
 
     @staticmethod
     def _parse_timestamp(value: Any) -> datetime:

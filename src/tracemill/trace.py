@@ -21,7 +21,6 @@ from typing import Any
 from tracemill._generated import (
     Action,
     Capability,
-    Decision,
     Effect,
     EventKind,
     Mechanism,

@@ -659,10 +659,7 @@ class GovernancePipeline:
         """Record a denial in session state for GateContext tracking."""
         state = self._ensure_gate_state(session_id)
         state._denied_count += 1
-        state._prior_verdicts.append(verdict)
-        # Cap history to last 100 verdicts to prevent unbounded growth
-        if len(state._prior_verdicts) > 100:
-            state._prior_verdicts = state._prior_verdicts[-100:]
+        state._prior_verdicts.append(verdict)  # deque(maxlen=100) auto-evicts
 
     def _record_allow(self, session_id: str) -> None:
         """Record an allow in session state."""
@@ -670,10 +667,14 @@ class GovernancePipeline:
         state._tool_call_count += 1
 
     def _ensure_gate_state(self, session_id: str):
-        """Lazily create minimal session state for gate context tracking."""
+        """Lazily create minimal session state for gate context tracking.
+
+        Uses setdefault for thread-safety (CPython dict operations are atomic
+        under the GIL for single-bytecode-instruction calls).
+        """
         if session_id not in self._states:
             from tracemill.governance.state import SessionState
-            self._states[session_id] = SessionState(session_id=session_id)
+            self._states.setdefault(session_id, SessionState(session_id=session_id))
         return self._states[session_id]
 
     def score_tool_call_event(self, event: "tracemill.types.SessionEvent") -> "SessionMeta":

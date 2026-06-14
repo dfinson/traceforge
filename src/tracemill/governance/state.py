@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import hashlib
-from collections import Counter
+from collections import Counter, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -96,7 +96,7 @@ class SessionState:
     # Gate tracking fields
     _tool_call_count: int = 0
     _denied_count: int = 0
-    _prior_verdicts: list = field(default_factory=list)
+    _prior_verdicts: deque = field(default_factory=lambda: deque(maxlen=100))
     _prior_tool_call_ids: list[str] = field(default_factory=list)
 
     PHASE_WINDOW_SIZE: int = 20

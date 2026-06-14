@@ -214,8 +214,9 @@ async def _process_line(line: str, pipeline: ResolvedPipeline, governance: "Gove
     events = list(adapter.parse_dict(data))
 
     for event in events:
-        # Run through governance
-        governance.process_event(event)
+        # Run through governance (bridge SessionEvent → EnrichmentContext)
+        ctx = governance.context_from_session_event(event)
+        governance.process_event(ctx)
 
         # Emit to sinks
         for sink_config in pipeline.sinks:

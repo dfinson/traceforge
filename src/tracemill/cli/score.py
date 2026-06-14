@@ -95,11 +95,35 @@ class _ScoreHandler(BaseHTTPRequestHandler):
 
 
 def _serialize_session_meta(meta) -> dict:
-    """Serialize SessionMeta to JSON-safe dict."""
+    """Serialize SessionMeta or EventTrace to JSON-safe dict."""
     from tracemill.governance.results import SessionMeta
+    from tracemill.trace import EventTrace
+
+    if isinstance(meta, EventTrace):
+        result: dict = {}
+        if meta.risk_score is not None:
+            result["risk_assessment"] = {
+                "score": meta.risk_score,
+                "level": meta.risk_band,
+            }
+        if meta.suggested_action is not None:
+            result["recommendation"] = {
+                "action": meta.suggested_action,
+                "reason_code": meta.reason,
+            }
+        if meta.mechanism or meta.effect:
+            result["evidence"] = {
+                "canonical_tool": meta.canonical_tool,
+                "mechanism": meta.mechanism,
+                "effect": meta.effect,
+                "scope": list(meta.scope) if meta.scope else [],
+                "role": list(meta.role) if meta.role else [],
+            }
+        result["stage"] = meta.stage
+        return result
 
     if isinstance(meta, SessionMeta):
-        result: dict = {}
+        result = {}
         if meta.risk_assessment is not None:
             result["risk_assessment"] = {
                 "score": meta.risk_assessment.score,

@@ -360,6 +360,7 @@ events:
     payload:
       agent_id: agent_id
       event_id: event_id
+      plan: plan
   agent_reasoning_failed:
     kind: reasoning.failed
     payload:

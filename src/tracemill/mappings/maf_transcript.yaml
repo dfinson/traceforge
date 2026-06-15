@@ -1,0 +1,95 @@
+# Microsoft 365 Agents SDK (MAF) transcript mapping for MappedJsonAdapter
+# Targets: microsoft-agents-hosting-core >= 1.0.0
+# Source: JSONL from FileTranscriptStore / ConsoleTranscriptLogger
+# Ingestion: file_watch on <root>/<channelId>/<conversationId>.transcript
+#
+# Each JSONL line is a full Activity object serialized via model_dump_json().
+# The maf_transcript preprocessor normalizes into flat dicts with a compound
+# _event_type field: "{activity_type}.{from_role}" (e.g. "message.bot").
+#
+# Key Activity fields:
+#   type: "message" | "typing" | "event" | "invoke" | "trace" | ...
+#   text: str (message body)
+#   from: {id, name, role}   where role is "bot" or "user"
+#   timestamp: ISO 8601
+#   conversation: {id}
+#   attachments: [{contentType, content, ...}]
+#   value: Any (invoke payloads, adaptive card data)
+#
+# This mapping complements the OTel span adapter (maf.yaml) — use both together
+# for full coverage: OTel gives structure/timing, transcript gives content.
+
+framework: maf_transcript
+framework_version: ">=1.0.0"
+ingestion_mode: file_watch
+preprocessor: maf_transcript
+type_field: _event_type
+timestamp_field: timestamp
+
+motivation_events: ["message.bot"]
+motivation_field: content
+
+events:
+  # ── Messages ──
+  message.bot:
+    kind: message.assistant
+    payload:
+      content: text
+      activity_id: activity_id
+      from_name: from_name
+
+  message.user:
+    kind: message.user
+    payload:
+      content: text
+      activity_id: activity_id
+      from_name: from_name
+
+  # ── Typing indicators ──
+  typing.bot:
+    kind: session.info
+    payload:
+      activity_id: activity_id
+
+  typing.user:
+    kind: session.info
+    payload:
+      activity_id: activity_id
+
+  # ── Invoke activities (tool calls via adaptive cards, skill invocations) ──
+  invoke.bot:
+    kind: tool.call.started
+    payload:
+      input: value
+      activity_id: activity_id
+
+  invoke.user:
+    kind: hook.started
+    payload:
+      input: value
+      activity_id: activity_id
+
+  # ── Event activities (proactive notifications, skill responses) ──
+  event.bot:
+    kind: hook.completed
+    payload:
+      content: text
+      value: value
+      activity_id: activity_id
+
+  event.user:
+    kind: hook.started
+    payload:
+      content: text
+      value: value
+      activity_id: activity_id
+
+  # ── Trace activities (diagnostic/debug) ──
+  trace.bot:
+    kind: session.info
+    payload:
+      content: text
+      value: value
+      activity_id: activity_id
+
+# Default: unmapped activity types get dropped (no default_kind)

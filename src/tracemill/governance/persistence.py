@@ -1,98 +1,107 @@
-"""SQLite persistence layer for governance session state."""
+"""SQLite persistence layer for governance session state.
+
+Schema is managed by Alembic migrations (src/tracemill/migrations/).
+On initialization, SystemStore runs ``alembic upgrade head`` to apply
+any pending migrations. For existing databases created before Alembic was
+introduced, we stamp the initial revision so future migrations apply cleanly.
+"""
 
 from __future__ import annotations
 
+import logging
 import sqlite3
+import threading
 from pathlib import Path
 
-
-SCHEMA_SQL = """
-PRAGMA journal_mode = WAL;
-PRAGMA busy_timeout = 5000;
-PRAGMA synchronous = NORMAL;
-
-CREATE TABLE IF NOT EXISTS session_state (
-    session_id TEXT PRIMARY KEY,
-    budget_json TEXT NOT NULL DEFAULT '{"version":1,"total_tool_calls":0,"total_tokens":0,"elapsed_seconds":0.0,"pressure":false}',
-    phase_window_json TEXT NOT NULL DEFAULT '[]',
-    last_assistant_json TEXT,
-    last_user_json TEXT,
-    pii_taints_json TEXT,
-    event_count INTEGER NOT NULL DEFAULT 0,
-    dropped_events INTEGER NOT NULL DEFAULT 0,
-    last_sequence INTEGER,
-    last_event_id TEXT,
-    updated_at TEXT NOT NULL DEFAULT ''
-);
-
-CREATE TABLE IF NOT EXISTS processed_events (
-    source_event_key TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
-    session_meta_json TEXT,
-    processed_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS mcp_fingerprints (
-    server TEXT NOT NULL,
-    tool_name TEXT NOT NULL,
-    description_hash TEXT NOT NULL,
-    schema_hash TEXT NOT NULL,
-    registered_effect TEXT,
-    registered_role TEXT,
-    registered_capabilities TEXT,
-    registered_scope TEXT,
-    clearance TEXT,
-    first_seen TEXT NOT NULL,
-    last_seen TEXT NOT NULL,
-    PRIMARY KEY (server, tool_name)
-);
-
-CREATE TABLE IF NOT EXISTS drift_baselines (
-    agent_model TEXT NOT NULL,
-    repo TEXT NOT NULL,
-    phase_counts_json TEXT NOT NULL,
-    total_events INTEGER NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (agent_model, repo)
-);
-
-CREATE TABLE IF NOT EXISTS content_hashes (
-    repo TEXT NOT NULL,
-    file_path TEXT NOT NULL,
-    sha256 TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    updated_by_session TEXT,
-    PRIMARY KEY (repo, file_path)
-);
-
-CREATE TABLE IF NOT EXISTS session_summaries (
-    session_id TEXT PRIMARY KEY,
-    repo TEXT,
-    agent_model TEXT,
-    started_at TEXT NOT NULL,
-    ended_at TEXT,
-    total_events INTEGER,
-    dropped_events INTEGER DEFAULT 0,
-    budget_snapshot_json TEXT,
-    recommendation_counts_json TEXT,
-    drift_max REAL
-);
-"""
-
+logger = logging.getLogger(__name__)
 
 _LRU_CACHE_SIZE = 10_000
 
 
+def _run_alembic(conn: sqlite3.Connection) -> None:
+    """Apply pending Alembic migrations using a SQLAlchemy connection wrapper."""
+    from sqlalchemy import create_engine, event, pool
+
+    from tracemill.migrations.runner import run_migrations
+
+    # Wrap the existing sqlite3 connection in a SQLAlchemy engine so Alembic
+    # can drive the migration context without opening a second connection.
+    engine = create_engine(
+        "sqlite://",
+        creator=lambda: conn,
+        poolclass=pool.StaticPool,
+    )
+    # Disable pysqlite's implicit transaction handling so Alembic controls it.
+    @event.listens_for(engine, "connect")
+    def _set_raw_connection(dbapi_conn, connection_record):
+        dbapi_conn.isolation_level = None
+
+    with engine.connect() as sa_conn:
+        run_migrations(sa_conn)
+
+
+def _stamp_existing_db(conn: sqlite3.Connection) -> None:
+    """Stamp an existing (pre-Alembic) database with the initial revision.
+
+    If the database already has tables but no alembic_version table, this
+    creates the version table and stamps it so migrations start from 0001.
+    """
+    cursor = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='alembic_version'"
+    )
+    if cursor.fetchone() is not None:
+        return  # Already managed by Alembic
+
+    # Check if this is an existing database (has our tables)
+    cursor = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='session_state'"
+    )
+    if cursor.fetchone() is None:
+        return  # Fresh database — Alembic will create everything
+
+    # Existing database without Alembic — stamp it at the initial revision
+    logger.info("Stamping existing database with initial Alembic revision")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL)"
+    )
+    conn.execute("INSERT INTO alembic_version (version_num) VALUES ('0001_initial')")
+
+    # Also ensure gate_endpoints exists (was previously managed separately)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS gate_endpoints (
+            session_id TEXT PRIMARY KEY,
+            sock_path TEXT NOT NULL,
+            pid INTEGER NOT NULL,
+            registered_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    conn.commit()
+
+
 class SystemStore:
-    """SQLite-backed persistence for governance state."""
+    """SQLite-backed persistence for governance state.
+
+    On construction, runs Alembic migrations to ensure the schema is at HEAD.
+    """
 
     def __init__(self, db_path: str | Path) -> None:
-        self._db_path = Path(db_path)
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
-        self._lock = __import__("threading").Lock()
-        self._conn.executescript(SCHEMA_SQL)
-        self._processed_cache: dict[str, str | None] = {}  # source_event_key → meta_json
+        self._db_path = Path(db_path) if str(db_path) != ":memory:" else Path(":memory:")
+        if str(db_path) != ":memory:":
+            self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        self._lock = threading.Lock()
+        self._processed_cache: dict[str, str | None] = {}
+
+        # Apply WAL and pragmas before migrations
+        self._conn.execute("PRAGMA journal_mode = WAL")
+        self._conn.execute("PRAGMA busy_timeout = 5000")
+        self._conn.execute("PRAGMA synchronous = NORMAL")
+
+        # Stamp existing databases so Alembic doesn't try to re-create tables
+        _stamp_existing_db(self._conn)
+
+        # Run migrations to HEAD
+        _run_alembic(self._conn)
 
     @property
     def connection(self) -> sqlite3.Connection:

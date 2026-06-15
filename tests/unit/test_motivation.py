@@ -72,12 +72,11 @@ class TestBasicMotivation:
         _events(adapter, {"type": "assistant.text", "text": "Let me read that file"})
         tool_events = _events(adapter, {"type": "tool.start", "name": "read_file"})
 
-        assert tool_events[0].metadata.tool_intent == "Let me read that file"
         assert tool_events[0].metadata.motivation is not None
         assert tool_events[0].metadata.motivation.intent == "Let me read that file"
         assert len(tool_events[0].metadata.motivation.source_event_ids) == 1
 
-    def test_intent_event_populates_tool_intent(self):
+    def test_intent_event_populates_motivation(self):
         adapter = _make_adapter(
             sources=[
                 MotivationSource(
@@ -88,7 +87,7 @@ class TestBasicMotivation:
         _events(adapter, {"type": "assistant.intent", "data": {"content": "Exploring codebase"}})
         tool_events = _events(adapter, {"type": "tool.start", "name": "grep"})
 
-        assert tool_events[0].metadata.tool_intent == "Exploring codebase"
+        assert tool_events[0].metadata.motivation.intent == "Exploring codebase"
 
 
 class TestSourceEventIdAccumulation:
@@ -139,9 +138,9 @@ class TestMultipleToolCalls:
         tool2 = _events(adapter, {"type": "tool.end", "output": "found it"})
         tool3 = _events(adapter, {"type": "tool.start", "name": "read_file"})
 
-        assert tool1[0].metadata.tool_intent == "I'll search for it"
-        assert tool2[0].metadata.tool_intent == "I'll search for it"
-        assert tool3[0].metadata.tool_intent == "I'll search for it"
+        assert tool1[0].metadata.motivation.intent == "I'll search for it"
+        assert tool2[0].metadata.motivation.intent == "I'll search for it"
+        assert tool3[0].metadata.motivation.intent == "I'll search for it"
 
 
 class TestMotivationReplacement:
@@ -169,7 +168,6 @@ class TestNoMotivationSources:
         adapter = _make_adapter(sources=[])
         _events(adapter, {"type": "assistant.text", "text": "Some text"})
         tool_events = _events(adapter, {"type": "tool.start", "name": "grep"})
-        assert tool_events[0].metadata.tool_intent is None
         assert tool_events[0].metadata.motivation is None
 
 
@@ -182,7 +180,6 @@ class TestEmptyContent:
         )
         _events(adapter, {"type": "assistant.text", "text": ""})
         tool_events = _events(adapter, {"type": "tool.start", "name": "grep"})
-        assert tool_events[0].metadata.tool_intent is None
         assert tool_events[0].metadata.motivation is None
 
     def test_whitespace_only(self):
@@ -191,7 +188,7 @@ class TestEmptyContent:
         )
         _events(adapter, {"type": "assistant.text", "text": "   \n  "})
         tool_events = _events(adapter, {"type": "tool.start", "name": "grep"})
-        assert tool_events[0].metadata.tool_intent is None
+        assert tool_events[0].metadata.motivation is None
 
     def test_none_content(self):
         adapter = _make_adapter(
@@ -199,17 +196,17 @@ class TestEmptyContent:
         )
         _events(adapter, {"type": "assistant.text"})
         tool_events = _events(adapter, {"type": "tool.start", "name": "grep"})
-        assert tool_events[0].metadata.tool_intent is None
+        assert tool_events[0].metadata.motivation is None
 
     def test_empty_motivation_clears_previous(self):
-        """A motivation event with empty text clears the intent slot."""
+        """A motivation event with empty text clears the intent slot → motivation becomes None."""
         adapter = _make_adapter(
             sources=[MotivationSource(events=["assistant.text"], field="content", role="intent")]
         )
         _events(adapter, {"type": "assistant.text", "text": "Old plan"})
         _events(adapter, {"type": "assistant.text", "text": ""})
         tool_events = _events(adapter, {"type": "tool.start", "name": "grep"})
-        assert tool_events[0].metadata.tool_intent is None
+        assert tool_events[0].metadata.motivation is None
 
 
 class TestListContent:
@@ -237,7 +234,7 @@ class TestListContent:
         )
         _events(adapter, {"type": "assistant.text", "text": []})
         tool_events = _events(adapter, {"type": "tool.start", "name": "grep"})
-        assert tool_events[0].metadata.tool_intent is None
+        assert tool_events[0].metadata.motivation is None
 
 
 class TestNonMotivationEventsDontClear:
@@ -250,7 +247,7 @@ class TestNonMotivationEventsDontClear:
         _events(adapter, {"type": "assistant.text", "text": "My plan"})
         _events(adapter, {"type": "user.message", "text": "Thanks"})
         tool_events = _events(adapter, {"type": "tool.start", "name": "grep"})
-        assert tool_events[0].metadata.tool_intent == "My plan"
+        assert tool_events[0].metadata.motivation.intent == "My plan"
 
 
 class TestDualRoles:
@@ -306,3 +303,75 @@ class TestCustomTargets:
 
         assert tool_start[0].metadata.motivation is not None
         assert tool_end[0].metadata.motivation is None
+
+
+class TestSourceWindow:
+    """source_event_ids respects the rolling window."""
+
+    def test_window_caps_ids(self):
+        adapter = _make_adapter(
+            sources=[MotivationSource(events=["assistant.text"], field="content", role="intent")],
+        )
+        # Default window is 10 — push 12 motivation events
+        for i in range(12):
+            _events(adapter, {"type": "assistant.text", "text": f"Plan {i}"})
+
+        tool = _events(adapter, {"type": "tool.start", "name": "grep"})
+        assert len(tool[0].metadata.motivation.source_event_ids) == 10
+
+    def test_custom_window(self):
+        """source_window configurable per-framework."""
+        from tracemill.adapters.mapped_json import MotivationConfig
+
+        motivation = MotivationConfig(
+            sources=[MotivationSource(events=["assistant.text"], field="content", role="intent")],
+            source_window=3,
+        )
+        mapping = FrameworkMapping(
+            framework="test",
+            framework_version="1.0",
+            ingestion_mode="file_watch",
+            type_field="type",
+            motivation=motivation,
+            events={
+                "assistant.text": EventMapping(
+                    kind=EventKind.MESSAGE_ASSISTANT,
+                    payload={"content": "text"},
+                ),
+                "tool.start": EventMapping(
+                    kind=EventKind.TOOL_CALL_STARTED,
+                    payload={"tool_name": "name"},
+                ),
+            },
+        )
+        adapter = MappedJsonAdapter(mapping=mapping, session_id="test-session")
+
+        for i in range(5):
+            _events(adapter, {"type": "assistant.text", "text": f"Plan {i}"})
+
+        tool = _events(adapter, {"type": "tool.start", "name": "grep"})
+        assert len(tool[0].metadata.motivation.source_event_ids) == 3
+
+
+class TestClearingTracksId:
+    """Clearing events (empty text) still record their source_event_id."""
+
+    def test_clear_event_tracked(self):
+        adapter = _make_adapter(
+            sources=[
+                MotivationSource(events=["assistant.text"], field="content", role="intent"),
+                MotivationSource(events=["assistant.thinking"], field="content", role="reasoning"),
+            ]
+        )
+        _events(adapter, {"type": "assistant.text", "text": "Plan"})
+        _events(adapter, {"type": "assistant.thinking", "thinking": "Thinking"})
+        # Clear intent — should still have reasoning, and 3 IDs tracked
+        _events(adapter, {"type": "assistant.text", "text": ""})
+
+        tool = _events(adapter, {"type": "tool.start", "name": "grep"})
+        # motivation exists because reasoning is still set
+        assert tool[0].metadata.motivation is not None
+        assert tool[0].metadata.motivation.intent is None
+        assert tool[0].metadata.motivation.reasoning == "Thinking"
+        # All 3 events tracked (including the clearing one)
+        assert len(tool[0].metadata.motivation.source_event_ids) == 3

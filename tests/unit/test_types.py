@@ -56,7 +56,7 @@ class TestEventMetadata:
         assert meta.visibility == "visible"
         assert meta.classification is None
         assert meta.tool_display is None
-        assert meta.tool_intent is None
+        assert meta.motivation is None
         assert meta.duration_ms is None
 
     def test_roundtrip(self):

@@ -82,6 +82,7 @@ class MotivationConfig(StrictModel):
 
     sources: list[MotivationSource] = Field(default_factory=list)
     targets: list[str] = Field(default_factory=lambda: ["tool.call.started", "tool.call.completed"])
+    source_window: int = 10  # max source_event_ids to keep (rolling window)
 
 
 class FrameworkMapping(StrictModel):
@@ -202,33 +203,31 @@ class MappedJsonAdapter(JsonLineAdapter):
         if raw_type in self._motivation_lookup:
             for field, role in self._motivation_lookup[raw_type]:
                 text = self._extract_text(payload, field)
-                if text is not None:
-                    if role == "intent":
-                        self._latest_intent = text
-                    else:
-                        self._latest_reasoning = text
-                    self._source_event_ids.append(event_id)
-                elif role == "intent":
-                    self._latest_intent = None
+                if role == "intent":
+                    self._latest_intent = text
                 else:
-                    self._latest_reasoning = None
+                    self._latest_reasoning = text
+                # Always record the source event (including clears)
+                self._source_event_ids.append(event_id)
+                # Enforce rolling window
+                if len(self._source_event_ids) > self._motivation_config.source_window:
+                    self._source_event_ids = self._source_event_ids[
+                        -self._motivation_config.source_window :
+                    ]
 
-        # Build motivation for target events
+        # Build motivation for target events (None if no content in either slot)
         motivation: ToolMotivation | None = None
-        tool_intent: str | None = None
-        if kind in self._target_kinds and self._source_event_ids:
+        if kind in self._target_kinds and (self._latest_intent or self._latest_reasoning):
             motivation = ToolMotivation(
                 intent=self._latest_intent,
                 reasoning=self._latest_reasoning,
                 source_event_ids=list(self._source_event_ids),
             )
-            tool_intent = self._latest_intent
 
         metadata = EventMetadata(
             source_framework=self._mapping.framework,
             ingestion_mode=self._mapping.ingestion_mode,
             raw_kind=raw_type,
-            tool_intent=tool_intent,
             motivation=motivation,
         )
 

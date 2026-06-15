@@ -220,7 +220,6 @@ class EventMetadata(FrozenModel):
     phases: frozenset[Phase] | None = None
     classification: Classification | None = None
     tool_display: str | None = None
-    tool_intent: str | None = None
     motivation: ToolMotivation | None = None
     duration_ms: float | None = None
 

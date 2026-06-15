@@ -95,10 +95,10 @@ Both use tree-sitter for AST-based parsing with incremental/chunked support.
 
 | Adapter | Input format | Mechanism |
 | --- | --- | --- |
-| `MappedJsonAdapter` | JSON lines | YAML-driven field extraction (15 bundled mappings) |
+| `MappedJsonAdapter` | JSON lines | YAML-driven field extraction (16 bundled mappings) |
 | `OtelSpanAdapter` | OTEL span JSON | Microsoft 365 Agents SDK spans |
 
-### Supported frameworks (15 YAML mappings)
+### Supported frameworks (16 YAML mappings)
 
 | Framework | Preprocessor | Notes |
 | --- | --- | --- |
@@ -114,7 +114,7 @@ Both use tree-sitter for AST-based parsing with incremental/chunked support.
 | Goose | `goose` | Block's event shape |
 | SWE-agent | -- | SWE-bench agent |
 | OpenCode | -- | CLI coding agent |
-| Microsoft 365 Agents SDK | -- | OTel spans (via OtelSpanAdapter) |
+| Microsoft 365 Agents SDK | `maf_transcript` | Transcript JSONL (full content) + OTel spans (timing) |
 
 Adding a new framework = writing a YAML file. No Python code required for standard JSON-line formats.
 

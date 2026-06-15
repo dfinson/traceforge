@@ -321,6 +321,20 @@ Features:
 - Attribute extraction via YAML-configured rules (`maf.yaml`)
 - Status code → error kind mapping
 
+> **Note:** MAF OTel spans carry only structural metadata (timing, routing, counts) — not
+> message content. For full activity text (needed for motivation tracking and content
+> analysis), use the `maf_transcript` mapping with `MappedJsonAdapter`, which reads JSONL
+> output from the SDK's `TranscriptLoggerMiddleware` (`FileTranscriptStore`). The two
+> adapters are complementary: OTel gives timing/structure, transcript gives content.
+>
+> To enable transcript output in a MAF app:
+> ```python
+> from microsoft_agents.hosting.core.storage import (
+>     TranscriptLoggerMiddleware, FileTranscriptStore,
+> )
+> ADAPTER.use(TranscriptLoggerMiddleware(FileTranscriptStore("./transcripts")))
+> ```
+
 ---
 
 ## §6 — YAML Mapping System
@@ -360,6 +374,7 @@ events:
 | `goose.yaml` | Goose (Block) | Uses `goose` preprocessor |
 | `langgraph.yaml` | LangGraph | LangChain orchestration |
 | `maf.yaml` | Microsoft 365 Agents SDK | OTel span mapping (used by OtelSpanAdapter) |
+| `maf_transcript.yaml` | Microsoft 365 Agents SDK | Transcript JSONL (FileTranscriptStore output) |
 | `opencode.yaml` | OpenCode | CLI coding agent |
 | `openhands.yaml` | OpenHands (All-Hands AI) | Uses `openhands` preprocessor |
 | `pydantic_ai.yaml` | PydanticAI | Uses `pydantic_ai` preprocessor |
@@ -925,7 +940,7 @@ tracemill/
 │   │   ├── loader.py            # Hierarchical config loading
 │   │   ├── defaults.py          # Default config template
 │   │   └── mappings.py          # Mapping file resolver
-│   ├── mappings/                # Bundled YAML mappings (15 files)
+│   ├── mappings/                # Bundled YAML mappings (16 files)
 │   │   ├── __init__.py
 │   │   ├── aider.yaml
 │   │   ├── aider_markdown.yaml
@@ -937,6 +952,7 @@ tracemill/
 │   │   ├── goose.yaml
 │   │   ├── langgraph.yaml
 │   │   ├── maf.yaml
+│   │   ├── maf_transcript.yaml
 │   │   ├── opencode.yaml
 │   │   ├── openhands.yaml
 │   │   ├── pydantic_ai.yaml

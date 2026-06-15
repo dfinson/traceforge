@@ -39,6 +39,7 @@ motivation:
     - events: ["ActionStep"]
       field: content
       role: intent
+  targets: ["tool.call.started"]
 
 events:
   # ── Real step types (preprocessor infers from field presence) ──

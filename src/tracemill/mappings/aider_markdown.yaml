@@ -17,6 +17,7 @@ motivation:
     - events: ["assistant_message"]
       field: content
       role: intent
+  targets: ["tool.call.completed"]
 
 events:
   # ── Session lifecycle ──

@@ -31,6 +31,7 @@ motivation:
     - events: ["message.bot"]
       field: content
       role: intent
+  targets: ["tool.call.started"]
 
 events:
   # ── Messages ──

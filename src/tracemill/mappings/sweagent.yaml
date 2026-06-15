@@ -31,6 +31,7 @@ motivation:
     - events: ["assistant"]
       field: content
       role: intent
+  targets: ["tool.output"]
 
 events:
   # ── Agent actions (assistant entries always have message_type="action") ──

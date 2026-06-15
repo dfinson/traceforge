@@ -57,7 +57,7 @@ motivation:
       field: text
       role: intent
     - events: ["session.next.reasoning.ended"]
-      field: content
+      field: text
       role: reasoning
 
 events:

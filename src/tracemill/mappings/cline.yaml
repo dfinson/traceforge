@@ -35,6 +35,7 @@ motivation:
     - events: ["say.reasoning"]
       field: content
       role: reasoning
+  targets: ["tool.call.completed"]
 
 events:
   # ── Say subtypes (preprocessor synthesizes "say.<subtype>") ──

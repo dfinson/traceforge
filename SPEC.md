@@ -352,6 +352,10 @@ timestamp_field: timestamp       # dot-path to timestamp
 default_kind: raw                # kind for unmapped event types
 preprocessor: claude             # optional: registered preprocessor name
 
+# Motivation tracking (optional)
+motivation_events: ["assistant.text"]  # raw event types that carry motivation text
+motivation_field: content              # payload field (after mapping) with motivation text
+
 events:
   session.start:                 # raw event type value
     kind: session.started        # canonical EventKind
@@ -359,6 +363,57 @@ events:
       model: data.selectedModel
       cwd: data.context.cwd
 `
+
+### Motivation Tracking
+
+Tool call events gain context by tracking the last assistant message — the "motivation"
+for why a tool was invoked. This is configured declaratively per-framework in the YAML mapping.
+
+**Configuration fields on `FrameworkMapping`:**
+
+| Field | Type | Default | Purpose |
+|-------|------|---------|---------|
+| `motivation_events` | `list[str]` | `[]` | Raw event type keys whose payload contains motivation text |
+| `motivation_field` | `str` | `"content"` | Which payload field (after YAML mapping) holds the text |
+
+**Behavior in `MappedJsonAdapter._map_single()`:**
+
+1. When a raw event's type matches an entry in `motivation_events`, the adapter extracts
+   the text from the mapped payload field and stores it as `_last_motivation`
+2. When the next `tool.call.started` or `tool.call.completed` event is produced,
+   `metadata.tool_intent` is populated with the stored motivation
+3. A new motivation event replaces the previous one; empty/missing content clears it
+4. Non-motivation events do not clear the stored value — it persists until replaced
+
+**Example flow (Claude):**
+```
+assistant.text  → "I'll read the config file to check the setting"  → stored as motivation
+tool.call.started → tool_intent = "I'll read the config file to check the setting"
+tool.call.completed → tool_intent = "I'll read the config file to check the setting"
+assistant.text  → "Now let me update the value"  → replaces previous motivation
+```
+
+**Framework coverage:**
+
+| Framework | `motivation_events` | `motivation_field` |
+|-----------|--------------------|--------------------|
+| Claude Code | `["assistant.text"]` | `content` |
+| GitHub Copilot | `["assistant.message", "assistant.intent"]` | `content` |
+| Cline | `["say.text"]` | `content` |
+| Goose | `["assistant"]` | `content` |
+| CrewAI | `["llm_call_completed"]` | `output` |
+| Codex | `["message.assistant"]` | `content` |
+| Continue | `["assistant.message"]` | `content` |
+| Amazon Q | `["message.assistant"]` | `content` |
+| OpenCode | `["session.next.text.ended"]` | `text` |
+| PydanticAI | `["model_text_response"]` | `content` |
+| smolagents | `["ActionStep"]` | `content` |
+| SWE-agent | `["assistant"]` | `content` |
+| MAF (transcript) | `["message.bot"]` | `content` |
+| Aider (markdown) | `["assistant_message"]` | `content` |
+| Copilot (markdown) | `["assistant_text", "api_assistant_text"]` | `content` |
+| Aider (analytics) | *(none — no text)* | -- |
+| MAF (OTel) | *(none — spans lack content)* | -- |
 
 ### Bundled Mappings (15 files in `src/tracemill/mappings/`)
 

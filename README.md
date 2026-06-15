@@ -123,6 +123,7 @@ Adding a new framework = writing a YAML file. No Python code required for standa
 Stateful per-session processor that transforms events before they reach sinks:
 
 - **Tool call pairing** -- buffers `tool.call.started`, pairs with matching `tool.call.completed`
+- **Motivation tracking** -- associates assistant messages with subsequent tool calls (`tool_intent`)
 - **Duration computation** -- timestamp difference of start/complete pairs
 - **Multi-dimensional classification** -- mechanism, effect, scope, role, action, capability, structure
 - **Shell AST analysis** -- tree-sitter parsing of bash, PowerShell, cmd commands

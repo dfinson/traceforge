@@ -50,12 +50,20 @@ def _run_alembic(conn: sqlite3.Connection) -> None:
         poolclass=pool.StaticPool,
     )
     # Disable pysqlite's implicit transaction handling so Alembic controls it.
+    # We must restore the original isolation_level afterward — otherwise the
+    # raw connection is left in permanent autocommit mode, breaking the
+    # pipeline's atomic commit/rollback patterns.
+    original_isolation_level = conn.isolation_level
+
     @event.listens_for(engine, "connect")
     def _set_raw_connection(dbapi_conn, connection_record):
         dbapi_conn.isolation_level = None
 
-    with engine.connect() as sa_conn:
-        run_migrations(sa_conn)
+    try:
+        with engine.connect() as sa_conn:
+            run_migrations(sa_conn)
+    finally:
+        conn.isolation_level = original_isolation_level
 
 
 def _stamp_existing_db(conn: sqlite3.Connection) -> None:
@@ -80,7 +88,8 @@ def _stamp_existing_db(conn: sqlite3.Connection) -> None:
     # Existing database without Alembic — stamp it at the initial revision
     logger.info("Stamping existing database with initial Alembic revision")
     conn.execute(
-        "CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL)"
+        "CREATE TABLE IF NOT EXISTS alembic_version "
+        "(version_num VARCHAR(32) NOT NULL, PRIMARY KEY (version_num))"
     )
     conn.execute("INSERT OR IGNORE INTO alembic_version (version_num) VALUES ('0001_initial')")
 

@@ -82,7 +82,7 @@ class MotivationConfig(StrictModel):
 
     sources: list[MotivationSource] = Field(default_factory=list)
     targets: list[str] = Field(default_factory=lambda: ["tool.call.started", "tool.call.completed"])
-    source_window: int = 10  # max source_event_ids to keep (rolling window)
+    source_window: int = Field(default=10, ge=1)  # max source_event_ids to keep (rolling window)
 
 
 class FrameworkMapping(StrictModel):

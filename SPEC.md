@@ -186,7 +186,7 @@ class EventMetadata(FrozenModel):
     phases: frozenset[Phase] | None
     classification: Classification | None
     tool_display: str | None
-    tool_intent: str | None
+    motivation: ToolMotivation | None
     duration_ms: float | None
 `
 
@@ -321,6 +321,20 @@ Features:
 - Attribute extraction via YAML-configured rules (`maf.yaml`)
 - Status code → error kind mapping
 
+> **Note:** MAF OTel spans carry only structural metadata (timing, routing, counts) — not
+> message content. For full activity text (needed for motivation tracking and content
+> analysis), use the `maf_transcript` mapping with `MappedJsonAdapter`, which reads JSONL
+> output from the SDK's `TranscriptLoggerMiddleware` (`FileTranscriptStore`). The two
+> adapters are complementary: OTel gives timing/structure, transcript gives content.
+>
+> To enable transcript output in a MAF app:
+> ```python
+> from microsoft_agents.hosting.core.storage import (
+>     TranscriptLoggerMiddleware, FileTranscriptStore,
+> )
+> ADAPTER.use(TranscriptLoggerMiddleware(FileTranscriptStore("./transcripts")))
+> ```
+
 ---
 
 ## §6 — YAML Mapping System
@@ -338,6 +352,18 @@ timestamp_field: timestamp       # dot-path to timestamp
 default_kind: raw                # kind for unmapped event types
 preprocessor: claude             # optional: registered preprocessor name
 
+# Motivation tracking (optional)
+motivation:
+  sources:
+    - events: ["assistant.message", "assistant.intent"]
+      field: content
+      role: intent
+    - events: ["assistant.reasoning"]
+      field: content
+      role: reasoning
+  targets: ["tool.call.started", "tool.call.completed"]
+  source_window: 10
+
 events:
   session.start:                 # raw event type value
     kind: session.started        # canonical EventKind
@@ -345,6 +371,80 @@ events:
       model: data.selectedModel
       cwd: data.context.cwd
 `
+
+### Motivation Tracking
+
+Tool call events gain context by tracking assistant messages — the "motivation"
+for why a tool was invoked. This is configured declaratively per-framework via
+the `motivation:` block in YAML.
+
+**ToolMotivation type (on EventMetadata):**
+
+```python
+class ToolMotivation(FrozenModel):
+    intent: str | None = None           # latest plan/statement
+    reasoning: str | None = None        # latest CoT/thinking text
+    source_event_ids: tuple[str, ...]   # rolling window of motivation event IDs
+```
+
+**MotivationConfig fields:**
+
+| Field | Type | Default | Purpose |
+|-------|------|---------|---------|
+| `sources` | `list[MotivationSource]` | `[]` | Which events carry motivation and what role they fill |
+| `targets` | `list[str]` | `["tool.call.started", "tool.call.completed"]` | Which event kinds receive the `ToolMotivation` |
+| `source_window` | `int` | `10` | Max `source_event_ids` to retain (rolling window) |
+
+**MotivationSource fields:**
+
+| Field | Type | Default | Purpose |
+|-------|------|---------|---------|
+| `events` | `list[str]` | — | Raw event type keys that carry this motivation |
+| `field` | `str` | `"content"` | Payload field (after mapping) containing the text |
+| `role` | `"intent" \| "reasoning"` | `"intent"` | Which slot this fills |
+
+**Behavior in `MappedJsonAdapter._map_single()`:**
+
+1. When a raw event's type matches a source's `events` list, the adapter extracts
+   text from the mapped `field` and stores it in the corresponding role slot
+2. Each motivation event's ID is appended to `_source_event_ids` (once per event, not per role)
+3. When a target event is produced and at least one slot (intent or reasoning) is non-None,
+   a `ToolMotivation` is attached to `metadata.motivation`
+4. If both slots are None (empty/cleared), `metadata.motivation` is `None`
+5. The `source_event_ids` list enforces a rolling window — oldest IDs are dropped
+
+**Example flow (Claude):**
+```
+assistant.thinking → "I should check the config"    → reasoning = "I should check the config"
+assistant.text     → "Let me read the config file"  → intent = "Let me read the config file"
+tool.call.started  → motivation = ToolMotivation(
+                       intent="Let me read the config file",
+                       reasoning="I should check the config",
+                       source_event_ids=("ev-1", "ev-2"))
+```
+
+**Framework coverage:**
+
+| Framework | Intent sources | Reasoning sources | Custom targets |
+|-----------|---------------|-------------------|----------------|
+| Claude Code | `assistant.text` | `assistant.thinking` | — |
+| GitHub Copilot | `assistant.message`, `assistant.intent` | `assistant.reasoning` | — |
+| Cline | `say.text` | `say.reasoning` | `tool.call.completed` |
+| Goose | `assistant` | `thinking` | — |
+| CrewAI | `llm_call_completed` | `llm_thinking_chunk`, `agent_reasoning_completed` | — |
+| OpenCode | `session.next.text.ended` | `session.next.reasoning.ended` | — |
+| Codex | `message.assistant` | — | — |
+| Continue | `assistant.message` | — | — |
+| Amazon Q | `message.assistant` | — | — |
+| PydanticAI | `model_text_response` | — | — |
+| smolagents | `ActionStep` | — | `tool.call.started` |
+| SWE-agent | `assistant` | — | `tool.output` |
+| MAF (transcript) | `message.bot` | — | `tool.call.started` |
+| Aider (markdown) | `assistant_message` | — | `tool.call.completed` |
+| Copilot (markdown) | `assistant_text`, `api_assistant_text` | — | — |
+| Aider (analytics) | *(none — no text)* | — | — |
+| MAF (OTel) | *(none — spans lack content)* | — | — |
+| LangGraph | *(none — no assistant events)* | — | — |
 
 ### Bundled Mappings (15 files in `src/tracemill/mappings/`)
 
@@ -360,6 +460,7 @@ events:
 | `goose.yaml` | Goose (Block) | Uses `goose` preprocessor |
 | `langgraph.yaml` | LangGraph | LangChain orchestration |
 | `maf.yaml` | Microsoft 365 Agents SDK | OTel span mapping (used by OtelSpanAdapter) |
+| `maf_transcript.yaml` | Microsoft 365 Agents SDK | Transcript JSONL (FileTranscriptStore output) |
 | `opencode.yaml` | OpenCode | CLI coding agent |
 | `openhands.yaml` | OpenHands (All-Hands AI) | Uses `openhands` preprocessor |
 | `pydantic_ai.yaml` | PydanticAI | Uses `pydantic_ai` preprocessor |
@@ -925,7 +1026,7 @@ tracemill/
 │   │   ├── loader.py            # Hierarchical config loading
 │   │   ├── defaults.py          # Default config template
 │   │   └── mappings.py          # Mapping file resolver
-│   ├── mappings/                # Bundled YAML mappings (15 files)
+│   ├── mappings/                # Bundled YAML mappings (16 files)
 │   │   ├── __init__.py
 │   │   ├── aider.yaml
 │   │   ├── aider_markdown.yaml
@@ -937,6 +1038,7 @@ tracemill/
 │   │   ├── goose.yaml
 │   │   ├── langgraph.yaml
 │   │   ├── maf.yaml
+│   │   ├── maf_transcript.yaml
 │   │   ├── opencode.yaml
 │   │   ├── openhands.yaml
 │   │   ├── pydantic_ai.yaml

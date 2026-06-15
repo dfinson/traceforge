@@ -12,6 +12,13 @@ ingestion_mode: file_watch
 type_field: type
 timestamp_field: timestamp
 
+motivation:
+  sources:
+    - events: ["assistant_message"]
+      field: content
+      role: intent
+  targets: ["tool.call.completed"]
+
 events:
   # ── Session lifecycle ──
   session_start:

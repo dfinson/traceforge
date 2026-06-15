@@ -180,6 +180,21 @@ def _uuid4_str() -> str:
     return str(uuid.uuid4())
 
 
+class ToolMotivation(FrozenModel):
+    """Composite motivation context for a tool call event.
+
+    Captures the agent's reasoning chain leading to this tool invocation:
+    - intent: the most recent plan/statement (short, actionable)
+    - reasoning: accumulated reasoning/thinking/CoT text
+    - source_event_ids: ALL motivation event IDs up to this point in the session,
+      enabling full chain resolution for deep analysis
+    """
+
+    intent: str | None = None
+    reasoning: str | None = None
+    source_event_ids: tuple[str, ...] = Field(default_factory=tuple)
+
+
 class EventMetadata(FrozenModel):
     """Contextual information attached to every event."""
 
@@ -205,7 +220,7 @@ class EventMetadata(FrozenModel):
     phases: frozenset[Phase] | None = None
     classification: Classification | None = None
     tool_display: str | None = None
-    tool_intent: str | None = None
+    motivation: ToolMotivation | None = None
     duration_ms: float | None = None
 
     # --- Governance (populated by enrichment pipeline before sink emission) ---

@@ -28,6 +28,12 @@ type_field: type
 timestamp_field: timestamp
 preprocessor: pydantic_ai
 
+motivation:
+  sources:
+    - events: ["model_text_response"]
+      field: content
+      role: intent
+
 events:
   # ── Agent lifecycle ──
   agent_run_start:

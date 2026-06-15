@@ -20,6 +20,18 @@ ingestion_mode: file_watch
 type_field: type
 timestamp_field: timestamp
 
+motivation:
+  sources:
+    - events: ["llm_call_completed"]
+      field: output
+      role: intent
+    - events: ["llm_thinking_chunk"]
+      field: content
+      role: reasoning
+    - events: ["agent_reasoning_completed"]
+      field: plan
+      role: reasoning
+
 events:
   # ── Flow lifecycle (lib/crewai/src/crewai/events/types/flow_events.py) ──
   flow_created:
@@ -360,6 +372,7 @@ events:
     payload:
       agent_id: agent_id
       event_id: event_id
+      plan: plan
   agent_reasoning_failed:
     kind: reasoning.failed
     payload:

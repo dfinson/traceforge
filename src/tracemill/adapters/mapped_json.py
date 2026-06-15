@@ -12,16 +12,17 @@ Preprocessors live in the tracemill.preprocessors package.
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Iterator
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field
 
 from tracemill.adapters.base import JsonLineAdapter
 from tracemill.models import StrictModel
 from tracemill.preprocessors import get_preprocessor
-from tracemill.types import EventKind, EventMetadata, IngestionMode, SessionEvent
+from tracemill.types import EventKind, EventMetadata, IngestionMode, SessionEvent, ToolMotivation
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,22 @@ class SpanMapping(StrictModel):
     attributes: dict[str, str] = Field(default_factory=dict)  # payload_field → otel_attr_key
 
 
+class MotivationSource(StrictModel):
+    """A single source of motivation text from the event stream."""
+
+    events: list[str]  # raw event type keys that carry this motivation
+    field: str = "content"  # payload field (after mapping) containing the text
+    role: Literal["intent", "reasoning"] = "intent"  # which slot this fills
+
+
+class MotivationConfig(StrictModel):
+    """Declarative motivation tracking configuration for a framework."""
+
+    sources: list[MotivationSource] = Field(default_factory=list)
+    targets: list[str] = Field(default_factory=lambda: ["tool.call.started", "tool.call.completed"])
+    source_window: int = Field(default=10, ge=1)  # max source_event_ids to keep (rolling window)
+
+
 class FrameworkMapping(StrictModel):
     """Declarative mapping config for a framework's JSON events."""
 
@@ -80,6 +97,15 @@ class FrameworkMapping(StrictModel):
     preprocessor: str | None = None  # registered preprocessor name (optional)
     events: dict[str, EventMapping] = Field(default_factory=dict)  # raw_type → mapping
     spans: dict[str, SpanMapping] = Field(default_factory=dict)  # otel_span_name → mapping
+
+    # Motivation tracking config
+    motivation: MotivationConfig | None = None
+
+    def get_motivation_config(self) -> MotivationConfig:
+        """Return the effective MotivationConfig."""
+        if self.motivation is not None:
+            return self.motivation
+        return MotivationConfig()
 
 
 # ─── Adapter ─────────────────────────────────────────────────────────────────
@@ -95,6 +121,19 @@ class MappedJsonAdapter(JsonLineAdapter):
     def __init__(self, mapping: FrameworkMapping, session_id: str):
         self._mapping = mapping
         self._session_id = session_id
+        self._motivation_config = mapping.get_motivation_config()
+        # Build lookup: raw_type → list of (field, role) for quick matching
+        self._motivation_lookup: dict[str, list[tuple[str, str]]] = {}
+        for source in self._motivation_config.sources:
+            for event_type in source.events:
+                self._motivation_lookup.setdefault(event_type, []).append(
+                    (source.field, source.role)
+                )
+        self._target_kinds = frozenset(self._motivation_config.targets)
+        # Accumulated motivation state
+        self._latest_intent: str | None = None
+        self._latest_reasoning: str | None = None
+        self._source_event_ids: list[str] = []
 
     @property
     def framework(self) -> str:
@@ -157,19 +196,69 @@ class MappedJsonAdapter(JsonLineAdapter):
         if kind == EventKind.RAW or not event_mapping:
             payload["original_type"] = raw_type
 
+        # Generate event ID upfront (needed for source_event_ids tracking)
+        event_id = str(uuid.uuid4())
+
+        # Track motivation from designated source events
+        if raw_type in self._motivation_lookup:
+            seen_this_event = False
+            for field, role in self._motivation_lookup[raw_type]:
+                text = self._extract_text(payload, field)
+                if role == "intent":
+                    self._latest_intent = text
+                else:
+                    self._latest_reasoning = text
+                # Record source event ID once per raw event (not per role)
+                if not seen_this_event:
+                    self._source_event_ids.append(event_id)
+                    seen_this_event = True
+            # Enforce rolling window
+            if len(self._source_event_ids) > self._motivation_config.source_window:
+                self._source_event_ids = self._source_event_ids[
+                    -self._motivation_config.source_window :
+                ]
+
+        # Build motivation for target events (None if no content in either slot)
+        motivation: ToolMotivation | None = None
+        if kind in self._target_kinds and (self._latest_intent or self._latest_reasoning):
+            motivation = ToolMotivation(
+                intent=self._latest_intent,
+                reasoning=self._latest_reasoning,
+                source_event_ids=tuple(self._source_event_ids),
+            )
+
         metadata = EventMetadata(
             source_framework=self._mapping.framework,
             ingestion_mode=self._mapping.ingestion_mode,
             raw_kind=raw_type,
+            motivation=motivation,
         )
 
         yield SessionEvent(
+            id=event_id,
             kind=kind,
             session_id=self._session_id,
             timestamp=timestamp,
             payload=payload,
             metadata=metadata,
         )
+
+    @staticmethod
+    def _extract_text(payload: dict[str, Any], field: str) -> str | None:
+        """Extract text from a payload field, handling list-type content."""
+        value = payload.get(field)
+        if value is None:
+            return None
+        # List-type content (e.g. Claude content blocks): join text items
+        if isinstance(value, list):
+            text_parts = [str(item) for item in value if item]
+            value = "\n".join(text_parts)
+        else:
+            value = str(value)
+        # Empty string → treat as None
+        if not value.strip():
+            return None
+        return value
 
     @staticmethod
     def _parse_timestamp(value: Any) -> datetime:

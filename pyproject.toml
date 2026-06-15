@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Agent event observation pipeline with pluggable storage backends"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "click>=8.1",
     "httpx>=0.25",
@@ -53,4 +53,11 @@ dev = [
     "datamodel-code-generator>=0.63.0",
     "pytest>=9.0.3",
     "pytest-asyncio>=1.4.0",
+    "crewai>=0.80",
+    "langchain-core>=0.3",
+    "langgraph>=0.2",
+    "semantic-kernel>=1.20",
+    "smolagents>=1.0",
+    "openai-agents>=0.1",
 ]
+

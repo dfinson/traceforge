@@ -22,6 +22,12 @@ type_field: block_type
 default_kind: raw
 preprocessor: amazonq
 
+motivation:
+  sources:
+    - events: ["message.assistant"]
+      field: content
+      role: intent
+
 events:
   # ── Tool calls ─────────────────────────────────────────────────────────────
   tool.call:

@@ -16,6 +16,12 @@ type_field: block_type
 default_kind: raw
 preprocessor: continue
 
+motivation:
+  sources:
+    - events: ["assistant.message"]
+      field: content
+      role: intent
+
 events:
   # ── User messages ─────────────────────────────────────────────────────────
   user.message:

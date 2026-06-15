@@ -565,3 +565,336 @@ class TestMotivationEdgeCasesE2E:
         # Pipeline still processes (risk assessment, etc.)
         assert meta is not None
         assert meta.risk_assessment is not None
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Cline — Custom target (only tool.call.completed, NOT started)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+class TestClineCustomTargetE2E:
+    """Cline only targets tool.call.completed — tool.call.started must NOT get motivation."""
+
+    def test_completed_gets_motivation_started_does_not(self):
+        """say.text → say.tool (completed) gets motivation; started events do not."""
+        adapter = _adapter("cline")
+        events = _feed_sequence(
+            adapter,
+            [
+                # Cline preprocessor expects: {type: "say", say: "text", text: "..."}
+                {"type": "say", "say": "text", "text": "Let me read the config file."},
+                {"type": "say", "say": "tool", "text": '{"tool": "read_file", "path": "/config.yaml"}'},
+            ],
+        )
+
+        completed = [e for e in events if e.kind == EventKind.TOOL_CALL_COMPLETED]
+        started = [e for e in events if e.kind == EventKind.TOOL_CALL_STARTED]
+
+        # Completed events get motivation
+        assert len(completed) >= 1
+        assert completed[0].metadata.motivation is not None
+        assert completed[0].metadata.motivation.intent == "Let me read the config file."
+
+        # Started events do NOT exist for Cline (it only maps tool.call.completed)
+        # But if they did, they wouldn't get motivation since targets excludes them
+        assert len(started) == 0
+
+    def test_reasoning_fills_reasoning_slot(self):
+        """say.reasoning events fill the reasoning slot on tool.call.completed."""
+        adapter = _adapter("cline")
+        events = _feed_sequence(
+            adapter,
+            [
+                {"type": "say", "say": "reasoning", "text": "The user wants to understand the schema."},
+                {"type": "say", "say": "text", "text": "I'll check the schema definition."},
+                {"type": "say", "say": "tool", "text": '{"tool": "read_file", "path": "schema.sql"}'},
+            ],
+        )
+
+        completed = [e for e in events if e.kind == EventKind.TOOL_CALL_COMPLETED]
+        assert completed[0].metadata.motivation.intent == "I'll check the schema definition."
+        assert (
+            completed[0].metadata.motivation.reasoning
+            == "The user wants to understand the schema."
+        )
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# MAF Transcript — Preprocessor + motivation through pipeline
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+class TestMafTranscriptMotivationE2E:
+    """MAF transcript preprocessor produces correct motivation through the full pipeline."""
+
+    def test_bot_message_then_invoke(self):
+        """message.bot → invoke.bot (tool.call.started) gets motivation."""
+        adapter = _adapter("maf_transcript")
+        events = _feed_sequence(
+            adapter,
+            [
+                {
+                    "type": "message",
+                    "text": "I'll search the knowledge base for that.",
+                    "timestamp": "2025-01-15T10:30:00Z",
+                    "from": {"id": "bot-1", "name": "Agent", "role": "bot"},
+                    "conversation": {"id": "conv-1"},
+                    "id": "act-100",
+                },
+                {
+                    "type": "invoke",
+                    "timestamp": "2025-01-15T10:30:05Z",
+                    "from": {"id": "bot-1", "name": "Agent", "role": "bot"},
+                    "conversation": {"id": "conv-1"},
+                    "id": "act-101",
+                    "value": {"action": "kb_search", "query": "policy details"},
+                },
+            ],
+        )
+
+        enriched = _enrich_all(events)
+        tool_calls = [(ev, meta) for ev, meta in enriched if ev.kind == EventKind.TOOL_CALL_STARTED]
+        assert len(tool_calls) == 1
+
+        ev, _ = tool_calls[0]
+        assert ev.metadata.motivation is not None
+        assert ev.metadata.motivation.intent == "I'll search the knowledge base for that."
+        assert len(ev.metadata.motivation.source_event_ids) == 1
+
+    def test_user_message_does_not_produce_motivation(self):
+        """message.user is NOT a motivation source — tool calls after it have no motivation."""
+        adapter = _adapter("maf_transcript")
+        events = _feed_sequence(
+            adapter,
+            [
+                {
+                    "type": "message",
+                    "text": "Can you look up my order?",
+                    "timestamp": "2025-01-15T10:30:00Z",
+                    "from": {"id": "user-1", "name": "User", "role": "user"},
+                    "conversation": {"id": "conv-1"},
+                    "id": "act-200",
+                },
+                {
+                    "type": "invoke",
+                    "timestamp": "2025-01-15T10:30:05Z",
+                    "from": {"id": "bot-1", "name": "Agent", "role": "bot"},
+                    "conversation": {"id": "conv-1"},
+                    "id": "act-201",
+                    "value": {"action": "lookup", "order_id": "12345"},
+                },
+            ],
+        )
+
+        tool_calls = [e for e in events if e.kind == EventKind.TOOL_CALL_STARTED]
+        assert len(tool_calls) == 1
+        assert tool_calls[0].metadata.motivation is None
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Motivation persistence across irrelevant events
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+class TestMotivationPersistsAcrossIrrelevantEventsE2E:
+    """Motivation survives non-motivation, non-target events between source and target."""
+
+    def test_interleaved_events_dont_clear_motivation(self):
+        """session.info events between assistant.message and tool don't clear motivation."""
+        adapter = _adapter("copilot")
+        events = _feed_sequence(
+            adapter,
+            [
+                {
+                    "type": "assistant.message",
+                    "timestamp": "2025-01-01T00:00:01Z",
+                    "data": {"content": "I'll check the file."},
+                },
+                # Non-motivation, non-target event
+                {
+                    "type": "assistant.turn_start",
+                    "timestamp": "2025-01-01T00:00:02Z",
+                    "data": {"turnId": "turn-99"},
+                },
+                # Another non-motivation event
+                {
+                    "type": "assistant.turn_start",
+                    "timestamp": "2025-01-01T00:00:03Z",
+                    "data": {"turnId": "turn-100"},
+                },
+                # Tool call — should still have motivation from the earlier assistant.message
+                {
+                    "type": "tool.execution_start",
+                    "timestamp": "2025-01-01T00:00:04Z",
+                    "data": {"toolCallId": "tc-1", "toolName": "read", "arguments": {}},
+                },
+            ],
+        )
+
+        tool_starts = [e for e in events if e.kind == EventKind.TOOL_CALL_STARTED]
+        assert len(tool_starts) == 1
+        assert tool_starts[0].metadata.motivation is not None
+        assert tool_starts[0].metadata.motivation.intent == "I'll check the file."
+
+    def test_many_non_motivation_events_dont_inflate_source_ids(self):
+        """Non-motivation events don't append to source_event_ids."""
+        adapter = _adapter("copilot")
+        events = _feed_sequence(
+            adapter,
+            [
+                {
+                    "type": "assistant.message",
+                    "timestamp": "2025-01-01T00:00:01Z",
+                    "data": {"content": "Plan A"},
+                },
+                # 20 irrelevant events
+                *[
+                    {
+                        "type": "assistant.turn_start",
+                        "timestamp": f"2025-01-01T00:00:{i+2:02d}Z",
+                        "data": {"turnId": f"t-{i}"},
+                    }
+                    for i in range(20)
+                ],
+                {
+                    "type": "tool.execution_start",
+                    "timestamp": "2025-01-01T00:01:00Z",
+                    "data": {"toolCallId": "tc-1", "toolName": "grep", "arguments": {}},
+                },
+            ],
+        )
+
+        tool_starts = [e for e in events if e.kind == EventKind.TOOL_CALL_STARTED]
+        # Only 1 source event ID (the assistant.message), not 21
+        assert len(tool_starts[0].metadata.motivation.source_event_ids) == 1
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Serialization roundtrip — ToolMotivation survives JSON encode/decode
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+class TestMotivationSerializationE2E:
+    """ToolMotivation serializes and deserializes correctly through Pydantic."""
+
+    def test_roundtrip_json(self):
+        """SessionEvent with motivation → JSON → back preserves all fields."""
+        adapter = _adapter("copilot")
+        events = _feed_sequence(
+            adapter,
+            [
+                {
+                    "type": "assistant.reasoning",
+                    "timestamp": "2025-01-01T00:00:01Z",
+                    "data": {"content": "Deep thought about the problem."},
+                },
+                {
+                    "type": "assistant.message",
+                    "timestamp": "2025-01-01T00:00:02Z",
+                    "data": {"content": "I'll fix the bug."},
+                },
+                {
+                    "type": "tool.execution_start",
+                    "timestamp": "2025-01-01T00:00:03Z",
+                    "data": {"toolCallId": "tc-1", "toolName": "edit", "arguments": {}},
+                },
+            ],
+        )
+
+        tool_event = [e for e in events if e.kind == EventKind.TOOL_CALL_STARTED][0]
+        assert tool_event.metadata.motivation is not None
+
+        # Serialize to JSON and back
+        json_str = tool_event.model_dump_json()
+        from tracemill.types import SessionEvent
+
+        restored = SessionEvent.model_validate_json(json_str)
+
+        assert restored.metadata.motivation is not None
+        assert restored.metadata.motivation.intent == "I'll fix the bug."
+        assert restored.metadata.motivation.reasoning == "Deep thought about the problem."
+        assert len(restored.metadata.motivation.source_event_ids) == 2
+        assert isinstance(restored.metadata.motivation.source_event_ids, tuple)
+
+    def test_none_motivation_roundtrip(self):
+        """Event with no motivation serializes as null and deserializes as None."""
+        adapter = _adapter("copilot")
+        events = _feed_sequence(
+            adapter,
+            [
+                {
+                    "type": "tool.execution_start",
+                    "timestamp": "2025-01-01T00:00:01Z",
+                    "data": {"toolCallId": "tc-1", "toolName": "read", "arguments": {}},
+                },
+            ],
+        )
+
+        tool_event = [e for e in events if e.kind == EventKind.TOOL_CALL_STARTED][0]
+        assert tool_event.metadata.motivation is None
+
+        json_str = tool_event.model_dump_json()
+        from tracemill.types import SessionEvent
+
+        restored = SessionEvent.model_validate_json(json_str)
+        assert restored.metadata.motivation is None
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Dedup — same event filling both roles only appends ID once
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+class TestDedupE2E:
+    """An event mapped to both intent and reasoning only contributes one source_event_id."""
+
+    def test_single_event_dual_role(self):
+        """CrewAI's llm_call_completed maps to intent; if the same event also mapped to
+        reasoning (hypothetical), it should only appear once in source_event_ids."""
+        # Use copilot which has assistant.message mapped to intent.
+        # We can't easily get dual-role from real YAMLs, so use the unit adapter.
+        from tracemill.adapters.mapped_json import (
+            EventMapping,
+            FrameworkMapping,
+            MappedJsonAdapter,
+            MotivationConfig,
+            MotivationSource,
+        )
+
+        # Map one event type to BOTH intent and reasoning
+        motivation = MotivationConfig(
+            sources=[
+                MotivationSource(events=["assistant.msg"], field="content", role="intent"),
+                MotivationSource(events=["assistant.msg"], field="content", role="reasoning"),
+            ],
+        )
+        mapping = FrameworkMapping(
+            framework="dedup_test",
+            framework_version="1.0",
+            ingestion_mode="file_watch",
+            type_field="type",
+            motivation=motivation,
+            events={
+                "assistant.msg": EventMapping(
+                    kind=EventKind.MESSAGE_ASSISTANT,
+                    payload={"content": "text"},
+                ),
+                "tool.start": EventMapping(
+                    kind=EventKind.TOOL_CALL_STARTED,
+                    payload={"tool_name": "name"},
+                ),
+            },
+        )
+        adapter = MappedJsonAdapter(mapping=mapping, session_id="dedup-test")
+
+        line1 = json.dumps({"type": "assistant.msg", "text": "Both roles"})
+        list(adapter.parse(line1))
+
+        line2 = json.dumps({"type": "tool.start", "name": "grep"})
+        tool_events = list(adapter.parse(line2))
+
+        m = tool_events[0].metadata.motivation
+        assert m.intent == "Both roles"
+        assert m.reasoning == "Both roles"
+        # Only ONE ID despite filling two roles from same event
+        assert len(m.source_event_ids) == 1

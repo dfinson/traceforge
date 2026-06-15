@@ -192,7 +192,7 @@ class ToolMotivation(FrozenModel):
 
     intent: str | None = None
     reasoning: str | None = None
-    source_event_ids: list[str] = Field(default_factory=list)
+    source_event_ids: tuple[str, ...] = Field(default_factory=tuple)
 
 
 class EventMetadata(FrozenModel):

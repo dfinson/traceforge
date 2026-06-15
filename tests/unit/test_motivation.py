@@ -63,7 +63,7 @@ def _events(adapter: MappedJsonAdapter, obj: dict) -> list:
 
 
 class TestBasicMotivation:
-    """Intent source populates tool_intent and motivation.intent."""
+    """Intent source populates motivation.intent."""
 
     def test_assistant_text_populates_motivation(self):
         adapter = _make_adapter(

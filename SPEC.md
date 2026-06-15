@@ -186,7 +186,7 @@ class EventMetadata(FrozenModel):
     phases: frozenset[Phase] | None
     classification: Classification | None
     tool_display: str | None
-    tool_intent: str | None
+    motivation: ToolMotivation | None
     duration_ms: float | None
 `
 
@@ -353,8 +353,16 @@ default_kind: raw                # kind for unmapped event types
 preprocessor: claude             # optional: registered preprocessor name
 
 # Motivation tracking (optional)
-motivation_events: ["assistant.text"]  # raw event types that carry motivation text
-motivation_field: content              # payload field (after mapping) with motivation text
+motivation:
+  sources:
+    - events: ["assistant.message", "assistant.intent"]
+      field: content
+      role: intent
+    - events: ["assistant.reasoning"]
+      field: content
+      role: reasoning
+  targets: ["tool.call.started", "tool.call.completed"]
+  source_window: 10
 
 events:
   session.start:                 # raw event type value
@@ -366,54 +374,77 @@ events:
 
 ### Motivation Tracking
 
-Tool call events gain context by tracking the last assistant message — the "motivation"
-for why a tool was invoked. This is configured declaratively per-framework in the YAML mapping.
+Tool call events gain context by tracking assistant messages — the "motivation"
+for why a tool was invoked. This is configured declaratively per-framework via
+the `motivation:` block in YAML.
 
-**Configuration fields on `FrameworkMapping`:**
+**ToolMotivation type (on EventMetadata):**
+
+```python
+class ToolMotivation(FrozenModel):
+    intent: str | None = None           # latest plan/statement
+    reasoning: str | None = None        # latest CoT/thinking text
+    source_event_ids: tuple[str, ...]   # rolling window of motivation event IDs
+```
+
+**MotivationConfig fields:**
 
 | Field | Type | Default | Purpose |
 |-------|------|---------|---------|
-| `motivation_events` | `list[str]` | `[]` | Raw event type keys whose payload contains motivation text |
-| `motivation_field` | `str` | `"content"` | Which payload field (after YAML mapping) holds the text |
+| `sources` | `list[MotivationSource]` | `[]` | Which events carry motivation and what role they fill |
+| `targets` | `list[str]` | `["tool.call.started", "tool.call.completed"]` | Which event kinds receive the `ToolMotivation` |
+| `source_window` | `int` | `10` | Max `source_event_ids` to retain (rolling window) |
+
+**MotivationSource fields:**
+
+| Field | Type | Default | Purpose |
+|-------|------|---------|---------|
+| `events` | `list[str]` | — | Raw event type keys that carry this motivation |
+| `field` | `str` | `"content"` | Payload field (after mapping) containing the text |
+| `role` | `"intent" \| "reasoning"` | `"intent"` | Which slot this fills |
 
 **Behavior in `MappedJsonAdapter._map_single()`:**
 
-1. When a raw event's type matches an entry in `motivation_events`, the adapter extracts
-   the text from the mapped payload field and stores it as `_last_motivation`
-2. When the next `tool.call.started` or `tool.call.completed` event is produced,
-   `metadata.tool_intent` is populated with the stored motivation
-3. A new motivation event replaces the previous one; empty/missing content clears it
-4. Non-motivation events do not clear the stored value — it persists until replaced
+1. When a raw event's type matches a source's `events` list, the adapter extracts
+   text from the mapped `field` and stores it in the corresponding role slot
+2. Each motivation event's ID is appended to `_source_event_ids` (once per event, not per role)
+3. When a target event is produced and at least one slot (intent or reasoning) is non-None,
+   a `ToolMotivation` is attached to `metadata.motivation`
+4. If both slots are None (empty/cleared), `metadata.motivation` is `None`
+5. The `source_event_ids` list enforces a rolling window — oldest IDs are dropped
 
 **Example flow (Claude):**
 ```
-assistant.text  → "I'll read the config file to check the setting"  → stored as motivation
-tool.call.started → tool_intent = "I'll read the config file to check the setting"
-tool.call.completed → tool_intent = "I'll read the config file to check the setting"
-assistant.text  → "Now let me update the value"  → replaces previous motivation
+assistant.thinking → "I should check the config"    → reasoning = "I should check the config"
+assistant.text     → "Let me read the config file"  → intent = "Let me read the config file"
+tool.call.started  → motivation = ToolMotivation(
+                       intent="Let me read the config file",
+                       reasoning="I should check the config",
+                       source_event_ids=("ev-1", "ev-2"))
 ```
 
 **Framework coverage:**
 
-| Framework | `motivation_events` | `motivation_field` |
-|-----------|--------------------|--------------------|
-| Claude Code | `["assistant.text"]` | `content` |
-| GitHub Copilot | `["assistant.message", "assistant.intent"]` | `content` |
-| Cline | `["say.text"]` | `content` |
-| Goose | `["assistant"]` | `content` |
-| CrewAI | `["llm_call_completed"]` | `output` |
-| Codex | `["message.assistant"]` | `content` |
-| Continue | `["assistant.message"]` | `content` |
-| Amazon Q | `["message.assistant"]` | `content` |
-| OpenCode | `["session.next.text.ended"]` | `text` |
-| PydanticAI | `["model_text_response"]` | `content` |
-| smolagents | `["ActionStep"]` | `content` |
-| SWE-agent | `["assistant"]` | `content` |
-| MAF (transcript) | `["message.bot"]` | `content` |
-| Aider (markdown) | `["assistant_message"]` | `content` |
-| Copilot (markdown) | `["assistant_text", "api_assistant_text"]` | `content` |
-| Aider (analytics) | *(none — no text)* | -- |
-| MAF (OTel) | *(none — spans lack content)* | -- |
+| Framework | Intent sources | Reasoning sources | Custom targets |
+|-----------|---------------|-------------------|----------------|
+| Claude Code | `assistant.text` | `assistant.thinking` | — |
+| GitHub Copilot | `assistant.message`, `assistant.intent` | `assistant.reasoning` | — |
+| Cline | `say.text` | `say.reasoning` | `tool.call.completed` |
+| Goose | `assistant` | `thinking` | — |
+| CrewAI | `llm_call_completed` | `llm_thinking_chunk`, `agent_reasoning_completed` | — |
+| OpenCode | `session.next.text.ended` | `session.next.reasoning.ended` | — |
+| Codex | `message.assistant` | — | — |
+| Continue | `assistant.message` | — | — |
+| Amazon Q | `message.assistant` | — | — |
+| PydanticAI | `model_text_response` | — | — |
+| smolagents | `ActionStep` | — | `tool.call.started` |
+| SWE-agent | `assistant` | — | `tool.output` |
+| MAF (transcript) | `message.bot` | — | `tool.call.started` |
+| Aider (markdown) | `assistant_message` | — | `tool.call.completed` |
+| Copilot (markdown) | `assistant_text`, `api_assistant_text` | — | — |
+| Aider (analytics) | *(none — no text)* | — | — |
+| MAF (OTel) | *(none — spans lack content)* | — | — |
+| LangGraph | *(none — no assistant events)* | — | — |
 
 ### Bundled Mappings (15 files in `src/tracemill/mappings/`)
 

@@ -98,7 +98,7 @@ class FrameworkMapping(StrictModel):
     events: dict[str, EventMapping] = Field(default_factory=dict)  # raw_type → mapping
     spans: dict[str, SpanMapping] = Field(default_factory=dict)  # otel_span_name → mapping
 
-    # New motivation config (preferred)
+    # Motivation tracking config
     motivation: MotivationConfig | None = None
 
     def get_motivation_config(self) -> MotivationConfig:
@@ -201,19 +201,22 @@ class MappedJsonAdapter(JsonLineAdapter):
 
         # Track motivation from designated source events
         if raw_type in self._motivation_lookup:
+            seen_this_event = False
             for field, role in self._motivation_lookup[raw_type]:
                 text = self._extract_text(payload, field)
                 if role == "intent":
                     self._latest_intent = text
                 else:
                     self._latest_reasoning = text
-                # Always record the source event (including clears)
-                self._source_event_ids.append(event_id)
-                # Enforce rolling window
-                if len(self._source_event_ids) > self._motivation_config.source_window:
-                    self._source_event_ids = self._source_event_ids[
-                        -self._motivation_config.source_window :
-                    ]
+                # Record source event ID once per raw event (not per role)
+                if not seen_this_event:
+                    self._source_event_ids.append(event_id)
+                    seen_this_event = True
+            # Enforce rolling window
+            if len(self._source_event_ids) > self._motivation_config.source_window:
+                self._source_event_ids = self._source_event_ids[
+                    -self._motivation_config.source_window :
+                ]
 
         # Build motivation for target events (None if no content in either slot)
         motivation: ToolMotivation | None = None
@@ -221,7 +224,7 @@ class MappedJsonAdapter(JsonLineAdapter):
             motivation = ToolMotivation(
                 intent=self._latest_intent,
                 reasoning=self._latest_reasoning,
-                source_event_ids=list(self._source_event_ids),
+                source_event_ids=tuple(self._source_event_ids),
             )
 
         metadata = EventMetadata(

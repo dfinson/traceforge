@@ -7,7 +7,6 @@ Create Date: 2026-06-15
 from __future__ import annotations
 
 from alembic import op
-import sqlalchemy as sa
 
 revision: str = "0001_initial"
 down_revision: str | None = None
@@ -16,90 +15,103 @@ depends_on: tuple[str, ...] | None = None
 
 
 def upgrade() -> None:
-    op.execute("PRAGMA journal_mode = WAL")
-    op.execute("PRAGMA busy_timeout = 5000")
-    op.execute("PRAGMA synchronous = NORMAL")
+    # PRAGMAs are set by SystemStore.__init__ before migrations run.
+    # They are non-transactional and must not appear inside a migration
+    # (they execute outside rollback scope and would confuse partial-failure recovery).
 
-    op.create_table(
-        "session_state",
-        sa.Column("session_id", sa.Text, primary_key=True),
-        sa.Column("budget_json", sa.Text, nullable=False, server_default='{"version":1,"total_tool_calls":0,"total_tokens":0,"elapsed_seconds":0.0,"pressure":false}'),
-        sa.Column("phase_window_json", sa.Text, nullable=False, server_default="[]"),
-        sa.Column("last_assistant_json", sa.Text),
-        sa.Column("last_user_json", sa.Text),
-        sa.Column("pii_taints_json", sa.Text),
-        sa.Column("event_count", sa.Integer, nullable=False, server_default="0"),
-        sa.Column("dropped_events", sa.Integer, nullable=False, server_default="0"),
-        sa.Column("last_sequence", sa.Integer),
-        sa.Column("last_event_id", sa.Text),
-        sa.Column("updated_at", sa.Text, nullable=False, server_default=""),
-    )
+    # Use IF NOT EXISTS to handle concurrent first-run race: two processes
+    # creating a fresh system.db simultaneously won't crash each other.
+    # We use exec_driver_sql() to bypass SQLAlchemy's text() parameter parsing,
+    # which misinterprets colons in JSON default values as bind parameters.
+    conn = op.get_bind()
 
-    op.create_table(
-        "processed_events",
-        sa.Column("source_event_key", sa.Text, primary_key=True),
-        sa.Column("session_id", sa.Text, nullable=False),
-        sa.Column("session_meta_json", sa.Text),
-        sa.Column("processed_at", sa.Text, nullable=False),
-    )
+    conn.exec_driver_sql("""
+        CREATE TABLE IF NOT EXISTS session_state (
+            session_id TEXT PRIMARY KEY,
+            budget_json TEXT NOT NULL DEFAULT '{"version":1,"total_tool_calls":0,"total_tokens":0,"elapsed_seconds":0.0,"pressure":false}',
+            phase_window_json TEXT NOT NULL DEFAULT '[]',
+            last_assistant_json TEXT,
+            last_user_json TEXT,
+            pii_taints_json TEXT,
+            event_count INTEGER NOT NULL DEFAULT 0,
+            dropped_events INTEGER NOT NULL DEFAULT 0,
+            last_sequence INTEGER,
+            last_event_id TEXT,
+            updated_at TEXT NOT NULL DEFAULT ''
+        )
+    """)
 
-    op.create_table(
-        "mcp_fingerprints",
-        sa.Column("server", sa.Text, nullable=False),
-        sa.Column("tool_name", sa.Text, nullable=False),
-        sa.Column("description_hash", sa.Text, nullable=False),
-        sa.Column("schema_hash", sa.Text, nullable=False),
-        sa.Column("registered_effect", sa.Text),
-        sa.Column("registered_role", sa.Text),
-        sa.Column("registered_capabilities", sa.Text),
-        sa.Column("registered_scope", sa.Text),
-        sa.Column("clearance", sa.Text),
-        sa.Column("first_seen", sa.Text, nullable=False),
-        sa.Column("last_seen", sa.Text, nullable=False),
-        sa.PrimaryKeyConstraint("server", "tool_name"),
-    )
+    conn.exec_driver_sql("""
+        CREATE TABLE IF NOT EXISTS processed_events (
+            source_event_key TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            session_meta_json TEXT,
+            processed_at TEXT NOT NULL
+        )
+    """)
 
-    op.create_table(
-        "drift_baselines",
-        sa.Column("agent_model", sa.Text, nullable=False),
-        sa.Column("repo", sa.Text, nullable=False),
-        sa.Column("phase_counts_json", sa.Text, nullable=False),
-        sa.Column("total_events", sa.Integer, nullable=False),
-        sa.Column("updated_at", sa.Text, nullable=False),
-        sa.PrimaryKeyConstraint("agent_model", "repo"),
-    )
+    conn.exec_driver_sql("""
+        CREATE TABLE IF NOT EXISTS mcp_fingerprints (
+            server TEXT NOT NULL,
+            tool_name TEXT NOT NULL,
+            description_hash TEXT NOT NULL,
+            schema_hash TEXT NOT NULL,
+            registered_effect TEXT,
+            registered_role TEXT,
+            registered_capabilities TEXT,
+            registered_scope TEXT,
+            clearance TEXT,
+            first_seen TEXT NOT NULL,
+            last_seen TEXT NOT NULL,
+            PRIMARY KEY (server, tool_name)
+        )
+    """)
 
-    op.create_table(
-        "content_hashes",
-        sa.Column("repo", sa.Text, nullable=False),
-        sa.Column("file_path", sa.Text, nullable=False),
-        sa.Column("sha256", sa.Text, nullable=False),
-        sa.Column("updated_at", sa.Text, nullable=False),
-        sa.Column("updated_by_session", sa.Text),
-        sa.PrimaryKeyConstraint("repo", "file_path"),
-    )
+    conn.exec_driver_sql("""
+        CREATE TABLE IF NOT EXISTS drift_baselines (
+            agent_model TEXT NOT NULL,
+            repo TEXT NOT NULL,
+            phase_counts_json TEXT NOT NULL,
+            total_events INTEGER NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (agent_model, repo)
+        )
+    """)
 
-    op.create_table(
-        "session_summaries",
-        sa.Column("session_id", sa.Text, primary_key=True),
-        sa.Column("repo", sa.Text),
-        sa.Column("agent_model", sa.Text),
-        sa.Column("started_at", sa.Text, nullable=False),
-        sa.Column("ended_at", sa.Text),
-        sa.Column("total_events", sa.Integer),
-        sa.Column("dropped_events", sa.Integer, server_default="0"),
-        sa.Column("budget_snapshot_json", sa.Text),
-        sa.Column("recommendation_counts_json", sa.Text),
-        sa.Column("drift_max", sa.Text),
-    )
+    conn.exec_driver_sql("""
+        CREATE TABLE IF NOT EXISTS content_hashes (
+            repo TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            sha256 TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            updated_by_session TEXT,
+            PRIMARY KEY (repo, file_path)
+        )
+    """)
 
-    op.create_table(
-        "gate_endpoints",
-        sa.Column("session_id", sa.Text, primary_key=True),
-        sa.Column("sock_path", sa.Text, nullable=False),
-        sa.Column("pid", sa.Integer, nullable=False),
-        sa.Column("registered_at", sa.Text, nullable=False, server_default="(datetime('now'))"),
-    )
+    conn.exec_driver_sql("""
+        CREATE TABLE IF NOT EXISTS session_summaries (
+            session_id TEXT PRIMARY KEY,
+            repo TEXT,
+            agent_model TEXT,
+            started_at TEXT NOT NULL,
+            ended_at TEXT,
+            total_events INTEGER,
+            dropped_events INTEGER DEFAULT 0,
+            budget_snapshot_json TEXT,
+            recommendation_counts_json TEXT,
+            drift_max REAL
+        )
+    """)
+
+    conn.exec_driver_sql("""
+        CREATE TABLE IF NOT EXISTS gate_endpoints (
+            session_id TEXT PRIMARY KEY,
+            sock_path TEXT NOT NULL,
+            pid INTEGER NOT NULL,
+            registered_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
 
 
 def downgrade() -> None:

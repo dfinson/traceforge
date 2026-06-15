@@ -19,7 +19,25 @@ _LRU_CACHE_SIZE = 10_000
 
 
 def _run_alembic(conn: sqlite3.Connection) -> None:
-    """Apply pending Alembic migrations using a SQLAlchemy connection wrapper."""
+    """Apply pending Alembic migrations using a SQLAlchemy connection wrapper.
+
+    Skips the heavy SQLAlchemy/Alembic import if the database is already at
+    the latest known revision (fast path for the common case).
+    """
+    from tracemill.migrations.versions import LATEST_REVISION
+
+    # Fast path: check if already at head without importing SQLAlchemy
+    try:
+        cursor = conn.execute(
+            "SELECT version_num FROM alembic_version LIMIT 1"
+        )
+        row = cursor.fetchone()
+        if row and row[0] == LATEST_REVISION:
+            return  # Already at HEAD, skip heavy imports
+    except sqlite3.OperationalError:
+        pass  # Table doesn't exist yet — need full migration
+
+    # Slow path: need to run migrations
     from sqlalchemy import create_engine, event, pool
 
     from tracemill.migrations.runner import run_migrations
@@ -64,7 +82,7 @@ def _stamp_existing_db(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL)"
     )
-    conn.execute("INSERT INTO alembic_version (version_num) VALUES ('0001_initial')")
+    conn.execute("INSERT OR IGNORE INTO alembic_version (version_num) VALUES ('0001_initial')")
 
     # Also ensure gate_endpoints exists (was previously managed separately)
     conn.execute("""

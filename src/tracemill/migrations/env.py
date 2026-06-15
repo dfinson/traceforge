@@ -48,7 +48,13 @@ def run_migrations_online() -> None:
                 context.run_migrations()
 
 
-if context.is_offline_mode():
-    run_migrations_offline()
-else:
-    run_migrations_online()
+try:
+    if context.is_offline_mode():
+        run_migrations_offline()
+    else:
+        run_migrations_online()
+except AttributeError:
+    # Guard against accidental direct import outside Alembic context.
+    # When imported normally (not via Alembic's ScriptDirectory), the
+    # context object won't be configured and will raise AttributeError.
+    pass

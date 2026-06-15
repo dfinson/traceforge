@@ -7,7 +7,7 @@ uses these to auto-generate diffs when new migrations are needed.
 
 from __future__ import annotations
 
-from sqlalchemy import Column, Integer, MetaData, PrimaryKeyConstraint, Table, Text
+from sqlalchemy import Column, Float, Integer, MetaData, PrimaryKeyConstraint, Table, Text
 
 metadata = MetaData()
 
@@ -87,7 +87,7 @@ session_summaries = Table(
     Column("dropped_events", Integer, server_default="0"),
     Column("budget_snapshot_json", Text),
     Column("recommendation_counts_json", Text),
-    Column("drift_max", Text),  # stored as real but SQLite is flexible
+    Column("drift_max", Float),
 )
 
 gate_endpoints = Table(

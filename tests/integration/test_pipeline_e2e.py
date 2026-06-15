@@ -852,7 +852,26 @@ class TestAllMappingsE2E:
         mapping = adapter._mapping
         if mapping.events:
             first_type = next(iter(mapping.events))
-            line = json.dumps({mapping.type_field: first_type, "timestamp": "2024-01-01T00:00:00Z"})
+
+            # For preprocessor-backed mappings, we must feed raw data in the
+            # format the preprocessor expects (not the post-processed type_field).
+            # The preprocessor IS part of the adapter pipeline — skipping it would
+            # be testing the wrong thing.
+            if mapping.preprocessor == "maf_transcript":
+                # maf_transcript produces compound types like "message.bot" from
+                # Activity objects with {type: "message", from: {role: "bot"}}.
+                parts = first_type.split(".", 1)
+                activity_type = parts[0]
+                role = parts[1] if len(parts) > 1 else "bot"
+                line = json.dumps({
+                    "type": activity_type,
+                    "from": {"id": "test", "name": "Test", "role": role},
+                    "timestamp": "2024-01-01T00:00:00Z",
+                    "id": "test-activity-1",
+                })
+            else:
+                line = json.dumps({mapping.type_field: first_type, "timestamp": "2024-01-01T00:00:00Z"})
+
             events = list(adapter.parse(line))
             assert len(events) == 1
             assert events[0].kind == mapping.events[first_type].kind

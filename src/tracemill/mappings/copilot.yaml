@@ -17,8 +17,14 @@ type_field: type
 timestamp_field: timestamp
 default_kind: raw
 
-motivation_events: ["assistant.message", "assistant.intent"]
-motivation_field: content
+motivation:
+  sources:
+    - events: ["assistant.message", "assistant.intent"]
+      field: content
+      role: intent
+    - events: ["assistant.reasoning"]
+      field: content
+      role: reasoning
 
 events:
   # ── Session lifecycle ──────────────────────────────────────────────────────

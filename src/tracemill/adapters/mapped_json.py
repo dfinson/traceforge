@@ -12,16 +12,17 @@ Preprocessors live in the tracemill.preprocessors package.
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Iterator
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field
 
 from tracemill.adapters.base import JsonLineAdapter
 from tracemill.models import StrictModel
 from tracemill.preprocessors import get_preprocessor
-from tracemill.types import EventKind, EventMetadata, IngestionMode, SessionEvent
+from tracemill.types import EventKind, EventMetadata, IngestionMode, SessionEvent, ToolMotivation
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,21 @@ class SpanMapping(StrictModel):
     attributes: dict[str, str] = Field(default_factory=dict)  # payload_field → otel_attr_key
 
 
+class MotivationSource(StrictModel):
+    """A single source of motivation text from the event stream."""
+
+    events: list[str]  # raw event type keys that carry this motivation
+    field: str = "content"  # payload field (after mapping) containing the text
+    role: Literal["intent", "reasoning"] = "intent"  # which slot this fills
+
+
+class MotivationConfig(StrictModel):
+    """Declarative motivation tracking configuration for a framework."""
+
+    sources: list[MotivationSource] = Field(default_factory=list)
+    targets: list[str] = Field(default_factory=lambda: ["tool.call.started", "tool.call.completed"])
+
+
 class FrameworkMapping(StrictModel):
     """Declarative mapping config for a framework's JSON events."""
 
@@ -81,17 +97,17 @@ class FrameworkMapping(StrictModel):
     events: dict[str, EventMapping] = Field(default_factory=dict)  # raw_type → mapping
     spans: dict[str, SpanMapping] = Field(default_factory=dict)  # otel_span_name → mapping
 
-    # Motivation tracking: which raw event types provide assistant "motivation"
-    # text that explains the intent behind subsequent tool calls.
-    motivation_events: list[str] = Field(default_factory=list)
-    # Which payload field (after mapping) contains the motivation text.
-    motivation_field: str = "content"
+    # New motivation config (preferred)
+    motivation: MotivationConfig | None = None
+
+    def get_motivation_config(self) -> MotivationConfig:
+        """Return the effective MotivationConfig."""
+        if self.motivation is not None:
+            return self.motivation
+        return MotivationConfig()
 
 
 # ─── Adapter ─────────────────────────────────────────────────────────────────
-
-
-_TOOL_CALL_KINDS = frozenset({EventKind.TOOL_CALL_STARTED, EventKind.TOOL_CALL_COMPLETED})
 
 
 class MappedJsonAdapter(JsonLineAdapter):
@@ -104,7 +120,19 @@ class MappedJsonAdapter(JsonLineAdapter):
     def __init__(self, mapping: FrameworkMapping, session_id: str):
         self._mapping = mapping
         self._session_id = session_id
-        self._last_motivation: str | None = None
+        self._motivation_config = mapping.get_motivation_config()
+        # Build lookup: raw_type → list of (field, role) for quick matching
+        self._motivation_lookup: dict[str, list[tuple[str, str]]] = {}
+        for source in self._motivation_config.sources:
+            for event_type in source.events:
+                self._motivation_lookup.setdefault(event_type, []).append(
+                    (source.field, source.role)
+                )
+        self._target_kinds = frozenset(self._motivation_config.targets)
+        # Accumulated motivation state
+        self._latest_intent: str | None = None
+        self._latest_reasoning: str | None = None
+        self._source_event_ids: list[str] = []
 
     @property
     def framework(self) -> str:
@@ -167,25 +195,45 @@ class MappedJsonAdapter(JsonLineAdapter):
         if kind == EventKind.RAW or not event_mapping:
             payload["original_type"] = raw_type
 
-        # Track motivation from designated assistant message events
-        if raw_type in self._mapping.motivation_events:
-            self._last_motivation = self._extract_motivation(payload)
+        # Generate event ID upfront (needed for source_event_ids tracking)
+        event_id = str(uuid.uuid4())
 
-        # Determine tool_intent for tool call events
-        tool_intent = (
-            self._last_motivation
-            if kind in _TOOL_CALL_KINDS and self._last_motivation is not None
-            else None
-        )
+        # Track motivation from designated source events
+        if raw_type in self._motivation_lookup:
+            for field, role in self._motivation_lookup[raw_type]:
+                text = self._extract_text(payload, field)
+                if text is not None:
+                    if role == "intent":
+                        self._latest_intent = text
+                    else:
+                        self._latest_reasoning = text
+                    self._source_event_ids.append(event_id)
+                elif role == "intent":
+                    self._latest_intent = None
+                else:
+                    self._latest_reasoning = None
+
+        # Build motivation for target events
+        motivation: ToolMotivation | None = None
+        tool_intent: str | None = None
+        if kind in self._target_kinds and self._source_event_ids:
+            motivation = ToolMotivation(
+                intent=self._latest_intent,
+                reasoning=self._latest_reasoning,
+                source_event_ids=list(self._source_event_ids),
+            )
+            tool_intent = self._latest_intent
 
         metadata = EventMetadata(
             source_framework=self._mapping.framework,
             ingestion_mode=self._mapping.ingestion_mode,
             raw_kind=raw_type,
             tool_intent=tool_intent,
+            motivation=motivation,
         )
 
         yield SessionEvent(
+            id=event_id,
             kind=kind,
             session_id=self._session_id,
             timestamp=timestamp,
@@ -193,9 +241,10 @@ class MappedJsonAdapter(JsonLineAdapter):
             metadata=metadata,
         )
 
-    def _extract_motivation(self, payload: dict[str, Any]) -> str | None:
-        """Extract motivation text from the payload using the configured field."""
-        value = payload.get(self._mapping.motivation_field)
+    @staticmethod
+    def _extract_text(payload: dict[str, Any], field: str) -> str | None:
+        """Extract text from a payload field, handling list-type content."""
+        value = payload.get(field)
         if value is None:
             return None
         # List-type content (e.g. Claude content blocks): join text items

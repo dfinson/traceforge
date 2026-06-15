@@ -20,8 +20,11 @@ type_field: block_type
 default_kind: raw
 preprocessor: codex
 
-motivation_events: ["message.assistant"]
-motivation_field: content
+motivation:
+  sources:
+    - events: ["message.assistant"]
+      field: content
+      role: intent
 
 events:
   # ── Session metadata (first line of every file) ────────────────────────────

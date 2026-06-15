@@ -19,8 +19,18 @@ framework_version: ">=1.0.0"
 ingestion_mode: file_watch
 type_field: type
 timestamp_field: timestamp
-motivation_events: ["llm_call_completed"]
-motivation_field: output
+
+motivation:
+  sources:
+    - events: ["llm_call_completed"]
+      field: output
+      role: intent
+    - events: ["llm_thinking_chunk"]
+      field: content
+      role: reasoning
+    - events: ["agent_reasoning_completed"]
+      field: plan
+      role: reasoning
 
 events:
   # ── Flow lifecycle (lib/crewai/src/crewai/events/types/flow_events.py) ──

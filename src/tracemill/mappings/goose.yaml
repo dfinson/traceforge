@@ -37,8 +37,14 @@ type_field: role
 timestamp_field: created_timestamp
 preprocessor: goose
 
-motivation_events: ["assistant"]
-motivation_field: content
+motivation:
+  sources:
+    - events: ["assistant"]
+      field: content
+      role: intent
+    - events: ["thinking"]
+      field: content
+      role: reasoning
 
 events:
   # ── REAL messages (preprocessor extracts text from content_json) ──

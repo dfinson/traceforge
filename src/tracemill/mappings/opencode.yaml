@@ -51,8 +51,14 @@ type_field: type
 timestamp_field: properties.timestamp
 default_kind: ""
 
-motivation_events: ["session.next.text.ended"]
-motivation_field: text
+motivation:
+  sources:
+    - events: ["session.next.text.ended"]
+      field: text
+      role: intent
+    - events: ["session.next.reasoning.ended"]
+      field: content
+      role: reasoning
 
 events:
   # ── Session lifecycle ──

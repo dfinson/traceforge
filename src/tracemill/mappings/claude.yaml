@@ -26,8 +26,14 @@ type_field: block_type
 default_kind: ""
 preprocessor: claude
 
-motivation_events: ["assistant.text"]
-motivation_field: content
+motivation:
+  sources:
+    - events: ["assistant.text"]
+      field: content
+      role: intent
+    - events: ["assistant.thinking"]
+      field: content
+      role: reasoning
 
 events:
   # ── User messages ──────────────────────────────────────────────────────────

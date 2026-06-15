@@ -26,8 +26,11 @@ preprocessor: maf_transcript
 type_field: _event_type
 timestamp_field: timestamp
 
-motivation_events: ["message.bot"]
-motivation_field: content
+motivation:
+  sources:
+    - events: ["message.bot"]
+      field: content
+      role: intent
 
 events:
   # ── Messages ──

@@ -14,8 +14,11 @@ ingestion_mode: sqlite
 type_field: type
 timestamp_field: timestamp
 
-motivation_events: ["assistant_text", "api_assistant_text"]
-motivation_field: content
+motivation:
+  sources:
+    - events: ["assistant_text", "api_assistant_text"]
+      field: content
+      role: intent
 
 events:
   # ── From parse_turn(): SQLite turns table ──

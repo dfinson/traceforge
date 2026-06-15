@@ -26,8 +26,11 @@ ingestion_mode: file_watch
 type_field: role
 timestamp_field: null
 
-motivation_events: ["assistant"]
-motivation_field: content
+motivation:
+  sources:
+    - events: ["assistant"]
+      field: content
+      role: intent
 
 events:
   # ── Agent actions (assistant entries always have message_type="action") ──

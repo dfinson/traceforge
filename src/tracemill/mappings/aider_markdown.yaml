@@ -12,8 +12,11 @@ ingestion_mode: file_watch
 type_field: type
 timestamp_field: timestamp
 
-motivation_events: ["assistant_message"]
-motivation_field: content
+motivation:
+  sources:
+    - events: ["assistant_message"]
+      field: content
+      role: intent
 
 events:
   # ── Session lifecycle ──

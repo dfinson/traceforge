@@ -34,8 +34,11 @@ type_field: step_type
 timestamp_field: timestamp
 preprocessor: smolagents
 
-motivation_events: ["ActionStep"]
-motivation_field: content
+motivation:
+  sources:
+    - events: ["ActionStep"]
+      field: content
+      role: intent
 
 events:
   # ── Real step types (preprocessor infers from field presence) ──

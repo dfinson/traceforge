@@ -27,8 +27,14 @@ type_field: type
 timestamp_field: ts
 preprocessor: cline
 
-motivation_events: ["say.text"]
-motivation_field: content
+motivation:
+  sources:
+    - events: ["say.text"]
+      field: content
+      role: intent
+    - events: ["say.reasoning"]
+      field: content
+      role: reasoning
 
 events:
   # ── Say subtypes (preprocessor synthesizes "say.<subtype>") ──

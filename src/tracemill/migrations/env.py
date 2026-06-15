@@ -53,8 +53,8 @@ try:
         run_migrations_offline()
     else:
         run_migrations_online()
-except AttributeError:
+except (AttributeError, NameError):
     # Guard against accidental direct import outside Alembic context.
     # When imported normally (not via Alembic's ScriptDirectory), the
-    # context object won't be configured and will raise AttributeError.
+    # context proxy raises NameError (Alembic's ModuleClsProxy machinery).
     pass

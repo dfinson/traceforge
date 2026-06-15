@@ -8,7 +8,6 @@ import logging
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
-from tracemill.governance.results import SessionMeta
 from tracemill.sinks.base import StorageSink
 from tracemill.types import SessionEvent, TelemetrySpan, UsageRecord
 
@@ -66,12 +65,18 @@ class WebhookSink(StorageSink):
                     return
                 logger.warning(
                     "WebhookSink: %s returned status %d (attempt %d/%d)",
-                    self._url, resp, attempt, self._max_retries,
+                    self._url,
+                    resp,
+                    attempt,
+                    self._max_retries,
                 )
             except (URLError, OSError, TimeoutError) as exc:
                 logger.warning(
                     "WebhookSink: POST to %s failed (attempt %d/%d): %s",
-                    self._url, attempt, self._max_retries, exc,
+                    self._url,
+                    attempt,
+                    self._max_retries,
+                    exc,
                 )
 
         logger.error("WebhookSink: all %d attempts to %s failed", self._max_retries, self._url)

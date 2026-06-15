@@ -7,9 +7,13 @@ import click
 
 @click.command("gate")
 @click.option("--stdin", "from_stdin", is_flag=True, help="Read event JSON from stdin.")
-@click.option("--format", "output_format", default="claude-code",
-              type=click.Choice(["claude-code", "json"]),
-              help="Output format for the verdict.")
+@click.option(
+    "--format",
+    "output_format",
+    default="claude-code",
+    type=click.Choice(["claude-code", "json"]),
+    help="Output format for the verdict.",
+)
 def gate(from_stdin: bool, output_format: str) -> None:
     """Relay a tool call event to the running Pipeline for gating.
 
@@ -22,4 +26,5 @@ def gate(from_stdin: bool, output_format: str) -> None:
         raise click.UsageError("--stdin is required (only stdin mode is currently supported)")
 
     from tracemill.gate.client import gate_from_stdin
+
     gate_from_stdin(format=output_format)

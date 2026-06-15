@@ -7,8 +7,12 @@ from enum import Enum
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from tracemill.sdk.gate_types import GateContext, PostflightVerdict, ToolCallRequest, ToolCallResult
-    from tracemill.trace import EventTrace
+    from tracemill.sdk.gate_types import (
+        GateContext,
+        PostflightVerdict,
+        ToolCallRequest,
+        ToolCallResult,
+    )
 
 
 # ─── Decision & Verdict ───────────────────────────────────────────────────────

@@ -44,20 +44,24 @@ def preprocess_continue(obj: dict[str, Any]) -> list[dict[str, Any]]:
         tool_calls = message.get("tool_calls")
 
         if role == "user":
-            results.append({
-                "block_type": "user.message",
-                "session_id": session_id,
-                "content": content,
-            })
+            results.append(
+                {
+                    "block_type": "user.message",
+                    "session_id": session_id,
+                    "content": content,
+                }
+            )
 
         elif role == "assistant":
             # Assistant messages may contain both text and tool_calls
             if content:
-                results.append({
-                    "block_type": "assistant.message",
-                    "session_id": session_id,
-                    "content": content,
-                })
+                results.append(
+                    {
+                        "block_type": "assistant.message",
+                        "session_id": session_id,
+                        "content": content,
+                    }
+                )
 
             if isinstance(tool_calls, list):
                 for tc in tool_calls:
@@ -73,20 +77,24 @@ def preprocess_continue(obj: dict[str, Any]) -> list[dict[str, Any]]:
                             arguments = {"_raw": args_raw}
                     else:
                         arguments = args_raw if isinstance(args_raw, dict) else {}
-                    results.append({
-                        "block_type": "assistant.tool_use",
-                        "session_id": session_id,
-                        "tool_call_id": tc.get("id", ""),
-                        "tool_name": func.get("name", "") if isinstance(func, dict) else "",
-                        "arguments": arguments,
-                    })
+                    results.append(
+                        {
+                            "block_type": "assistant.tool_use",
+                            "session_id": session_id,
+                            "tool_call_id": tc.get("id", ""),
+                            "tool_name": func.get("name", "") if isinstance(func, dict) else "",
+                            "arguments": arguments,
+                        }
+                    )
 
         elif role == "tool":
-            results.append({
-                "block_type": "tool.result",
-                "session_id": session_id,
-                "tool_call_id": message.get("tool_call_id", ""),
-                "content": content,
-            })
+            results.append(
+                {
+                    "block_type": "tool.result",
+                    "session_id": session_id,
+                    "tool_call_id": message.get("tool_call_id", ""),
+                    "content": content,
+                }
+            )
 
     return results if results else [obj]

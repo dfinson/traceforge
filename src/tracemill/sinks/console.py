@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import sys
-from datetime import datetime, timezone
 
 from tracemill.sinks.base import StorageSink
 from tracemill.types import SessionEvent, TelemetrySpan, UsageRecord

@@ -24,7 +24,7 @@ from tracemill.sdk.gate_types import (
     ToolCallRequest,
     ToolCallResult,
 )
-from tracemill.sdk.verdict import Decision, Verdict
+from tracemill.sdk.verdict import Verdict
 
 
 # ─── Shared gate functions ────────────────────────────────────────────────────
@@ -82,10 +82,10 @@ def make_pipeline(
     """Create a fresh GovernancePipeline with given gates."""
     policy = GatePolicy()
     if preflight:
-        for g in (preflight if isinstance(preflight, list) else [preflight]):
+        for g in preflight if isinstance(preflight, list) else [preflight]:
             policy.preflight(g)
     if postflight:
-        for g in (postflight if isinstance(postflight, list) else [postflight]):
+        for g in postflight if isinstance(postflight, list) else [postflight]:
             policy.postflight(g)
 
     pipeline = GovernancePipeline.create()
@@ -103,6 +103,7 @@ class TestCrewAIGating:
 
     def _reset_hooks(self):
         from crewai.hooks import clear_all_tool_call_hooks
+
         clear_all_tool_call_hooks()
 
     def _make_ctx(self, tool_name, tool_input, output=None):
@@ -173,7 +174,7 @@ class TestCrewAIGating:
         ctx.tool_result = "The password is SECRET_VALUE_123"
         get_after_tool_call_hooks()[0](ctx)
         # CrewAI after hooks can mutate ctx.output
-        output = getattr(ctx, "output", ctx.tool_result)
+        getattr(ctx, "output", ctx.tool_result)
         # At minimum, the hook ran without error
 
 
@@ -235,9 +236,7 @@ class TestLangChainGating:
         def leaky_tool(query: str) -> str:
             return f"result contains SECRET data for {query}"
 
-        tool = StructuredTool.from_function(
-            func=leaky_tool, name="search", description="Search"
-        )
+        tool = StructuredTool.from_function(func=leaky_tool, name="search", description="Search")
 
         pipeline = make_pipeline(
             preflight=allow_all_gate,
@@ -259,9 +258,7 @@ class TestLangChainGating:
             call_count["n"] += 1
             raise ValueError("something went wrong")
 
-        tool = StructuredTool.from_function(
-            func=failing_tool, name="bad_tool", description="Fails"
-        )
+        tool = StructuredTool.from_function(func=failing_tool, name="bad_tool", description="Fails")
         tool.handle_tool_error = True
 
         pipeline = make_pipeline(
@@ -322,7 +319,9 @@ class TestLangGraphGating:
 
         return [
             StructuredTool.from_function(func=read_file, name="read_file", description="Read file"),
-            StructuredTool.from_function(func=delete_file, name="delete", description="Delete file"),
+            StructuredTool.from_function(
+                func=delete_file, name="delete", description="Delete file"
+            ),
         ]
 
     def _compile_graph(self, tool_node):
@@ -345,9 +344,7 @@ class TestLangGraphGating:
 
         ai_msg = AIMessage(
             content="",
-            tool_calls=[
-                {"id": "call_1", "name": "read_file", "args": {"path": "/tmp/x.txt"}}
-            ],
+            tool_calls=[{"id": "call_1", "name": "read_file", "args": {"path": "/tmp/x.txt"}}],
         )
         result = app.invoke({"messages": [ai_msg]})
         last_msg = result["messages"][-1]
@@ -356,7 +353,7 @@ class TestLangGraphGating:
 
     def test_denied_tool_returns_error_message(self):
         """ToolNode returns denial ToolMessage without executing tool."""
-        from langchain_core.messages import AIMessage, ToolMessage
+        from langchain_core.messages import AIMessage
 
         pipeline = make_pipeline(preflight=deny_rm_gate)
         tools = self._make_tools()
@@ -365,9 +362,7 @@ class TestLangGraphGating:
 
         ai_msg = AIMessage(
             content="",
-            tool_calls=[
-                {"id": "call_2", "name": "delete", "args": {"path": "/etc/hosts"}}
-            ],
+            tool_calls=[{"id": "call_2", "name": "delete", "args": {"path": "/etc/hosts"}}],
         )
         result = app.invoke({"messages": [ai_msg]})
         last_msg = result["messages"][-1]
@@ -376,7 +371,7 @@ class TestLangGraphGating:
 
     def test_postflight_redact_in_langgraph(self):
         """Postflight redacts ToolMessage content."""
-        from langchain_core.messages import AIMessage, ToolMessage
+        from langchain_core.messages import AIMessage
         from langchain_core.tools import StructuredTool
 
         def leaky(query: str) -> str:
@@ -411,10 +406,6 @@ class TestSemanticKernelGating:
     def test_preflight_deny_blocks_function(self):
         """SK filter blocks function invocation and sets terminate."""
         from semantic_kernel import Kernel
-        from semantic_kernel.filters.auto_function_invocation.auto_function_invocation_context import (
-            AutoFunctionInvocationContext,
-        )
-        from semantic_kernel.functions import KernelFunction, KernelArguments
 
         pipeline = make_pipeline(preflight=deny_rm_gate)
         kernel = Kernel()
@@ -440,11 +431,13 @@ class TestSemanticKernelGating:
         pipeline.gate_semantic_kernel(kernel)
 
         # Invoke directly (not via chat completion — that would need a model)
-        result = asyncio.run(kernel.invoke(
-            function_name="read_file",
-            plugin_name="tools",
-            path="/tmp/test.txt",
-        ))
+        result = asyncio.run(
+            kernel.invoke(
+                function_name="read_file",
+                plugin_name="tools",
+                path="/tmp/test.txt",
+            )
+        )
         assert "contents of /tmp/test.txt" in str(result)
 
 
@@ -466,7 +459,6 @@ class TestSmolagentsGating:
 
     def test_preflight_deny_returns_blocked_string(self):
         """Denied tool call returns [BLOCKED] string without executing."""
-        from smolagents import ToolCallingAgent
 
         pipeline = make_pipeline(preflight=deny_rm_gate)
         GatedAgent = pipeline.gate_smolagents()
@@ -482,8 +474,8 @@ class TestSmolagentsGating:
 
     def test_preflight_allow_executes_tool(self):
         """Allowed tool call actually executes via parent class mechanism."""
-        from unittest.mock import MagicMock, patch
-        from smolagents import ToolCallingAgent, tool
+        from unittest.mock import MagicMock
+        from smolagents import tool
 
         @tool
         def greet(name: str) -> str:
@@ -553,11 +545,13 @@ class TestGatePolicyIntegration:
     def test_score_then_gate_allow(self):
         """Full pipeline: score + preflight gate → ALLOW."""
         pipeline = make_pipeline(preflight=allow_all_gate)
-        trace = pipeline.score_tool_call({
-            "tool_name": "read_file",
-            "tool_input": {"path": "/tmp/test.txt"},
-            "session_id": "e2e-test",
-        })
+        trace = pipeline.score_tool_call(
+            {
+                "tool_name": "read_file",
+                "tool_input": {"path": "/tmp/test.txt"},
+                "session_id": "e2e-test",
+            }
+        )
         # Trace should be fully assessed
         assert trace.risk_score is not None
         assert trace.stage == "assessed"
@@ -566,11 +560,13 @@ class TestGatePolicyIntegration:
         """Full pipeline: score + preflight gate → DENY for destructive tool."""
         pipeline = make_pipeline(preflight=deny_rm_gate)
         # The scoring still works (it doesn't enforce)
-        trace = pipeline.score_tool_call({
-            "tool_name": "rm",
-            "tool_input": {"path": "/etc/passwd"},
-            "session_id": "e2e-test",
-        })
+        trace = pipeline.score_tool_call(
+            {
+                "tool_name": "rm",
+                "tool_input": {"path": "/etc/passwd"},
+                "session_id": "e2e-test",
+            }
+        )
         assert trace.risk_score is not None
         # But the gate would deny:
         verdict = pipeline._run_preflight(trace, session_id="e2e-test")
@@ -582,20 +578,24 @@ class TestGatePolicyIntegration:
         pipeline = make_pipeline(preflight=deny_after_3_calls)
 
         for i in range(3):
-            trace = pipeline.score_tool_call({
-                "tool_name": "search",
-                "tool_input": {"q": f"query{i}"},
-                "session_id": "rate-test",
-            })
+            trace = pipeline.score_tool_call(
+                {
+                    "tool_name": "search",
+                    "tool_input": {"q": f"query{i}"},
+                    "session_id": "rate-test",
+                }
+            )
             verdict = pipeline._run_preflight(trace, session_id="rate-test")
             assert verdict.allowed, f"Call {i} should be allowed"
 
         # 4th call should be denied
-        trace = pipeline.score_tool_call({
-            "tool_name": "search",
-            "tool_input": {"q": "query3"},
-            "session_id": "rate-test",
-        })
+        trace = pipeline.score_tool_call(
+            {
+                "tool_name": "search",
+                "tool_input": {"q": "query3"},
+                "session_id": "rate-test",
+            }
+        )
         verdict = pipeline._run_preflight(trace, session_id="rate-test")
         assert verdict.denied
         assert "Rate limit" in verdict.reason
@@ -614,11 +614,13 @@ class TestGatePolicyIntegration:
             postflight=[redact_gate, suppress_gate],
         )
 
-        trace = pipeline.score_tool_call({
-            "tool_name": "search",
-            "tool_input": {"q": "test"},
-            "session_id": "severity-test",
-        })
+        trace = pipeline.score_tool_call(
+            {
+                "tool_name": "search",
+                "tool_input": {"q": "test"},
+                "session_id": "severity-test",
+            }
+        )
         pv = pipeline._run_postflight(trace, session_id="severity-test", output={"r": "data"})
         assert pv.action == PostflightAction.SUPPRESS
 
@@ -629,11 +631,13 @@ class TestGatePolicyIntegration:
             raise RuntimeError("gate crashed")
 
         pipeline = make_pipeline(preflight=broken_gate)
-        trace = pipeline.score_tool_call({
-            "tool_name": "anything",
-            "tool_input": {},
-            "session_id": "fail-test",
-        })
+        trace = pipeline.score_tool_call(
+            {
+                "tool_name": "anything",
+                "tool_input": {},
+                "session_id": "fail-test",
+            }
+        )
         verdict = pipeline._run_preflight(trace, session_id="fail-test")
         assert verdict.denied
         assert "fail-closed" in verdict.reason
@@ -644,22 +648,34 @@ class TestGatePolicyIntegration:
 
         # Session A: 3 calls
         for i in range(3):
-            trace = pipeline.score_tool_call({
-                "tool_name": "x", "tool_input": {}, "session_id": "session-A",
-            })
+            trace = pipeline.score_tool_call(
+                {
+                    "tool_name": "x",
+                    "tool_input": {},
+                    "session_id": "session-A",
+                }
+            )
             pipeline._run_preflight(trace, session_id="session-A")
 
         # Session A: 4th call denied
-        trace = pipeline.score_tool_call({
-            "tool_name": "x", "tool_input": {}, "session_id": "session-A",
-        })
+        trace = pipeline.score_tool_call(
+            {
+                "tool_name": "x",
+                "tool_input": {},
+                "session_id": "session-A",
+            }
+        )
         v = pipeline._run_preflight(trace, session_id="session-A")
         assert v.denied
 
         # Session B: still has budget
-        trace = pipeline.score_tool_call({
-            "tool_name": "x", "tool_input": {}, "session_id": "session-B",
-        })
+        trace = pipeline.score_tool_call(
+            {
+                "tool_name": "x",
+                "tool_input": {},
+                "session_id": "session-B",
+            }
+        )
         v = pipeline._run_preflight(trace, session_id="session-B")
         assert v.allowed
 
@@ -753,7 +769,6 @@ class TestScoreAPIE2E:
     def test_score_api_returns_structured_response(self):
         """Score API returns proper risk assessment via HTTP."""
         import json
-        import threading
         from http.client import HTTPConnection
 
         from tracemill.cli.score import ScoreServer
@@ -770,11 +785,13 @@ class TestScoreAPIE2E:
             conn = HTTPConnection("127.0.0.1", 19876)
 
             # Score a tool call
-            body = json.dumps({
-                "tool_name": "bash",
-                "arguments": {"command": "ls -la"},
-                "session_id": "api-test",
-            }).encode()
+            body = json.dumps(
+                {
+                    "tool_name": "bash",
+                    "arguments": {"command": "ls -la"},
+                    "session_id": "api-test",
+                }
+            ).encode()
             conn.request("POST", "/score", body, {"Content-Type": "application/json"})
             resp = conn.getresponse()
             assert resp.status == 200
@@ -789,7 +806,6 @@ class TestScoreAPIE2E:
     def test_health_endpoint(self):
         """Health endpoint returns 200 OK."""
         import json
-        import threading
         from http.client import HTTPConnection
 
         from tracemill.cli.score import ScoreServer

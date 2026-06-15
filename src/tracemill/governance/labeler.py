@@ -12,20 +12,20 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from tracemill.classify.core import Classification
-    from tracemill.governance.budget import BudgetThresholds, BudgetTracker
+    from tracemill.governance.budget import BudgetThresholds
     from tracemill.governance.drift import DriftAssessment, DriftDetector, DriftResult
     from tracemill.governance.ifc import IFCChecker
     from tracemill.governance.integrity import IntegrityVerifier
-    from tracemill.governance.mcp_drift import MCPDeferredWrite, MCPIntegrityScanner, MCPScanResult
+    from tracemill.governance.mcp_drift import MCPIntegrityScanner
     from tracemill.governance.pii import PIIScanner
     from tracemill.governance.risk_wrapper import RiskModifiers
-    from tracemill.governance.state import SessionStateSnapshot
     from tracemill.governance.types import EnrichmentContext
 
 
 @dataclass(frozen=True)
 class GovernanceResult:
     """Output of Phase 2 — enriched classification + risk modifiers."""
+
     classification: "Classification"
     risk_modifiers: "RiskModifiers"
     drift_result: "DriftResult | None" = None
@@ -77,9 +77,7 @@ class GovernanceLabeler:
             mcp_alerts = scan_result.alerts
             mcp_deferred_writes = scan_result.deferred_writes
             severity_map = {"critical": 20, "warning": 10, "info": 5}
-            mcp_bonus = min(40, sum(
-                severity_map[a.severity] for a in mcp_alerts
-            ))
+            mcp_bonus = min(40, sum(severity_map[a.severity] for a in mcp_alerts))
             if mcp_alerts:
                 struct.add("semantic_drift")
 
@@ -89,8 +87,11 @@ class GovernanceLabeler:
             self._ifc_label_only(ctx, src_labels)
             all_caps = ctx.base_classification.capability | frozenset(cap)
             # Filter out current event's taint to prevent self-violation
-            prior_taints = [t for t in ctx.session_state.taint_ledger
-                           if t.source_event_key != ctx.event.source_event_key]
+            prior_taints = [
+                t
+                for t in ctx.session_state.taint_ledger
+                if t.source_event_key != ctx.event.source_event_key
+            ]
             if prior_taints and ctx.base_classification.effect in ("mutating", "destructive"):
                 struct.add("ifc_violation")
                 ifc_violations = 1
@@ -149,7 +150,9 @@ class GovernanceLabeler:
         if ctx.session_state.taint_ledger:
             max_clearance = max(
                 (t.clearance for t in ctx.session_state.taint_ledger),
-                key=lambda c: {"public": 0, "internal": 1, "confidential": 2, "secret": 3}.get(c, 0),
+                key=lambda c: {"public": 0, "internal": 1, "confidential": 2, "secret": 3}.get(
+                    c, 0
+                ),
                 default=None,
             )
             if max_clearance:

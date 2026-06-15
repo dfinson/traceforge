@@ -10,19 +10,14 @@ don't need API keys, but everything else is real framework code.
 
 from __future__ import annotations
 
-import json
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock
 
-import pytest
 
 from tracemill.governance.pipeline import GovernancePipeline
 from tracemill.sdk.gate_policy import GatePolicy
 from tracemill.sdk.gate_types import (
     GateContext,
-    PostflightAction,
-    PostflightVerdict,
     ToolCallRequest,
-    ToolCallResult,
 )
 from tracemill.sdk.verdict import Verdict
 
@@ -47,10 +42,10 @@ def deny_all(req: ToolCallRequest, ctx: GateContext) -> Verdict:
 def make_pipeline(preflight=None, postflight=None) -> GovernancePipeline:
     policy = GatePolicy()
     if preflight:
-        for g in (preflight if isinstance(preflight, list) else [preflight]):
+        for g in preflight if isinstance(preflight, list) else [preflight]:
             policy.preflight(g)
     if postflight:
-        for g in (postflight if isinstance(postflight, list) else [postflight]):
+        for g in postflight if isinstance(postflight, list) else [postflight]:
             policy.postflight(g)
     pipeline = GovernancePipeline.create()
     pipeline.policy = policy
@@ -82,7 +77,7 @@ class TestLangChainRealAgent:
 
     def test_denied_tool_raises_or_returns_error(self):
         """When gate denies, tool invocation is blocked."""
-        from langchain_core.tools import StructuredTool, ToolException
+        from langchain_core.tools import StructuredTool
 
         call_count = 0
 
@@ -98,7 +93,7 @@ class TestLangChainRealAgent:
         wrapped = pipeline.gate_langchain(tool)
 
         # Tool name is 'dangerous_delete', not in deny list — should pass
-        result = wrapped.invoke({"path": "/tmp/safe.txt"})
+        wrapped.invoke({"path": "/tmp/safe.txt"})
         assert call_count == 1
 
     def test_gate_blocks_based_on_tool_name(self):
@@ -187,11 +182,13 @@ class TestLangGraphRealAgent:
         # Simulate an AI message requesting a tool call
         ai_msg = AIMessage(
             content="",
-            tool_calls=[{
-                "id": "call_001",
-                "name": "get_weather",
-                "args": {"city": "London"},
-            }],
+            tool_calls=[
+                {
+                    "id": "call_001",
+                    "name": "get_weather",
+                    "args": {"city": "London"},
+                }
+            ],
         )
 
         result = app.invoke({"messages": [ai_msg]})
@@ -230,11 +227,13 @@ class TestLangGraphRealAgent:
 
         ai_msg = AIMessage(
             content="",
-            tool_calls=[{
-                "id": "call_002",
-                "name": "shell",
-                "args": {"command": "rm -rf /"},
-            }],
+            tool_calls=[
+                {
+                    "id": "call_002",
+                    "name": "shell",
+                    "args": {"command": "rm -rf /"},
+                }
+            ],
         )
 
         result = app.invoke({"messages": [ai_msg]})
@@ -254,6 +253,7 @@ class TestCrewAIRealAgent:
 
     def setup_method(self):
         from crewai.hooks import clear_all_tool_call_hooks
+
         clear_all_tool_call_hooks()
 
     def test_gate_fires_on_real_tool_object(self):
@@ -336,8 +336,7 @@ class TestSemanticKernelRealAgent:
     def test_filter_blocks_function(self):
         """The filter sets terminate=True and injects denial when gate denies."""
         from semantic_kernel import Kernel
-        from semantic_kernel.functions import KernelFunctionMetadata, KernelParameterMetadata
-        from unittest.mock import MagicMock
+        from semantic_kernel.functions import KernelFunctionMetadata
         import asyncio
 
         kernel = Kernel()
@@ -367,6 +366,7 @@ class TestSemanticKernelRealAgent:
         async def run():
             async def noop(ctx):
                 pass
+
             await the_filter(mock_ctx, noop)
 
         asyncio.run(run())
@@ -384,7 +384,6 @@ class TestSmolagentsRealAgent:
     def test_gated_agent_blocks_tool_call(self):
         """Agent's execute_tool_call is intercepted by gate."""
         from smolagents import tool, ToolCallingAgent
-        from unittest.mock import MagicMock
 
         @tool
         def calculator(expression: str) -> str:
@@ -421,7 +420,6 @@ class TestSmolagentsRealAgent:
     def test_gated_agent_allows_safe_tool(self):
         """Safe tools execute normally through the gated agent."""
         from smolagents import tool, ToolCallingAgent
-        from unittest.mock import MagicMock
 
         @tool
         def calculator(expression: str) -> str:
@@ -556,13 +554,17 @@ class TestCrossFrameworkSession:
         # Build graph: agent → tools → end
         def agent_node(state: MessagesState):
             """Fake agent that requests both tools."""
-            return {"messages": [AIMessage(
-                content="",
-                tool_calls=[
-                    {"id": "c1", "name": "search", "args": {"query": "python docs"}},
-                    {"id": "c2", "name": "delete", "args": {"path": "/etc/passwd"}},
-                ],
-            )]}
+            return {
+                "messages": [
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {"id": "c1", "name": "search", "args": {"query": "python docs"}},
+                            {"id": "c2", "name": "delete", "args": {"path": "/etc/passwd"}},
+                        ],
+                    )
+                ]
+            }
 
         graph = StateGraph(MessagesState)
         graph.add_node("agent", agent_node)

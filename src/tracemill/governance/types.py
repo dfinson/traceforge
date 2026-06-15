@@ -108,7 +108,9 @@ class ToolCallEvent(SessionEvent):
             payload = {}
         tool_name = str(payload.get("tool_name", "") or "")
         session_id = str(payload.get("session_id", "") or "") or f"anon-{_uuid.uuid4().hex[:8]}"
-        tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+        tool_input = (
+            payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+        )
         eid = f"score-{_uuid.uuid4().hex[:12]}"
 
         return cls(

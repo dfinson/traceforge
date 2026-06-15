@@ -43,8 +43,12 @@ class OtelExporterSink(StorageSink):
 
         if len(self._batch) >= self._max_backlog:
             dropped = len(self._batch) - self._batch_size
-            self._batch = self._batch[-self._batch_size:]
-            logger.warning("OtelExporterSink: backlog exceeded %d, dropped %d oldest spans", self._max_backlog, dropped)
+            self._batch = self._batch[-self._batch_size :]
+            logger.warning(
+                "OtelExporterSink: backlog exceeded %d, dropped %d oldest spans",
+                self._max_backlog,
+                dropped,
+            )
 
         if len(self._batch) >= self._batch_size:
             await self.flush()
@@ -54,17 +58,21 @@ class OtelExporterSink(StorageSink):
             return
 
         payload = {
-            "resourceSpans": [{
-                "resource": {
-                    "attributes": [
-                        {"key": "service.name", "value": {"stringValue": self._service_name}},
-                    ]
-                },
-                "scopeSpans": [{
-                    "scope": {"name": "tracemill.governance"},
-                    "spans": list(self._batch),
-                }],
-            }]
+            "resourceSpans": [
+                {
+                    "resource": {
+                        "attributes": [
+                            {"key": "service.name", "value": {"stringValue": self._service_name}},
+                        ]
+                    },
+                    "scopeSpans": [
+                        {
+                            "scope": {"name": "tracemill.governance"},
+                            "spans": list(self._batch),
+                        }
+                    ],
+                }
+            ]
         }
 
         body = json.dumps(payload, default=str).encode("utf-8")
@@ -114,7 +122,14 @@ class OtelExporterSink(StorageSink):
             tool_args = event.payload.get("arguments") or event.payload.get("tool_input")
             if tool_args:
                 attributes.append(
-                    {"key": "gen_ai.tool.call.arguments", "value": {"stringValue": str(tool_args) if not isinstance(tool_args, str) else tool_args}}
+                    {
+                        "key": "gen_ai.tool.call.arguments",
+                        "value": {
+                            "stringValue": str(tool_args)
+                            if not isinstance(tool_args, str)
+                            else tool_args
+                        },
+                    }
                 )
             tool_result = event.payload.get("result") or event.payload.get("tool_result")
             if tool_result:
@@ -131,14 +146,23 @@ class OtelExporterSink(StorageSink):
         if gov is not None:
             if gov.risk_assessment is not None:
                 attributes.append(
-                    {"key": "tracemill.risk.score", "value": {"intValue": gov.risk_assessment.score}}
+                    {
+                        "key": "tracemill.risk.score",
+                        "value": {"intValue": gov.risk_assessment.score},
+                    }
                 )
                 attributes.append(
-                    {"key": "tracemill.risk.level", "value": {"stringValue": gov.risk_assessment.level}}
+                    {
+                        "key": "tracemill.risk.level",
+                        "value": {"stringValue": gov.risk_assessment.level},
+                    }
                 )
             if gov.recommendation is not None:
                 attributes.append(
-                    {"key": "tracemill.action", "value": {"stringValue": gov.recommendation.recommended_action.value}}
+                    {
+                        "key": "tracemill.action",
+                        "value": {"stringValue": gov.recommendation.recommended_action.value},
+                    }
                 )
 
         return {

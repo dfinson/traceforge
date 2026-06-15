@@ -6,12 +6,13 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from tracemill.governance.state import SessionState, TaintEntry
+    from tracemill.governance.state import SessionState
     from tracemill.governance.types import EnrichmentContext
 
 
 class Clearance(StrEnum):
     """IFC clearance levels (ordered from least to most privileged)."""
+
     PUBLIC = "public"
     INTERNAL = "internal"
     CONFIDENTIAL = "confidential"
@@ -56,7 +57,6 @@ class IFCChecker:
         session_state: "SessionState",
     ) -> None:
         """Assign IFC labels based on event content and taint history."""
-        from tracemill.governance.types import ToolCallEvent, ToolResultEvent
         from tracemill.governance.state import TaintEntry
 
         event = ctx.event
@@ -78,13 +78,15 @@ class IFCChecker:
         if clearance and _CLEARANCE_ORDER[clearance] >= _CLEARANCE_ORDER[Clearance.CONFIDENTIAL]:
             src_labels.add(f"ifc:{clearance}")
             # Record taint for future events (not current)
-            session_state.add_taint(TaintEntry(
-                event_id=event.event_id,
-                source_event_key=event.source_event_key,
-                clearance=clearance,
-                source=self._classify_source(ctx),
-                payload_pointer="",
-            ))
+            session_state.add_taint(
+                TaintEntry(
+                    event_id=event.event_id,
+                    source_event_key=event.source_event_key,
+                    clearance=clearance,
+                    source=self._classify_source(ctx),
+                    payload_pointer="",
+                )
+            )
 
     def _infer_clearance(self, ctx: "EnrichmentContext") -> Clearance | None:
         """Infer clearance level from event context."""
@@ -97,13 +99,19 @@ class IFCChecker:
         # Try structured path extraction first
         try:
             args_dict = json_mod.loads(ctx.event.tool_args_json)
-            file_path = args_dict.get("path") or args_dict.get("file") or args_dict.get("filename") or ""
+            file_path = (
+                args_dict.get("path") or args_dict.get("file") or args_dict.get("filename") or ""
+            )
             if isinstance(file_path, str):
                 # Check path segments and basename for sensitive file matches
                 path_lower = file_path.lower()
                 basename = path_lower.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
                 for sensitive_path in _SENSITIVE_PATHS:
-                    if basename == sensitive_path or path_lower.endswith(f"/{sensitive_path}") or path_lower.endswith(f"\\{sensitive_path}"):
+                    if (
+                        basename == sensitive_path
+                        or path_lower.endswith(f"/{sensitive_path}")
+                        or path_lower.endswith(f"\\{sensitive_path}")
+                    ):
                         return PATH_LABEL_RULES.get(sensitive_path, Clearance.SECRET)
                 for ext in _SENSITIVE_EXTENSIONS:
                     if basename.endswith(ext):
@@ -116,6 +124,7 @@ class IFCChecker:
         for path in _SENSITIVE_PATHS:
             # Require path separator or string boundary before the sensitive name
             import re
+
             pattern = r'(?:^|[/\\\s"\':])' + re.escape(path) + r'(?:$|[/\\\s"\',})\]])'
             if re.search(pattern, args):
                 return PATH_LABEL_RULES.get(path, Clearance.SECRET)
@@ -123,6 +132,7 @@ class IFCChecker:
         for ext in _SENSITIVE_EXTENSIONS:
             # Extension must be at word boundary
             import re
+
             if re.search(re.escape(ext) + r'(?:$|["\s,}\]\)])', args):
                 return Clearance.CONFIDENTIAL
 

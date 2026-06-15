@@ -47,7 +47,9 @@ class JsonlSink(StorageSink):
                 "session_id": event.session_id,
                 "timestamp": event.timestamp.isoformat(),
                 "payload": event.payload,
-                "metadata": event.metadata.model_dump(exclude_none=True) if event.metadata else None,
+                "metadata": event.metadata.model_dump(exclude_none=True)
+                if event.metadata
+                else None,
             },
             default=str,
         )

@@ -11,7 +11,6 @@ by datamodel-code-generator from classify/schema.yaml — see _generated.py.
 
 from __future__ import annotations
 
-import copy
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
@@ -133,7 +132,7 @@ class EventTrace:
             object.__setattr__(self, "raw_event", _deep_freeze(raw))
         elif isinstance(raw, MappingProxyType):
             pass  # already frozen
-        
+
         ti = self.tool_input
         if isinstance(ti, dict) and not isinstance(ti, MappingProxyType):
             object.__setattr__(self, "tool_input", _deep_freeze(ti))
@@ -210,7 +209,7 @@ class EventTrace:
         canonical_tool=_UNSET,
     ) -> EventTrace:
         """Return a new EventTrace with classification fields populated.
-        
+
         Sentinel-based: omitted fields preserve existing values.
         """
         kwargs: dict[str, Any] = {}
@@ -241,7 +240,7 @@ class EventTrace:
         reason=_UNSET,
     ) -> EventTrace:
         """Return a new EventTrace with assessment fields populated.
-        
+
         Sentinel-based: omitted fields preserve existing values.
         """
         kwargs: dict[str, Any] = {}

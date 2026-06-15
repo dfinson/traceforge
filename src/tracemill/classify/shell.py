@@ -80,7 +80,9 @@ def _words_from_command_node(node: ts.Node) -> list[str]:
 
 # Wrapper flags that consume exactly one argument (e.g., sudo -u <user>)
 _WRAPPER_FLAGS_WITH_ARG: dict[str, frozenset[str]] = {
-    "sudo": frozenset({"-u", "--user", "-g", "--group", "-C", "-D", "-R", "--role", "-t", "--type"}),
+    "sudo": frozenset(
+        {"-u", "--user", "-g", "--group", "-C", "-D", "-R", "--role", "-t", "--type"}
+    ),
     "env": frozenset({"-u", "--unset", "-S", "--split-string"}),
     "timeout": frozenset({"--signal", "-s", "-k", "--kill-after"}),
     "nice": frozenset({"-n", "--adjustment"}),

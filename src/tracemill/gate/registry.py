@@ -1,4 +1,10 @@
-"""Gate endpoint registry — maps session_id → socket path in system.db."""
+"""Gate endpoint registry — maps session_id → socket path in system.db.
+
+The gate_endpoints table is now managed by Alembic as part of the unified
+system schema. This module provides convenience functions that operate
+on a standalone connection for lightweight lookups (the gate client doesn't
+always have access to a full SystemStore instance).
+"""
 
 from __future__ import annotations
 
@@ -19,6 +25,7 @@ def _system_db_path() -> str:
 
 
 def _ensure_table(conn: sqlite3.Connection) -> None:
+    """Ensure gate_endpoints table exists (backward compat for pre-migration DBs)."""
     conn.execute("""
         CREATE TABLE IF NOT EXISTS gate_endpoints (
             session_id TEXT PRIMARY KEY,
@@ -103,6 +110,7 @@ def _pid_alive(pid: int) -> bool:
     """Check if a PID is still running."""
     if os.name == "nt":
         import ctypes
+
         kernel32 = ctypes.windll.kernel32
         handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
         if handle:

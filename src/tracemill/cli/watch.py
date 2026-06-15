@@ -26,11 +26,19 @@ logger = logging.getLogger(__name__)
 
 @click.command()
 @click.option("--config", "config_path", type=click.Path(exists=True), default=None)
-@click.option("--frameworks", default=None, help="Comma-separated frameworks to watch (default: all detected).")
+@click.option(
+    "--frameworks",
+    default=None,
+    help="Comma-separated frameworks to watch (default: all detected).",
+)
 @click.option("--once", is_flag=True, help="Process existing files then exit (no watching).")
 @click.option("--no-score", is_flag=True, help="Don't start the Score API server.")
-@click.option("--log-level", default="INFO", type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]))
-def watch(config_path: str | None, frameworks: str | None, once: bool, no_score: bool, log_level: str) -> None:
+@click.option(
+    "--log-level", default="INFO", type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"])
+)
+def watch(
+    config_path: str | None, frameworks: str | None, once: bool, no_score: bool, log_level: str
+) -> None:
     """Watch detected frameworks, run governance pipeline, emit to sinks."""
     logging.basicConfig(
         level=getattr(logging, log_level),
@@ -67,8 +75,10 @@ def watch(config_path: str | None, frameworks: str | None, once: bool, no_score:
     policy = None
     if config and config.get("governance", {}).get("tool_preflight_gate"):
         from tracemill.sdk.gate_policy import GatePolicy
+
         dotted = config["governance"]["tool_preflight_gate"]
         from tracemill.governance.pipeline import _import_dotted
+
         gate_fn = _import_dotted(dotted)
         policy = GatePolicy().preflight(gate_fn)
 
@@ -76,6 +86,7 @@ def watch(config_path: str | None, frameworks: str | None, once: bool, no_score:
 
     # Start Gate IPC server (for CLI-based frameworks: Claude Code, Copilot CLI, etc.)
     from tracemill.gate.server import GateServer
+
     gate_server = GateServer(pipeline)
     gate_server.start()
     click.echo(f"Gate IPC server listening on {gate_server.sock_path}")
@@ -89,7 +100,9 @@ def watch(config_path: str | None, frameworks: str | None, once: bool, no_score:
     # Start Score API
     score_server: ScoreServer | None = None
     if not no_score:
-        listen = config.get("score", {}).get("listen", "localhost:7331") if config else "localhost:7331"
+        listen = (
+            config.get("score", {}).get("listen", "localhost:7331") if config else "localhost:7331"
+        )
         score_server = ScoreServer(pipeline, listen=listen)
         score_server.start_background()
 
@@ -103,6 +116,7 @@ def watch(config_path: str | None, frameworks: str | None, once: bool, no_score:
         click.echo("\nShutting down...")
     finally:
         from tracemill.gate.registry import unregister_pid
+
         gate_server.stop()
         unregister_pid()
         if score_server:
@@ -175,7 +189,9 @@ async def _watch_pipeline(pipeline: ResolvedPipeline, governance: "GovernancePip
         logger.warning("Source path does not exist: %s", pipeline.source_path)
 
 
-async def _process_pipeline_once(pipeline: ResolvedPipeline, governance: "GovernancePipeline") -> None:
+async def _process_pipeline_once(
+    pipeline: ResolvedPipeline, governance: "GovernancePipeline"
+) -> None:
     """Process existing content in a pipeline's source (no watching)."""
     logger.info("Processing %s at %s", pipeline.name, pipeline.source_path)
 
@@ -194,7 +210,9 @@ async def _process_pipeline_once(pipeline: ResolvedPipeline, governance: "Govern
                 await _process_line(stripped, pipeline, governance)
 
 
-async def _process_line(line: str, pipeline: ResolvedPipeline, governance: "GovernancePipeline") -> None:
+async def _process_line(
+    line: str, pipeline: ResolvedPipeline, governance: "GovernancePipeline"
+) -> None:
     """Parse a raw line through the adapter and governance pipeline."""
     from tracemill.adapters.mapped_json import MappedJsonAdapter
     from tracemill.cli.runner import load_mapping_path

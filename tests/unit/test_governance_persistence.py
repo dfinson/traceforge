@@ -1,9 +1,5 @@
 """Tests for governance persistence layer."""
 
-import sqlite3
-import tempfile
-from pathlib import Path
-
 import pytest
 
 from tracemill.governance.persistence import SystemStore

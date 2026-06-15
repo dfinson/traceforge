@@ -4,12 +4,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import hashlib
 from collections import Counter, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -152,12 +149,12 @@ class SessionState:
     def update_phase_window(self, phase: str) -> None:
         self._phase_window.append(phase)
         if len(self._phase_window) > self.PHASE_WINDOW_SIZE:
-            self._phase_window = self._phase_window[-self.PHASE_WINDOW_SIZE:]
+            self._phase_window = self._phase_window[-self.PHASE_WINDOW_SIZE :]
 
     def add_taint(self, entry: TaintEntry) -> None:
         self._taint_ledger.append(entry)
         if len(self._taint_ledger) > self.TAINT_LEDGER_MAX:
-            self._taint_ledger = self._taint_ledger[-self.TAINT_LEDGER_MAX:]
+            self._taint_ledger = self._taint_ledger[-self.TAINT_LEDGER_MAX :]
 
     def record_event(self, sequence: int | None = None) -> None:
         self._event_count += 1
@@ -190,7 +187,7 @@ class SessionState:
             return True
         for dim_key, limits in thresholds.items():
             if dim_key.startswith("max_by_") and isinstance(limits, dict):
-                dim = dim_key[len("max_by_"):]
+                dim = dim_key[len("max_by_") :]
                 counter = self._budget_counters.get(dim, Counter())
                 for key, limit in limits.items():
                     if counter[key] >= limit:
@@ -258,27 +255,40 @@ class SessionState:
         """Write-through to SQLite."""
         if self._db is None:
             return
-        budget_json = json.dumps({
-            "version": 1,
-            "total_tool_calls": self._total_tool_calls,
-            "total_tokens": self._total_tokens,
-            "elapsed_seconds": self._elapsed_seconds,
-            "by_effect": dict(self._budget_counters["effect"]),
-            "by_mechanism": dict(self._budget_counters["mechanism"]),
-            "by_scope": dict(self._budget_counters["scope"]),
-            "by_role": dict(self._budget_counters["role"]),
-            "by_phase": dict(self._budget_counters["phase"]),
-            "by_capability": dict(self._budget_counters["capability"]),
-            "by_action": dict(self._budget_counters["action"]),
-            "by_structure": dict(self._budget_counters["structure"]),
-            "pressure": self._pressure,
-        })
+        budget_json = json.dumps(
+            {
+                "version": 1,
+                "total_tool_calls": self._total_tool_calls,
+                "total_tokens": self._total_tokens,
+                "elapsed_seconds": self._elapsed_seconds,
+                "by_effect": dict(self._budget_counters["effect"]),
+                "by_mechanism": dict(self._budget_counters["mechanism"]),
+                "by_scope": dict(self._budget_counters["scope"]),
+                "by_role": dict(self._budget_counters["role"]),
+                "by_phase": dict(self._budget_counters["phase"]),
+                "by_capability": dict(self._budget_counters["capability"]),
+                "by_action": dict(self._budget_counters["action"]),
+                "by_structure": dict(self._budget_counters["structure"]),
+                "pressure": self._pressure,
+            }
+        )
         phase_json = json.dumps(self._phase_window)
-        taints_json = json.dumps([
-            {"event_id": t.event_id, "source_event_key": t.source_event_key,
-             "clearance": t.clearance, "source": t.source, "payload_pointer": t.payload_pointer}
-            for t in self._taint_ledger
-        ]) if self._taint_ledger else None
+        taints_json = (
+            json.dumps(
+                [
+                    {
+                        "event_id": t.event_id,
+                        "source_event_key": t.source_event_key,
+                        "clearance": t.clearance,
+                        "source": t.source,
+                        "payload_pointer": t.payload_pointer,
+                    }
+                    for t in self._taint_ledger
+                ]
+            )
+            if self._taint_ledger
+            else None
+        )
         now = datetime.now(timezone.utc).isoformat()
         self._db.execute(
             """INSERT OR REPLACE INTO session_state
@@ -287,10 +297,17 @@ class SessionState:
                 last_sequence, last_event_id, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                self.session_id, budget_json, phase_json,
-                self._last_assistant_event_id, self._last_user_event_id,
-                taints_json, self._event_count, self._dropped_events,
-                self._last_sequence, None, now,
+                self.session_id,
+                budget_json,
+                phase_json,
+                self._last_assistant_event_id,
+                self._last_user_event_id,
+                taints_json,
+                self._event_count,
+                self._dropped_events,
+                self._last_sequence,
+                None,
+                now,
             ),
         )
         self._db.commit()
@@ -300,27 +317,40 @@ class SessionState:
         Used for atomic state+reservation transactions."""
         if self._db is None:
             return
-        budget_json = json.dumps({
-            "version": 1,
-            "total_tool_calls": self._total_tool_calls,
-            "total_tokens": self._total_tokens,
-            "elapsed_seconds": self._elapsed_seconds,
-            "by_effect": dict(self._budget_counters["effect"]),
-            "by_mechanism": dict(self._budget_counters["mechanism"]),
-            "by_scope": dict(self._budget_counters["scope"]),
-            "by_role": dict(self._budget_counters["role"]),
-            "by_phase": dict(self._budget_counters["phase"]),
-            "by_capability": dict(self._budget_counters["capability"]),
-            "by_action": dict(self._budget_counters["action"]),
-            "by_structure": dict(self._budget_counters["structure"]),
-            "pressure": self._pressure,
-        })
+        budget_json = json.dumps(
+            {
+                "version": 1,
+                "total_tool_calls": self._total_tool_calls,
+                "total_tokens": self._total_tokens,
+                "elapsed_seconds": self._elapsed_seconds,
+                "by_effect": dict(self._budget_counters["effect"]),
+                "by_mechanism": dict(self._budget_counters["mechanism"]),
+                "by_scope": dict(self._budget_counters["scope"]),
+                "by_role": dict(self._budget_counters["role"]),
+                "by_phase": dict(self._budget_counters["phase"]),
+                "by_capability": dict(self._budget_counters["capability"]),
+                "by_action": dict(self._budget_counters["action"]),
+                "by_structure": dict(self._budget_counters["structure"]),
+                "pressure": self._pressure,
+            }
+        )
         phase_json = json.dumps(self._phase_window)
-        taints_json = json.dumps([
-            {"event_id": t.event_id, "source_event_key": t.source_event_key,
-             "clearance": t.clearance, "source": t.source, "payload_pointer": t.payload_pointer}
-            for t in self._taint_ledger
-        ]) if self._taint_ledger else None
+        taints_json = (
+            json.dumps(
+                [
+                    {
+                        "event_id": t.event_id,
+                        "source_event_key": t.source_event_key,
+                        "clearance": t.clearance,
+                        "source": t.source,
+                        "payload_pointer": t.payload_pointer,
+                    }
+                    for t in self._taint_ledger
+                ]
+            )
+            if self._taint_ledger
+            else None
+        )
         now = datetime.now(timezone.utc).isoformat()
         self._db.execute(
             """INSERT OR REPLACE INTO session_state
@@ -329,10 +359,17 @@ class SessionState:
                 last_sequence, last_event_id, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                self.session_id, budget_json, phase_json,
-                self._last_assistant_event_id, self._last_user_event_id,
-                taints_json, self._event_count, self._dropped_events,
-                self._last_sequence, None, now,
+                self.session_id,
+                budget_json,
+                phase_json,
+                self._last_assistant_event_id,
+                self._last_user_event_id,
+                taints_json,
+                self._event_count,
+                self._dropped_events,
+                self._last_sequence,
+                None,
+                now,
             ),
         )
 
@@ -351,7 +388,16 @@ class SessionState:
         state._total_tokens = budget_data.get("total_tokens", 0)
         state._elapsed_seconds = budget_data.get("elapsed_seconds", 0.0)
         state._pressure = budget_data.get("pressure", False)
-        for dim in ("effect", "mechanism", "scope", "role", "phase", "capability", "action", "structure"):
+        for dim in (
+            "effect",
+            "mechanism",
+            "scope",
+            "role",
+            "phase",
+            "capability",
+            "action",
+            "structure",
+        ):
             state._budget_counters[dim] = Counter(budget_data.get(f"by_{dim}", {}))
         state._phase_window = json.loads(row[2]) if row[2] else []
         state._last_assistant_event_id = row[3]

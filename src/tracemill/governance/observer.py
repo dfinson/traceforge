@@ -11,6 +11,7 @@ from tracemill.governance.pipeline import SessionMeta
 @dataclass(frozen=True)
 class AgentContext:
     """Context provided by the host framework on session lifecycle events."""
+
     session_id: str
     agent_model: str | None = None
     repo: str | None = None

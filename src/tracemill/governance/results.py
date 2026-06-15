@@ -28,6 +28,7 @@ class RecommendedAction(StrEnum):
 @dataclass(frozen=True)
 class TransformSuggestion:
     """Materialized by Phase 3 from TransformTemplate + event-specific data."""
+
     target_kind: str  # "shell_flag", "shell_arg", "tool_arg", "file_content"
     path: str  # AST node path (shell) or JSONPath (mcp tool args)
     original: str
@@ -39,6 +40,7 @@ class TransformSuggestion:
 @dataclass(frozen=True)
 class EscalationContext:
     """Rich metadata for escalate/deny — full classification context."""
+
     canonical_id: str
     classification: "Classification"
     recommended_action: "RecommendedAction"
@@ -57,6 +59,7 @@ class EscalationContext:
 @dataclass(frozen=True)
 class EvidencePointer:
     """What triggered this evidence."""
+
     event_id: str
     rule_id: str
     detector: str
@@ -66,6 +69,7 @@ class EvidencePointer:
 @dataclass(frozen=True)
 class Evidence:
     """Emitted for warn/escalate/deny recommendations."""
+
     canonical_id: str
     timestamp: datetime
     session_id: str
@@ -88,6 +92,7 @@ class Evidence:
 @dataclass(frozen=True)
 class RiskRecommendation:
     """Full recommendation with canonical identity."""
+
     recommended_action: RecommendedAction
     assessment: "RiskAssessment"
     reason_code: str
@@ -99,6 +104,7 @@ class RiskRecommendation:
 @dataclass(frozen=True)
 class RecommendationResult:
     """Phase 3 output envelope."""
+
     recommendation: RiskRecommendation
     evidence: Evidence | None = None
 
@@ -106,6 +112,7 @@ class RecommendationResult:
 @dataclass(frozen=True)
 class Phase3Result:
     """Always produced by Phase 3."""
+
     risk_assessment: "RiskAssessment"
     recommendation_result: RecommendationResult | None = None
 
@@ -117,6 +124,7 @@ class SessionMeta:
     For lifecycle events (session_start/end), Phase 2/3 fields are None.
     canonical_id is accessed via recommendation.canonical_id (no separate field).
     """
+
     classification: "Classification | None"
     risk_assessment: "RiskAssessment | None"
     recommendation: RiskRecommendation | None = None

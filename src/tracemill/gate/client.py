@@ -10,14 +10,13 @@ import json
 import socket
 import struct
 import sys
-from pathlib import Path
 
 
 def send_gate_request(sock_path: str, payload: dict) -> dict:
     """Send a gate request to the IPC server and return the verdict dict."""
     if sock_path.startswith("tcp://"):
         # Windows TCP fallback
-        addr = sock_path[len("tcp://"):]
+        addr = sock_path[len("tcp://") :]
         host, port_str = addr.rsplit(":", 1)
         conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         conn.connect((host, int(port_str)))
@@ -131,12 +130,16 @@ def _output_allow(format: str) -> None:
 def _output_deny(format: str, reason: str) -> None:
     """Output a deny verdict in the specified format."""
     if format == "claude-code":
-        print(json.dumps({
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "permissionDecisionReason": reason or "denied by tracemill policy",
-            }
-        }))
+        print(
+            json.dumps(
+                {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "deny",
+                        "permissionDecisionReason": reason or "denied by tracemill policy",
+                    }
+                }
+            )
+        )
     else:
         print(json.dumps({"decision": "deny", "reason": reason}))

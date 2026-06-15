@@ -12,10 +12,7 @@ Tests the full preflight/postflight flow:
 
 from __future__ import annotations
 
-import json
-import struct
 import threading
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -28,7 +25,7 @@ from tracemill.sdk.gate_types import (
     ToolCallRequest,
     ToolCallResult,
 )
-from tracemill.sdk.verdict import Decision, Verdict
+from tracemill.sdk.verdict import Verdict
 
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -142,7 +139,9 @@ class TestPostflight:
         pipeline = _make_pipeline(postflight=_postflight_redact)
         payload = {"tool_name": "read_file", "tool_input": {}, "session_id": "s1"}
         trace, _ = pipeline._score_and_gate_preflight(payload)
-        pv = pipeline._enforce_postflight(trace, session_id="s1", output={"result": "has SECRET123"})
+        pv = pipeline._enforce_postflight(
+            trace, session_id="s1", output={"result": "has SECRET123"}
+        )
         assert pv.action == PostflightAction.REDACT
         assert "SECRET123" in pv.redaction_keys
 
@@ -234,11 +233,13 @@ class TestGateServer:
 
         pipeline = _make_pipeline(preflight=_deny_all)
         server = GateServer(pipeline)
-        result = server._process_gate_request({
-            "tool_name": "rm",
-            "tool_input": {"path": "/"},
-            "session_id": "s1",
-        })
+        result = server._process_gate_request(
+            {
+                "tool_name": "rm",
+                "tool_input": {"path": "/"},
+                "session_id": "s1",
+            }
+        )
         assert result["decision"] == "deny"
         assert "blocked by test policy" in result["reason"]
 
@@ -247,11 +248,13 @@ class TestGateServer:
 
         pipeline = _make_pipeline(preflight=_allow_all)
         server = GateServer(pipeline)
-        result = server._process_gate_request({
-            "tool_name": "read_file",
-            "tool_input": {"path": "/tmp/x"},
-            "session_id": "s1",
-        })
+        result = server._process_gate_request(
+            {
+                "tool_name": "read_file",
+                "tool_input": {"path": "/tmp/x"},
+                "session_id": "s1",
+            }
+        )
         assert result["decision"] == "allow"
 
     def test_server_no_policy_allows(self):
@@ -259,11 +262,13 @@ class TestGateServer:
 
         pipeline = GovernancePipeline.create()
         server = GateServer(pipeline)
-        result = server._process_gate_request({
-            "tool_name": "anything",
-            "tool_input": {},
-            "session_id": "s1",
-        })
+        result = server._process_gate_request(
+            {
+                "tool_name": "anything",
+                "tool_input": {},
+                "session_id": "s1",
+            }
+        )
         assert result["decision"] == "allow"
 
 
@@ -342,6 +347,7 @@ class TestThreadSafety:
 
         def slow_gate(req, ctx):
             import time
+
             time.sleep(0.001)
             return Verdict.allow()
 

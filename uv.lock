@@ -3716,6 +3716,7 @@ dev = [
     { name = "openai-agents" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "ruff" },
     { name = "semantic-kernel" },
     { name = "smolagents" },
 ]
@@ -3750,6 +3751,7 @@ dev = [
     { name = "openai-agents", specifier = ">=0.1" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
+    { name = "ruff", specifier = ">=0.15.16" },
     { name = "semantic-kernel", specifier = ">=1.20" },
     { name = "smolagents", specifier = ">=1.0" },
 ]

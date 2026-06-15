@@ -21,29 +21,33 @@ class PIICategory(StrEnum):
     CONNECTION_STRING = "connection_string"
 
 
-_CREDENTIAL_CATEGORIES = frozenset({
-    PIICategory.API_KEY, PIICategory.PRIVATE_KEY,
-    PIICategory.AWS_KEY, PIICategory.JWT,
-    PIICategory.CONNECTION_STRING,
-})
+_CREDENTIAL_CATEGORIES = frozenset(
+    {
+        PIICategory.API_KEY,
+        PIICategory.PRIVATE_KEY,
+        PIICategory.AWS_KEY,
+        PIICategory.JWT,
+        PIICategory.CONNECTION_STRING,
+    }
+)
 
 PII_PATTERNS: dict[PIICategory, re.Pattern[str]] = {
-    PIICategory.SSN: re.compile(r'\b\d{3}-\d{2}-\d{4}\b'),
-    PIICategory.EMAIL: re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'),
+    PIICategory.SSN: re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
+    PIICategory.EMAIL: re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"),
     PIICategory.CREDIT_CARD: re.compile(
-        r'\b(?:'
-        r'(?:4\d{3}|5[1-5]\d{2}|6(?:011|5\d{2}))[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}'  # Visa/MC/Discover (16)
-        r'|3[47]\d{2}[- ]?\d{6}[- ]?\d{5}'  # Amex (15)
-        r')\b'
+        r"\b(?:"
+        r"(?:4\d{3}|5[1-5]\d{2}|6(?:011|5\d{2}))[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}"  # Visa/MC/Discover (16)
+        r"|3[47]\d{2}[- ]?\d{6}[- ]?\d{5}"  # Amex (15)
+        r")\b"
     ),
     PIICategory.API_KEY: re.compile(
-        r'\b(?:sk|pk|api|key|token|secret)[-_][A-Za-z0-9-_]{20,}\b', re.IGNORECASE
+        r"\b(?:sk|pk|api|key|token|secret)[-_][A-Za-z0-9-_]{20,}\b", re.IGNORECASE
     ),
-    PIICategory.PRIVATE_KEY: re.compile(r'-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'),
-    PIICategory.AWS_KEY: re.compile(r'\b(?:AKIA|ASIA)[A-Z0-9]{16}\b'),
-    PIICategory.JWT: re.compile(r'\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b'),
+    PIICategory.PRIVATE_KEY: re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"),
+    PIICategory.AWS_KEY: re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"),
+    PIICategory.JWT: re.compile(r"\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
     PIICategory.CONNECTION_STRING: re.compile(
-        r'(?:mongodb|postgres|mysql|redis|amqp)://[^\s]+', re.IGNORECASE
+        r"(?:mongodb|postgres|mysql|redis|amqp)://[^\s]+", re.IGNORECASE
     ),
 }
 
@@ -80,5 +84,7 @@ class PIIScanner:
             cap.add("pii_exposure")
 
         # Tainted flow: PII going to network-capable tool
-        if (found_pii or found_credential) and "network_outbound" in ctx.base_classification.capability:
+        if (
+            found_pii or found_credential
+        ) and "network_outbound" in ctx.base_classification.capability:
             struct.add("tainted_flow")

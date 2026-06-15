@@ -1,7 +1,7 @@
 """Tests for new governance modules: envelope, MCP integrity, drift assessment, observer."""
 
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -9,7 +9,6 @@ from tracemill.governance.envelope import ContextGapEvent, EnrichedEvent
 from tracemill.governance.mcp_drift import (
     MCPIntegrityAlert,
     MCPIntegrityScanner,
-    MCPToolProfile,
     _ADVERSARIAL_PATTERNS,
 )
 from tracemill.governance.drift import DriftAssessment, DriftDetector, _TRANSITION_BONUSES
@@ -49,7 +48,8 @@ class TestContextGapEvent:
 
     def test_default_values(self):
         gap = ContextGapEvent(
-            id="g1", session_id="s1",
+            id="g1",
+            session_id="s1",
             timestamp=datetime.now(timezone.utc),
             source_event_key="k1",
         )
@@ -64,11 +64,16 @@ class TestContextGapEvent:
 class TestEnrichedEvent:
     def _make_meta(self, with_risk=False, with_recommendation=False):
         from tracemill.classify.risk import RiskAssessment
+
         risk = None
         if with_risk:
             risk = RiskAssessment(
-                score=42, level="medium", confidence="high",
-                factors=("shell_execute",), mitre=("T1059",), version="1.0",
+                score=42,
+                level="medium",
+                confidence="high",
+                factors=("shell_execute",),
+                mitre=("T1059",),
+                version="1.0",
             )
         return SessionMeta(
             classification=None,
@@ -82,7 +87,8 @@ class TestEnrichedEvent:
 
     def test_to_dict_context_gap(self):
         gap = ContextGapEvent(
-            id="g1", session_id="s1",
+            id="g1",
+            session_id="s1",
             timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc),
             source_event_key="gap:s1:1:5",
             dropped_count=5,
@@ -98,11 +104,15 @@ class TestEnrichedEvent:
 
     def test_to_dict_regular_event(self):
         from tracemill.governance.types import ToolCallEvent
+
         event = ToolCallEvent(
-            event_id="e1", session_id="s1",
+            event_id="e1",
+            session_id="s1",
             timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc),
-            source_event_key="k1", span_id="sp1",
-            tool_name="git_diff", server_namespace=None,
+            source_event_key="k1",
+            span_id="sp1",
+            tool_name="git_diff",
+            server_namespace=None,
             tool_args_json='{"path": "."}',
             source_event_id=None,
         )
@@ -114,7 +124,8 @@ class TestEnrichedEvent:
 
     def test_immutable(self):
         gap = ContextGapEvent(
-            id="g1", session_id="s1",
+            id="g1",
+            session_id="s1",
             timestamp=datetime.now(timezone.utc),
             source_event_key="k1",
         )
@@ -190,12 +201,17 @@ class TestMCPIntegrityScannerIntegration:
     def _make_ctx(self, server="mcp-fs", tool_name="read_file", desc="Read a file", schema="{}"):
         from tracemill.governance.types import ToolCallEvent, EnrichmentContext
         from tracemill.classify.core import Classification
+
         event = ToolCallEvent(
-            event_id="e1", session_id="s1",
+            event_id="e1",
+            session_id="s1",
             timestamp=datetime.now(timezone.utc),
-            source_event_key="k1", span_id="sp1",
-            tool_name=tool_name, server_namespace=server,
-            tool_args_json='{}', source_event_id=None,
+            source_event_key="k1",
+            span_id="sp1",
+            tool_name=tool_name,
+            server_namespace=server,
+            tool_args_json="{}",
+            source_event_id=None,
             mcp_server_name=server,
             tool_description=desc,
             tool_schema_json=schema,
@@ -224,21 +240,30 @@ class TestMCPIntegrityScannerIntegration:
     def test_non_mcp_event_returns_empty(self):
         from tracemill.governance.types import ToolCallEvent, EnrichmentContext
         from tracemill.classify.core import Classification
+
         scanner, store = self._make_scanner()
         event = ToolCallEvent(
-            event_id="e1", session_id="s1",
+            event_id="e1",
+            session_id="s1",
             timestamp=datetime.now(timezone.utc),
-            source_event_key="k1", span_id="sp1",
-            tool_name="git_diff", server_namespace=None,
-            tool_args_json='{}', source_event_id=None,
+            source_event_key="k1",
+            span_id="sp1",
+            tool_name="git_diff",
+            server_namespace=None,
+            tool_args_json="{}",
+            source_event_id=None,
             mcp_server_name="",  # No server = not MCP
         )
         ctx = EnrichmentContext(
             event=event,
             base_classification=Classification(mechanism="shell.execute"),
-            command_analysis=None, project_root=None,
-            session_state=None, mcp_profiles=None,
-            engine="shell", drift_baseline=None, mcp_profile_key=None,
+            command_analysis=None,
+            project_root=None,
+            session_state=None,
+            mcp_profiles=None,
+            engine="shell",
+            drift_baseline=None,
+            mcp_profile_key=None,
         )
         cap: set[str] = set()
         result = scanner.scan(ctx, cap)
@@ -288,6 +313,7 @@ class TestDriftDetectorIntegration:
 
     def _make_snapshot(self, window):
         from tracemill.governance.state import SessionStateSnapshot, BudgetSnapshot
+
         return SessionStateSnapshot(
             event_count=len(window),
             phase_window=window,
@@ -329,17 +355,24 @@ class TestTracemillObserver:
         assert hasattr(TracemillObserver, "on_session_end")
 
     def test_protocol_is_runtime_checkable(self):
-        from tracemill.governance.observer import AgentContext
         class FakeObserver:
-            async def on_pre_tool_call(self, tool_name, args): pass
-            async def on_post_tool_call(self, tool_name, result): pass
-            async def on_session_start(self, context): pass
-            async def on_session_end(self, context): pass
+            async def on_pre_tool_call(self, tool_name, args):
+                pass
+
+            async def on_post_tool_call(self, tool_name, result):
+                pass
+
+            async def on_session_start(self, context):
+                pass
+
+            async def on_session_end(self, context):
+                pass
 
         assert hasattr(FakeObserver, "on_pre_tool_call")
 
     def test_agent_context_dataclass(self):
         from tracemill.governance.observer import AgentContext
+
         ctx = AgentContext(session_id="s1", agent_model="gpt-4", repo="org/repo")
         assert ctx.session_id == "s1"
         assert ctx.agent_model == "gpt-4"
@@ -362,8 +395,10 @@ class TestPipelineLifecycle:
         labeler = GovernanceLabeler()
         tracker = BudgetTracker(BudgetThresholds())
         return GovernancePipeline(
-            store=store, labeler=labeler,
-            budget_tracker=tracker, rules=[],
+            store=store,
+            labeler=labeler,
+            budget_tracker=tracker,
+            rules=[],
             engine=engine,
         )
 
@@ -414,6 +449,7 @@ class TestTransformSuggestion:
 class TestEscalationContext:
     def test_creation(self):
         from tracemill.governance.pipeline import RecommendedAction
+
         esc = EscalationContext(
             canonical_id="sha256:abc",
             classification=None,

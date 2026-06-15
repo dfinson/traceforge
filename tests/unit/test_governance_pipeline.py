@@ -6,19 +6,16 @@ from pathlib import Path
 import pytest
 
 from tracemill.classify.core import Classification
-from tracemill.governance.budget import BudgetThresholds, BudgetTracker
+from tracemill.governance.budget import BudgetTracker
 from tracemill.governance.canonical import compute_canonical_hash
 from tracemill.governance.labeler import GovernanceLabeler
 from tracemill.governance.persistence import SystemStore
 from tracemill.governance.pii import PIIScanner
-from tracemill.governance.pipeline import GovernancePipeline, SessionMeta
+from tracemill.governance.pipeline import GovernancePipeline
 from tracemill.governance.rules import parse_rules
-from tracemill.governance.state import SessionStateSnapshot
 from tracemill.governance.types import (
-    CommandAnalysis,
     EnrichmentContext,
     ToolCallEvent,
-    ToolResultEvent,
 )
 
 
@@ -31,7 +28,14 @@ def store(tmp_path):
 
 @pytest.fixture
 def rules():
-    rules_path = Path(__file__).parent.parent.parent / "src" / "tracemill" / "classify" / "data" / "recommendation_rules.yaml"
+    rules_path = (
+        Path(__file__).parent.parent.parent
+        / "src"
+        / "tracemill"
+        / "classify"
+        / "data"
+        / "recommendation_rules.yaml"
+    )
     return parse_rules(rules_path)
 
 
@@ -53,7 +57,9 @@ def _make_ctx(event=None, classification=None, command_analysis=None):
     if event is None:
         event = _make_tool_call_event()
     if classification is None:
-        classification = Classification(mechanism="shell.execute", effect="destructive", scope=frozenset({"host"}))
+        classification = Classification(
+            mechanism="shell.execute", effect="destructive", scope=frozenset({"host"})
+        )
     return EnrichmentContext(
         event=event,
         base_classification=classification,
@@ -69,7 +75,9 @@ def _make_ctx(event=None, classification=None, command_analysis=None):
 
 class TestCanonicalHash:
     def test_deterministic(self):
-        cls = Classification(mechanism="shell.execute", effect="destructive", scope=frozenset({"host"}))
+        cls = Classification(
+            mechanism="shell.execute", effect="destructive", scope=frozenset({"host"})
+        )
         h1 = compute_canonical_hash(cls, command="rm -rf /", reason_code="test")
         h2 = compute_canonical_hash(cls, command="rm -rf /", reason_code="test")
         assert h1 == h2
@@ -81,7 +89,9 @@ class TestCanonicalHash:
         assert h1 != h2
 
     def test_excludes_dynamic_labels(self):
-        cls1 = Classification(mechanism="shell.execute", effect="mutating", capability=frozenset({"budget_pressure"}))
+        cls1 = Classification(
+            mechanism="shell.execute", effect="mutating", capability=frozenset({"budget_pressure"})
+        )
         cls2 = Classification(mechanism="shell.execute", effect="mutating", capability=frozenset())
         # budget_pressure is excluded from canonical hash
         h1 = compute_canonical_hash(cls1, reason_code="test")
@@ -97,7 +107,9 @@ class TestCanonicalHash:
 
     def test_includes_stable_capability(self):
         cls1 = Classification(mechanism="shell.execute", capability=frozenset({"network_outbound"}))
-        cls2 = Classification(mechanism="shell.execute", capability=frozenset({"elevated_privilege"}))
+        cls2 = Classification(
+            mechanism="shell.execute", capability=frozenset({"elevated_privilege"})
+        )
         h1 = compute_canonical_hash(cls1, reason_code="x")
         h2 = compute_canonical_hash(cls2, reason_code="x")
         assert h1 != h2
@@ -112,7 +124,9 @@ class TestCanonicalHash:
 class TestPIIScanner:
     def test_detects_api_key(self):
         scanner = PIIScanner()
-        event = _make_tool_call_event(args='{"data": "sk-proj-abcdefghijklmnopqrstuvwxyz1234567890"}')
+        event = _make_tool_call_event(
+            args='{"data": "sk-proj-abcdefghijklmnopqrstuvwxyz1234567890"}'
+        )
         ctx = _make_ctx(event=event)
         cap: set[str] = set()
         struct: set[str] = set()
@@ -169,7 +183,9 @@ class TestGovernanceLabeler:
 
     def test_pii_scanner_adds_labels(self):
         labeler = GovernanceLabeler(pii_scanner=PIIScanner())
-        event = _make_tool_call_event(args='{"text": "sk-proj-abcdefghijklmnopqrstuvwxyz1234567890"}')
+        event = _make_tool_call_event(
+            args='{"text": "sk-proj-abcdefghijklmnopqrstuvwxyz1234567890"}'
+        )
         ctx = _make_ctx(event=event)
         result = labeler.label(ctx)
         assert "credential_exposure" in result.classification.capability
@@ -183,8 +199,11 @@ class TestGovernancePipeline:
         labeler = GovernanceLabeler(pii_scanner=PIIScanner())
         tracker = BudgetTracker()
         pipeline = GovernancePipeline(
-            store=store, labeler=labeler, budget_tracker=tracker,
-            rules=rules, engine=engine,
+            store=store,
+            labeler=labeler,
+            budget_tracker=tracker,
+            rules=rules,
+            engine=engine,
         )
 
         ctx = _make_ctx()
@@ -201,8 +220,11 @@ class TestGovernancePipeline:
         labeler = GovernanceLabeler()
         tracker = BudgetTracker()
         pipeline = GovernancePipeline(
-            store=store, labeler=labeler, budget_tracker=tracker,
-            rules=rules, engine=engine,
+            store=store,
+            labeler=labeler,
+            budget_tracker=tracker,
+            rules=rules,
+            engine=engine,
         )
 
         ctx = _make_ctx()
@@ -218,12 +240,16 @@ class TestGovernancePipeline:
         labeler = GovernanceLabeler()
         tracker = BudgetTracker()
         pipeline = GovernancePipeline(
-            store=store, labeler=labeler, budget_tracker=tracker,
-            rules=rules, engine=engine,
+            store=store,
+            labeler=labeler,
+            budget_tracker=tracker,
+            rules=rules,
+            engine=engine,
         )
 
         safe_cls = Classification(
-            mechanism="shell.execute", effect="read_only",
+            mechanism="shell.execute",
+            effect="read_only",
             capability=frozenset({"elevated_privilege"}),  # prevents none_of match
         )
         event = ToolCallEvent(
@@ -251,4 +277,7 @@ class TestGovernancePipeline:
         meta = pipeline.process_event(ctx)
         # Low risk, elevated_privilege prevents none_of from matching
         # Risk score for read_only should be low (<40)
-        assert meta.recommendation is None or meta.recommendation.recommended_action.value in ("allow", "warn")
+        assert meta.recommendation is None or meta.recommendation.recommended_action.value in (
+            "allow",
+            "warn",
+        )

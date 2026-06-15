@@ -47,6 +47,12 @@ testpaths = ["tests"]
 target-version = "py311"
 line-length = 100
 
+[tool.ruff.lint]
+ignore = [
+    "E741",   # ambiguous variable name (used intentionally in comprehensions)
+    "F821",   # undefined name — false positives for string-quoted forward references
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/tracemill"]
 

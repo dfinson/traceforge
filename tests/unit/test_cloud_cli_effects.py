@@ -159,8 +159,14 @@ def test_aws_batch_verbs(cmd, expected):
     "cmd,expected",
     [
         ("aws ec2 describe-security-group-rules --security-group-id sg-123", "read_only"),
-        ("az network vnet subnet delete --name sub1 --vnet-name v1 --resource-group rg", "destructive"),
-        ("az network vnet subnet create --name sub1 --vnet-name v1 --resource-group rg", "mutating"),
+        (
+            "az network vnet subnet delete --name sub1 --vnet-name v1 --resource-group rg",
+            "destructive",
+        ),
+        (
+            "az network vnet subnet create --name sub1 --vnet-name v1 --resource-group rg",
+            "mutating",
+        ),
         ("gcloud compute firewall-rules delete rule1", "destructive"),
         ("gcloud compute firewall-rules list", "read_only"),
         ("gcloud container clusters get-credentials my-cluster", "read_only"),
@@ -232,10 +238,16 @@ def test_semantic_correctness(cmd, expected):
     "cmd,expected",
     [
         # Route53 change verb
-        ("aws route53 change-resource-record-sets --hosted-zone-id z --change-batch file://c.json", "mutating"),
+        (
+            "aws route53 change-resource-record-sets --hosted-zone-id z --change-batch file://c.json",
+            "mutating",
+        ),
         # EKS lifecycle
         ("aws eks describe-cluster --name c", "read_only"),
-        ("aws eks create-cluster --name c --role-arn r --resources-vpc-config subnetIds=s", "mutating"),
+        (
+            "aws eks create-cluster --name c --role-arn r --resources-vpc-config subnetIds=s",
+            "mutating",
+        ),
         ("aws eks delete-cluster --name c", "destructive"),
         # CloudFront invalidation
         ("aws cloudfront create-invalidation --distribution-id d --paths /*", "mutating"),
@@ -275,11 +287,17 @@ def test_cross_cli_consistency(cmd, expected):
         # Flags with verb-like words in values
         ("aws ssm put-parameter --name /delete/path --value secret", "mutating"),
         # Long flag chains
-        ("az vm create --name vm1 --resource-group rg1 --image UbuntuLTS --size Standard_D2s_v3", "mutating"),
+        (
+            "az vm create --name vm1 --resource-group rg1 --image UbuntuLTS --size Standard_D2s_v3",
+            "mutating",
+        ),
         # gcloud with --format (doesn't affect effect)
         ("gcloud compute instances list --format=json", "read_only"),
         # gcloud with --quiet on delete (still destructive)
-        ("gcloud compute instances delete vm1 --project my-proj --zone us-east1-b --quiet", "destructive"),
+        (
+            "gcloud compute instances delete vm1 --project my-proj --zone us-east1-b --quiet",
+            "destructive",
+        ),
         # aws with --output flag
         ("aws ec2 describe-instances --output json", "read_only"),
         # presign (read-only, generates URL)

@@ -583,7 +583,11 @@ class TestClineCustomTargetE2E:
             [
                 # Cline preprocessor expects: {type: "say", say: "text", text: "..."}
                 {"type": "say", "say": "text", "text": "Let me read the config file."},
-                {"type": "say", "say": "tool", "text": '{"tool": "read_file", "path": "/config.yaml"}'},
+                {
+                    "type": "say",
+                    "say": "tool",
+                    "text": '{"tool": "read_file", "path": "/config.yaml"}',
+                },
             ],
         )
 
@@ -605,17 +609,24 @@ class TestClineCustomTargetE2E:
         events = _feed_sequence(
             adapter,
             [
-                {"type": "say", "say": "reasoning", "text": "The user wants to understand the schema."},
+                {
+                    "type": "say",
+                    "say": "reasoning",
+                    "text": "The user wants to understand the schema.",
+                },
                 {"type": "say", "say": "text", "text": "I'll check the schema definition."},
-                {"type": "say", "say": "tool", "text": '{"tool": "read_file", "path": "schema.sql"}'},
+                {
+                    "type": "say",
+                    "say": "tool",
+                    "text": '{"tool": "read_file", "path": "schema.sql"}',
+                },
             ],
         )
 
         completed = [e for e in events if e.kind == EventKind.TOOL_CALL_COMPLETED]
         assert completed[0].metadata.motivation.intent == "I'll check the schema definition."
         assert (
-            completed[0].metadata.motivation.reasoning
-            == "The user wants to understand the schema."
+            completed[0].metadata.motivation.reasoning == "The user wants to understand the schema."
         )
 
 
@@ -751,7 +762,7 @@ class TestMotivationPersistsAcrossIrrelevantEventsE2E:
                 *[
                     {
                         "type": "assistant.turn_start",
-                        "timestamp": f"2025-01-01T00:00:{i+2:02d}Z",
+                        "timestamp": f"2025-01-01T00:00:{i + 2:02d}Z",
                         "data": {"turnId": f"t-{i}"},
                     }
                     for i in range(20)

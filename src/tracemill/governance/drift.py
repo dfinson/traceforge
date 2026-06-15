@@ -14,12 +14,12 @@ if TYPE_CHECKING:
 
 # Suspicious transition bonuses (from → to: bonus)
 _TRANSITION_BONUSES: dict[tuple[str, str], int] = {
-    ("testing", "implementation"): 10,     # Verification → destructive implementation
+    ("testing", "implementation"): 10,  # Verification → destructive implementation
     ("verification", "implementation"): 10,
-    ("testing", "destructive"): 18,        # Verification → destructive
+    ("testing", "destructive"): 18,  # Verification → destructive
     ("verification", "destructive"): 18,
-    ("exploration", "network"): 15,        # Exploration → network write
-    ("exploration", "deployment"): 12,     # Exploration → deployment (skipping impl)
+    ("exploration", "network"): 15,  # Exploration → network write
+    ("exploration", "deployment"): 12,  # Exploration → deployment (skipping impl)
 }
 
 # Oscillation threshold
@@ -31,6 +31,7 @@ _WARMUP_EVENTS = 5  # Minimum events before drift detection activates
 @dataclass(frozen=True)
 class DriftAssessment:
     """Full drift assessment per the design spec."""
+
     phase_window: tuple[str, ...]
     baseline_distribution: tuple[tuple[str, float], ...]  # Sorted pairs (immutable)
     current_phase: str
@@ -157,7 +158,10 @@ class DriftDetector:
     def _get_baseline(self, ctx: "EnrichmentContext") -> dict | None:
         # Use pre-loaded baseline from context when available
         if ctx.drift_baseline:
-            return {"phase_counts": dict(ctx.drift_baseline), "total_events": sum(v for _, v in ctx.drift_baseline)}
+            return {
+                "phase_counts": dict(ctx.drift_baseline),
+                "total_events": sum(v for _, v in ctx.drift_baseline),
+            }
         repo = ctx.project_root or "unknown"
         return self._store.get_drift_baseline("unknown", repo)
 

@@ -18,6 +18,7 @@ class ContextGapEvent:
     Does NOT flow through full enrichment pipeline — bypasses Phase 2/3.
     Serialized directly to sinks as-is.
     """
+
     id: str
     session_id: str
     timestamp: datetime
@@ -48,6 +49,7 @@ class EnrichedEvent:
 
     Sinks serialize this as {"event": {...}, "_governance": {...}} or equivalent per sink type.
     """
+
     event: "SessionEvent | ContextGapEvent"
     governance: "SessionMeta"
 

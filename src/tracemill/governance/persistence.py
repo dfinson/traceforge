@@ -28,9 +28,7 @@ def _run_alembic(conn: sqlite3.Connection) -> None:
 
     # Fast path: check if already at head without importing SQLAlchemy
     try:
-        cursor = conn.execute(
-            "SELECT version_num FROM alembic_version LIMIT 1"
-        )
+        cursor = conn.execute("SELECT version_num FROM alembic_version LIMIT 1")
         row = cursor.fetchone()
         if row and row[0] == LATEST_REVISION:
             return  # Already at HEAD, skip heavy imports
@@ -154,7 +152,9 @@ class SystemStore:
             return row[0]
         return None
 
-    def record_processed(self, source_event_key: str, session_id: str, meta_json: str, processed_at: str) -> None:
+    def record_processed(
+        self, source_event_key: str, session_id: str, meta_json: str, processed_at: str
+    ) -> None:
         with self._lock:
             self._conn.execute(
                 "INSERT OR IGNORE INTO processed_events (source_event_key, session_id, session_meta_json, processed_at) VALUES (?, ?, ?, ?)",
@@ -196,11 +196,17 @@ class SystemStore:
         if not row:
             return None
         return {
-            "server": row[0], "tool_name": row[1],
-            "description_hash": row[2], "schema_hash": row[3],
-            "registered_effect": row[4], "registered_role": row[5],
-            "registered_capabilities": row[6], "registered_scope": row[7],
-            "clearance": row[8], "first_seen": row[9], "last_seen": row[10],
+            "server": row[0],
+            "tool_name": row[1],
+            "description_hash": row[2],
+            "schema_hash": row[3],
+            "registered_effect": row[4],
+            "registered_role": row[5],
+            "registered_capabilities": row[6],
+            "registered_scope": row[7],
+            "clearance": row[8],
+            "first_seen": row[9],
+            "last_seen": row[10],
         }
 
     def upsert_mcp_profile(self, server: str, tool_name: str, profile: dict) -> None:
@@ -211,10 +217,19 @@ class SystemStore:
                    (server, tool_name, description_hash, schema_hash, registered_effect,
                     registered_role, registered_capabilities, registered_scope, clearance, first_seen, last_seen)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (server, tool_name, profile["description_hash"], profile["schema_hash"],
-                 profile.get("registered_effect"), profile.get("registered_role"),
-                 profile.get("registered_capabilities"), profile.get("registered_scope"),
-                 profile.get("clearance"), profile["first_seen"], profile["last_seen"]),
+                (
+                    server,
+                    tool_name,
+                    profile["description_hash"],
+                    profile["schema_hash"],
+                    profile.get("registered_effect"),
+                    profile.get("registered_role"),
+                    profile.get("registered_capabilities"),
+                    profile.get("registered_scope"),
+                    profile.get("clearance"),
+                    profile["first_seen"],
+                    profile["last_seen"],
+                ),
             )
             self._conn.commit()
 
@@ -235,7 +250,9 @@ class SystemStore:
             ).fetchone()
         return row[0] if row else None
 
-    def store_content_hash(self, repo: str, file_path: str, sha256: str, session_id: str, updated_at: str) -> None:
+    def store_content_hash(
+        self, repo: str, file_path: str, sha256: str, session_id: str, updated_at: str
+    ) -> None:
         with self._lock:
             self._conn.execute(
                 """INSERT OR REPLACE INTO content_hashes (repo, file_path, sha256, updated_at, updated_by_session)
@@ -253,6 +270,7 @@ class SystemStore:
         if not row:
             return None
         import json
+
         return {"phase_counts": json.loads(row[0]), "total_events": row[1]}
 
     def execute_in_transaction(self, sql: str, params: tuple = ()) -> None:
@@ -280,11 +298,12 @@ class SystemStore:
         Accepts tuple[MCPDeferredWrite, ...] from MCPScanResult.
         """
         import json as json_mod
-        from tracemill.governance.mcp_drift import MCPDeferredWrite
 
         for write in writes:
             if write.kind == "upsert":
-                self.upsert_mcp_profile(write.server, write.tool_name, json_mod.loads(write.payload))
+                self.upsert_mcp_profile(
+                    write.server, write.tool_name, json_mod.loads(write.payload)
+                )
             elif write.kind == "last_seen":
                 self.update_mcp_last_seen(write.server, write.tool_name, write.payload)
 

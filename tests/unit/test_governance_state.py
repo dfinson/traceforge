@@ -1,16 +1,11 @@
 """Tests for governance session state."""
 
-import sqlite3
-import tempfile
-from pathlib import Path
-
 import pytest
 
 from tracemill.governance.persistence import SystemStore
 from tracemill.governance.state import (
     BudgetSnapshot,
     SessionState,
-    SessionStateSnapshot,
     TaintEntry,
 )
 
@@ -84,7 +79,9 @@ class TestSessionState:
         # Create and persist
         s1 = SessionState(session_id="persist-test")
         s1.attach_db(store.connection)
-        s1.increment_budget(mechanism="mcp", effect="read_only", capability=frozenset({"network_outbound"}))
+        s1.increment_budget(
+            mechanism="mcp", effect="read_only", capability=frozenset({"network_outbound"})
+        )
         s1.update_phase_window("exploration")
         s1.record_event(sequence=10)
         s1.persist()

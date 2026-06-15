@@ -26,6 +26,7 @@ class RecommendedAction(StrEnum):
 @dataclass(frozen=True)
 class TransformTemplate:
     """Static template for a transform suggestion."""
+
     pattern: str
     replacement: str
     description: str | None = None
@@ -34,6 +35,7 @@ class TransformTemplate:
 @dataclass(frozen=True)
 class Predicate:
     """Single condition in a rule's `when` clause."""
+
     dim: str
     operator: Literal["exact", "any_of", "all_of", "none_of", ">=", ">", "<=", "<", "=="]
     target: str | None = None
@@ -44,6 +46,7 @@ class Predicate:
 @dataclass(frozen=True)
 class Rule:
     """Single recommendation rule loaded from YAML."""
+
     id: str
     index: int
     when: tuple[Predicate, ...]
@@ -55,6 +58,7 @@ class Rule:
 @dataclass(frozen=True)
 class RecommendationTemplate:
     """Static output from rule matching."""
+
     recommended_action: RecommendedAction
     reason_code: str
     message: str | None = None
@@ -64,6 +68,7 @@ class RecommendationTemplate:
 @dataclass(frozen=True)
 class RuleMatch:
     """Intermediate output from rule evaluation."""
+
     template: RecommendationTemplate
     rule_id: str
     matched_predicates: tuple[Predicate, ...]
@@ -73,7 +78,7 @@ class RuleMatch:
 _DISALLOWED_DIMS = frozenset({"source_labels"})
 _SCALAR_DIMS = frozenset({"mechanism", "effect"})
 _SET_DIMS = frozenset({"scope", "role", "action", "capability", "structure"})
-_COMPARISON_RE = re.compile(r'^(>=|>|<=|<|==)\s*(\d+)$')
+_COMPARISON_RE = re.compile(r"^(>=|>|<=|<|==)\s*(\d+)$")
 
 
 def parse_rules(yaml_path: str | Path) -> list[Rule]:
@@ -99,10 +104,16 @@ def parse_rules(yaml_path: str | Path) -> list[Rule]:
                 description=t.get("description"),
             )
         rule_id = entry.get("id", f"rule_{i}")
-        rules.append(Rule(
-            id=rule_id, index=i, when=tuple(predicates),
-            recommend=recommend, reason=reason, transform=transform,
-        ))
+        rules.append(
+            Rule(
+                id=rule_id,
+                index=i,
+                when=tuple(predicates),
+                recommend=recommend,
+                reason=reason,
+                transform=transform,
+            )
+        )
 
     return rules
 
@@ -115,7 +126,9 @@ def _parse_when(when: dict, *, rule_index: int) -> list[Predicate]:
         if dim in _DISALLOWED_DIMS:
             raise ValueError(f"Rule {rule_index}: dimension '{dim}' is disallowed in predicates")
         if dim not in _VALID_DIMS:
-            raise ValueError(f"Rule {rule_index}: unknown predicate dimension '{dim}' (valid: {sorted(_VALID_DIMS)})")
+            raise ValueError(
+                f"Rule {rule_index}: unknown predicate dimension '{dim}' (valid: {sorted(_VALID_DIMS)})"
+            )
 
         if dim == "risk_score":
             m = _COMPARISON_RE.match(str(value))
@@ -123,10 +136,13 @@ def _parse_when(when: dict, *, rule_index: int) -> list[Predicate]:
                 raise ValueError(f"Rule {rule_index}: invalid risk_score predicate: {value}")
             op = m.group(1)
             assert op in (">=", ">", "<=", "<", "=="), f"Invalid comparison operator: {op}"
-            predicates.append(Predicate(
-                dim="risk_score", operator=op,  # type: ignore[arg-type]  # validated above
-                threshold=int(m.group(2)),
-            ))
+            predicates.append(
+                Predicate(
+                    dim="risk_score",
+                    operator=op,  # type: ignore[arg-type]  # validated above
+                    threshold=int(m.group(2)),
+                )
+            )
             continue
 
         if isinstance(value, str):
@@ -138,22 +154,33 @@ def _parse_when(when: dict, *, rule_index: int) -> list[Predicate]:
         elif isinstance(value, dict):
             # Explicit operator dict — exactly one key
             if len(value) != 1:
-                raise ValueError(f"Rule {rule_index}: predicate dict must have exactly one operator key, got {list(value.keys())}")
+                raise ValueError(
+                    f"Rule {rule_index}: predicate dict must have exactly one operator key, got {list(value.keys())}"
+                )
             op_key = next(iter(value))
             if op_key not in ("any_of", "all_of", "none_of"):
                 raise ValueError(f"Rule {rule_index}: unknown operator '{op_key}'")
             # Scalar dimensions only support any_of and none_of (not all_of — nonsensical for single value)
             if dim in _SCALAR_DIMS and op_key == "all_of":
-                raise ValueError(f"Rule {rule_index}: 'all_of' is not valid for scalar dimension '{dim}' (use 'exact' or 'any_of')")
+                raise ValueError(
+                    f"Rule {rule_index}: 'all_of' is not valid for scalar dimension '{dim}' (use 'exact' or 'any_of')"
+                )
             op_targets = value[op_key]
             if not isinstance(op_targets, list):
-                raise ValueError(f"Rule {rule_index}: operator '{op_key}' value must be a list, got {type(op_targets).__name__}")
-            predicates.append(Predicate(
-                dim=dim, operator=op_key,  # type: ignore[arg-type]  # validated above
-                targets=tuple(op_targets),
-            ))
+                raise ValueError(
+                    f"Rule {rule_index}: operator '{op_key}' value must be a list, got {type(op_targets).__name__}"
+                )
+            predicates.append(
+                Predicate(
+                    dim=dim,
+                    operator=op_key,  # type: ignore[arg-type]  # validated above
+                    targets=tuple(op_targets),
+                )
+            )
         else:
-            raise ValueError(f"Rule {rule_index}: invalid predicate value type for '{dim}': {type(value)}")
+            raise ValueError(
+                f"Rule {rule_index}: invalid predicate value type for '{dim}': {type(value)}"
+            )
 
     return predicates
 

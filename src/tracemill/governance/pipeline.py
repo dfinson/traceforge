@@ -6,7 +6,7 @@ import json
 import sqlite3
 import uuid
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Callable, Literal
+from typing import TYPE_CHECKING, Literal
 
 from tracemill.governance.results import (
     Evidence,
@@ -24,26 +24,23 @@ if TYPE_CHECKING:
     import tracemill.types
 
     from tracemill.classify.config import ClassificationEngine
-    from tracemill.classify.core import Classification
-    from tracemill.classify.risk import RiskAssessment
     from tracemill.governance.budget import BudgetThresholds, BudgetTracker
-    from tracemill.governance.canonical import compute_canonical_hash
-    from tracemill.governance.drift import DriftAssessment
     from tracemill.governance.labeler import GovernanceLabeler, GovernanceResult
     from tracemill.governance.persistence import SystemStore
-    from tracemill.governance.risk_wrapper import RiskModifiers, assess_governance_risk
-    from tracemill.governance.rules import Rule, RuleMatch, evaluate_rules
-    from tracemill.governance.state import BudgetSnapshot, SessionState, SessionStateSnapshot
+    from tracemill.governance.rules import Rule
+    from tracemill.governance.state import SessionState, SessionStateSnapshot
     from tracemill.governance.types import (
-        CommandAnalysis,
         EnrichmentContext,
-        SessionEvent,
         ToolCallEvent,
-        ToolResultEvent,
     )
     from tracemill.sdk.gate_policy import GatePolicy
-    from tracemill.sdk.gate_types import GateContext, PostflightVerdict, ToolCallRequest, ToolCallResult
-    from tracemill.sdk.verdict import PostflightGate, PreflightGate, Verdict
+    from tracemill.sdk.gate_types import (
+        GateContext,
+        PostflightVerdict,
+        ToolCallRequest,
+        ToolCallResult,
+    )
+    from tracemill.sdk.verdict import Verdict
 
 
 def _decode_budget_dims(raw: list | None) -> tuple[tuple[str, int], ...]:
@@ -65,9 +62,9 @@ def _import_dotted(dotted_path: str):
     if not module_path:
         raise ImportError(f"Invalid dotted path: {dotted_path!r} (need module.attr)")
     import importlib
+
     module = importlib.import_module(module_path)
     return getattr(module, attr_name)
-
 
 
 class GovernancePipeline:
@@ -99,7 +96,9 @@ class GovernancePipeline:
         self._write_failures: dict[str, int] = {}  # session_id → consecutive failure count
         self._MAX_WRITE_FAILURES = 10
         self._phase23_attempts: dict[str, int] = {}  # source_event_key → attempt count
-        self._phase23_session_keys: dict[str, set[str]] = {}  # session_id → set of event keys with attempts
+        self._phase23_session_keys: dict[
+            str, set[str]
+        ] = {}  # session_id → set of event keys with attempts
         self._MAX_PHASE23_ATTEMPTS = 3
 
     @classmethod
@@ -147,7 +146,9 @@ class GovernancePipeline:
         if config.rules_path:
             rules_path = Path(config.rules_path)
         else:
-            rules_path = Path(__file__).parent.parent / "classify" / "data" / "recommendation_rules.yaml"
+            rules_path = (
+                Path(__file__).parent.parent / "classify" / "data" / "recommendation_rules.yaml"
+            )
         rules = parse_rules(rules_path)
 
         # Budget thresholds from config
@@ -162,6 +163,7 @@ class GovernancePipeline:
         pii_scanner = None
         if config.pii_scanning:
             from tracemill.governance.pii import PIIScanner
+
             pii_scanner = PIIScanner()
 
         instance = cls(
@@ -213,13 +215,16 @@ class GovernancePipeline:
             instance.policy = policy
         elif config.governance.tool_preflight_gate:
             from tracemill.sdk.gate_policy import GatePolicy
+
             gate_fn = _import_dotted(config.governance.tool_preflight_gate)
             auto_policy = GatePolicy().preflight(gate_fn)
             instance.policy = auto_policy
 
         return instance
 
-    def context_from_session_event(self, event: "tracemill.types.SessionEvent") -> "EnrichmentContext":
+    def context_from_session_event(
+        self, event: "tracemill.types.SessionEvent"
+    ) -> "EnrichmentContext":
         """Bridge: convert an enriched SessionEvent (from adapters/Enricher) into an EnrichmentContext.
 
         This is the canonical path for observation pipeline events. The Enricher
@@ -232,6 +237,7 @@ class GovernancePipeline:
         classification = event.metadata.classification
         if classification is None:
             from tracemill.classify.core import Classification, Mechanism
+
             classification = Classification(mechanism=Mechanism.UNKNOWN, effect=None)
 
         # Build governance ToolCallEvent from SessionEvent fields
@@ -240,7 +246,10 @@ class GovernancePipeline:
         server_namespace = event.payload.get("server_namespace")
 
         import json as _json
-        tool_args_json = _json.dumps(arguments, default=str) if isinstance(arguments, dict) else str(arguments)
+
+        tool_args_json = (
+            _json.dumps(arguments, default=str) if isinstance(arguments, dict) else str(arguments)
+        )
 
         gov_event = ToolCallEvent(
             event_id=event.id,
@@ -266,8 +275,11 @@ class GovernancePipeline:
         command_analysis = self._build_command_analysis(command) if command else None
 
         # Derive engine literal
-        mech_str = (classification.mechanism.value if hasattr(classification.mechanism, "value")
-                    else str(classification.mechanism)).lower()
+        mech_str = (
+            classification.mechanism.value
+            if hasattr(classification.mechanism, "value")
+            else str(classification.mechanism)
+        ).lower()
         if "shell" in mech_str or "process" in mech_str:
             engine_literal: Literal["shell", "mcp", "coding"] = "shell"
         elif "mcp" in mech_str:
@@ -305,7 +317,7 @@ class GovernancePipeline:
         classify_name = tool_name
         if server_namespace and not tool_name.startswith("mcp__"):
             prefix = f"{server_namespace}__"
-            base = tool_name[len(prefix):] if tool_name.startswith(prefix) else tool_name
+            base = tool_name[len(prefix) :] if tool_name.startswith(prefix) else tool_name
             classify_name = f"mcp__{server_namespace}__{base}"
 
         canonical = normalize_tool_name(classify_name, engine=self._engine)
@@ -313,7 +325,11 @@ class GovernancePipeline:
 
         if is_shell:
             tool_input = _json.loads(event.tool_args_json) if event.tool_args_json else {}
-            command = tool_input.get("command", "") or tool_input.get("cmd", "") if isinstance(tool_input, dict) else ""
+            command = (
+                tool_input.get("command", "") or tool_input.get("cmd", "")
+                if isinstance(tool_input, dict)
+                else ""
+            )
             classification = self._classify_shell_for_assess(tool_name, command)
             command_analysis = self._build_command_analysis(command) if command else None
         else:
@@ -321,8 +337,11 @@ class GovernancePipeline:
             command_analysis = None
 
         # Derive engine literal
-        mech_str = (classification.mechanism.value if hasattr(classification.mechanism, "value")
-                    else str(classification.mechanism)).lower()
+        mech_str = (
+            classification.mechanism.value
+            if hasattr(classification.mechanism, "value")
+            else str(classification.mechanism)
+        ).lower()
         if "shell" in mech_str or "process" in mech_str:
             engine_literal = "shell"
         elif "mcp" in mech_str:
@@ -391,15 +410,21 @@ class GovernancePipeline:
                         if tok == "|":
                             if current:
                                 b, _s, f, _c = _unwrap_binary(current, engine=self._engine)
-                                t = tuple(x for x in current[1:] if not x.startswith("-") and x != b)
-                                segments.append(PipeSegment(binary=b or current[0], flags=tuple(f), targets=t))
+                                t = tuple(
+                                    x for x in current[1:] if not x.startswith("-") and x != b
+                                )
+                                segments.append(
+                                    PipeSegment(binary=b or current[0], flags=tuple(f), targets=t)
+                                )
                             current = []
                         else:
                             current.append(tok)
                     if current:
                         b, _s, f, _c = _unwrap_binary(current, engine=self._engine)
                         t = tuple(x for x in current[1:] if not x.startswith("-") and x != b)
-                        segments.append(PipeSegment(binary=b or current[0], flags=tuple(f), targets=t))
+                        segments.append(
+                            PipeSegment(binary=b or current[0], flags=tuple(f), targets=t)
+                        )
                     if len(segments) > 1:
                         pipe_segments = tuple(segments)
             except ValueError:
@@ -436,7 +461,6 @@ class GovernancePipeline:
     def _score_event(self, payload: dict) -> "EventTrace":
         """Internal: build event from dict, score it, return EventTrace."""
         from tracemill.governance.types import ToolCallEvent
-        from tracemill.trace import EventTrace
 
         event = ToolCallEvent.from_dict(payload)
         try:
@@ -454,9 +478,15 @@ class GovernancePipeline:
         self._persist_score(event.source_event_key, event.session_id, meta)
         return self._meta_to_trace(payload, event, meta, kind="tool.call.started")
 
-    def _meta_to_trace(self, payload: dict, event: "ToolCallEvent", meta: "SessionMeta", *, kind: str = "tool.call.started") -> "EventTrace":
+    def _meta_to_trace(
+        self,
+        payload: dict,
+        event: "ToolCallEvent",
+        meta: "SessionMeta",
+        *,
+        kind: str = "tool.call.started",
+    ) -> "EventTrace":
         """Convert internal pipeline types into a unified EventTrace."""
-        import uuid
 
         from tracemill.trace import EventTrace
 
@@ -621,7 +651,9 @@ class GovernancePipeline:
         from tracemill.sdk.gate_types import PostflightAction, PostflightVerdict
 
         try:
-            result = self._to_tool_call_result(trace, output=output, duration_ms=duration_ms, error=error)
+            result = self._to_tool_call_result(
+                trace, output=output, duration_ms=duration_ms, error=error
+            )
             ctx = self._build_gate_context(session_id)
         except Exception as exc:
             return PostflightVerdict(
@@ -677,6 +709,7 @@ class GovernancePipeline:
         """
         if session_id not in self._states:
             from tracemill.governance.state import SessionState
+
             self._states.setdefault(session_id, SessionState(session_id=session_id))
         return self._states[session_id]
 
@@ -823,7 +856,6 @@ class GovernancePipeline:
 
     def process_lifecycle(self, session_id: str, event_kind: str) -> SessionMeta:
         """Handle session_start/end — Phase 1 only, skip Phase 2/3."""
-        from tracemill.governance.state import SessionState
 
         state = self.get_or_create_state(session_id)
 
@@ -854,9 +886,6 @@ class GovernancePipeline:
 
     def process_event(self, ctx: "EnrichmentContext") -> SessionMeta:
         """Full pipeline: Phase 1 → Phase 2 → Phase 3 → SessionMeta."""
-        from tracemill.governance.canonical import compute_canonical_hash
-        from tracemill.governance.risk_wrapper import assess_governance_risk
-        from tracemill.governance.rules import evaluate_rules
 
         event = ctx.event
         session_id = event.session_id
@@ -893,17 +922,24 @@ class GovernancePipeline:
                 self._budget.check_pressure(state)
             except Exception as phase1_exc:
                 import logging
+
                 logging.getLogger(__name__).error(
                     "Phase 1 mutation failed for session %s event %s: %s — discarding state",
-                    session_id, event.source_event_key, phase1_exc,
+                    session_id,
+                    event.source_event_key,
+                    phase1_exc,
                 )
                 # Discard corrupted in-memory state — reload clean from DB
                 del self._states[session_id]
                 state = self.get_or_create_state(session_id)
                 return SessionMeta(
-                    classification=None, risk_assessment=None,
-                    recommendation=None, budget_snapshot=state.snapshot().budget,
-                    drift=None, mcp_alerts=(), evidence=None,
+                    classification=None,
+                    risk_assessment=None,
+                    recommendation=None,
+                    budget_snapshot=state.snapshot().budget,
+                    drift=None,
+                    mcp_alerts=(),
+                    evidence=None,
                 )
 
             # Atomic commit: state persist + reservation in single transaction
@@ -926,9 +962,11 @@ class GovernancePipeline:
                 self._store.cache_processed(event.source_event_key, reservation_json)
             except (sqlite3.OperationalError, sqlite3.IntegrityError) as e:
                 import logging
+
                 logging.getLogger(__name__).warning(
                     "Atomic Phase 1 commit failed for session %s: %s — discarding in-memory mutations, will retry on next delivery",
-                    session_id, e,
+                    session_id,
+                    e,
                 )
                 self._store.rollback()
                 # Discard corrupted in-memory state — reload clean from DB
@@ -936,9 +974,13 @@ class GovernancePipeline:
                 state = self.get_or_create_state(session_id)
                 # Return degraded response — event will be re-delivered
                 return SessionMeta(
-                    classification=None, risk_assessment=None,
-                    recommendation=None, budget_snapshot=state.snapshot().budget,
-                    drift=None, mcp_alerts=(), evidence=None,
+                    classification=None,
+                    risk_assessment=None,
+                    recommendation=None,
+                    budget_snapshot=state.snapshot().budget,
+                    drift=None,
+                    mcp_alerts=(),
+                    evidence=None,
                 )
 
         # ── Phase 2: Labeling (side-effect-free) ──
@@ -961,6 +1003,7 @@ class GovernancePipeline:
             phase3 = self._phase3(enrichment_ctx, gov_result, snapshot)
         except Exception as phase23_exc:
             import logging
+
             logger = logging.getLogger(__name__)
             # Increment attempt counter and dead-letter after max retries
             attempts = self._phase23_attempts.get(event.source_event_key, 0) + 1
@@ -970,20 +1013,28 @@ class GovernancePipeline:
             if attempts >= self._MAX_PHASE23_ATTEMPTS:
                 logger.error(
                     "Event %s failed Phase 2/3 %d times — dead-lettering: %s",
-                    event.source_event_key, attempts, phase23_exc,
+                    event.source_event_key,
+                    attempts,
+                    phase23_exc,
                 )
                 # Finalize with degraded meta so event stops retrying
                 degraded_meta = SessionMeta(
-                    classification=None, risk_assessment=None,
-                    recommendation=None, budget_snapshot=snapshot.budget,
-                    drift=None, mcp_alerts=(), evidence=None,
+                    classification=None,
+                    risk_assessment=None,
+                    recommendation=None,
+                    budget_snapshot=snapshot.budget,
+                    drift=None,
+                    mcp_alerts=(),
+                    evidence=None,
                 )
-                degraded_json = json.dumps({
-                    **self._serialize_meta(degraded_meta),
-                    "dead_lettered": True,
-                    "error": str(phase23_exc),
-                    "attempts": attempts,
-                })
+                degraded_json = json.dumps(
+                    {
+                        **self._serialize_meta(degraded_meta),
+                        "dead_lettered": True,
+                        "error": str(phase23_exc),
+                        "attempts": attempts,
+                    }
+                )
                 try:
                     self._store.execute_in_transaction(
                         "UPDATE processed_events SET session_meta_json = ? WHERE source_event_key = ?",
@@ -1006,16 +1057,21 @@ class GovernancePipeline:
             else:
                 logger.warning(
                     "Event %s Phase 2/3 attempt %d/%d failed: %s — will retry on next delivery",
-                    event.source_event_key, attempts, self._MAX_PHASE23_ATTEMPTS, phase23_exc,
+                    event.source_event_key,
+                    attempts,
+                    self._MAX_PHASE23_ATTEMPTS,
+                    phase23_exc,
                 )
                 # Persist attempt count in reservation so it survives process restarts
                 # Preserve the snapshot so retries still use event-time state
                 try:
-                    reservation_json = json.dumps({
-                        "reserved": True,
-                        "phase23_attempts": attempts,
-                        "snapshot": self._serialize_snapshot(snapshot),
-                    })
+                    reservation_json = json.dumps(
+                        {
+                            "reserved": True,
+                            "phase23_attempts": attempts,
+                            "snapshot": self._serialize_snapshot(snapshot),
+                        }
+                    )
                     self._store.execute_in_transaction(
                         "UPDATE processed_events SET session_meta_json = ? WHERE source_event_key = ?",
                         (reservation_json, event.source_event_key),
@@ -1025,9 +1081,13 @@ class GovernancePipeline:
                 except (sqlite3.OperationalError, sqlite3.IntegrityError):
                     self._store.rollback()
                 return SessionMeta(
-                    classification=None, risk_assessment=None,
-                    recommendation=None, budget_snapshot=snapshot.budget,
-                    drift=None, mcp_alerts=(), evidence=None,
+                    classification=None,
+                    risk_assessment=None,
+                    recommendation=None,
+                    budget_snapshot=snapshot.budget,
+                    drift=None,
+                    mcp_alerts=(),
+                    evidence=None,
                 )
 
         # Phase 2/3 succeeded — clear retry counter ONLY after finalization commits (below)
@@ -1061,12 +1121,21 @@ class GovernancePipeline:
                 self._commit_mcp_writes_no_commit(gov_result.mcp_deferred_writes)
             self._store.commit()
             self._store.cache_processed(event.source_event_key, meta_json)
-        except (sqlite3.OperationalError, sqlite3.IntegrityError,
-                json.JSONDecodeError, KeyError, TypeError, ValueError, AttributeError) as e:
+        except (
+            sqlite3.OperationalError,
+            sqlite3.IntegrityError,
+            json.JSONDecodeError,
+            KeyError,
+            TypeError,
+            ValueError,
+            AttributeError,
+        ) as e:
             import logging
+
             logging.getLogger(__name__).error(
                 "Finalization commit failed for event %s: %s — will retry on next delivery",
-                event.source_event_key, e,
+                event.source_event_key,
+                e,
             )
             self._store.rollback()
             # Event stays reserved; next delivery re-runs Phase 2/3
@@ -1101,10 +1170,19 @@ class GovernancePipeline:
                        (server, tool_name, description_hash, schema_hash, registered_effect,
                         registered_role, registered_capabilities, registered_scope, clearance, first_seen, last_seen)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (write.server, write.tool_name, profile["description_hash"], profile["schema_hash"],
-                     profile.get("registered_effect"), profile.get("registered_role"),
-                     profile.get("registered_capabilities"), profile.get("registered_scope"),
-                     profile.get("clearance"), profile["first_seen"], profile["last_seen"]),
+                    (
+                        write.server,
+                        write.tool_name,
+                        profile["description_hash"],
+                        profile["schema_hash"],
+                        profile.get("registered_effect"),
+                        profile.get("registered_role"),
+                        profile.get("registered_capabilities"),
+                        profile.get("registered_scope"),
+                        profile.get("clearance"),
+                        profile["first_seen"],
+                        profile["last_seen"],
+                    ),
                 )
             elif write.kind == "last_seen":
                 self._store.execute_in_transaction(
@@ -1112,7 +1190,12 @@ class GovernancePipeline:
                     (write.payload, write.server, write.tool_name),
                 )
 
-    def _phase3(self, ctx: "EnrichmentContext", result: "GovernanceResult", snapshot: "SessionStateSnapshot" = None) -> Phase3Result:
+    def _phase3(
+        self,
+        ctx: "EnrichmentContext",
+        result: "GovernanceResult",
+        snapshot: "SessionStateSnapshot" = None,
+    ) -> Phase3Result:
         """Phase 3: risk assessment + rule evaluation + evidence + escalation context."""
         from tracemill.governance.canonical import compute_canonical_hash
         from tracemill.governance.risk_wrapper import assess_governance_risk
@@ -1157,13 +1240,23 @@ class GovernancePipeline:
         # Build evidence for non-allow actions
         evidence = None
         if recommendation.recommended_action in (
-            RecommendedAction.WARN, RecommendedAction.ESCALATE, RecommendedAction.DENY
+            RecommendedAction.WARN,
+            RecommendedAction.ESCALATE,
+            RecommendedAction.DENY,
         ):
             # Build EscalationContext for escalate/deny
             escalation = None
-            if recommendation.recommended_action in (RecommendedAction.ESCALATE, RecommendedAction.DENY):
+            if recommendation.recommended_action in (
+                RecommendedAction.ESCALATE,
+                RecommendedAction.DENY,
+            ):
                 escalation = self._build_escalation(
-                    ctx, result, risk, recommendation, canonical_id, snapshot,
+                    ctx,
+                    result,
+                    risk,
+                    recommendation,
+                    canonical_id,
+                    snapshot,
                 )
 
             evidence = Evidence(
@@ -1182,11 +1275,13 @@ class GovernancePipeline:
                 risk_score=risk.score,
                 risk_factors=risk.factors,
                 mitre_techniques=risk.mitre,
-                pointers=(EvidencePointer(
-                    event_id=ctx.event.event_id,
-                    rule_id=rule_match.rule_id,
-                    detector="rule_engine",
-                ),),
+                pointers=(
+                    EvidencePointer(
+                        event_id=ctx.event.event_id,
+                        rule_id=rule_match.rule_id,
+                        detector="rule_engine",
+                    ),
+                ),
                 escalation=escalation,
             )
 
@@ -1223,9 +1318,12 @@ class GovernancePipeline:
             return "exploration"
         return "exploration"
 
-    def _with_snapshot(self, ctx: "EnrichmentContext", snapshot: "SessionStateSnapshot") -> "EnrichmentContext":
+    def _with_snapshot(
+        self, ctx: "EnrichmentContext", snapshot: "SessionStateSnapshot"
+    ) -> "EnrichmentContext":
         """Create new context with session state snapshot."""
         import dataclasses
+
         return dataclasses.replace(ctx, session_state=snapshot)
 
     def _render_transform(self, template, ctx: "EnrichmentContext") -> TransformSuggestion | None:
@@ -1269,8 +1367,13 @@ class GovernancePipeline:
         return None
 
     def _build_escalation(
-        self, ctx: "EnrichmentContext", result: "GovernanceResult",
-        risk, recommendation, canonical_id: str, snapshot,
+        self,
+        ctx: "EnrichmentContext",
+        result: "GovernanceResult",
+        risk,
+        recommendation,
+        canonical_id: str,
+        snapshot,
     ) -> EscalationContext:
         """Build full EscalationContext for escalate/deny recommendations."""
         from tracemill.governance.types import ToolCallEvent
@@ -1283,7 +1386,10 @@ class GovernancePipeline:
             raw_args = ctx.event.tool_args_json or ""
             tool_args_summary = self._sanitize_args(raw_args)
 
-        pii_taint = "pii_exposure" in result.classification.capability or "credential_exposure" in result.classification.capability
+        pii_taint = (
+            "pii_exposure" in result.classification.capability
+            or "credential_exposure" in result.classification.capability
+        )
         ifc_violations = result.risk_modifiers.ifc_violations
 
         budget = snapshot.budget if snapshot else None
@@ -1309,7 +1415,7 @@ class GovernancePipeline:
         import re
 
         # Word-boundary anchored to avoid matching "monkey", "turkey", "keyboard" etc.
-        _SENSITIVE_KEYS = r'(?<![a-zA-Z])(?:password|secret|token|api_key|credential|auth|authorization)(?![a-zA-Z])'
+        _SENSITIVE_KEYS = r"(?<![a-zA-Z])(?:password|secret|token|api_key|credential|auth|authorization)(?![a-zA-Z])"
         # Handle JSON-style: "key": "value" or "key":"value"
         sanitized = re.sub(
             r'(?i)(["\']?(?:' + _SENSITIVE_KEYS + r')["\']?\s*[:=]\s*)["\']([^"\']*)["\']',
@@ -1318,8 +1424,8 @@ class GovernancePipeline:
         )
         # Handle bare (non-quoted) values: key=value or key: value (no quotes around value)
         sanitized = re.sub(
-            r'(?i)((?:' + _SENSITIVE_KEYS + r')\s*[:=]\s*)([^\s"\'}{,\]\)]+)',
-            r'\1<REDACTED>',
+            r"(?i)((?:" + _SENSITIVE_KEYS + r')\s*[:=]\s*)([^\s"\'}{,\]\)]+)',
+            r"\1<REDACTED>",
             sanitized,
         )
         if len(sanitized) > max_len:
@@ -1332,11 +1438,13 @@ class GovernancePipeline:
         import logging
 
         now = datetime.now(timezone.utc).isoformat()
-        budget_json = json_mod.dumps({
-            "total_tool_calls": snapshot.budget.total_tool_calls,
-            "total_tokens": snapshot.budget.total_tokens,
-            "pressure": snapshot.budget.pressure,
-        })
+        budget_json = json_mod.dumps(
+            {
+                "total_tool_calls": snapshot.budget.total_tool_calls,
+                "total_tokens": snapshot.budget.total_tokens,
+                "pressure": snapshot.budget.pressure,
+            }
+        )
         try:
             # INSERT OR IGNORE: first delivery records started_at/ended_at; duplicates are no-ops
             self._store.connection.execute(
@@ -1370,8 +1478,13 @@ class GovernancePipeline:
             },
             "phase_window": list(snapshot.phase_window),
             "taint_ledger": [
-                {"event_id": t.event_id, "source_event_key": t.source_event_key,
-                 "clearance": t.clearance, "source": t.source, "payload_pointer": t.payload_pointer}
+                {
+                    "event_id": t.event_id,
+                    "source_event_key": t.source_event_key,
+                    "clearance": t.clearance,
+                    "source": t.source,
+                    "payload_pointer": t.payload_pointer,
+                }
                 for t in snapshot.taint_ledger
             ],
             "last_assistant_event_id": snapshot.last_assistant_event_id,
@@ -1428,9 +1541,16 @@ class GovernancePipeline:
         if not data:
             return None
         from tracemill.classify.core import Classification
-        cls = Classification.from_dict(data["classification"]) if data.get("classification") else None
+
+        cls = (
+            Classification.from_dict(data["classification"]) if data.get("classification") else None
+        )
         action_val = data.get("recommended_action", "allow")
-        action = RecommendedAction(action_val) if action_val in tuple(RecommendedAction) else RecommendedAction.ALLOW
+        action = (
+            RecommendedAction(action_val)
+            if action_val in tuple(RecommendedAction)
+            else RecommendedAction.ALLOW
+        )
         return EscalationContext(
             canonical_id=data.get("canonical_id", ""),
             classification=cls,
@@ -1444,7 +1564,9 @@ class GovernancePipeline:
             tool_name=data.get("tool_name", ""),
             tool_args_summary=data.get("tool_args_summary", ""),
             session_id=data.get("session_id", ""),
-            timestamp=datetime.fromisoformat(data["timestamp"]) if data.get("timestamp") else datetime.now(timezone.utc),
+            timestamp=datetime.fromisoformat(data["timestamp"])
+            if data.get("timestamp")
+            else datetime.now(timezone.utc),
         )
 
     def _serialize_meta(self, meta: SessionMeta) -> dict:
@@ -1499,8 +1621,12 @@ class GovernancePipeline:
         evidence_data = None
         if meta.evidence:
             pointers_data = [
-                {"event_id": p.event_id, "rule_id": p.rule_id,
-                 "detector": p.detector, "payload_pointer": p.payload_pointer}
+                {
+                    "event_id": p.event_id,
+                    "rule_id": p.rule_id,
+                    "detector": p.detector,
+                    "payload_pointer": p.payload_pointer,
+                }
                 for p in meta.evidence.pointers
             ]
             evidence_data = {
@@ -1539,15 +1665,17 @@ class GovernancePipeline:
         mcp_alerts_data = []
         if meta.mcp_alerts:
             for alert in meta.mcp_alerts:
-                mcp_alerts_data.append({
-                    "tool_name": alert.tool_name,
-                    "server": alert.server,
-                    "alert_type": alert.alert_type,
-                    "previous": alert.previous,
-                    "current": alert.current,
-                    "severity": alert.severity,
-                    "timestamp": alert.timestamp.isoformat(),
-                })
+                mcp_alerts_data.append(
+                    {
+                        "tool_name": alert.tool_name,
+                        "server": alert.server,
+                        "alert_type": alert.alert_type,
+                        "previous": alert.previous,
+                        "current": alert.current,
+                        "severity": alert.severity,
+                        "timestamp": alert.timestamp.isoformat(),
+                    }
+                )
         return {
             "classification": cls_data,
             "recommendation": rec_data,
@@ -1627,6 +1755,7 @@ class GovernancePipeline:
         evidence_data = data.get("evidence")
         if evidence_data:
             from datetime import datetime as dt_cls
+
             pointers = tuple(
                 EvidencePointer(
                     event_id=p["event_id"],
@@ -1638,7 +1767,9 @@ class GovernancePipeline:
             )
             evidence = Evidence(
                 canonical_id=evidence_data.get("canonical_id", ""),
-                timestamp=dt_cls.fromisoformat(evidence_data["timestamp"]) if evidence_data.get("timestamp") else datetime.now(timezone.utc),
+                timestamp=dt_cls.fromisoformat(evidence_data["timestamp"])
+                if evidence_data.get("timestamp")
+                else datetime.now(timezone.utc),
                 session_id=evidence_data.get("session_id", ""),
                 mechanism=evidence_data.get("mechanism", ""),
                 effect=evidence_data.get("effect"),
@@ -1648,7 +1779,9 @@ class GovernancePipeline:
                 capability=tuple(evidence_data.get("capability", ())),
                 structure=tuple(evidence_data.get("structure", ())),
                 source_labels=tuple(evidence_data.get("source_labels", ())),
-                recommended_action=RecommendedAction(evidence_data["recommended_action"]) if evidence_data.get("recommended_action") in tuple(RecommendedAction) else RecommendedAction.ALLOW,
+                recommended_action=RecommendedAction(evidence_data["recommended_action"])
+                if evidence_data.get("recommended_action") in tuple(RecommendedAction)
+                else RecommendedAction.ALLOW,
                 risk_score=evidence_data.get("risk_score", 0),
                 risk_factors=tuple(evidence_data.get("risk_factors", ())),
                 mitre_techniques=tuple(evidence_data.get("mitre_techniques", ())),
@@ -1664,15 +1797,19 @@ class GovernancePipeline:
             alerts_list = []
             for a in mcp_alerts_raw:
                 if isinstance(a, dict):
-                    alerts_list.append(MCPIntegrityAlert(
-                        tool_name=a.get("tool_name", ""),
-                        server=a.get("server", ""),
-                        alert_type=a.get("alert_type", "schema_change"),
-                        previous=a.get("previous", ""),
-                        current=a.get("current", ""),
-                        severity=a.get("severity", "info"),
-                        timestamp=datetime.fromisoformat(a["timestamp"]) if a.get("timestamp") else datetime.now(timezone.utc),
-                    ))
+                    alerts_list.append(
+                        MCPIntegrityAlert(
+                            tool_name=a.get("tool_name", ""),
+                            server=a.get("server", ""),
+                            alert_type=a.get("alert_type", "schema_change"),
+                            previous=a.get("previous", ""),
+                            current=a.get("current", ""),
+                            severity=a.get("severity", "info"),
+                            timestamp=datetime.fromisoformat(a["timestamp"])
+                            if a.get("timestamp")
+                            else datetime.now(timezone.utc),
+                        )
+                    )
                 # Legacy string alerts: skip (can't reconstruct typed object)
             mcp_alerts = tuple(alerts_list)
 
@@ -1724,8 +1861,11 @@ class GovernancePipeline:
           - ALERT: return result normally but log alert
         """
         return self._run_postflight(
-            trace, session_id=session_id,
-            output=output, duration_ms=duration_ms, error=error,
+            trace,
+            session_id=session_id,
+            output=output,
+            duration_ms=duration_ms,
+            error=error,
         )
 
     @staticmethod
@@ -1802,10 +1942,12 @@ class GovernancePipeline:
                 return
             output = getattr(ctx, "output", None)
             pv = pipeline._enforce_postflight(
-                trace, session_id=sid,
+                trace,
+                session_id=sid,
                 output={"result": output} if output else None,
             )
             from tracemill.sdk.gate_types import PostflightAction
+
             if pv.action == PostflightAction.TERMINATE:
                 raise RuntimeError(f"Session terminated by policy: {pv.reason}")
             if pv.action == PostflightAction.SUPPRESS:
@@ -1868,12 +2010,14 @@ class GovernancePipeline:
             finally:
                 duration_ms = int((time.monotonic() - t0) * 1000)
                 pv = pipeline._enforce_postflight(
-                    trace, session_id=sid,
+                    trace,
+                    session_id=sid,
                     output={"result": result} if error is None else None,
                     duration_ms=duration_ms,
                     error=error,
                 )
             from tracemill.sdk.gate_types import PostflightAction
+
             if pv.action == PostflightAction.TERMINATE:
                 raise RuntimeError(f"Session terminated by policy: {pv.reason}")
             if pv.action == PostflightAction.SUPPRESS:
@@ -1930,7 +2074,8 @@ class GovernancePipeline:
                 error = str(exc)
                 duration_ms = int((time.monotonic() - t0) * 1000)
                 pipeline._enforce_postflight(
-                    trace, session_id=sid,
+                    trace,
+                    session_id=sid,
                     duration_ms=duration_ms,
                     error=error,
                 )
@@ -1938,11 +2083,13 @@ class GovernancePipeline:
 
             duration_ms = int((time.monotonic() - t0) * 1000)
             pv = pipeline._enforce_postflight(
-                trace, session_id=sid,
+                trace,
+                session_id=sid,
                 output={"content": getattr(result, "content", str(result))},
                 duration_ms=duration_ms,
             )
             from tracemill.sdk.gate_types import PostflightAction
+
             if pv.action == PostflightAction.TERMINATE:
                 return ToolMessage(
                     content=f"Session terminated: {pv.reason}",
@@ -2000,20 +2147,24 @@ class GovernancePipeline:
             await next_handler(context)
             result_val = getattr(context.function_result, "value", None)
             pv = pipeline._enforce_postflight(
-                trace, session_id=sid,
+                trace,
+                session_id=sid,
                 output={"result": str(result_val)} if result_val else None,
             )
             from tracemill.sdk.gate_types import PostflightAction
+
             if pv.action == PostflightAction.TERMINATE:
                 context.terminate = True
             elif pv.action == PostflightAction.SUPPRESS:
                 from semantic_kernel.functions import FunctionResult
+
                 context.function_result = FunctionResult(
                     function=context.function.metadata,
                     value="[output suppressed by policy]",
                 )
             elif pv.action == PostflightAction.REDACT and result_val:
                 from semantic_kernel.functions import FunctionResult
+
                 redacted = pipeline._apply_postflight_to_output(pv, str(result_val))
                 context.function_result = FunctionResult(
                     function=context.function.metadata,
@@ -2057,13 +2208,15 @@ class GovernancePipeline:
                     duration_ms = int((time.monotonic() - t0) * 1000)
                     result = getattr(context, "result", None)
                     pv = pipeline._enforce_postflight(
-                        trace, session_id=sid,
+                        trace,
+                        session_id=sid,
                         output={"result": str(result)} if result and not error else None,
                         duration_ms=duration_ms,
                         error=error,
                     )
 
                 from tracemill.sdk.gate_types import PostflightAction
+
                 if pv.action == PostflightAction.TERMINATE:
                     raise MiddlewareTermination(f"Session terminated: {pv.reason}")
                 if pv.action == PostflightAction.SUPPRESS:
@@ -2083,6 +2236,7 @@ class GovernancePipeline:
         """
         if agent_cls is None:
             from smolagents import ToolCallingAgent
+
             agent_cls = ToolCallingAgent
 
         pipeline = self
@@ -2112,12 +2266,14 @@ class GovernancePipeline:
                 finally:
                     duration_ms = int((time.monotonic() - t0) * 1000)
                     pv = pipeline._enforce_postflight(
-                        trace, session_id=sid,
+                        trace,
+                        session_id=sid,
                         output={"result": str(result)} if error is None else None,
                         duration_ms=duration_ms,
                         error=error,
                     )
                 from tracemill.sdk.gate_types import PostflightAction
+
                 if pv.action == PostflightAction.TERMINATE:
                     raise RuntimeError(f"Session terminated by policy: {pv.reason}")
                 if pv.action == PostflightAction.SUPPRESS:
@@ -2170,10 +2326,12 @@ class GovernancePipeline:
             if trace is None:
                 return
             pv = pipeline._enforce_postflight(
-                trace, session_id=sid,
+                trace,
+                session_id=sid,
                 output={"result": str(result)} if result else None,
             )
             from tracemill.sdk.gate_types import PostflightAction
+
             if pv.action == PostflightAction.TERMINATE:
                 raise RuntimeError(f"Session terminated by policy: {pv.reason}")
             if pv.action == PostflightAction.SUPPRESS:

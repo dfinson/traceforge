@@ -253,9 +253,7 @@ def scan_text(
     deduped: list[PiiMatch] = []
     taken_ranges: list[tuple[int, int]] = []
     for match in matches:
-        overlaps = any(
-            match.start < end and match.end > start for start, end in taken_ranges
-        )
+        overlaps = any(match.start < end and match.end > start for start, end in taken_ranges)
         if not overlaps:
             deduped.append(match)
             taken_ranges.append((match.start, match.end))

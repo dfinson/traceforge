@@ -30,7 +30,7 @@ class GateServer:
 
     Used by CLI-based frameworks (Claude Code, Copilot CLI, Codex CLI, etc.)
     that can't inject Python hooks but can shell out to `tracemill gate --stdin`.
-    
+
     The server uses the pipeline's policy chain (same as gate_* methods) rather
     than a standalone callback. This ensures consistent behavior across all paths.
     """
@@ -106,6 +106,7 @@ class GateServer:
     def register_session(self, session_id: str) -> None:
         """Register a session_id → this server's socket in the registry."""
         from tracemill.gate.registry import register_session
+
         register_session(session_id, self._sock_path)
 
     def _serve_loop(self) -> None:

@@ -185,8 +185,11 @@ class ScoreServer:
 
 # ─── CLI command ─────────────────────────────────────────────────────────────
 
+
 @click.command()
-@click.option("--listen", default="localhost:7331", help="Host:port to bind (default: localhost:7331).")
+@click.option(
+    "--listen", default="localhost:7331", help="Host:port to bind (default: localhost:7331)."
+)
 @click.option("--config", "config_path", type=click.Path(exists=True), default=None)
 def score(listen: str, config_path: str | None) -> None:
     """Run the Score API server standalone (no file watching)."""

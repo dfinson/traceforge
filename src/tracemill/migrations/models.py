@@ -15,7 +15,12 @@ session_state = Table(
     "session_state",
     metadata,
     Column("session_id", Text, primary_key=True),
-    Column("budget_json", Text, nullable=False, server_default='{"version":1,"total_tool_calls":0,"total_tokens":0,"elapsed_seconds":0.0,"pressure":false}'),
+    Column(
+        "budget_json",
+        Text,
+        nullable=False,
+        server_default='{"version":1,"total_tool_calls":0,"total_tokens":0,"elapsed_seconds":0.0,"pressure":false}',
+    ),
     Column("phase_window_json", Text, nullable=False, server_default="[]"),
     Column("last_assistant_json", Text),
     Column("last_user_json", Text),

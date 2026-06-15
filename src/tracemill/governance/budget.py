@@ -6,13 +6,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from tracemill.governance.state import BudgetSnapshot, SessionState
+    from tracemill.governance.state import SessionState
     from tracemill.governance.types import EnrichmentContext
 
 
 @dataclass(frozen=True)
 class BudgetThresholds:
     """Configurable budget thresholds. Pressure label applied when ANY is exceeded."""
+
     max_tool_calls: int | None = None
     max_by_effect: dict[str, int] | None = None  # e.g. {"destructive": 5}
     max_by_capability: dict[str, int] | None = None

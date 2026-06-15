@@ -55,6 +55,7 @@ def _amazonq_data_dir() -> Path:
 
 # ─── Detection registry ─────────────────────────────────────────────────────
 
+
 class DetectedFramework:
     """A detected framework with its source path and adapter config."""
 
@@ -108,6 +109,7 @@ def detect_frameworks(frameworks: list[str] | None = None) -> list[DetectedFrame
 
 
 # ─── Individual detectors ────────────────────────────────────────────────────
+
 
 def _detect_claude() -> DetectedFramework | None:
     path = _expand("~/.claude/projects")

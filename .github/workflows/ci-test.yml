@@ -11,14 +11,14 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
-        install-extras: ["dev"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e ".[${{ matrix.install-extras }}]"
-      - run: pytest --tb=short -q
+      - uses: astral-sh/setup-uv@v4
+      - run: uv sync --group dev
+      - run: uv run pytest --tb=short -q
 
   build:
     runs-on: ubuntu-latest

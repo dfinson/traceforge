@@ -49,6 +49,7 @@ ADAPTER_MAP: dict[str, MappedJsonAdapterConfig] = {
 
 # ─── Resolved pipeline config ───────────────────────────────────────────────
 
+
 @dataclass(frozen=True)
 class ResolvedPipeline:
     """A fully-resolved pipeline ready to run."""
@@ -91,13 +92,15 @@ def resolve_pipelines(
             logger.warning("No adapter mapping for framework %r (adapter=%r)", fw.name, fw.adapter)
             continue
 
-        pipelines.append(ResolvedPipeline(
-            name=fw.name,
-            source_path=fw.path,
-            ingestion_mode=fw.ingestion_mode,
-            adapter=adapter,
-            sinks=sinks,
-        ))
+        pipelines.append(
+            ResolvedPipeline(
+                name=fw.name,
+                source_path=fw.path,
+                ingestion_mode=fw.ingestion_mode,
+                adapter=adapter,
+                sinks=sinks,
+            )
+        )
 
     return pipelines
 
@@ -111,6 +114,7 @@ def _default_sinks() -> list:
 
 
 # ─── Source multiplexer ──────────────────────────────────────────────────────
+
 
 async def watch_jsonl_file(path: Path, start_at: str = "end") -> AsyncIterator[str]:
     """Watch a JSONL file for new lines using polling.
@@ -175,4 +179,3 @@ async def watch_directory(
                     known_files[fpath] = fh.tell()
 
         await asyncio.sleep(1.0)
-

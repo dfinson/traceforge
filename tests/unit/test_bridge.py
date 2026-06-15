@@ -31,7 +31,14 @@ def engine():
 
 @pytest.fixture
 def rules():
-    rules_path = Path(__file__).parent.parent.parent / "src" / "tracemill" / "classify" / "data" / "recommendation_rules.yaml"
+    rules_path = (
+        Path(__file__).parent.parent.parent
+        / "src"
+        / "tracemill"
+        / "classify"
+        / "data"
+        / "recommendation_rules.yaml"
+    )
     return parse_rules(rules_path)
 
 
@@ -40,8 +47,11 @@ def pipeline(store, rules, engine):
     labeler = GovernanceLabeler()
     tracker = BudgetTracker()
     return GovernancePipeline(
-        store=store, labeler=labeler, budget_tracker=tracker,
-        rules=rules, engine=engine,
+        store=store,
+        labeler=labeler,
+        budget_tracker=tracker,
+        rules=rules,
+        engine=engine,
     )
 
 
@@ -76,7 +86,6 @@ def _make_event(
 
 
 class TestBridgeBasic:
-
     def test_produces_enrichment_context(self, pipeline):
         event = _make_event(tool_name="read_file", arguments={"path": "/tmp/x"})
         ctx = pipeline.context_from_session_event(event)
@@ -92,6 +101,7 @@ class TestBridgeBasic:
 
     def test_missing_classification_defaults_to_unknown(self, pipeline):
         from tracemill.classify.core import Mechanism
+
         event = _make_event(tool_name="something_custom", classification=None)
         ctx = pipeline.context_from_session_event(event)
         assert ctx.base_classification.mechanism == Mechanism.UNKNOWN
@@ -149,7 +159,6 @@ class TestBridgeBasic:
 
 
 class TestBridgeShellAnalysis:
-
     def test_pipe_command_segments(self, pipeline):
         cls = Classification(mechanism=CodingMechanism.PROCESS_SHELL, effect=None)
         event = _make_event(
@@ -200,7 +209,6 @@ class TestBridgeShellAnalysis:
 
 
 class TestAssessEvent:
-
     def test_basic_shell_assessment(self, pipeline):
         cls = Classification(mechanism=CodingMechanism.PROCESS_SHELL, effect=None)
         event = _make_event(
@@ -268,11 +276,11 @@ class TestAssessEvent:
 
 
 class TestBridgeFieldMapping:
-
     def test_tool_args_json_is_serialized_arguments(self, pipeline):
         event = _make_event(tool_name="bash", arguments={"command": "echo hello", "timeout": 30})
         ctx = pipeline.context_from_session_event(event)
         import json
+
         args = json.loads(ctx.event.tool_args_json)
         assert args["command"] == "echo hello"
         assert args["timeout"] == 30

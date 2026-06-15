@@ -53,7 +53,7 @@ def _full_pipeline_event(yaml_name: str, event: dict):
 
 class TestAmazonQE2E:
     """Full pipeline for Amazon Q Developer events.
-    
+
     AmazonQ uses a preprocessor that flattens nested structures.
     Events use block_type field with values like 'tool.call', 'tool.result'.
     """
@@ -263,9 +263,21 @@ class TestCopilotE2E:
         events_data = [
             {"type": "session.start", "timestamp": "2025-06-01T10:00:00Z", "session_id": "s1"},
             {"type": "user.message", "timestamp": "2025-06-01T10:00:01Z", "content": "Run tests"},
-            {"type": "tool.execution_start", "timestamp": "2025-06-01T10:00:02Z", "tool_name": "runCommand"},
-            {"type": "tool.execution_complete", "timestamp": "2025-06-01T10:00:05Z", "tool_name": "runCommand"},
-            {"type": "assistant.message", "timestamp": "2025-06-01T10:00:06Z", "content": "Tests passed"},
+            {
+                "type": "tool.execution_start",
+                "timestamp": "2025-06-01T10:00:02Z",
+                "tool_name": "runCommand",
+            },
+            {
+                "type": "tool.execution_complete",
+                "timestamp": "2025-06-01T10:00:05Z",
+                "tool_name": "runCommand",
+            },
+            {
+                "type": "assistant.message",
+                "timestamp": "2025-06-01T10:00:06Z",
+                "content": "Tests passed",
+            },
             {"type": "session.shutdown", "timestamp": "2025-06-01T10:00:10Z"},
         ]
 
@@ -362,7 +374,11 @@ class TestAiderMarkdownE2E:
             {"type": "session_start", "timestamp": "2025-06-01T10:00:00Z", "version": "0.50.0"},
             {"type": "user_message", "timestamp": "2025-06-01T10:00:01Z", "content": "Add tests"},
             {"type": "file_edit", "timestamp": "2025-06-01T10:00:05Z", "path": "tests/test_new.py"},
-            {"type": "file_edit_applied", "timestamp": "2025-06-01T10:00:06Z", "path": "tests/test_new.py"},
+            {
+                "type": "file_edit_applied",
+                "timestamp": "2025-06-01T10:00:06Z",
+                "path": "tests/test_new.py",
+            },
             {"type": "git_commit", "timestamp": "2025-06-01T10:00:10Z", "hash": "def456"},
         ]
 
@@ -439,7 +455,7 @@ class TestCodexE2E:
 
 class TestContinueDevE2E:
     """Full pipeline for Continue Dev events.
-    
+
     Continue Dev uses block_type field after preprocessor.
     """
 
@@ -482,7 +498,7 @@ class TestContinueDevE2E:
 
 class TestOpenCodeE2E:
     """Full pipeline for OpenCode events.
-    
+
     OpenCode uses dot-separated type field: session.next.tool.called, etc.
     """
 
@@ -743,8 +759,12 @@ class TestAiderFullPipelineE2E:
             {"event": "launched", "properties": {}, "user_id": "u1", "time": 1000},
             {
                 "event": "cli session",
-                "properties": {"main_model": "gpt-4o", "weak_model": "gpt-4o-mini",
-                               "editor_model": "gpt-4o", "edit_format": "diff"},
+                "properties": {
+                    "main_model": "gpt-4o",
+                    "weak_model": "gpt-4o-mini",
+                    "editor_model": "gpt-4o",
+                    "edit_format": "diff",
+                },
                 "user_id": "u1",
                 "time": 1001,
             },

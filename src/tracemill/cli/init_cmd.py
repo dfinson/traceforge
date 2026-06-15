@@ -62,10 +62,12 @@ def _init_claude_code(project_root: Path) -> None:
                     return
 
     # Add a matcher for all tools with tracemill hook
-    pre_tool_use.append({
-        "matcher": ".*",
-        "hooks": [hook_entry],
-    })
+    pre_tool_use.append(
+        {
+            "matcher": ".*",
+            "hooks": [hook_entry],
+        }
+    )
 
     settings_file.write_text(json.dumps(settings, indent=2) + "\n")
     click.echo(f"✓ Wrote PreToolUse hook to {settings_file}")
@@ -76,6 +78,7 @@ def _find_tracemill_command() -> str:
     """Find the tracemill executable path."""
     # If running as installed package, use the entry point
     import shutil
+
     tracemill_path = shutil.which("tracemill")
     if tracemill_path:
         return tracemill_path

@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class IntegrityCheck:
     """Result of verifying a file's content hash."""
+
     path: str
     expected_hash: str
     actual_hash: str
@@ -31,6 +32,7 @@ class IntegrityVerifier:
     def should_check(self, classification: "object") -> bool:
         """Whether to verify integrity for this classification."""
         from tracemill.classify.core import Classification
+
         if not isinstance(classification, Classification):
             return False
         return (

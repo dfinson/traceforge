@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from tracemill.classify.config import ClassificationEngine
@@ -16,11 +16,12 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class RiskModifiers:
     """Governance-specific risk score modifiers (additive bonuses)."""
+
     phase_drift_bonus: int = 0  # +10 per anomaly up to 20
-    mcp_drift_bonus: int = 0   # +15 per schema change
-    ifc_violations: int = 0    # +10 per violation up to 30
-    integrity_bonus: int = 0   # +10 if integrity_unverified
-    budget_bonus: int = 0      # +5 if budget pressure
+    mcp_drift_bonus: int = 0  # +15 per schema change
+    ifc_violations: int = 0  # +10 per violation up to 30
+    integrity_bonus: int = 0  # +10 if integrity_unverified
+    budget_bonus: int = 0  # +5 if budget pressure
 
 
 def assess_governance_risk(
@@ -48,7 +49,9 @@ def assess_governance_risk(
             pipe_segments=[
                 {"binary": seg.binary, "targets": list(seg.targets)}
                 for seg in command_analysis.pipe_segments
-            ] if command_analysis.pipe_segments else None,
+            ]
+            if command_analysis.pipe_segments
+            else None,
             project_root=project_root,
         )
     else:

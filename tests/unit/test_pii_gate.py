@@ -8,11 +8,9 @@ from __future__ import annotations
 from types import MappingProxyType
 from unittest.mock import MagicMock
 
-import pytest
 
 from tracemill.gates.pii import (
     PiiGateConfig,
-    PiiMatch,
     _iban_check,
     _luhn_check,
     scan_text,
@@ -22,7 +20,6 @@ from tracemill.gates.pii import (
 from tracemill.sdk.gate_types import (
     GateContext,
     PostflightAction,
-    PostflightVerdict,
     ToolCallResult,
 )
 from tracemill.trace import EMPTY_MAP
@@ -187,7 +184,7 @@ class TestScanText:
         matches = scan_text(text, score_threshold=0.1)
         # No two matches should overlap
         for i, a in enumerate(matches):
-            for b in matches[i + 1:]:
+            for b in matches[i + 1 :]:
                 assert a.end <= b.start or b.end <= a.start, (
                     f"Overlap: {a.text}[{a.start}:{a.end}] vs {b.text}[{b.start}:{b.end}]"
                 )
@@ -269,9 +266,7 @@ class TestPiiGate:
 
     def test_multiple_pii_types_in_reason(self):
         gate = pii_postflight_gate(PiiGateConfig(suppress_on_critical=False))
-        result = _make_result(output={
-            "content": "Email: bob@x.com, IP: 10.20.30.40"
-        })
+        result = _make_result(output={"content": "Email: bob@x.com, IP: 10.20.30.40"})
         verdict = gate(result, _make_ctx())
         assert verdict.action == PostflightAction.REDACT
         assert "EMAIL_ADDRESS" in verdict.reason
@@ -298,4 +293,3 @@ class TestExtractText:
         text = _extract_text(result)
         assert "Alice" in text
         assert "42" not in text
-

@@ -182,7 +182,12 @@ class S3SinkConfig(StrictModel):
 
 # Discriminated union of all serializable sink types
 SinkConfig = Annotated[
-    SqliteSinkConfig | JsonlSinkConfig | ConsoleSinkConfig | WebhookSinkConfig | OtelSinkConfig | S3SinkConfig,
+    SqliteSinkConfig
+    | JsonlSinkConfig
+    | ConsoleSinkConfig
+    | WebhookSinkConfig
+    | OtelSinkConfig
+    | S3SinkConfig,
     Field(discriminator="type"),
 ]
 

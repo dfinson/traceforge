@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from tracemill.adapters.base import Adapter
-from tracemill.types import EventKind, EventMetadata, IngestionMode, SessionEvent
+from tracemill.types import EventKind, EventMetadata, SessionEvent
 
 logger = logging.getLogger(__name__)
 

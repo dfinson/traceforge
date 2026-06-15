@@ -7,7 +7,7 @@ with guaranteed non-optional fields — no None checks needed in gate logic.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum, StrEnum
+from enum import StrEnum
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
@@ -21,7 +21,7 @@ from tracemill._generated import (
     Role,
     Scope,
 )
-from tracemill.sdk.verdict import Decision, Verdict
+from tracemill.sdk.verdict import Verdict
 from tracemill.trace import EMPTY_MAP
 
 if TYPE_CHECKING:

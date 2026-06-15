@@ -110,6 +110,7 @@ def _pid_alive(pid: int) -> bool:
     """Check if a PID is still running."""
     if os.name == "nt":
         import ctypes
+
         kernel32 = ctypes.windll.kernel32
         handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
         if handle:

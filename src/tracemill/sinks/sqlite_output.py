@@ -73,9 +73,11 @@ class SqliteOutputSink(StorageSink):
                     action = gov.recommendation.recommended_action.value
 
         payload_json = json.dumps(event.payload, default=str) if event.payload else None
-        metadata_json = json.dumps(
-            event.metadata.model_dump(exclude_none=True), default=str
-        ) if event.metadata else None
+        metadata_json = (
+            json.dumps(event.metadata.model_dump(exclude_none=True), default=str)
+            if event.metadata
+            else None
+        )
 
         params = (
             event.id,

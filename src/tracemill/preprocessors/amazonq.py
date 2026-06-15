@@ -43,7 +43,13 @@ def preprocess_amazonq(obj: dict[str, Any]) -> list[dict[str, Any]]:
         try:
             value = json.loads(value_raw)
         except (json.JSONDecodeError, TypeError):
-            return [{"block_type": "raw.parse_error", "conversation_id": conversation_id, "_raw": value_raw}]
+            return [
+                {
+                    "block_type": "raw.parse_error",
+                    "conversation_id": conversation_id,
+                    "_raw": value_raw,
+                }
+            ]
     elif isinstance(value_raw, dict):
         value = value_raw
     else:
@@ -63,11 +69,13 @@ def preprocess_amazonq(obj: dict[str, Any]) -> list[dict[str, Any]]:
 
         # Content can be a string or array of content blocks
         if isinstance(content, str):
-            results.append({
-                "block_type": f"message.{role}" if role else "message.unknown",
-                "conversation_id": conversation_id,
-                "content": content,
-            })
+            results.append(
+                {
+                    "block_type": f"message.{role}" if role else "message.unknown",
+                    "conversation_id": conversation_id,
+                    "content": content,
+                }
+            )
         elif isinstance(content, list):
             for block in content:
                 if not isinstance(block, dict):
@@ -75,20 +83,24 @@ def preprocess_amazonq(obj: dict[str, Any]) -> list[dict[str, Any]]:
                 block_type = block.get("type", "")
 
                 if block_type == "text":
-                    results.append({
-                        "block_type": f"message.{role}" if role else "message.unknown",
-                        "conversation_id": conversation_id,
-                        "content": block.get("text", ""),
-                    })
+                    results.append(
+                        {
+                            "block_type": f"message.{role}" if role else "message.unknown",
+                            "conversation_id": conversation_id,
+                            "content": block.get("text", ""),
+                        }
+                    )
 
                 elif block_type == "tool_use":
-                    results.append({
-                        "block_type": "tool.call",
-                        "conversation_id": conversation_id,
-                        "tool_call_id": block.get("id", ""),
-                        "tool_name": block.get("name", ""),
-                        "arguments": block.get("input", {}),
-                    })
+                    results.append(
+                        {
+                            "block_type": "tool.call",
+                            "conversation_id": conversation_id,
+                            "tool_call_id": block.get("id", ""),
+                            "tool_name": block.get("name", ""),
+                            "arguments": block.get("input", {}),
+                        }
+                    )
 
                 elif block_type == "tool_result":
                     result_content = block.get("content", "")
@@ -96,12 +108,14 @@ def preprocess_amazonq(obj: dict[str, Any]) -> list[dict[str, Any]]:
                         result_content = " ".join(
                             b.get("text", "") for b in result_content if isinstance(b, dict)
                         )
-                    results.append({
-                        "block_type": "tool.result",
-                        "conversation_id": conversation_id,
-                        "tool_call_id": block.get("tool_use_id", ""),
-                        "is_error": block.get("is_error", False),
-                        "output": result_content,
-                    })
+                    results.append(
+                        {
+                            "block_type": "tool.result",
+                            "conversation_id": conversation_id,
+                            "tool_call_id": block.get("tool_use_id", ""),
+                            "is_error": block.get("is_error", False),
+                            "output": result_content,
+                        }
+                    )
 
     return results if results else [{"block_type": "raw.empty", "conversation_id": conversation_id}]

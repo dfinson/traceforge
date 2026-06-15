@@ -27,7 +27,9 @@ def create_default_pipeline(
     from tracemill.governance.rules import parse_rules
 
     # Load default recommendation rules from bundled data
-    rules_path = Path(__file__).resolve().parent.parent / "classify" / "data" / "recommendation_rules.yaml"
+    rules_path = (
+        Path(__file__).resolve().parent.parent / "classify" / "data" / "recommendation_rules.yaml"
+    )
     rules = parse_rules(rules_path)
 
     engine = get_default_engine()

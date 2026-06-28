@@ -1,6 +1,7 @@
 # OpenCode event mapping for MappedJsonAdapter
 # Targets: opencode >= 1.2, < 2.0 (SSE event stream from GET /event/subscribe)
-# Source: anomalyco/opencode packages/core/src/session-event.ts (tag github-v1.2.24)
+# Source: anomalyco/opencode packages/schema/src/session-event.ts (canonical Event.define schemas)
+#         anomalyco/opencode packages/core/src/session/event.ts (re-export of @opencode-ai/schema/session-event)
 #         anomalyco/opencode packages/opencode/src/server/routes/instance/httpapi/handlers/event.ts
 #         anomalyco/opencode packages/opencode/src/event-v2-bridge.ts
 #
@@ -267,5 +268,7 @@ events:
     kind: workflow.compaction.completed
     payload:
       session_id: properties.sessionID
+      message_id: properties.messageID
+      reason: properties.reason
       text: properties.text
-      include: properties.include
+      recent: properties.recent

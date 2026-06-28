@@ -317,14 +317,18 @@ class TestOpenCodeMappings:
         pytest.param(
             _wire_event(
                 "session.next.compaction.ended",
+                messageID="msg-1",
+                reason="auto",
                 text="Condensed summary",
-                include=["turn-1", "turn-2"],
+                recent="turn-2",
             ),
             "workflow.compaction.completed",
             {
                 "session_id": "sess-abc",
+                "message_id": "msg-1",
+                "reason": "auto",
                 "text": "Condensed summary",
-                "include": ["turn-1", "turn-2"],
+                "recent": "turn-2",
             },
             id="session.next.compaction.ended",
         ),

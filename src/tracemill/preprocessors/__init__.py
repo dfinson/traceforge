@@ -24,6 +24,7 @@ import tracemill.preprocessors.codex  # noqa: F401
 import tracemill.preprocessors.amazonq  # noqa: F401
 import tracemill.preprocessors.maf_transcript  # noqa: F401
 import tracemill.preprocessors.opencode  # noqa: F401
+import tracemill.preprocessors.copilot_vscode  # noqa: F401
 
 __all__ = [
     "PreprocessorFn",

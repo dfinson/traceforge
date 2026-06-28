@@ -62,6 +62,9 @@ def preprocess_codex(obj: dict[str, Any]) -> list[dict[str, Any]]:
     if top_type == "event_msg":
         return _handle_event_msg(payload, base)
 
+    if top_type == "turn_context":
+        return []
+
     # Pass through unknown types
     return [{**base, "block_type": f"raw.{top_type}", **payload}]
 
@@ -106,12 +109,15 @@ def _handle_response_item(payload: dict[str, Any], base: dict[str, Any]) -> list
     if item_type == "message":
         role = payload.get("role", "")
         content_blocks = payload.get("content", [])
+        if role == "developer":
+            return []
+
         text = ""
         if isinstance(content_blocks, list):
             text = " ".join(
                 b.get("text", "")
                 for b in content_blocks
-                if isinstance(b, dict) and b.get("type") == "output_text"
+                if isinstance(b, dict) and b.get("type") in {"output_text", "input_text"}
             )
         elif isinstance(content_blocks, str):
             text = content_blocks
@@ -122,6 +128,9 @@ def _handle_response_item(payload: dict[str, Any], base: dict[str, Any]) -> list
                 "content": text,
             }
         ]
+
+    if item_type == "reasoning":
+        return []
 
     # Other response items (e.g. local_shell_call, custom_tool_call)
     if item_type == "local_shell_call":
@@ -202,6 +211,33 @@ def _handle_event_msg(payload: dict[str, Any], base: dict[str, Any]) -> list[dic
             }
         ]
 
+    if event_type == "patch_apply_begin":
+        return [
+            {
+                **base,
+                "block_type": "tool.exec_begin",
+                "call_id": payload.get("call_id", ""),
+                "command": "apply_patch",
+                "cwd": payload.get("cwd", ""),
+            }
+        ]
+
+    if event_type == "patch_apply_end":
+        return [
+            {
+                **base,
+                "block_type": "tool.exec_end",
+                "call_id": payload.get("call_id", ""),
+                "command": "apply_patch",
+                "cwd": payload.get("cwd", ""),
+                "exit_code": 0 if payload.get("success") else 1,
+                "stdout": payload.get("stdout", ""),
+                "stderr": payload.get("stderr", ""),
+                "status": payload.get("status", ""),
+                "changes": payload.get("changes", {}),
+            }
+        ]
+
     if event_type == "mcp_tool_call_begin":
         invocation = payload.get("invocation", {})
         return [
@@ -261,6 +297,9 @@ def _handle_event_msg(payload: dict[str, Any], base: dict[str, Any]) -> list[dic
                 "content": payload.get("message", ""),
             }
         ]
+
+    if event_type in {"task_started", "task_complete", "token_count"}:
+        return []
 
     # Pass through other event types
     return [

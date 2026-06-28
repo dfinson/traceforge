@@ -1,9 +1,17 @@
 # OpenCode event mapping for MappedJsonAdapter
-# Targets: opencode >= 1.2, < 2.0 (SSE event stream from GET /event/subscribe)
+# Targets: opencode >= 1.2, < 2.0 (SSE stream) and opencode >= 1.17, < 2.0
+#          (event-sourced SQLite store).
 # Source: anomalyco/opencode packages/schema/src/session-event.ts (canonical Event.define schemas)
 #         anomalyco/opencode packages/core/src/session/event.ts (re-export of @opencode-ai/schema/session-event)
 #         anomalyco/opencode packages/opencode/src/server/routes/instance/httpapi/handlers/event.ts
 #         anomalyco/opencode packages/opencode/src/event-v2-bridge.ts
+#
+# v1.17 SQLite format: ~/.local/share/opencode/opencode.db table `event`.
+# Rows are {id, aggregate_id=sessionID, seq, type, data}. The type has a
+# trailing version suffix (e.g. message.part.updated.1) and data is a JSON
+# object/string containing session/message/part payloads. The opencode
+# preprocessor strips the version suffix, routes message.updated by role, and
+# routes message.part.updated by part.type (and tool state).
 #
 # Wire format: SSE text/event-stream, each message is event: "message", data: JSON.
 # The JSON shape on the wire (Bus transport via EventV2Bridge):
@@ -46,11 +54,12 @@
 # 26 total events defined in All union at v1.2.24.
 
 framework: opencode
-framework_version: ">=1.2,<2.0"
-ingestion_mode: stream
+framework_version: ">=1.17,<2.0"
+ingestion_mode: sqlite
 type_field: type
-timestamp_field: properties.timestamp
+timestamp_field: _timestamp
 default_kind: ""
+preprocessor: opencode
 
 motivation:
   sources:
@@ -62,6 +71,170 @@ motivation:
       role: reasoning
 
 events:
+  # ── v1.17 SQLite event-sourced store ──
+  session.created:
+    kind: session.started
+    payload:
+      session_id: data.sessionID
+      title: data.info.title
+      directory: data.info.directory
+      version: data.info.version
+      cost: data.info.cost
+      input_tokens: data.info.tokens.input
+      output_tokens: data.info.tokens.output
+      reasoning_tokens: data.info.tokens.reasoning
+      cache_read_tokens: data.info.tokens.cache.read
+      cache_write_tokens: data.info.tokens.cache.write
+      permissions: data.info.permission
+
+  session.updated:
+    kind: session.info
+    payload:
+      session_id: data.sessionID
+      title: data.info.title
+      directory: data.info.directory
+      agent: data.info.agent
+      model_id: data.info.model.id
+      provider_id: data.info.model.providerID
+      variant: data.info.model.variant
+      cost: data.info.cost
+      input_tokens: data.info.tokens.input
+      output_tokens: data.info.tokens.output
+      reasoning_tokens: data.info.tokens.reasoning
+      cache_read_tokens: data.info.tokens.cache.read
+      cache_write_tokens: data.info.tokens.cache.write
+      summary: data.info.summary
+
+  message.updated.user:
+    kind: message.user
+    payload:
+      session_id: data.sessionID
+      message_id: data.info.id
+      role: data.info.role
+      agent: data.info.agent
+      model_id: data.info.model.modelID
+      provider_id: data.info.model.providerID
+
+  message.updated.assistant:
+    kind: message.assistant
+    payload:
+      session_id: data.sessionID
+      message_id: data.info.id
+      parent_id: data.info.parentID
+      role: data.info.role
+      agent: data.info.agent
+      model_id: data.info.modelID
+      provider_id: data.info.providerID
+      cost: data.info.cost
+      tokens: data.info.tokens
+
+  message.part.text.user:
+    kind: message.user
+    payload:
+      session_id: data.sessionID
+      message_id: data.part.messageID
+      part_id: data.part.id
+      text: data.part.text
+
+  message.part.text.assistant:
+    kind: message.assistant
+    payload:
+      session_id: data.sessionID
+      message_id: data.part.messageID
+      part_id: data.part.id
+      text: data.part.text
+
+  message.part.text.unknown:
+    kind: message.assistant
+    payload:
+      session_id: data.sessionID
+      message_id: data.part.messageID
+      part_id: data.part.id
+      text: data.part.text
+
+  message.part.reasoning:
+    kind: llm.reasoning.completed
+    payload:
+      session_id: data.sessionID
+      message_id: data.part.messageID
+      part_id: data.part.id
+      text: data.part.text
+      metadata: data.part.metadata
+      time: data.part.time
+
+  message.part.tool.running:
+    kind: tool.call.started
+    payload:
+      session_id: data.sessionID
+      message_id: data.part.messageID
+      part_id: data.part.id
+      call_id: data.part.callID
+      tool: data.part.tool
+      input: data.part.state.input
+      raw_input: data.part.state.raw
+      metadata: data.part.metadata
+
+  message.part.tool.completed:
+    kind: tool.call.completed
+    payload:
+      session_id: data.sessionID
+      message_id: data.part.messageID
+      part_id: data.part.id
+      call_id: data.part.callID
+      tool: data.part.tool
+      input: data.part.state.input
+      output: data.part.state.output
+      title: data.part.state.title
+      exit_code: data.part.state.metadata.exit
+      metadata: data.part.state.metadata
+      time: data.part.state.time
+
+  message.part.tool.failed:
+    kind: tool.call.failed
+    payload:
+      session_id: data.sessionID
+      message_id: data.part.messageID
+      part_id: data.part.id
+      call_id: data.part.callID
+      tool: data.part.tool
+      input: data.part.state.input
+      output: data.part.state.output
+      error: data.part.state.error
+      metadata: data.part.state.metadata
+
+  message.part.step-start:
+    kind: llm.call.started
+    payload:
+      session_id: data.sessionID
+      message_id: data.part.messageID
+      part_id: data.part.id
+      snapshot: data.part.snapshot
+
+  message.part.step-finish:
+    kind: llm.call.completed
+    payload:
+      session_id: data.sessionID
+      message_id: data.part.messageID
+      part_id: data.part.id
+      reason: data.part.reason
+      cost: data.part.cost
+      input_tokens: data.part.tokens.input
+      output_tokens: data.part.tokens.output
+      reasoning_tokens: data.part.tokens.reasoning
+      total_tokens: data.part.tokens.total
+      cache_read_tokens: data.part.tokens.cache.read
+      cache_write_tokens: data.part.tokens.cache.write
+      snapshot: data.part.snapshot
+
+  message.part.patch:
+    kind: file.edited
+    payload:
+      session_id: data.sessionID
+      message_id: data.part.messageID
+      part_id: data.part.id
+      files: data.part.files
+      hash: data.part.hash
+
   # ── Session lifecycle ──
   session.next.prompted:
     kind: message.user

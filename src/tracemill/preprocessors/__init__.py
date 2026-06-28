@@ -17,6 +17,7 @@ import tracemill.preprocessors.continue_dev  # noqa: F401
 import tracemill.preprocessors.goose  # noqa: F401
 import tracemill.preprocessors.openhands  # noqa: F401
 import tracemill.preprocessors.pydantic_ai  # noqa: F401
+import tracemill.preprocessors.openai_agents  # noqa: F401
 import tracemill.preprocessors.claude  # noqa: F401
 import tracemill.preprocessors.smolagents  # noqa: F401
 import tracemill.preprocessors.codex  # noqa: F401

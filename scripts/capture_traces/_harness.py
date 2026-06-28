@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import re
 import subprocess
 from importlib import metadata
 from pathlib import Path
@@ -26,6 +27,36 @@ from typing import Any, Iterable
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES_ROOT = REPO_ROOT / "tests" / "fixtures" / "raw_traces"
+
+_REDACTED = "REDACTED"
+# Value-shaped secrets (provider API keys/tokens) that frameworks sometimes
+# serialize into their native event objects (e.g. an LLM client's api_key).
+_SECRET_VALUE_RE = re.compile(r"(sk-[A-Za-z0-9_\-]{20,})|(?i:bearer\s+[A-Za-z0-9._\-]{20,})")
+# Field names whose values are credentials regardless of shape.
+_SECRET_KEY_RE = re.compile(r"(?i)(api[_-]?key|secret|token|authorization|password)")
+
+
+def _redact_secrets(value: Any) -> Any:
+    """Recursively scrub credential-shaped values from a native event object.
+
+    Committed fixtures must never contain secrets (GitHub push protection blocks
+    them). Frameworks like crewai serialize their LLM client config — including
+    ``api_key`` — into native events, so every row is sanitized before it is
+    written. This is the only edit applied to otherwise-verbatim traces.
+    """
+    if isinstance(value, dict):
+        out: dict[Any, Any] = {}
+        for key, val in value.items():
+            if isinstance(key, str) and _SECRET_KEY_RE.search(key) and isinstance(val, str) and val:
+                out[key] = _REDACTED
+            else:
+                out[key] = _redact_secrets(val)
+        return out
+    if isinstance(value, list):
+        return [_redact_secrets(item) for item in value]
+    if isinstance(value, str):
+        return _SECRET_VALUE_RE.sub(_REDACTED, value)
+    return value
 
 
 def _git_commit() -> str:
@@ -71,7 +102,7 @@ def write_trace(
     out_dir = FIXTURES_ROOT / framework
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    rows = list(lines)
+    rows = [_redact_secrets(row) for row in lines]
     jsonl_path = out_dir / f"{scenario}.jsonl"
     with jsonl_path.open("w", encoding="utf-8", newline="\n") as fh:
         for row in rows:

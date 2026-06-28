@@ -9,13 +9,24 @@ from tracemill.preprocessors.registry import register_preprocessor
 
 @register_preprocessor("openhands")
 def preprocess_openhands(obj: dict[str, Any]) -> list[dict[str, Any]]:
-    """Normalize OpenHands compound discriminator (action OR observation).
+    """Normalize OpenHands compound discriminator (legacy or SDK events).
 
-    Action events already have an "action" field — pass through unchanged.
-    Observation events have "observation" field — synthesize "action" as
-    "observation.<value>" so the YAML type_field lookup works uniformly.
-    The nested structure (args, extras) is preserved for _resolve_path.
+    OpenHands 0.x used an ``action``/``observation`` compound discriminator.
+    OpenHands 1.x SDK persistence uses ``kind`` plus ``source``/``tool_name``.
+    Synthesize the YAML ``action`` discriminator for both formats while
+    preserving the native nested payload for dot-path extraction.
     """
+    kind = obj.get("kind")
+    if kind in {"SystemPromptEvent", "ActionEvent", "ObservationEvent", "MessageEvent"}:
+        normalized = dict(obj)
+        if kind in {"ActionEvent", "ObservationEvent"}:
+            normalized["action"] = f"{kind}.{obj.get('tool_name', 'unknown')}"
+        elif kind == "MessageEvent":
+            normalized["action"] = f"MessageEvent.{obj.get('source', 'unknown')}"
+        else:
+            normalized["action"] = kind
+        return [normalized]
+
     if "action" in obj:
         return [obj]
     elif "observation" in obj:

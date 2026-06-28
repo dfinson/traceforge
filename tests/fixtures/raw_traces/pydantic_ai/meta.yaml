@@ -1,0 +1,9 @@
+framework: pydantic_ai
+scenario: tool_call_and_text
+source_repo: pydantic/pydantic-ai
+framework_version: 2.0.0
+model: FunctionModel (zero-cost, deterministic)
+captured_at: "2026-06-28T08:25:34Z"
+tracemill_commit: 9b3b681
+line_count: 14
+notes: Native stream events + message history; no provider API called.

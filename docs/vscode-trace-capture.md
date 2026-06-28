@@ -50,8 +50,9 @@ This is the one that matters most. **Correction (verified on disk):** VS Code Co
 Chat does **not** reuse the standalone CLI's `~/.copilot/session-state/<id>/events.jsonl`
 — that path is empty for editor sessions. VS Code persists chat in its **own** format,
 and it is **not markdown** (markdown is only an *export*, see below). So this channel
-needs a **dedicated VS Code mapping** (`copilot_vscode`), which is new work — it does
-not ride on `copilot.yaml`.
+has a **dedicated VS Code mapping** (`copilot_vscode`) — it does **not** ride on
+`copilot.yaml`. The mapping + replay preprocessor are already built and tested
+(`src/tracemill/mappings/copilot_vscode.yaml`); all that remains is a demo-repo session.
 
 **Run it:**
 1. Open the scratch repo (Step 0).
@@ -88,8 +89,15 @@ Get-ChildItem "$env:APPDATA\Code\User\workspaceStorage\*\chatSessions\*.jsonl" |
   Sort-Object LastWriteTime -Desc | Select-Object -First 1 FullName
 ```
 
-Send me that `<sessionId>.jsonl` (scrub secrets first). I map it through the new
-`copilot_vscode` mapping and commit it as the golden fixture.
+Send me that `<sessionId>.jsonl` (scrub secrets first), or just run the harvester
+yourself from the worktree — it auto-picks the newest journal and writes the golden
+fixture verbatim:
+
+```powershell
+python scripts/capture_traces/capture_copilot_vscode.py
+```
+
+It maps cleanly through the `copilot_vscode` mapping and lands the committed fixture.
 
 ---
 
@@ -176,7 +184,7 @@ For each handed-back native file I:
 
 | Channel | Native file (what I ingest) | Mapping |
 |---|---|---|
-| Copilot Chat **agent** (VS Code) | `workspaceStorage/<wshash>/chatSessions/<sessionId>.jsonl` (ChatModel journal v3 — replay `{kind,k,v}`) | `copilot_vscode` (**new, TODO**) |
+| Copilot Chat **agent** (VS Code) | `workspaceStorage/<wshash>/chatSessions/<sessionId>.jsonl` (ChatModel journal v3 — replay `{kind,k,v}`) | `copilot_vscode` (**built**) |
 | Copilot Chat (thin fallback) | `github.copilot-chat/session-store.db` → `turns` (host_type=`vscode`) | `copilot_markdown.yaml` |
 | Copilot **CLI** (terminal) | `~/.copilot/session-state/<id>/events.jsonl` | `copilot.yaml` |
 | Cline / Roo Cline | `globalStorage/<ext>/tasks/<id>/api_conversation_history.json` | `cline` |

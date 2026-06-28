@@ -19,11 +19,12 @@ genuine on-disk trace.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _harness import FIXTURES_ROOT, write_trace  # noqa: E402
+from _harness import FIXTURES_ROOT, REPO_ROOT, _git_commit, write_trace  # noqa: E402
 
 HOME = Path.home()
 
@@ -47,11 +48,60 @@ def _newest(directory: Path, glob: str) -> Path | None:
     return max(candidates, key=lambda p: p.stat().st_mtime)
 
 
+def _write_meta(
+    *,
+    framework: str,
+    scenario: str,
+    source_repo: str,
+    framework_version: str,
+    model: str,
+    line_count: int,
+    notes: str,
+    demo_repo: str = "",
+    demo_repo_sha: str = "",
+    capture_method: str = "file_copy",
+    source_path: str = "",
+) -> None:
+    import datetime as dt
+
+    meta_path = FIXTURES_ROOT / framework / "meta.yaml"
+    meta = {
+        "framework": framework,
+        "scenario": scenario,
+        "source_repo": source_repo,
+        "framework_version": framework_version,
+        "model": model,
+        "demo_repo": demo_repo,
+        "demo_repo_sha": demo_repo_sha,
+        "capture_method": capture_method,
+        "source_path": source_path,
+        "captured_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "tracemill_commit": _git_commit(),
+        "line_count": line_count,
+        "notes": notes,
+    }
+    with meta_path.open("w", encoding="utf-8", newline="\n") as fh:
+        for key, value in meta.items():
+            if isinstance(value, str) and (
+                value == "" or ":" in value or "\\" in value or value.startswith("#")
+            ):
+                fh.write(f"{key}: {json.dumps(value)}\n")
+            else:
+                fh.write(f"{key}: {value}\n")
+    print(f"wrote meta           -> {meta_path.relative_to(REPO_ROOT)}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("framework", choices=sorted(SOURCES))
     ap.add_argument("--file", type=Path, help="explicit session file to harvest")
     ap.add_argument("--scenario", default="session", help="fixture scenario name")
+    ap.add_argument("--framework-version", default="see versions.lock")
+    ap.add_argument("--model", default="real session (user-provided)")
+    ap.add_argument("--notes", default="")
+    ap.add_argument("--demo-repo", default="")
+    ap.add_argument("--demo-repo-sha", default="")
+    ap.add_argument("--capture-method", default="file_copy")
     args = ap.parse_args()
 
     default_dir, glob, repo = SOURCES[args.framework]
@@ -69,44 +119,44 @@ def main() -> int:
     # JSON is wrapped to one line so the golden test can stream it.
     out_dir = FIXTURES_ROOT / args.framework
     out_dir.mkdir(parents=True, exist_ok=True)
-    raw = src.read_text(encoding="utf-8")
-
     if src.suffix == ".jsonl":
         dest = out_dir / f"{args.scenario}.jsonl"
-        dest.write_text(raw, encoding="utf-8", newline="\n")
-        line_count = sum(1 for line in raw.splitlines() if line.strip())
+        raw_bytes = src.read_bytes()
+        dest.write_bytes(raw_bytes)
+        line_count = sum(1 for line in raw_bytes.splitlines() if line.strip())
         print(f"harvested {line_count} line(s) verbatim -> {dest.relative_to(out_dir.parents[2])}")
+        _write_meta(
+            framework=args.framework,
+            scenario=args.scenario,
+            source_repo=repo,
+            framework_version=args.framework_version,
+            model=args.model,
+            line_count=line_count,
+            notes=args.notes or f"Harvested verbatim from {src}",
+            demo_repo=args.demo_repo,
+            demo_repo_sha=args.demo_repo_sha,
+            capture_method=args.capture_method,
+            source_path=str(src),
+        )
+        return 0
     else:
         # Single JSON object/array (or markdown) — pass through write_trace as one
         # opaque line so provenance + golden discovery still work. For JSON the
         # framework's own preprocessor flattens it downstream.
         import json
 
+        raw = src.read_text(encoding="utf-8")
         obj = json.loads(raw) if src.suffix == ".json" else {"raw_markdown": raw}
         write_trace(
             framework=args.framework,
             scenario=args.scenario,
             lines=[obj],
             source_repo=repo,
-            framework_version="see versions.lock",
-            model="real session (user-provided)",
-            notes=f"Harvested verbatim from {src}",
+            framework_version=args.framework_version,
+            model=args.model,
+            notes=args.notes or f"Harvested verbatim from {src}",
         )
         return 0
-
-    # meta for the jsonl branch
-    write_trace(
-        framework=args.framework,
-        scenario=f"{args.scenario}__meta_only",
-        lines=[],
-        source_repo=repo,
-        framework_version="see versions.lock",
-        model="real session (user-provided)",
-        notes=f"Harvested verbatim from {src}; trace in {args.scenario}.jsonl",
-    )
-    # remove the empty meta-only jsonl, keep only meta.yaml + real trace
-    (out_dir / f"{args.scenario}__meta_only.jsonl").unlink(missing_ok=True)
-    return 0
 
 
 if __name__ == "__main__":

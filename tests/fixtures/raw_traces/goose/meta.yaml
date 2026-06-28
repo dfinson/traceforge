@@ -1,0 +1,13 @@
+framework: goose
+model: gpt-5
+demo_repo: demo-issue-tracker-api
+demo_repo_sha: 6ea7b6aba6ae924654ddcae7edc37aa8a6db4588
+capture_method: sqlite_messages_export
+source_path: "C:\\Users\\davidfinson\\AppData\\Roaming\\Block\\goose\\data\\sessions\\sessions.db"
+scenario: demo_issue_tracker_get_endpoint
+source_repo: block/goose
+framework_version: 1.39.0
+captured_at: "2026-06-28T09:41:57Z"
+tracemill_commit: 13f4d3d
+line_count: 20
+notes: Real demo repo session 20260628_5; exported native messages rows from SQLite preserving column names and values.

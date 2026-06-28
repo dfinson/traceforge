@@ -1,0 +1,8 @@
+{"event": "launched", "properties": {}, "user_id": "c9e53284-f599-4d00-b70d-a38d813b715d", "time": 1782638587}
+{"event": "repo", "properties": {"num_files": 18}, "user_id": "c9e53284-f599-4d00-b70d-a38d813b715d", "time": 1782638605}
+{"event": "auto_commits", "properties": {"enabled": true}, "user_id": "c9e53284-f599-4d00-b70d-a38d813b715d", "time": 1782638605}
+{"event": "message_send_starting", "properties": {}, "user_id": "c9e53284-f599-4d00-b70d-a38d813b715d", "time": 1782638605}
+{"event": "message_send", "properties": {"main_model": "gpt-5", "weak_model": "gpt-5-nano", "editor_model": "gpt-5", "edit_format": "diff", "prompt_tokens": 3647, "completion_tokens": 36, "total_tokens": 3683, "cost": 0.00491875, "total_cost": 0.00491875}, "user_id": "c9e53284-f599-4d00-b70d-a38d813b715d", "time": 1782638643}
+{"event": "message_send_starting", "properties": {}, "user_id": "c9e53284-f599-4d00-b70d-a38d813b715d", "time": 1782638644}
+{"event": "message_send", "properties": {"main_model": "gpt-5", "weak_model": "gpt-5-nano", "editor_model": "gpt-5", "edit_format": "diff", "prompt_tokens": 3926, "completion_tokens": 399, "total_tokens": 4325, "cost": 0.008897500000000001, "total_cost": 0.013816250000000002}, "user_id": "c9e53284-f599-4d00-b70d-a38d813b715d", "time": 1782638658}
+{"event": "exit", "properties": {"reason": "Completed --message"}, "user_id": "c9e53284-f599-4d00-b70d-a38d813b715d", "time": 1782638670}

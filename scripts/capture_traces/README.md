@@ -22,7 +22,7 @@ Hand-building a fixture recreates exactly the problem this initiative fixes.
 
 | Tier | How | Frameworks |
 |------|-----|-----------|
-| `sdk` | Drive with a **fake/test model** (zero API cost); serialize native events | pydantic_ai ✅, langgraph, smolagents, crewai, openai_agents, autogen, openhands, sweagent |
+| `sdk` | Drive a **real paid provider session** (default `gpt-5` via `OPENAI_API_KEY`); serialize the framework's native events | pydantic_ai ✅, langgraph, smolagents, crewai, openai_agents, autogen/maf, openhands, sweagent |
 | `cli` | Run a **real session** (needs auth + a few $), then harvest the on-disk file verbatim | codex, claude, copilot, amazonq, opencode, continue_dev, aider, goose, cline |
 | `derived` | Export from a parent framework's run | aider_markdown, copilot_markdown, maf_transcript |
 
@@ -30,12 +30,14 @@ Pins live in [`versions.lock`](versions.lock).
 
 ## How to capture
 
-SDK (zero cost):
+SDK (real paid session — set a real `OPENAI_API_KEY` first):
 ```bash
-uv run --with pydantic-ai-slim python scripts/capture_traces/capture_pydantic_ai.py
+uv run --with "pydantic-ai-slim[openai]" python scripts/capture_traces/capture_pydantic_ai.py
 ```
 Add a new SDK framework by copying `capture_sdk_template.py` to
-`capture_<framework>.py` and filling in the fake-model scenario.
+`capture_<framework>.py` and filling in the real-model scenario. Run captures in
+an **isolated** `uv run --with` env — never `uv pip install` into the project
+`.venv` (it has corrupted the env before).
 
 CLI/file (real session required):
 ```bash

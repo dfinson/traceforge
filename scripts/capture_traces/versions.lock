@@ -5,7 +5,7 @@
 # release, then re-run the matching capture_<framework>.py and commit the
 # refreshed trace + meta.yaml.
 #
-# tier=sdk     -> Python SDK; can be driven with a fake/test model at zero cost
+# tier=sdk     -> Python SDK; driven by a REAL paid provider model (gpt-5)
 # tier=cli     -> CLI/desktop app writing session files; run a real session,
 #                 then harvest the on-disk file (needs auth + a few $ of tokens)
 # tier=derived -> produced from a parent framework's run (no separate capture)

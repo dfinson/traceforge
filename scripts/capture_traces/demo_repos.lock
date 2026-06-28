@@ -1,0 +1,15 @@
+# Vendored demo-repo snapshots used as the substrate for raw-trace capture.
+#
+# Each raw trace under tests/fixtures/raw_traces/<framework>/ is produced by
+# running that framework's agent (real paid model) against one of these demo
+# repos on scripts/capture_traces/_repo_task.py::CANONICAL_TASK. The repos are
+# FIRST-PARTY demo content (CodePlane demos) — committed fixtures never contain
+# real-world or third-party code.
+#
+# Snapshots are frozen `git archive HEAD` trees (no .git) vendored under
+# tests/fixtures/demo_repos/<repo>/. To refresh: re-archive at a new SHA, update
+# the pin here, then re-run the affected capture_<framework>.py scripts.
+#
+# repo                      origin (first-party)                                       sha
+demo-issue-tracker-api      codeplane-demos/demo-issue-tracker-api                     6ea7b6aba6ae924654ddcae7edc37aa8a6db4588
+demo-support-dashboard      codeplane-demos/demo-support-dashboard                     0de5c66fe4b8f1e2ac2167f45a7d0ed864d7715a

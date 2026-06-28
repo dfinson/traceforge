@@ -86,6 +86,6 @@ def test_pydantic_ai_part_end_carries_real_content() -> None:
     ]
     non_empty = [t for t in assistant_texts if t]
     assert non_empty, "part_end mapped to empty content — #40 regression"
-    assert any("weather" in t or "Paris" in t for t in non_empty), (
-        f"expected real captured text, got {assistant_texts!r}"
+    assert any("ticket" in t.lower() or "endpoint" in t.lower() for t in non_empty), (
+        f"expected real captured task text, got {assistant_texts!r}"
     )

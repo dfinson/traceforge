@@ -64,6 +64,14 @@ events:
     kind: session.idle
     payload: {}
 
+  # ── Model selection ──────────────────────────────────────────────────────────
+  session.model_change:
+    kind: workflow.model_switched
+    payload:
+      model: data.newModel
+      reasoning_effort: data.reasoningEffort
+      context_tier: data.contextTier
+
   # ── Messages ───────────────────────────────────────────────────────────────
   user.message:
     kind: message.user

@@ -1842,7 +1842,7 @@ class TestPydanticAIMappings:
         pytest.param(
             {
                 "event_kind": "part_end",
-                "content": "Hello world",
+                "part": {"part_kind": "text", "content": "Hello world"},
                 "timestamp": "2024-06-15T10:00:15Z",
             },
             EventKind.MESSAGE_ASSISTANT,

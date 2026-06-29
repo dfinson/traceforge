@@ -1,0 +1,9 @@
+framework: sweagent
+scenario: demo_issue_tracker_get_endpoint
+source_repo: demo-issue-tracker-api
+framework_version: 1.1.0 (git tag v1.1.0; PyPI sweagent 0.0.1 is uninstallable due to togetherunidiff)
+model: gpt-5
+captured_at: "2026-06-28T13:04:22Z"
+tracemill_commit: f70fa41
+line_count: 38
+notes: "Real OpenAI gpt-5 session using SWE-agent in Docker; native artifact: .capture_runs/swe_output/demo_issue_tracker_get_endpoint/demo_issue_tracker_get_endpoint.traj, exported from native history[]."

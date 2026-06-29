@@ -42,6 +42,9 @@ tracemill = "tracemill.cli:main"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Vendored demo repos (tests/fixtures/demo_repos/) carry their own test suites and
+# third-party deps (fastapi, etc.) and must not be collected by tracemill's suite.
+addopts = "--ignore=tests/fixtures/demo_repos"
 
 [tool.ruff]
 target-version = "py311"

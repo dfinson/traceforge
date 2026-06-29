@@ -130,7 +130,7 @@ events:
   stream.part_end:
     kind: message.assistant
     payload:
-      content: content
+      content: part.content
   # FinalResultEvent (event_kind="final_result") — signal-only, no content payload.
   # Indicates which tool call produced the final result; actual data was in prior PartStart/Delta.
   stream.final_result:

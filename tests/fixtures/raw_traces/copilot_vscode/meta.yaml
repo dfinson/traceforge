@@ -1,0 +1,9 @@
+framework: copilot_vscode
+scenario: demo_issue_tracker_get_endpoint
+source_repo: demo-issue-tracker-api
+framework_version: vscode-chat-v3
+model: copilot/claude-opus-4.7
+captured_at: "2026-06-28T14:17:29Z"
+tracemill_commit: cf44e11
+line_count: 41
+notes: VS Code Copilot Chat (Agent mode) ChatModel journal, harvested verbatim from workspaceStorage/<hash>/chatSessions/<sessionId>.jsonl. GUI capture per docs/vscode-trace-capture.md.

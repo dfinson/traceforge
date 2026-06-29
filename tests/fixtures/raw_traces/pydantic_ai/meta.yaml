@@ -1,0 +1,9 @@
+framework: pydantic_ai
+scenario: demo_issue_tracker_get_endpoint
+source_repo: pydantic/pydantic-ai
+framework_version: 2.0.0
+model: gpt-5
+captured_at: "2026-06-28T09:12:28Z"
+tracemill_commit: 13f4d3d
+line_count: 1456
+notes: Real OpenAI Responses session; coding task on demo-issue-tracker-api.

@@ -1,0 +1,144 @@
+# OpenAI Agents SDK mapping for native Trace.export()/Span.export() JSONL.
+# Targets: openai-agents >= 0.3.3
+# Source: openai-agents-python agents.tracing Trace/Span export() objects.
+
+framework: openai_agents
+framework_version: ">=0.3.3"
+ingestion_mode: file_watch
+type_field: event_type
+timestamp_field: timestamp
+preprocessor: openai_agents
+
+motivation:
+  sources:
+    - events: ["generation.completed"]
+      field: output
+      role: intent
+
+events:
+  trace:
+    kind: session.started
+    payload:
+      trace_id: trace_id
+      workflow_name: workflow_name
+      group_id: group_id
+      metadata: metadata
+
+  agent.completed:
+    kind: agent.completed
+    payload:
+      agent_name: span_data.name
+      tools: span_data.tools
+      handoffs: span_data.handoffs
+      output_type: span_data.output_type
+      span_id: span_id
+      trace_id: trace_id
+      parent_id: parent_id
+
+  response.completed:
+    kind: llm.call.completed
+    payload:
+      response_id: span_data.response_id
+      span_id: span_id
+      trace_id: trace_id
+      parent_id: parent_id
+
+  generation.completed:
+    kind: llm.call.completed
+    payload:
+      model: span_data.model
+      model_config: span_data.model_config
+      input: span_data.input
+      output: span_data.output
+      input_tokens: span_data.usage.input_tokens
+      output_tokens: span_data.usage.output_tokens
+      usage: span_data.usage
+      span_id: span_id
+      trace_id: trace_id
+      parent_id: parent_id
+
+  function.started:
+    kind: tool.call.started
+    payload:
+      tool_name: tool_name
+      tool_call_id: span_id
+      arguments: arguments
+      span_id: span_id
+      trace_id: trace_id
+      parent_id: parent_id
+
+  function.completed:
+    kind: tool.call.completed
+    payload:
+      tool_name: tool_name
+      tool_call_id: span_id
+      result: result
+      span_id: span_id
+      trace_id: trace_id
+      parent_id: parent_id
+
+  function.failed:
+    kind: tool.call.failed
+    payload:
+      tool_name: tool_name
+      tool_call_id: span_id
+      error: error
+      result: result
+      span_id: span_id
+      trace_id: trace_id
+      parent_id: parent_id
+
+  handoff.completed:
+    kind: agent.handoff
+    payload:
+      from_agent: span_data.from_agent
+      to_agent: span_data.to_agent
+      span_id: span_id
+      trace_id: trace_id
+      parent_id: parent_id
+
+  guardrail.completed:
+    kind: guardrail.passed
+    payload:
+      name: span_data.name
+      triggered: span_data.triggered
+      span_id: span_id
+      trace_id: trace_id
+      parent_id: parent_id
+
+  custom.completed:
+    kind: session.info
+    payload:
+      name: span_data.name
+      data: span_data.data
+      span_id: span_id
+      trace_id: trace_id
+      parent_id: parent_id
+
+  speech.completed:
+    kind: llm.call.completed
+    payload:
+      span_id: span_id
+      trace_id: trace_id
+      parent_id: parent_id
+
+  speech_group.completed:
+    kind: llm.call.completed
+    payload:
+      span_id: span_id
+      trace_id: trace_id
+      parent_id: parent_id
+
+  transcription.completed:
+    kind: llm.call.completed
+    payload:
+      span_id: span_id
+      trace_id: trace_id
+      parent_id: parent_id
+
+  mcp_tools.completed:
+    kind: mcp.connection.completed
+    payload:
+      span_id: span_id
+      trace_id: trace_id
+      parent_id: parent_id

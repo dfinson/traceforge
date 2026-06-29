@@ -1,0 +1,12 @@
+framework: "opencode"
+scenario: "demo_issue_tracker_get_endpoint"
+source_repo: "demo-issue-tracker-api"
+framework_version: "1.17.11"
+model: "gpt-5"
+capture_method: "sqlite_event_table"
+source_path: "C:\\Users\\davidfinson\\.local\\share\\opencode\\opencode.db"
+session_id: "ses_0f26b3ee2ffe31ZjnzcRkv769m"
+captured_at: "2026-06-28T10:54:53Z"
+tracemill_commit: "74a706d"
+line_count: 107
+notes: "Real demo repo session; harvested from native opencode.db event rows with data parsed from JSON strings into nested objects."

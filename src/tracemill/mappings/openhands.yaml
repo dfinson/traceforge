@@ -1,10 +1,13 @@
 # OpenHands event mapping for MappedJsonAdapter
-# Targets: openhands >= 0.30, < 1.0 (JSON event files in workspace)
-# Source: All-Hands-AI/OpenHands openhands/events/serialization/event.py
+# Targets: openhands >= 0.30 legacy events and >= 1.0 SDK event-store files
+# Sources:
+#   - All-Hands-AI/OpenHands openhands/events/serialization/event.py (0.x)
+#   - OpenHands SDK event persistence (1.x): events/event-*.json
 #
-# NOTE: v1.0+ is INCOMPATIBLE — openhands/events/ was extracted to
-# OpenHands/software-agent-sdk with a completely different Pydantic model.
-# This mapping covers the 0.x compound-discriminator JSON format only.
+# NOTE: v1.0+ moved to SDK Pydantic events with kind=ActionEvent /
+# ObservationEvent / MessageEvent / SystemPromptEvent. The preprocessor
+# synthesizes ActionEvent.<tool_name>, ObservationEvent.<tool_name>, and
+# MessageEvent.<source> discriminators for those rows.
 #
 # CRITICAL: OpenHands uses a COMPOUND discriminator:
 #   - Action events have: {"action": "run", "args": {...}}
@@ -22,13 +25,88 @@
 #   - CmdOutputMetadata: serialized via model_dump() into extras.metadata
 
 framework: openhands
-framework_version: ">=0.30,<1.0"
+framework_version: ">=0.30,<2.0"
 ingestion_mode: file_watch
 type_field: action
 timestamp_field: timestamp
 preprocessor: openhands
 
 events:
+  # ── OpenHands 1.x SDK event-store rows (real — discriminated by "kind") ──
+  SystemPromptEvent:
+    kind: message.system
+    payload:
+      content: system_prompt.text
+      tools: tools
+      source: source
+  MessageEvent.user:
+    kind: message.user
+    payload:
+      content: llm_message.content.0.text
+      source: source
+  MessageEvent.agent:
+    kind: message.assistant
+    payload:
+      content: llm_message.content.0.text
+      source: source
+  ActionEvent.terminal:
+    kind: command.started
+    payload:
+      command: action.command
+      summary: summary
+      tool_call_id: tool_call_id
+      source: source
+  ObservationEvent.terminal:
+    kind: command.completed
+    payload:
+      command: observation.command
+      content: observation.content.0.text
+      exit_code: observation.exit_code
+      tool_call_id: tool_call_id
+      source: source
+  ActionEvent.apply_patch:
+    kind: file.edited
+    payload:
+      patch: action.patch
+      summary: summary
+      tool_call_id: tool_call_id
+      source: source
+  ObservationEvent.apply_patch:
+    kind: tool.output
+    payload:
+      content: observation.content.0.text
+      is_error: observation.is_error
+      tool_call_id: tool_call_id
+      source: source
+  ActionEvent.task_tracker:
+    kind: session.info
+    payload:
+      command: action.command
+      summary: summary
+      tool_call_id: tool_call_id
+      source: source
+  ObservationEvent.task_tracker:
+    kind: session.info
+    payload:
+      content: observation.content.0.text
+      is_error: observation.is_error
+      tool_call_id: tool_call_id
+      source: source
+  ActionEvent.finish:
+    kind: session.ended
+    payload:
+      output: action.message
+      summary: summary
+      tool_call_id: tool_call_id
+      source: source
+  ObservationEvent.finish:
+    kind: session.ended
+    payload:
+      output: observation.content.0.text
+      is_error: observation.is_error
+      tool_call_id: tool_call_id
+      source: source
+
   # ── Action events (real — discriminated by "action" field value) ──
   run:
     kind: command.started
@@ -202,4 +280,3 @@ events:
     payload:
       content: content
       source: source
-

@@ -1,0 +1,10 @@
+framework: claude
+scenario: demo_issue_tracker_contributing
+source_repo: anthropics/claude-code
+framework_version: harvested
+model: claude (real session)
+capture_method: harvested verbatim from ~/.claude/projects (no re-serialization)
+demo_repo: demo-issue-tracker-api
+demo_repo_sha: 6ea7b6aba6ae924654ddcae7edc37aa8a6db4588
+line_count: 30
+notes: "Real Claude Code session on the demo repo; SDK transcript lines (text/thinking/tool_use/tool_result/result) plus Claude Code app-metadata lines, committed byte-for-byte."

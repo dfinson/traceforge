@@ -1,0 +1,5 @@
+# Ignore everything except user config files
+*
+!.gitignore
+!config.yaml
+# state.yaml is auto-generated, do not commit

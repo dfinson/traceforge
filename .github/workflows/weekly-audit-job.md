@@ -50,13 +50,20 @@ Each agent produces one of:
 - 🔴 **BREAKING** — mapped event types removed/renamed, field paths broken, or serialization shape changed
 
 ### 3. Action on Findings
-- **🔴 BREAKING**: Fix the YAML and/or preprocessor immediately. Update affected tests in `tests/integration/test_yaml_comprehensive_e2e.py`. Run full test suite. Commit.
+- **🔴 BREAKING**: Fix the YAML and/or preprocessor immediately. **Re-capture the affected framework's raw trace** against the new upstream version (`scripts/capture_traces/`) and update the golden assertions in `tests/e2e/test_raw_traces.py`. Update affected hand-written cases in `tests/integration/test_yaml_comprehensive_e2e.py`. Run full test suite. Commit.
 - **⚠️ NEW**: Add the new events to the YAML with correct field mappings. Add corresponding test cases. Commit.
 - **✅ PASS**: No action needed.
+
+> **Golden raw traces (#43):** Prefer real captured traces under
+> `tests/fixtures/raw_traces/<framework>/` over hand-written post-preprocessor
+> fixtures — the latter encode tracemill's assumptions and cannot catch drift.
+> A 🔴 fix is not "done" until the framework's raw trace is re-captured and the
+> golden test reflects the new reality. See `scripts/capture_traces/README.md`.
 
 After all fixes: create GitHub issues for visibility:
 - 🔴 findings → one issue per framework: "🔴 YAML Drift Detected: [framework]"
 - ⚠️ findings → single issue: "⚠️ New upstream events available"
+
 
 ## Severity Classification
 

@@ -1,0 +1,34 @@
+# Pinned framework versions for raw-trace capture.
+#
+# Each row is the latest-stable version a trace was (or should be) captured
+# against. Update the version here when you re-capture after an upstream
+# release, then re-run the matching capture_<framework>.py and commit the
+# refreshed trace + meta.yaml.
+#
+# tier=sdk     -> Python SDK; driven by a REAL paid provider model (gpt-5)
+# tier=cli     -> CLI/desktop app writing session files; run a real session,
+#                 then harvest the on-disk file (needs auth + a few $ of tokens)
+# tier=derived -> produced from a parent framework's run (no separate capture)
+#
+# framework        tier      package / source                     pin
+pydantic_ai        sdk       pydantic-ai-slim                     2.0.0
+langgraph          sdk       langgraph                            latest-stable
+smolagents         sdk       smolagents                           1.26.0
+crewai             sdk       crewai                               1.6.1
+openai_agents      sdk       openai-agents                        0.3.3
+autogen            sdk       autogen-agentchat                    latest-stable
+openhands          sdk       openhands-ai                         0.62.0
+sweagent           sdk       sweagent                             latest-stable
+codex              cli       openai/codex                         latest-stable
+claude             cli       @anthropic-ai/claude-code            latest-stable
+copilot            cli       @github/copilot                      latest-stable
+amazonq            cli       amazon-q-developer (vscode)          latest-stable
+opencode           cli       anomalyco/opencode                   latest-stable
+continue_dev       cli       continuedev/continue (vscode)        latest-stable
+aider              cli       aider-chat                           latest-stable
+goose              cli       block/goose                          latest-stable
+cline              cli       cline/cline (vscode)                 latest-stable
+maf               cli       microsoft-agents-hosting-core        latest-stable
+aider_markdown     derived   aider-chat (--chat-history-md)       latest-stable
+copilot_markdown   derived   @github/copilot (markdown export)    latest-stable
+maf_transcript     derived   autogen/maf transcript export        latest-stable

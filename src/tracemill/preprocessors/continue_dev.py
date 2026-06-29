@@ -18,10 +18,15 @@ def preprocess_continue(obj: dict[str, Any]) -> list[dict[str, Any]]:
       "title": "...",
       "history": [
         {"message": {"role": "user", "content": "..."}},
-        {"message": {"role": "assistant", "content": "...", "tool_calls": [...]}},
-        {"message": {"role": "tool", "tool_call_id": "...", "content": "..."}}
+        {"message": {"role": "assistant", "content": "...", "toolCalls": [...]}},
+        {"message": {"role": "tool", "toolCallId": "...", "content": "..."}}
       ]
     }
+
+    Note: Continue.dev persists camelCase keys (toolCalls, toolCallId) — its
+    internal TypeScript ChatMessage types are written to disk via JSON.stringify
+    with no rename. snake_case (tool_calls/tool_call_id) only appears on the
+    OpenAI provider wire format, not in the session file on disk.
 
     Each history entry becomes a normalized dict with:
     - block_type: "user.message", "assistant.message", "assistant.tool_use", "tool.result"
@@ -41,7 +46,10 @@ def preprocess_continue(obj: dict[str, Any]) -> list[dict[str, Any]]:
 
         role = message.get("role", "")
         content = message.get("content")
-        tool_calls = message.get("tool_calls")
+        # Continue.dev persists session JSON with camelCase keys (TypeScript
+        # JSON.stringify of its internal ChatMessage types). snake_case keys
+        # only appear on the OpenAI provider wire format, never on disk.
+        tool_calls = message.get("toolCalls")
 
         if role == "user":
             results.append(
@@ -87,12 +95,23 @@ def preprocess_continue(obj: dict[str, Any]) -> list[dict[str, Any]]:
                         }
                     )
 
+        elif role == "thinking":
+            # Claude extended thinking / OpenAI reasoning tokens persisted on disk
+            # as role "thinking" (ThinkingChatMessage). Without this they are dropped.
+            results.append(
+                {
+                    "block_type": "assistant.thinking",
+                    "session_id": session_id,
+                    "content": content,
+                }
+            )
+
         elif role == "tool":
             results.append(
                 {
                     "block_type": "tool.result",
                     "session_id": session_id,
-                    "tool_call_id": message.get("tool_call_id", ""),
+                    "tool_call_id": message.get("toolCallId", ""),
                     "content": content,
                 }
             )

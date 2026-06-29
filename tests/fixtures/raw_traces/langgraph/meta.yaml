@@ -1,0 +1,9 @@
+framework: langgraph
+scenario: demo_issue_tracker_get_endpoint
+source_repo: langchain-ai/langgraph
+framework_version: 1.2.5
+model: gpt-5
+captured_at: "2026-06-28T09:24:01Z"
+tracemill_commit: 13f4d3d
+line_count: 1690
+notes: Real OpenAI session; coding task on demo-issue-tracker-api.

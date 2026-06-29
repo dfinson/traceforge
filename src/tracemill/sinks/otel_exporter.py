@@ -9,7 +9,7 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from tracemill.sinks.base import StorageSink
-from tracemill.types import SessionEvent, TelemetrySpan, UsageRecord
+from tracemill.types import SessionEvent, TelemetrySpan, TitleUpdate, UsageRecord
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,9 @@ class OtelExporterSink(StorageSink):
         self._max_backlog = max_backlog
 
     async def on_event(self, event: SessionEvent) -> None:
-        span = self._event_to_span(event)
+        await self._enqueue(self._event_to_span(event))
+
+    async def _enqueue(self, span: dict) -> None:
         self._batch.append(span)
 
         if len(self._batch) >= self._max_backlog:
@@ -180,3 +182,31 @@ class OtelExporterSink(StorageSink):
 
     async def on_usage(self, usage: UsageRecord) -> None:
         pass
+
+    async def on_title_update(self, update: TitleUpdate) -> None:
+        await self._enqueue(self._title_update_to_span(update))
+
+    def _title_update_to_span(self, update: TitleUpdate) -> dict:
+        """Convert a TitleUpdate to an OTLP span dict."""
+        import uuid
+
+        attributes = [
+            {"key": "tracemill.session.id", "value": {"stringValue": update.session_id}},
+            {"key": "tracemill.segment.id", "value": {"stringValue": update.segment_id}},
+            {"key": "tracemill.segment.kind", "value": {"stringValue": update.kind}},
+            {"key": "tracemill.segment.title", "value": {"stringValue": update.title}},
+            {"key": "tracemill.segment.title_version", "value": {"intValue": update.version}},
+        ]
+        if update.parent_id is not None:
+            attributes.append(
+                {"key": "tracemill.segment.parent_id", "value": {"stringValue": update.parent_id}}
+            )
+        return {
+            "traceId": uuid.uuid4().hex,
+            "spanId": uuid.uuid4().hex[:16],
+            "name": f"tracemill.title.{update.kind}",
+            "kind": 1,  # SPAN_KIND_INTERNAL
+            "startTimeUnixNano": "0",
+            "endTimeUnixNano": "0",
+            "attributes": attributes,
+        }

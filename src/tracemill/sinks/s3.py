@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime, timezone
 
 from tracemill.sinks.base import StorageSink
-from tracemill.types import SessionEvent, TelemetrySpan, UsageRecord
+from tracemill.types import SessionEvent, TelemetrySpan, TitleUpdate, UsageRecord
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +120,17 @@ class S3Sink(StorageSink):
             "cost_usd": usage.cost_usd,
         }
 
+    def _serialize_title_update(self, update: TitleUpdate) -> dict:
+        return {
+            "type": "title_update",
+            "session_id": update.session_id,
+            "segment_id": update.segment_id,
+            "kind": update.kind,
+            "title": update.title,
+            "version": update.version,
+            "parent_id": update.parent_id,
+        }
+
     async def on_event(self, event: SessionEvent) -> None:
         async with self._lock:
             if self._session_id is None:
@@ -141,6 +152,14 @@ class S3Sink(StorageSink):
             if self._session_id is None:
                 self._session_id = usage.session_id
             self._buffer.append(self._serialize_usage(usage))
+            if self._should_flush():
+                await self._flush_buffer()
+
+    async def on_title_update(self, update: TitleUpdate) -> None:
+        async with self._lock:
+            if self._session_id is None:
+                self._session_id = update.session_id
+            self._buffer.append(self._serialize_title_update(update))
             if self._should_flush():
                 await self._flush_buffer()
 

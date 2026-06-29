@@ -9,7 +9,7 @@ import sqlite3
 from pathlib import Path
 
 from tracemill.sinks.base import StorageSink
-from tracemill.types import SessionEvent, TelemetrySpan, UsageRecord
+from tracemill.types import SessionEvent, TelemetrySpan, TitleUpdate, UsageRecord
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,19 @@ CREATE INDEX IF NOT EXISTS idx_enriched_session ON enriched_events(session_id);
 CREATE INDEX IF NOT EXISTS idx_enriched_timestamp ON enriched_events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_enriched_risk ON enriched_events(risk_level);
 CREATE INDEX IF NOT EXISTS idx_enriched_action ON enriched_events(action);
+
+CREATE TABLE IF NOT EXISTS segment_titles (
+    segment_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    parent_id TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (segment_id, kind)
+);
+
+CREATE INDEX IF NOT EXISTS idx_segment_titles_session ON segment_titles(session_id);
 """
 
 
@@ -113,6 +126,38 @@ class SqliteOutputSink(StorageSink):
 
     async def on_usage(self, usage: UsageRecord) -> None:
         pass
+
+    async def on_title_update(self, update: TitleUpdate) -> None:
+        params = (
+            update.segment_id,
+            update.kind,
+            update.session_id,
+            update.title,
+            update.version,
+            update.parent_id,
+        )
+        await asyncio.to_thread(self._write_title, params)
+
+    def _write_title(self, params: tuple) -> None:
+        """Synchronous upsert keeping the highest version — called via to_thread."""
+        conn = self._get_conn()
+        try:
+            conn.execute(
+                """INSERT INTO segment_titles
+                   (segment_id, kind, session_id, title, version, parent_id)
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(segment_id, kind) DO UPDATE SET
+                       title=excluded.title,
+                       session_id=excluded.session_id,
+                       version=excluded.version,
+                       parent_id=excluded.parent_id,
+                       updated_at=datetime('now')
+                   WHERE excluded.version >= segment_titles.version""",
+                params,
+            )
+            conn.commit()
+        except sqlite3.Error as exc:
+            logger.error("SqliteOutputSink: title write failed: %s", exc)
 
     async def flush(self) -> None:
         if self._conn:

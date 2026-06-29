@@ -9,7 +9,7 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from tracemill.sinks.base import StorageSink
-from tracemill.types import SessionEvent, TelemetrySpan, UsageRecord
+from tracemill.types import SessionEvent, TelemetrySpan, TitleUpdate, UsageRecord
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,20 @@ class WebhookSink(StorageSink):
             "payload": event.payload,
             "governance": self._extract_governance(event),
         }
+        await self._post(payload)
 
+    async def on_title_update(self, update: TitleUpdate) -> None:
+        await self._post({
+            "record": "title_update",
+            "session_id": update.session_id,
+            "segment_id": update.segment_id,
+            "kind": update.kind,
+            "title": update.title,
+            "version": update.version,
+            "parent_id": update.parent_id,
+        })
+
+    async def _post(self, payload: dict) -> None:
         body = json.dumps(payload, default=str).encode("utf-8")
         headers = {
             "Content-Type": "application/json",

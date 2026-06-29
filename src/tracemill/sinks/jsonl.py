@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 
 from tracemill.sinks.base import StorageSink
-from tracemill.types import SessionEvent, TelemetrySpan, UsageRecord
+from tracemill.types import SessionEvent, TelemetrySpan, TitleUpdate, UsageRecord
 
 logger = logging.getLogger(__name__)
 
@@ -65,3 +65,26 @@ class JsonlSink(StorageSink):
 
     async def on_usage(self, usage: UsageRecord) -> None:
         pass
+
+    async def on_title_update(self, update: TitleUpdate) -> None:
+        path = self._resolve_path(update.session_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        line = json.dumps(
+            {
+                "record": "title_update",
+                "session_id": update.session_id,
+                "segment_id": update.segment_id,
+                "kind": update.kind,
+                "title": update.title,
+                "version": update.version,
+                "parent_id": update.parent_id,
+            },
+            default=str,
+        )
+
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        except OSError as exc:
+            logger.error("JsonlSink: failed to write to %s: %s", path, exc)

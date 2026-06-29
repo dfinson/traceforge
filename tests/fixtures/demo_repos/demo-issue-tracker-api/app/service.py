@@ -12,7 +12,9 @@ class TicketService:
     def __init__(self, repository: TicketRepository) -> None:
         self._repository = repository
 
-    def list_tickets(self, *, include_archived: bool = False, search: str | None = None) -> TicketListResponse:
+    def list_tickets(
+        self, *, include_archived: bool = False, search: str | None = None
+    ) -> TicketListResponse:
         """Return tickets filtered by archive status and optional search term."""
         tickets = self._repository.list_tickets()
 

@@ -39,7 +39,6 @@ Run inside the SDK container (manylinux localharness needs glibc >= 2.36):
 from __future__ import annotations
 
 import json
-import os
 import sys
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -65,9 +64,7 @@ def _build_steps() -> list:
         idx[0] += 1
 
     def tool(name: str, args: dict, canonical_path: str | None = None) -> None:
-        tc = T.ToolCall(
-            name=name, args=args, id=f"call-{idx[0]}", canonical_path=canonical_path
-        )
+        tc = T.ToolCall(name=name, args=args, id=f"call-{idx[0]}", canonical_path=canonical_path)
         add(
             type=T.StepType.TOOL_CALL,
             source=T.StepSource.MODEL,

@@ -55,30 +55,40 @@ def _expand_amazonq_pair(entry: dict[str, Any], cid: str) -> list[dict[str, Any]
         for r in results or []:
             if not isinstance(r, dict):
                 continue
-            out.append({
-                "block_type": "tool.result",
-                "conversation_id": cid,
-                "tool_call_id": r.get("tool_use_id", ""),
-                "is_error": r.get("status") == "Error",
-                "output": _amazonq_text(r.get("content", "")),
-            })
+            out.append(
+                {
+                    "block_type": "tool.result",
+                    "conversation_id": cid,
+                    "tool_call_id": r.get("tool_use_id", ""),
+                    "is_error": r.get("status") == "Error",
+                    "output": _amazonq_text(r.get("content", "")),
+                }
+            )
 
     assistant = entry.get("assistant")
     if isinstance(assistant, dict):
         body = assistant.get("Response") or assistant.get("ToolUse") or {}
         if isinstance(body, dict):
             if body.get("content"):
-                out.append({"block_type": "message.assistant", "conversation_id": cid, "content": body["content"]})
+                out.append(
+                    {
+                        "block_type": "message.assistant",
+                        "conversation_id": cid,
+                        "content": body["content"],
+                    }
+                )
             for tu in body.get("tool_uses", []) or []:
                 if not isinstance(tu, dict):
                     continue
-                out.append({
-                    "block_type": "tool.call",
-                    "conversation_id": cid,
-                    "tool_call_id": tu.get("id", ""),
-                    "tool_name": tu.get("name", ""),
-                    "arguments": tu.get("args", {}),
-                })
+                out.append(
+                    {
+                        "block_type": "tool.call",
+                        "conversation_id": cid,
+                        "tool_call_id": tu.get("id", ""),
+                        "tool_name": tu.get("name", ""),
+                        "arguments": tu.get("args", {}),
+                    }
+                )
     return out
 
 
@@ -147,7 +157,11 @@ def preprocess_amazonq(obj: dict[str, Any]) -> list[dict[str, Any]]:
             if not isinstance(entry, dict):
                 continue
             results.extend(_expand_amazonq_pair(entry, conversation_id))
-        return results if results else [{"block_type": "raw.empty", "conversation_id": conversation_id}]
+        return (
+            results
+            if results
+            else [{"block_type": "raw.empty", "conversation_id": conversation_id}]
+        )
 
     for msg in messages:
         if not isinstance(msg, dict):

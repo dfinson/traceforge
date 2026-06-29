@@ -29,11 +29,7 @@ MAPPINGS_DIR = REPO_ROOT / "src" / "tracemill" / "mappings"
 def _discover() -> list[str]:
     if not TRACES_ROOT.is_dir():
         return []
-    return sorted(
-        d.name
-        for d in TRACES_ROOT.iterdir()
-        if d.is_dir() and any(d.glob("*.jsonl"))
-    )
+    return sorted(d.name for d in TRACES_ROOT.iterdir() if d.is_dir() and any(d.glob("*.jsonl")))
 
 
 def _parse_trace(framework: str) -> list:
@@ -80,9 +76,7 @@ def test_pydantic_ai_part_end_carries_real_content() -> None:
         pytest.skip("pydantic_ai trace not captured")
     events = _parse_trace("pydantic_ai")
     assistant_texts = [
-        e.payload.get("content")
-        for e in events
-        if e.kind == EventKind.MESSAGE_ASSISTANT
+        e.payload.get("content") for e in events if e.kind == EventKind.MESSAGE_ASSISTANT
     ]
     non_empty = [t for t in assistant_texts if t]
     assert non_empty, "part_end mapped to empty content — #40 regression"

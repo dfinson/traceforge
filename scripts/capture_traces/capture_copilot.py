@@ -56,11 +56,24 @@ def _run_headless() -> str:
     shutil.copytree(src, work)
 
     before = _session_ids()
-    cmd = [_copilot_exe(), "-p", CANONICAL_TASK, "--allow-all", "--add-dir", str(work), "--no-color"]
+    cmd = [
+        _copilot_exe(),
+        "-p",
+        CANONICAL_TASK,
+        "--allow-all",
+        "--add-dir",
+        str(work),
+        "--no-color",
+    ]
     print(f"running headless copilot in {work} ...")
     proc = subprocess.run(
-        cmd, cwd=str(work), capture_output=True,
-        text=True, encoding="utf-8", errors="replace", timeout=1200,
+        cmd,
+        cwd=str(work),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=1200,
     )
     print("copilot exit:", proc.returncode)
     new_ids = _session_ids() - before
@@ -85,8 +98,12 @@ def _run_headless() -> str:
 def _copilot_version() -> str:
     try:
         out = subprocess.run(
-            [_copilot_exe(), "--version"], capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=30,
+            [_copilot_exe(), "--version"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
         )
         return (out.stdout or out.stderr or "unknown").strip().splitlines()[0]
     except Exception:
@@ -99,7 +116,9 @@ def main() -> None:
     if not events.is_file():
         raise SystemExit(f"events.jsonl missing for session {sid}: {events}")
 
-    lines = [json.loads(raw) for raw in events.read_text(encoding="utf-8").splitlines() if raw.strip()]
+    lines = [
+        json.loads(raw) for raw in events.read_text(encoding="utf-8").splitlines() if raw.strip()
+    ]
     print(f"session {sid}: {len(lines)} event(s) from {events}")
     if not lines:
         raise SystemExit("session produced no events")

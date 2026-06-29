@@ -121,9 +121,24 @@ def test_tool_call_step_fans_out_per_call(adapter: MappedJsonAdapter) -> None:
                 "TOOL_CALL",
                 target="TARGET_ENVIRONMENT",
                 tool_calls=[
-                    {"name": "view_file", "args": {"path": "a.py"}, "id": "c1", "canonical_path": "a.py"},
-                    {"name": "view_file", "args": {"path": "b.py"}, "id": "c2", "canonical_path": "b.py"},
-                    {"name": "run_command", "args": {"command": "pytest"}, "id": "c3", "canonical_path": None},
+                    {
+                        "name": "view_file",
+                        "args": {"path": "a.py"},
+                        "id": "c1",
+                        "canonical_path": "a.py",
+                    },
+                    {
+                        "name": "view_file",
+                        "args": {"path": "b.py"},
+                        "id": "c2",
+                        "canonical_path": "b.py",
+                    },
+                    {
+                        "name": "run_command",
+                        "args": {"command": "pytest"},
+                        "id": "c3",
+                        "canonical_path": None,
+                    },
                 ],
             ),
         ],

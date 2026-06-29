@@ -77,9 +77,7 @@ def test_snake_case_is_not_read_from_disk() -> None:
                 "message": {
                     "role": "assistant",
                     "content": "x",
-                    "tool_calls": [
-                        {"id": "tc_x", "function": {"name": "n", "arguments": "{}"}}
-                    ],
+                    "tool_calls": [{"id": "tc_x", "function": {"name": "n", "arguments": "{}"}}],
                 }
             },
         ],

@@ -7,6 +7,7 @@ from app.models import Ticket, TicketPriority, TicketStatus
 
 class TicketRepository:
     """Stores tickets in memory with seed data for demonstration purposes."""
+
     def __init__(self) -> None:
         self._tickets: list[Ticket] = [
             Ticket(

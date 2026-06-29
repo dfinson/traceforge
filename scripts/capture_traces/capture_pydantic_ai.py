@@ -78,9 +78,7 @@ async def _capture(ws: Workspace) -> list[dict]:
     lines: list[dict] = []
     run = None
     try:
-        async with agent.iter(
-            CANONICAL_TASK, usage_limits=UsageLimits(request_limit=30)
-        ) as run:
+        async with agent.iter(CANONICAL_TASK, usage_limits=UsageLimits(request_limit=30)) as run:
             async for node in run:
                 if Agent.is_model_request_node(node):
                     async with node.stream(run.ctx) as stream:

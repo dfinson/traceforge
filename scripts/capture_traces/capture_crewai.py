@@ -78,11 +78,7 @@ def _register_event_capture(lines: list[dict[str, Any]], lock: Lock) -> None:
     for module_info in pkgutil.iter_modules(event_types.__path__):
         module = importlib.import_module(f"{event_types.__name__}.{module_info.name}")
         for value in vars(module).values():
-            if (
-                isinstance(value, type)
-                and issubclass(value, BaseEvent)
-                and value is not BaseEvent
-            ):
+            if isinstance(value, type) and issubclass(value, BaseEvent) and value is not BaseEvent:
 
                 @crewai_event_bus.on(value)
                 def _capture(_source: Any, event: BaseEvent) -> None:

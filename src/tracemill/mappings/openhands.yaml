@@ -201,6 +201,24 @@ events:
       agent_class: args.agent_class
       source: source
 
+  # ── New actions (#41: openhands 0.62 additive) ──
+  condensation_request:
+    kind: session.info
+    payload:
+      source: source
+  task_tracking:
+    kind: session.info
+    payload:
+      command: args.command
+      task_list: args.task_list
+      thought: args.thought
+      source: source
+  loop_recovery:
+    kind: session.info
+    payload:
+      option: args.option
+      source: source
+
   # ── Observation events (preprocessor synthesizes action: "observation.<value>") ──
   observation.run:
     kind: command.completed
@@ -277,6 +295,26 @@ events:
       source: source
   observation.mcp:
     kind: mcp.tool.completed
+    payload:
+      content: content
+      source: source
+
+  # ── New observations (#41: openhands 0.62 additive) ──
+  observation.download:
+    kind: file.read
+    payload:
+      file_path: extras.file_path
+      content: content
+      source: source
+  observation.task_tracking:
+    kind: session.info
+    payload:
+      command: extras.command
+      task_list: extras.task_list
+      content: content
+      source: source
+  observation.loop_detection:
+    kind: session.info
     payload:
       content: content
       source: source

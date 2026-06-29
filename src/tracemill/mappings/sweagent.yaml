@@ -42,6 +42,7 @@ events:
       thought: thought
       action: action
       tool_calls: tool_calls
+      thinking_blocks: thinking_blocks
       agent: agent
       message_type: message_type
       is_demo: is_demo

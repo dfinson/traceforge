@@ -1,12 +1,14 @@
 # Copilot Markdown Pre-Parser output mapping for MappedJsonAdapter
 # Maps event dicts emitted by CopilotPreParser → canonical event kinds.
 #
-# Two input modes:
-#   1. parse_turn() output: events from SQLite turns table (rendered markdown)
-#   2. parse_log_line() output: events from process-*.log (raw API messages)
+# Input: parse_turn() output — events from the SQLite turns table (rendered
+# markdown). Tool calls are extracted from fenced code blocks in the assistant
+# response, so fidelity is medium (heuristic, no raw tool_use/tool_result ids).
 #
-# The parse_turn() path gives medium-fidelity events (tool calls embedded in text).
-# The parse_log_line() path gives FULL-fidelity events (raw API tool_use/tool_result).
+# NOTE: The high-fidelity Copilot capture path is copilot.yaml over
+# ~/.copilot/session-state/<id>/events.jsonl. The old process-log path
+# (parse_log_line, api_*/telemetry/session_event) targeted a dead Anthropic log
+# format and was removed (issue #45).
 
 framework: copilot_markdown
 framework_version: ">=1.0"
@@ -15,8 +17,9 @@ type_field: type
 timestamp_field: timestamp
 
 motivation:
+  targets: ["tool.call.started"]
   sources:
-    - events: ["assistant_text", "api_assistant_text"]
+    - events: ["assistant_text"]
       field: content
       role: intent
 
@@ -67,44 +70,3 @@ events:
     kind: tool.output
     payload:
       content: content
-
-  # ── From parse_log_line(): Process log API messages ──
-
-  api_user_text:
-    kind: message.user
-    payload:
-      content: content
-      role: role
-
-  api_assistant_text:
-    kind: message.assistant
-    payload:
-      content: content
-      role: role
-
-  api_tool_use:
-    kind: tool.call.started
-    payload:
-      tool_use_id: tool_use_id
-      tool_name: tool_name
-      input: input
-
-  api_tool_result:
-    kind: tool.call.completed
-    payload:
-      tool_use_id: tool_use_id
-      result: content
-
-  # ── Telemetry and session events (from process log) ──
-
-  telemetry:
-    kind: telemetry.usage
-    payload:
-      event_name: event_name
-      kind: kind
-
-  session_event:
-    kind: session.info
-    payload:
-      session_id: session_id
-      event_name: event_name

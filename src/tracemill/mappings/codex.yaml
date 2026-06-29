@@ -117,3 +117,42 @@ events:
     kind: message.assistant
     payload:
       content: content
+
+  # ── Streaming deltas (#41: event_msg passthrough as event.<type>) ──
+  event.agent_message_content_delta:
+    kind: llm.output.chunk
+    payload:
+      delta: delta
+  event.agent_message_delta:
+    kind: llm.output.chunk
+    payload:
+      delta: delta
+  event.exec_command_output_delta:
+    kind: tool.output.chunk
+    payload:
+      call_id: call_id
+      chunk: chunk
+  event.agent_reasoning_delta:
+    kind: llm.reasoning.chunk
+    payload:
+      delta: delta
+
+  # ── Item lifecycle v2 (#41: response_item passthrough as response.<type>) ──
+  response.item_started:
+    kind: session.info
+    payload:
+      item: item
+  response.item_completed:
+    kind: session.info
+    payload:
+      item: item
+
+  # ── Hooks (#41) ──
+  event.hook_started:
+    kind: hook.started
+    payload:
+      hook_name: hook_name
+  event.hook_completed:
+    kind: hook.completed
+    payload:
+      hook_name: hook_name

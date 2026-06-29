@@ -445,3 +445,29 @@ events:
       reason: properties.reason
       text: properties.text
       recent: properties.recent
+
+  # ── Session management (#41/#32: additive) ──
+  session.next.moved:
+    kind: session.info
+    payload:
+      session_id: properties.sessionID
+      directory: properties.directory
+  session.next.prompt.admitted:
+    kind: message.user
+    payload:
+      session_id: properties.sessionID
+      delivery: properties.delivery
+      text: properties.text
+  session.next.prompt.promoted:
+    kind: session.info
+    payload:
+      session_id: properties.sessionID
+  session.next.interrupt.requested:
+    kind: session.info
+    payload:
+      session_id: properties.sessionID
+  session.next.context.updated:
+    kind: session.info
+    payload:
+      session_id: properties.sessionID
+      message_id: properties.messageID

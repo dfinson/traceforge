@@ -35,6 +35,12 @@ events:
     payload:
       content: content
 
+  # ── Thinking / reasoning ──────────────────────────────────────────────────
+  assistant.thinking:
+    kind: reasoning.started
+    payload:
+      content: content
+
   # ── Tool calls ────────────────────────────────────────────────────────────
   assistant.tool_use:
     kind: tool.call.started

@@ -8,6 +8,80 @@ from typing import Any
 from tracemill.preprocessors.registry import register_preprocessor
 
 
+def _amazonq_text(content: Any) -> str:
+    """Flatten an Amazon Q ToolUseResultBlock list into text."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for b in content:
+            if isinstance(b, dict):
+                # externally-tagged: {"Text": "..."} | {"Json": {...}}
+                if "Text" in b:
+                    parts.append(str(b["Text"]))
+                elif "Json" in b:
+                    parts.append(json.dumps(b["Json"]))
+                elif b.get("type") == "text":
+                    parts.append(b.get("text", ""))
+        return " ".join(p for p in parts if p)
+    return ""
+
+
+def _expand_amazonq_pair(entry: dict[str, Any], cid: str) -> list[dict[str, Any]]:
+    """Expand one HistoryEntry {user, assistant} pair into block events.
+
+    Current Amazon Q schema uses externally-tagged Rust enums:
+      user.content = {Prompt:{prompt}} | {ToolUseResults:{tool_use_results:[...]}}
+                     | {CancelledToolUses:{prompt, tool_use_results}}
+      assistant    = {Response:{content}} | {ToolUse:{content, tool_uses:[...]}}
+      tool_use     = {id, name, args, ...}; result = {tool_use_id, content, status}
+    """
+    out: list[dict[str, Any]] = []
+    user = entry.get("user")
+    if isinstance(user, dict):
+        content = user.get("content", {})
+        prompt = None
+        results = None
+        if isinstance(content, dict):
+            if "Prompt" in content:
+                prompt = content["Prompt"].get("prompt")
+            elif "CancelledToolUses" in content:
+                prompt = content["CancelledToolUses"].get("prompt")
+                results = content["CancelledToolUses"].get("tool_use_results")
+            elif "ToolUseResults" in content:
+                results = content["ToolUseResults"].get("tool_use_results")
+        if prompt:
+            out.append({"block_type": "message.user", "conversation_id": cid, "content": prompt})
+        for r in results or []:
+            if not isinstance(r, dict):
+                continue
+            out.append({
+                "block_type": "tool.result",
+                "conversation_id": cid,
+                "tool_call_id": r.get("tool_use_id", ""),
+                "is_error": r.get("status") == "Error",
+                "output": _amazonq_text(r.get("content", "")),
+            })
+
+    assistant = entry.get("assistant")
+    if isinstance(assistant, dict):
+        body = assistant.get("Response") or assistant.get("ToolUse") or {}
+        if isinstance(body, dict):
+            if body.get("content"):
+                out.append({"block_type": "message.assistant", "conversation_id": cid, "content": body["content"]})
+            for tu in body.get("tool_uses", []) or []:
+                if not isinstance(tu, dict):
+                    continue
+                out.append({
+                    "block_type": "tool.call",
+                    "conversation_id": cid,
+                    "tool_call_id": tu.get("id", ""),
+                    "tool_name": tu.get("name", ""),
+                    "arguments": tu.get("args", {}),
+                })
+    return out
+
+
 @register_preprocessor("amazonq")
 def preprocess_amazonq(obj: dict[str, Any]) -> list[dict[str, Any]]:
     """Normalize an Amazon Q conversation row into tool call events.
@@ -59,7 +133,21 @@ def preprocess_amazonq(obj: dict[str, Any]) -> list[dict[str, Any]]:
     if not isinstance(messages, list):
         return [{"block_type": "raw.no_messages", "conversation_id": conversation_id, **value}]
 
+    # Amazon Q persists conversation_id INSIDE the value blob; the SQLite `key`
+    # column is the working directory, not the id.
+    conversation_id = value.get("conversation_id", conversation_id)
     results: list[dict[str, Any]] = []
+
+    # Current Amazon Q format: history is a list of {user, assistant, request_metadata}
+    # pairs, with externally-tagged Rust enums for content. Detect and expand.
+    if value.get("history") and any(
+        isinstance(e, dict) and ("user" in e or "assistant" in e) for e in messages
+    ):
+        for entry in messages:
+            if not isinstance(entry, dict):
+                continue
+            results.extend(_expand_amazonq_pair(entry, conversation_id))
+        return results if results else [{"block_type": "raw.empty", "conversation_id": conversation_id}]
 
     for msg in messages:
         if not isinstance(msg, dict):

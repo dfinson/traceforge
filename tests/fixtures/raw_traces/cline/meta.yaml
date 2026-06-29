@@ -1,0 +1,6 @@
+framework: cline
+scenario: demo_issue_tracker_get_endpoint_shape
+source_repo: demo-issue-tracker-api
+framework_version: ">=3.88"
+model: shape-fixture
+notes: SHAPE FIXTURE (VS Code GUI capture not run). Verbatim ui_messages.json ClineMessage shape verified against cline/cline ExtensionMessage.ts — type ask|say, subtype in ask/say, api_req_started text=JSON ClineApiReqInfo, tool text=JSON ClineSayTool. Replace with real capture when extension is run.

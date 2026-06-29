@@ -1,0 +1,6 @@
+framework: amazonq
+scenario: demo_issue_tracker_get_endpoint_shape
+source_repo: demo-issue-tracker-api
+framework_version: "1.x"
+model: shape-fixture
+notes: SHAPE FIXTURE (CLI run not captured). Verbatim conversations-table row shape verified against aws/amazon-q-developer-cli — key=cwd, value=JSON ConversationState{conversation_id,history:[{user,assistant}]}; externally-tagged enums (Prompt/ToolUseResults, Response/ToolUse); tool_use {id,name,args}; result {tool_use_id,content:[{Text}],status}. Replace with real capture when CLI is run.

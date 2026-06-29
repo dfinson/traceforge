@@ -95,6 +95,17 @@ def preprocess_continue(obj: dict[str, Any]) -> list[dict[str, Any]]:
                         }
                     )
 
+        elif role == "thinking":
+            # Claude extended thinking / OpenAI reasoning tokens persisted on disk
+            # as role "thinking" (ThinkingChatMessage). Without this they are dropped.
+            results.append(
+                {
+                    "block_type": "assistant.thinking",
+                    "session_id": session_id,
+                    "content": content,
+                }
+            )
+
         elif role == "tool":
             results.append(
                 {

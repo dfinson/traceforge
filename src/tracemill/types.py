@@ -15,12 +15,10 @@ from typing import Any, Final, Literal
 
 from pydantic import Field, field_validator
 
-from tracemill.governance.results import SessionMeta
-from tracemill.models import FrozenModel
-
-
 from tracemill.classify.core import Classification
 from tracemill.classify.workflow import Phase, Visibility
+from tracemill.governance.results import SessionMeta
+from tracemill.models import FrozenModel
 
 
 # ─── EventKind: Open String Registry ────────────────────────────────────────

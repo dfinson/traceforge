@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Iterable
 
 from tracemill.enricher import Enricher
 from tracemill.sinks.base import StorageSink
@@ -279,52 +280,38 @@ class EventPipeline:
             for update in updates:
                 await self._push_title_update(update)
 
-    async def _push_title_update(self, update: TitleUpdate) -> None:
-        """Fan-out an append-only title update to all sinks. Error-isolated."""
-        results = await asyncio.gather(
-            *(sink.on_title_update(update) for sink in self._sinks),
-            return_exceptions=True,
-        )
+    async def _fanout(self, coros: Iterable[Awaitable], action: str) -> None:
+        """Await sink coroutines concurrently, error-isolated.
+
+        One failing sink is logged (with ``action`` naming the operation) and
+        skipped; it never blocks the others. The result order matches
+        ``self._sinks``, so the logged index identifies the failing sink.
+        """
+        results = await asyncio.gather(*coros, return_exceptions=True)
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
                 logger.error(
-                    "Sink %d failed on title update for segment %s: %s",
+                    "Sink %d failed on %s: %s",
                     i,
-                    update.segment_id,
+                    action,
                     result,
                     exc_info=(type(result), result, result.__traceback__),
                 )
+
+    async def _push_title_update(self, update: TitleUpdate) -> None:
+        """Fan-out an append-only title update to all sinks. Error-isolated."""
+        await self._fanout(
+            (sink.on_title_update(update) for sink in self._sinks),
+            f"title update for segment {update.segment_id}",
+        )
 
     async def push_span(self, span: TelemetrySpan) -> None:
         """Fan-out span to all registered sinks."""
-        results = await asyncio.gather(
-            *(sink.on_span(span) for sink in self._sinks),
-            return_exceptions=True,
-        )
-        for i, result in enumerate(results):
-            if isinstance(result, BaseException):
-                logger.error(
-                    "Sink %d failed on span %s: %s",
-                    i,
-                    span.name,
-                    result,
-                    exc_info=(type(result), result, result.__traceback__),
-                )
+        await self._fanout((sink.on_span(span) for sink in self._sinks), f"span {span.name}")
 
     async def push_usage(self, usage: UsageRecord) -> None:
         """Fan-out usage record to all registered sinks."""
-        results = await asyncio.gather(
-            *(sink.on_usage(usage) for sink in self._sinks),
-            return_exceptions=True,
-        )
-        for i, result in enumerate(results):
-            if isinstance(result, BaseException):
-                logger.error(
-                    "Sink %d failed on usage record: %s",
-                    i,
-                    result,
-                    exc_info=(type(result), result, result.__traceback__),
-                )
+        await self._fanout((sink.on_usage(usage) for sink in self._sinks), "usage record")
 
     async def flush(self) -> None:
         """Flush enricher buffered events then flush all sinks. Error-isolated."""
@@ -346,47 +333,13 @@ class EventPipeline:
         # stream first.
         await self._flush_title_streams()
 
-        results = await asyncio.gather(
-            *(sink.flush() for sink in self._sinks),
-            return_exceptions=True,
-        )
-        for i, result in enumerate(results):
-            if isinstance(result, BaseException):
-                logger.error(
-                    "Sink %d failed on flush: %s",
-                    i,
-                    result,
-                    exc_info=(type(result), result, result.__traceback__),
-                )
+        await self._fanout((sink.flush() for sink in self._sinks), "flush")
 
     async def _push_to_sinks(self, event: SessionEvent) -> None:
         """Push event directly to sinks (bypassing enricher)."""
-        results = await asyncio.gather(
-            *(sink.on_event(event) for sink in self._sinks),
-            return_exceptions=True,
-        )
-        for i, result in enumerate(results):
-            if isinstance(result, BaseException):
-                logger.error(
-                    "Sink %d failed on event %s: %s",
-                    i,
-                    event.id,
-                    result,
-                    exc_info=(type(result), result, result.__traceback__),
-                )
+        await self._fanout((sink.on_event(event) for sink in self._sinks), f"event {event.id}")
 
     async def close(self) -> None:
         """Flush then close all sinks. Error-isolated."""
         await self.flush()
-        results = await asyncio.gather(
-            *(sink.close() for sink in self._sinks),
-            return_exceptions=True,
-        )
-        for i, result in enumerate(results):
-            if isinstance(result, BaseException):
-                logger.error(
-                    "Sink %d failed on close: %s",
-                    i,
-                    result,
-                    exc_info=(type(result), result, result.__traceback__),
-                )
+        await self._fanout((sink.close() for sink in self._sinks), "close")

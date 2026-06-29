@@ -15,7 +15,6 @@ Output: Structured event dicts suitable for copilot_markdown.yaml mapping.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -63,13 +62,11 @@ _PAT_LIST = 8
 
 # ─── Log line patterns ───────────────────────────────────────────────────────
 
-_LOG_LINE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\s+\[(\w+)\]\s+(.+)$")
-
-_API_REQUEST_RE = re.compile(r"Making Anthropic Messages streaming request with messages:\s*\[")
-
-_TELEMETRY_RE = re.compile(r"Sending telemetry event:\s+([\w/.-]+)(?:\s+\(kind:\s+(\w+)\))?")
-
-_SESSION_EVENT_RE = re.compile(r"Forwarding event for session\s+([\w-]+):\s+([\w.]+)")
+# (removed in #45) The process-log path — parse_log_line + api_*/telemetry/
+# session_event extraction — targeted an obsolete Anthropic streaming log format
+# the current Copilot CLI no longer emits. The canonical high-fidelity path is
+# copilot.yaml over ~/.copilot/session-state/<id>/events.jsonl. Only the SQLite
+# turns path (parse_turn) remains here as a thin fallback.
 
 
 # ─── Turn state ──────────────────────────────────────────────────────────────
@@ -100,9 +97,6 @@ class CopilotPreParser(MarkdownPreParser):
 
     def __init__(self) -> None:
         super().__init__()
-        self._log_buffer: list[str] = []
-        self._in_json_block = False
-        self._log_block_timestamp: str = ""
         self._turn_state: _TurnState | None = None
 
     # ─── Base class hooks (for markdown AST parsing) ─────────────────────
@@ -302,126 +296,6 @@ class CopilotPreParser(MarkdownPreParser):
             tree = self._ts_parser.parse(source)
             blocks = self._extract_blocks(tree, source)
             yield from self._process_blocks(blocks, source)
-
-    # ─── Mode 2: Parse process log lines ─────────────────────────────────
-
-    def parse_log_line(self, line: str) -> Iterator[dict[str, Any]]:
-        """Parse a single process log line into event dicts.
-
-        Handles:
-        - Structured log lines: TIMESTAMP [LEVEL] message
-        - Multi-line JSON blobs (messages arrays from API requests)
-        - Telemetry events
-        - Session protocol events
-        """
-        # If we're accumulating a JSON block, try to complete it
-        if self._in_json_block:
-            self._log_buffer.append(line)
-            joined = "\n".join(self._log_buffer)
-            parsed = try_parse_json(joined)
-            if parsed is not None:
-                self._in_json_block = False
-                self._log_buffer = []
-                yield from self._process_messages_array(parsed, self._log_block_timestamp)
-                return
-            if len(self._log_buffer) > 5000:
-                self._in_json_block = False
-                self._log_buffer = []
-            return
-
-        # Try to match a standard log line
-        m = _LOG_LINE_RE.match(line)
-        if not m:
-            return
-
-        timestamp, _level, message = m.group(1), m.group(2), m.group(3)
-
-        # Check for API request with messages array
-        api_match = _API_REQUEST_RE.search(message)
-        if api_match:
-            json_start = message[api_match.end() - 1 :]
-            parsed = try_parse_json(json_start)
-            if parsed is not None:
-                yield from self._process_messages_array(parsed, timestamp)
-            else:
-                self._in_json_block = True
-                self._log_block_timestamp = timestamp
-                self._log_buffer = [json_start]
-            return
-
-        # Telemetry events
-        tel_match = _TELEMETRY_RE.search(message)
-        if tel_match:
-            yield {
-                "type": "telemetry",
-                "timestamp": timestamp,
-                "event_name": tel_match.group(1),
-                "kind": tel_match.group(2) or "",
-            }
-            return
-
-        # Session forwarding events
-        sess_match = _SESSION_EVENT_RE.search(message)
-        if sess_match:
-            yield {
-                "type": "session_event",
-                "timestamp": timestamp,
-                "session_id": sess_match.group(1),
-                "event_name": sess_match.group(2),
-            }
-
-    def _process_messages_array(
-        self, messages: list[Any] | dict[str, Any], timestamp: str = ""
-    ) -> Iterator[dict[str, Any]]:
-        """Extract structured events from a parsed messages array."""
-        if isinstance(messages, dict):
-            messages = [messages]
-
-        for msg in messages:
-            if not isinstance(msg, dict):
-                continue
-            role = msg.get("role", "")
-            content = msg.get("content", [])
-
-            if isinstance(content, str):
-                yield {
-                    "type": f"api_{role}_text",
-                    "timestamp": timestamp,
-                    "role": role,
-                    "content": content,
-                }
-                continue
-
-            if not isinstance(content, list):
-                continue
-
-            for block in content:
-                if not isinstance(block, dict):
-                    continue
-                block_type = block.get("type", "")
-
-                if block_type == "text":
-                    yield {
-                        "type": f"api_{role}_text",
-                        "timestamp": timestamp,
-                        "role": role,
-                        "content": block.get("text", ""),
-                    }
-                elif block_type == "tool_use":
-                    yield {
-                        "type": "api_tool_use",
-                        "timestamp": timestamp,
-                        "tool_use_id": block.get("id", ""),
-                        "tool_name": block.get("name", ""),
-                        "input": block.get("input", {}),
-                    }
-                elif block_type == "tool_result":
-                    yield {
-                        "type": "api_tool_result",
-                        "timestamp": timestamp,
-                        "tool_use_id": block.get("tool_use_id", ""),
-                        "content": block.get("content", ""),
-                    }
 
     # ─── Event construction ──────────────────────────────────────────────
 

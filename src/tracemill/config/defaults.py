@@ -51,6 +51,16 @@ governance:
   #   max_by_effect:
   #     destructive: 10
 
+# ─── Phase tracker (session-level phase segmentation) ───────────────────────
+# Smooths per-event activity labels into stable workflow phases via a debounced
+# majority vote. Defaults are literature-seeded; recalibrate with the
+# phase-tracker-window-sweep experiment.
+# phase_tracker:
+#   enabled: true
+#   window_size: 3      # sliding window whose mode is the current phase
+#   debounce: 2         # consecutive events before a boundary commits
+#   phase_root_depth: 1 # dot-path depth grouped into the boundary root
+
 # ─── SDK configuration (in-process push mode) ───────────────────────────────
 sdk:
   batch_size: 64

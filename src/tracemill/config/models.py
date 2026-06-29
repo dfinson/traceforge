@@ -287,6 +287,42 @@ class AutoDetectConfig(StrictModel):
     frameworks: list[str] = Field(default_factory=list)  # empty = detect all known
 
 
+# ─── Phase Tracker Config ────────────────────────────────────────────────────
+
+
+class PhaseTrackerConfig(StrictModel):
+    """Phase tracker (debounced majority-vote segmentation) configuration.
+
+    No hardcoded numeric constants live in the tracker; they all live here.
+    Defaults are evidence-based starting points, not magic numbers, and are
+    meant to be replaced by the values measured in the
+    ``phase-tracker-window-sweep`` calibration experiment.
+
+        # tracemill.yaml
+        phase_tracker:
+          enabled: true
+          window_size: 3
+          debounce: 2
+          phase_root_depth: 1
+    """
+
+    enabled: bool = True
+
+    # Sliding window of activity-derived phase signals whose mode is the current
+    # phase. Default seeded from Banos 2014 / Wang 2019 short-stream HAR work;
+    # recalibrate via phase-tracker-window-sweep.yaml.
+    window_size: int = Field(default=3, ge=1)
+
+    # Consecutive events the window mode must hold a new value before a boundary
+    # commits. Higher = fewer spurious transitions, more detection latency.
+    debounce: int = Field(default=2, ge=1)
+
+    # Dot-path depth used to group activities into the root compared at
+    # boundaries (1 => 'verification.lint' and 'verification.test' share root
+    # 'verification' and do not open a new block).
+    phase_root_depth: int = Field(default=1, ge=1)
+
+
 # ─── Root Config ─────────────────────────────────────────────────────────────
 
 
@@ -322,6 +358,9 @@ class TracemillConfig(StrictModel):
 
     # Auto-detection of installed frameworks
     auto_detect: AutoDetectConfig = Field(default_factory=AutoDetectConfig)
+
+    # Phase tracker (session-level phase segmentation)
+    phase_tracker: PhaseTrackerConfig = Field(default_factory=PhaseTrackerConfig)
 
     @field_validator("pipelines")
     @classmethod

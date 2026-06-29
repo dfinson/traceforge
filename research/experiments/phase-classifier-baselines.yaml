@@ -1,0 +1,200 @@
+# Per-event phase classifier baselines (+ context-aware variants).
+#
+# Companion: docs/design-phase-tracker.md and docs/03-feature-design.md.
+# Per-event baselines establish accuracy before any smoothing. The
+# context-aware variants (combined-seg*, *-nbr*) fold the classical-
+# segmentation detectors and windowed neighbor model2vec similarity INTO the
+# feature vector, so the smoothing is learned per-event rather than applied as
+# a post-inference debounce. The deterministic PhaseTracker debounce becomes a
+# fallback/comparison point, not the mechanism.
+
+experiment:
+  name: phase-classifier-baselines
+  mlflow_experiment: phase-classifier-baselines-v1
+  display_name: "Phase Classifier — Per-Event Baselines"
+  description: |
+    Per-event phase classification baselines on the labeled phase corpus
+    (1,102 labeled events). Runs compare:
+
+      * a rule-only baseline derived from the existing tracemill enricher
+        _detect_phases() — establishes the floor;
+      * one-vs-rest logistic regression on model2vec embeddings of
+        tool_intent + payload text — establishes a portable feature
+        baseline;
+      * gradient-boosted trees on classification dimensions
+        (mechanism / effect / scope / role / action) — establishes the
+        symbolic-only baseline.
+
+    Context-aware variants (close the Block 4/6 gap — see rationale below).
+    The per-event baselines above classify each event in isolation; phase is
+    inherently a *segmented* notion, so a context-free per-event predictor
+    jitters across single stray events. The design (docs/03-feature-design.md
+    §4, §6) puts the smoothing IN the feature vector — learned, not a
+    post-inference debounce. These variants add the same classical-
+    segmentation detector outputs the boundary classifier already uses, plus
+    windowed neighbor model2vec similarity, over the per-event phase-signal /
+    payload-text streams:
+
+      * combined-seg — combined + Block 6 segmentation detector outputs
+        (BOCPD changepoint / run-length, multi-scale majority-vote change,
+        phase-distribution entropy) over the session phase-signal stream;
+      * combined-seg-nbrcos — + windowed neighbor model2vec cosine
+        (past-window centroid vs future-window centroid) at windows {3,5,10};
+      * combined-seg-nbrcentroid — + distance of the event embedding to its
+        trailing windowed centroid at windows {3,5,10};
+      * combined-seg-nbr — + both neighbor representations (full-context
+        candidate);
+      * combined-seg-nbr-noleak — full-context candidate with the enricher
+        phase_signals dropped (learned-vs-echoed leakage ablation).
+
+    Output: a per-class precision / recall / F1 table and confusion matrix,
+    and the context-lift ladder (combined -> combined-seg -> +neighbor) that
+    determines whether the learned, in-feature smoothing beats both the
+    per-event floor and the deterministic PhaseTracker debounce.
+  tags:
+    classifier: phase
+    pillar: input-quality
+    research_doc: docs/design-phase-tracker.md
+    stage: baseline
+
+# Gated label vocabulary. review is demoted to a modifier (see rationale):
+# 37/57,316 featurizable events (0.065%), base rate varies ~25x across agent
+# frameworks (swe-agent 0.054% vs copilot-cli 1.32%), and review labels are the
+# least agreed-upon (accept_fraction 0.848 vs 0.953). It is folded into
+# verification and surfaced as the is_review modifier (verification whose target
+# is the agent's own prior artifact) — emitted but not gated.
+labels:
+  gated_phases: [planning, implementation, verification, exploration]
+  modifiers:
+    - id: is_review
+      remaps_to: verification
+      gated: false
+      rationale: docs/05-data-sizing.md "when more data is the wrong answer"
+
+dataset:
+  source: phase-labeled-events
+  size: 1102
+  source_note: research/docs/02-data-inventory.md
+  split:
+    train: 0.7
+    val:   0.15
+    test:  0.15
+    seed:  42
+
+baselines:
+  - id: enricher-rules
+    description: existing _detect_phases() rules as predictor
+    inputs: [classification_dimensions]
+  - id: model2vec-logreg
+    description: one-vs-rest logistic regression on model2vec embeddings
+    inputs: [tool_intent_text, payload_text]
+  - id: dimensions-gbm
+    description: gradient-boosted trees on symbolic dimensions
+    inputs: [mechanism, effect, scope, role, action]
+  - id: combined-logreg
+    description: one-vs-rest logistic regression on symbolic + model2vec embedding
+    inputs: [classification_dimensions, tool_intent_text, payload_text]
+  - id: combined-logreg-noleak
+    description: combined, with enricher phase_signals dropped (leakage ablation)
+    inputs: [classification_dimensions_minus_phase_signals, tool_intent_text, payload_text]
+  - id: combined-seg-logreg
+    description: combined plus classical-segmentation detector outputs (Block 6)
+    inputs: [classification_dimensions, tool_intent_text, payload_text, segmentation]
+  - id: combined-seg-nbrcos-logreg
+    description: >
+      combined-seg plus windowed neighbor model2vec cosine (past-window
+      centroid vs future-window centroid) at the segmentation windows
+    inputs: [classification_dimensions, tool_intent_text, payload_text, segmentation, neighbor_cosine]
+  - id: combined-seg-nbrcentroid-logreg
+    description: >
+      combined-seg plus distance of the event embedding to its trailing
+      windowed centroid at the segmentation windows
+    inputs: [classification_dimensions, tool_intent_text, payload_text, segmentation, neighbor_centroid]
+  - id: combined-seg-nbr-logreg
+    description: combined-seg plus both neighbor representations (full-context candidate)
+    inputs: [classification_dimensions, tool_intent_text, payload_text, segmentation, neighbor_cosine, neighbor_centroid]
+  - id: combined-seg-nbr-noleak
+    description: full-context candidate with enricher phase_signals dropped (leakage ablation)
+    inputs: [classification_dimensions_minus_phase_signals, tool_intent_text, payload_text, segmentation, neighbor_cosine, neighbor_centroid]
+
+# Classical-segmentation detectors fed as features (docs/03-feature-design.md §6).
+# Identical detector + hyperparameters to boundary-classifier-baselines.yaml so
+# the two ML paths share one portable segmentation feature definition. Window
+# sizes and the BOCPD prior are hyperparameters, not magic thresholds: they
+# parameterise detectors whose *outputs* are features the classifier learns to
+# weight. Calibrated post-pilot.
+segmentation:
+  windows:
+    value: [3, 5, 10]
+    source: docs/03-feature-design.md
+    rationale: "multi-scale majority vote — short/medium/long context windows."
+  entropy_window:
+    value: 10
+    source: docs/03-feature-design.md
+    rationale: "trailing window for phase-distribution entropy."
+  bocpd_expected_run_length:
+    value: 12
+    calibration: boundary-baselines
+    rationale: >
+      constant-hazard prior on phase run length (hazard = 1/E[run]); seeded from
+      the median labelled activity span, to be recalibrated against the curve.
+  bocpd_alpha:
+    value: 0.5
+    source: docs/03-feature-design.md
+    rationale: "Dirichlet concentration for the categorical predictive (Jeffreys prior)."
+  bocpd_r_max:
+    value: 60
+    source: docs/03-feature-design.md
+    rationale: "run-length truncation for tractability; > longest typical activity."
+
+# Windowed neighbor model2vec similarity features (docs/03-feature-design.md §5,
+# Block 5b). The static model2vec embedder (Block 5) is reused as a bi-encoder
+# neighbour signal: cheap per-event 256-d vectors are pooled over context windows
+# and compared. Portable by construction (same frozen embedder, no per-framework
+# work). Two representations are compared because we do not yet have evidence
+# which carries more boundary signal:
+neighbor_embedding:
+  embedder:
+    value: minishlab/potion-base-8M
+    source: docs/03-feature-design.md
+    rationale: "same frozen static embedder as Block 5; no extra dependency."
+  windows:
+    value: [3, 5, 10]
+    source: docs/03-feature-design.md
+    rationale: "same multi-scale windows as the segmentation detectors."
+  representations:
+    - id: cosine
+      definition: >
+        cosine( mean_pool(embed(t-w .. t-1)), mean_pool(embed(t .. t+w-1)) )
+        per window w — semantic shift between the recent past and near future.
+    - id: centroid_distance
+      definition: >
+        1 - cosine( embed(t), mean_pool(embed(t-w+1 .. t)) ) per window w —
+        how far the current event drifts from its trailing context.
+  note: >
+    Neighbour windows require embeddings of EVERY event in a session (including
+    unlabeled events), so these features are computed per-session at load time
+    over the full event stream, not from the labeled-only embedding matrix.
+
+metrics:
+  primary:
+    - method: f1_macro
+  secondary:
+    - method: per_class_precision
+    - method: per_class_recall
+    - method: per_class_f1
+    - method: confusion_matrix
+    - method: accuracy
+
+mlflow:
+  log_params:
+    - baseline_id
+    - feature_set
+    - model_class
+    - hyperparameters
+  log_tags:
+    - baseline_id
+  log_artifacts:
+    - confusion_matrix
+    - per_class_table
+    - test_predictions

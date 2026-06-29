@@ -1,0 +1,62 @@
+# Phase tracker calibration — sweep window_size and debounce against the
+# labeled boundary corpus to pick the operating point.
+#
+# Doc: docs/design-phase-tracker.md §"Algorithm Parameters"
+# Policy: research/docs/08-no-heuristics-policy.md
+
+experiment:
+  name: phase-tracker-window-sweep
+  mlflow_experiment: phase-tracker-calibration-v1
+  display_name: "Phase Tracker Calibration — Window & Debounce Sweep"
+  description: |
+    Replace the literature-seeded defaults (window_size=3, debounce=2 from
+    Banos 2014 / Wang 2019) with values measured on our labeled boundary
+    corpus. Each run is a (window_size, debounce) point on the sweep grid.
+    Primary metric is F1 on phase transition boundaries within ±2 events;
+    selection picks max F1, ties broken by lower detection latency, then by
+    smaller window size.
+  tags:
+    classifier: phase-tracker
+    pillar: production-tuning
+    research_doc: docs/design-phase-tracker.md
+    stage: calibration
+  goal: >
+    Replace the literature-seeded defaults (window_size=3, debounce=2 from
+    Banos 2014 / Wang 2019) with values measured on our boundary corpus.
+
+dataset:
+  source: phase-boundary-corpus
+  split:
+    train: 0.7
+    val:   0.15
+    test:  0.15
+    seed:  42
+
+sweep:
+  window_size: [1, 2, 3, 5, 7]
+  debounce:    [1, 2, 3]
+  rationale: >
+    Bracket the literature default (3,2) symmetrically. Window > 7 is
+    excluded by Wang 2019; debounce > 3 produces unacceptable detection
+    latency given mean activity length ~15 turns.
+
+metrics:
+  primary:
+    - method: f1
+      target: phase_transition_boundary_within_2_events
+  secondary:
+    - method: latency_events_to_detect
+    - method: false_transition_rate
+    - method: precision
+    - method: recall
+
+selection:
+  rule: max_primary_then_min_secondary_latency
+  tie_breaker: lower_complexity   # smaller window_size
+
+mlflow:
+  log_params: [window_size, debounce]
+  log_metrics: all metrics above
+  log_artifacts:
+    - per_session_transition_log
+    - confusion_matrix

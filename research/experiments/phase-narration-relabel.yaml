@@ -1,0 +1,117 @@
+# Phase classifier — narration-aware relabel of the copilot-cli-native corpus.
+#
+# Companion: docs/design-phase-tracker.md, docs/03-feature-design.md,
+# prompts/combined-labeling.md (the revised labeling contract this run uses).
+#
+# Hypothesis
+# ----------
+# The production e2e (eval_phase_pipeline_e2e.py) on unseen live Copilot-CLI
+# sessions collapses to ~53% `planning` even after the content-bearing scope +
+# inherit fix. Root cause (verified): in the labeling corpus EVERY
+# `message.assistant` event is labeled `planning`/`review` and 0 are
+# implementation/verification/exploration — 189 planning / 3 review / 0 other
+# for copilot-cli-native — *despite the assistant narration text being visible
+# to the labeler* (content non-empty for ~75% of those events). So the bias is
+# the labeling PROMPT's "narration / informational acknowledgement = planning"
+# default, faithfully learned by the model, not a featuriser or adapter gap.
+#
+# Intervention: revise combined-labeling.md so assistant narration is labeled
+# by the work-phase its intent describes (implementation / verification /
+# exploration / review), reserving `planning` for genuine strategic
+# deliberation; then re-label the 20 copilot-cli-native sessions and retrain.
+# swe-agent-nebius (729 sessions) is NOT relabeled — its assistant events
+# already carry non-`planning` phases and dominate the corpus.
+
+experiment:
+  name: phase-narration-relabel
+  mlflow_experiment: phase-narration-relabel-v1
+  display_name: "Phase Classifier — Narration-Aware Relabel"
+  description: |
+    Re-label the copilot-cli-native phase corpus (20 sessions) under a revised
+    labeling contract that labels `message.assistant` narration by the work it
+    describes instead of defaulting it to `planning`. Retrain the shipped
+    combined-seg-nbrcentroid bundle on the updated labels (+ unchanged
+    swe-agent-nebius labels) and re-measure (a) leave-session-out held-out F1
+    and (b) the production e2e phase distribution on unseen live sessions.
+  parent: phase-classifier-baselines
+  tags:
+    classifier: phase
+    pillar: input-quality
+    research_doc: docs/design-phase-tracker.md
+    stage: relabel
+
+# Same gated vocabulary as the baselines (review folded into verification).
+labels:
+  gated_phases: [planning, implementation, verification, exploration]
+  modifiers:
+    - id: is_review
+      remaps_to: verification
+      gated: false
+
+# Only the labels change; featuriser, splits and model are held fixed so the
+# effect is attributable to the relabel alone.
+intervention:
+  prompt: prompts/combined-labeling.md
+  change: >
+    Added a narration rule under Definitions: `message.assistant` is labeled by
+    the phase of the work its content describes (implementation / verification /
+    exploration / review); only genuine strategic deliberation is planning. The
+    utility/metadata-emitter special-case is scoped to zero-tool sessions only.
+  relabeled_source: copilot-cli-native
+  relabeled_sessions: 20
+  held_fixed:
+    - featuriser (tracemill.phase.features, combined-seg-nbrcentroid)
+    - swe-agent-nebius labels (729 sessions)
+    - content_only training scope (plumbing inherits at inference)
+    - leave-session-out GroupKFold split
+
+dataset:
+  source: phase-labeled-events
+  source_note: research/docs/02-data-inventory.md
+  before:
+    copilot_cli_native: {sessions: 20, message_assistant_phase: {planning: 189, review: 3}}
+  after:
+    copilot_cli_native:
+      sessions: 17  # 4 of 21 in-scope sessions truncated at the labeler output cap
+      message_assistant_phase: {planning: 33, implementation: 23, exploration: 54, verification: 15, review: 7}
+    note: >
+      message.assistant narration went from 100% planning/review (0 other) to a
+      work-distributed spread. Training events: 55,918 across 746 sessions.
+
+evaluate:
+  split:
+    kind: group-kfold
+    k: 5
+    group: session_id
+    seed: 42
+  metrics:
+    primary: [f1_macro]
+    secondary: [per_class_precision, per_class_recall, per_class_f1, confusion_matrix]
+  production_e2e:
+    script: scripts/eval_phase_pipeline_e2e.py
+    invocation: "--largest --min-kb 600 --max-kb 8000 --limit 20"
+    baseline:
+      held_out_f1: 0.939
+      e2e_planning_fraction: 0.529
+    result:
+      held_out_f1_macro: 0.934
+      held_out_per_class_f1: {planning: 0.993, implementation: 0.923, verification: 0.900, exploration: 0.922}
+      e2e_distribution: {exploration: 0.325, planning: 0.291, verification: 0.269, implementation: 0.115}
+      e2e_events_stamped: "18536/18536 (0 non-control unphased)"
+      verdict: >
+        Planning collapse resolved: e2e planning 52.9% -> 29.1%, verification
+        8.5% -> 26.9%. Held-out F1 dips 0.939 -> 0.934 (the relabeled targets
+        are more nuanced); per-class F1 stays >= 0.90.
+  baseline_for_comparison: phase-classifier-baselines
+
+mlflow:
+  log_params:
+    - feature_set
+    - relabeled_source
+    - prompt_revision
+  log_tags:
+    - stage
+  log_artifacts:
+    - confusion_matrix
+    - per_class_table
+    - e2e_phase_distribution

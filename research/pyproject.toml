@@ -1,0 +1,50 @@
+[project]
+name = "tracemill-research"
+version = "0.1.0"
+description = "Phase-tracker research: data prep, enrichment, feature engineering, model training"
+requires-python = ">=3.11"
+dependencies = [
+    # Core ML
+    "scikit-learn>=1.5",
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "pyarrow>=15",
+    # Tracking
+    "mlflow>=2.16",
+    # Data sources
+    "datasets>=3.0",
+    "huggingface-hub>=0.25",
+    # Tracemill itself (editable, from parent repo)
+    "tracemill",
+    # Misc
+    "pydantic>=2",
+    "pyyaml",
+    "tqdm",
+    # Labeling backend — Copilot Python SDK (drives the labeler / red-team
+    # subagents used by the labeling pipeline). Pinned to the same minor
+    # range used by dfinson/codeplane.
+    "github-copilot-sdk>=0.3.0,<0.4",
+]
+
+[project.optional-dependencies]
+embeddings = [
+    "model2vec>=0.8.2",
+    "sentence-transformers>=3.0",
+]
+notebook = ["jupyterlab", "matplotlib", "seaborn"]
+
+[tool.uv.sources]
+tracemill = { path = "..", editable = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.0",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tracemill_research"]

@@ -1,0 +1,86 @@
+# Pilot experiment — calibrate the activity/step taxonomy YAML against a
+# small Copilot subset before committing to the full labeling run.
+#
+# Companion: research/experiments/activity-step-taxonomy.yaml
+# Doc:        research/docs/07-activity-step-taxonomy.md §7
+
+experiment:
+  name: activity-step-taxonomy-pilot
+  mlflow_experiment: activity-step-pilot-v1
+  display_name: "Activity / Step Pilot — Inter-Annotator Agreement"
+  description: |
+    Calibrate the activity/step taxonomy rubric on a 30-session stratified
+    Copilot subset. Measures Cohen's κ between an LLM annotator and a human
+    annotator at both the activity and step levels, plus granularity
+    distributions (activities/session, steps/activity, turns/segment).
+    Decides whether the rubric in activity-step-taxonomy.yaml is ready for
+    the full labeling run, or which sections need revision.
+  tags:
+    classifier: activity-step
+    pillar: data-quality
+    research_doc: docs/07-activity-step-taxonomy.md
+    stage: pilot
+  goal: >
+    Measure inter-annotator agreement (κ) and granularity distributions for
+    the activity/step taxonomy under the rubric on a stratified Copilot
+    subset, then update the seed values in
+    activity-step-taxonomy.yaml.
+
+dataset:
+  source: copilot-canonicalized
+  pipeline: tracemill                      # raw → enricher → parquet
+  size: 30
+  stratification:
+    short:  { turn_range: [5,  20], n: 10 }
+    medium: { turn_range: [21, 60], n: 10 }
+    long:   { turn_range: [61, 200], n: 10 }
+  rationale: >
+    30 sessions = small enough to allow human annotation in a single
+    afternoon, large enough to estimate κ to ±0.10 (Cohen 1960 SE
+    formula at p ≈ 0.5).
+
+passes:
+  - id: llm
+    annotator: claude-sonnet-4.6
+    config: research/experiments/activity-step-taxonomy.yaml
+  - id: human
+    annotator: project-author
+    rubric: research/docs/07-activity-step-taxonomy.md §3
+
+metrics:
+  iaa:
+    - method: cohen_kappa
+      level: activity
+      target_range: [0.55, 0.65]
+    - method: cohen_kappa
+      level: step
+      target_range: [0.30, 0.45]
+  granularity:
+    - activities_per_session_median
+    - activities_per_session_iqr
+    - steps_per_activity_median
+    - steps_per_activity_iqr
+    - turns_per_activity_median
+    - turns_per_step_median
+  label_quality:
+    - word_count_compliance_rate
+    - imperative_form_compliance_rate
+
+decision_gates:
+  - if: activity_kappa < 0.45
+    action: revise_rubric_section_3_then_rerun
+  - if: step_kappa < 0.20
+    action: revise_step_phrase_list_then_rerun
+  - if: |
+      activities_per_session_median outside [granularity.min, granularity.max]
+      OR steps_per_activity_median outside [granularity.min, granularity.max]
+    action: update_targets_in_taxonomy_yaml_before_full_labeling
+
+mlflow:
+  log_artifacts:
+    - per_session_label_json
+    - confusion_matrix_activity
+    - confusion_matrix_step
+    - granularity_histogram
+  log_params_from: research/experiments/activity-step-taxonomy.yaml
+  log_metrics: all metrics above

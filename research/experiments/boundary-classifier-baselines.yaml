@@ -1,0 +1,111 @@
+# Per-gap activity/step boundary classifier baselines.
+#
+# Companion: docs/01-activity-step-classifier.md and docs/03-feature-design.md.
+# This experiment establishes in-distribution boundary-detection accuracy on the
+# labeled corpus before the cross-framework transfer study
+# (activity-step-classifier-transfer.yaml) and before any segmentation/debounce
+# calibration.
+
+experiment:
+  name: boundary-classifier-baselines
+  mlflow_experiment: boundary-classifier-baselines-v1
+  display_name: "Boundary Classifier — Per-Gap Baselines"
+  description: |
+    Per-gap boundary classification baselines on the labeled boundary corpus
+    (noise / step-boundary / activity-boundary). Severe class imbalance
+    (~92% / ~6% / ~1%). Runs compare:
+
+      * a majority-class floor (always predict noise);
+      * one-vs-rest logistic regression on model2vec embeddings of the
+        adjacent events' text;
+      * gradient-boosted trees on the symbolic canonical dimensions of the
+        adjacent events plus transition indicators;
+      * logistic regression on symbolic + embedding combined.
+
+    Evaluation is leave-session-out (GroupKFold by session_id). The binding
+    metric is the step-boundary class F1 against the docs/05-data-sizing.md
+    decision gate.
+  tags:
+    classifier: boundary
+    pillar: input-quality
+    research_doc: docs/01-activity-step-classifier.md
+    stage: baseline
+
+dataset:
+  source: boundary-labeled-gaps
+  source_note: research/data/processed/boundary-labels.parquet
+  classes: [noise, step-boundary, activity-boundary]
+
+baselines:
+  - id: majority-noise
+    description: always predict the majority class (noise)
+    inputs: [none]
+  - id: model2vec-logreg
+    description: one-vs-rest logistic regression on model2vec embeddings
+    inputs: [adjacent_text]
+  - id: dimensions-gbm
+    description: gradient-boosted trees on symbolic dimensions + transitions
+    inputs: [mechanism, effect, action, transitions]
+  - id: combined-logreg
+    description: logistic regression on symbolic + embedding
+    inputs: [symbolic, adjacent_text]
+  - id: combined-seg-logreg
+    description: combined plus classical-segmentation detector outputs
+    inputs: [symbolic, adjacent_text, segmentation]
+
+# Classical-segmentation detectors fed as features (docs/03-feature-design.md §6).
+# Window sizes and the BOCPD prior are hyperparameters, not magic thresholds:
+# they parameterise detectors whose *outputs* are features the classifier
+# learns to weight. Calibrated post-pilot.
+segmentation:
+  windows:
+    value: [3, 5, 10]
+    source: docs/03-feature-design.md
+    rationale: "multi-scale majority vote — short/medium/long context windows."
+  entropy_window:
+    value: 10
+    source: docs/03-feature-design.md
+    rationale: "trailing window for phase-distribution entropy."
+  bocpd_expected_run_length:
+    value: 12
+    calibration: boundary-baselines
+    rationale: >
+      constant-hazard prior on phase run length (hazard = 1/E[run]); seeded from
+      the median labelled activity span, to be recalibrated against the curve.
+  bocpd_alpha:
+    value: 0.5
+    source: docs/03-feature-design.md
+    rationale: "Dirichlet concentration for the categorical predictive (Jeffreys prior)."
+  bocpd_r_max:
+    value: 60
+    source: docs/03-feature-design.md
+    rationale: "run-length truncation for tractability; > longest typical activity."
+
+acceptance:
+  step_class_min_f1:
+    value: 0.25
+    source: docs/05-data-sizing.md
+    note: >
+      Below this the step-boundary rubric is broken; fix the prompt before
+      collecting more data (docs/05-data-sizing.md recommended protocol step 2).
+
+metrics:
+  primary:
+    - method: f1_macro
+  secondary:
+    - method: per_class_precision
+    - method: per_class_recall
+    - method: per_class_f1
+    - method: confusion_matrix
+
+mlflow:
+  log_params:
+    - baseline_id
+    - feature_set
+    - model_class
+    - hyperparameters
+  log_tags:
+    - baseline_id
+  log_artifacts:
+    - confusion_matrix
+    - per_class_table

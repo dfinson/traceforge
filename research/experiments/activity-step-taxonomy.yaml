@@ -1,0 +1,135 @@
+# Activity / Step taxonomy — labeling and segmentation config.
+#
+# Companion docs:
+#   research/docs/07-activity-step-taxonomy.md
+#   research/docs/08-no-heuristics-policy.md
+#
+# Every value here is either cited (see `source:` field) or marked
+# `calibration:` with the experiment that will tune it. No value is a
+# free-standing magic number.
+
+schema_version: 1
+
+# ---------------------------------------------------------------------------
+# Tier 1 — Activity boundary triggers
+# ---------------------------------------------------------------------------
+activity_boundary:
+  # A1 — explicit goal-change phrases in tool_intent / assistant message.
+  # Source: Passonneau & Litman 1997 (structural triggers raise IAA);
+  # phrase list extracted from rubric in 07-activity-step-taxonomy.md §3.
+  goal_change_phrases:
+    case_sensitive: false
+    phrases:
+      - "Let me now"
+      - "Next, I need to"
+      - "Now I'll"
+      - "Now let's"
+      - "I should"
+      - "Let me switch to"
+      - "Moving on to"
+      - "I'll now"
+      - "Before I can"
+      - "Let me start by"
+      - "First, I'll"
+      - "Time to"
+
+  # A2 — verification-gate completion followed by topic shift.
+  # The "verification gate" tag set comes from the canonical action labels
+  # emitted by the enricher; no string matching on raw commands.
+  verification_gate_actions:
+    - verification.test
+    - verification.build
+    - verification.lint
+    - verification.typecheck
+
+  # A3 — user message presence is a kind-level signal, no threshold.
+
+  # A4 — phase-tracker transitions between these two groups.
+  phase_groups:
+    early: [exploration, planning]
+    late:  [implementation, verification, review]
+
+# ---------------------------------------------------------------------------
+# Tier 2 — Step boundary triggers
+# ---------------------------------------------------------------------------
+step_boundary:
+  # S1 — explicit micro-task phrases.
+  micro_task_phrases:
+    case_sensitive: false
+    phrases:
+      - "First, let me"
+      - "To do this"
+      - "Let me check"
+      - "I should verify"
+      - "Let me look at"
+      - "Now I need to"
+      - "Quick check"
+      - "Let me confirm"
+
+  # S2 — tool-group transitions. The mapping below comes from
+  # AutoDev (Fu et al. 2024) tool taxonomy crossed with the canonical
+  # action labels emitted by the tracemill enricher.
+  tool_groups:
+    investigation: [read_file, search_file, grep, list_dir, web_search, web_fetch]
+    modification:  [edit_file, write_file, create_file, delete_file, rename, patch]
+    validation:    [verification.test, verification.build, verification.lint, verification.typecheck]
+    delivery:      [git_commit, git_push, submit, pr_create, pr_update]
+
+  # S3 — ceiling on consecutive turns in the same tool group without a
+  # new micro-intent. Default seeded from the raw taxonomy research §8;
+  # to be calibrated in the pilot.
+  same_group_run_max:
+    value: 8
+    calibration: activity-step-taxonomy-pilot
+
+# ---------------------------------------------------------------------------
+# Granularity targets — used by the LLM labeler rubric.
+# Seed values come from observed SWE-agent corpus (~43 turns / 6 activities
+# per session, Yang et al. 2024) and Plan-Compliance 4-phase finding
+# (Liu et al. 2026). Calibrated against the pilot before full labeling.
+# ---------------------------------------------------------------------------
+granularity:
+  activities_per_session:
+    min: 3
+    max: 8
+    target_turns_per_activity: 15
+    calibration: activity-step-taxonomy-pilot
+  steps_per_activity:
+    min: 2
+    max: 6
+    target_turns_per_step: 5
+    calibration: activity-step-taxonomy-pilot
+  total_toc_entries_max:
+    value: 35
+    source: "AMI corpus readability ceiling — Carletta 2005"
+
+# ---------------------------------------------------------------------------
+# Label format constraints. Validator reads from this YAML.
+# ---------------------------------------------------------------------------
+label_format:
+  pattern: imperative_verb_object
+  word_count_min: 3
+  word_count_max: 6
+  source: "Liu et al. 2019 (PR descriptions); Conventional Commits"
+  source_priority:
+    - intent_text_first_line     # TextRank P7 — first sentence most informative
+    - dominant_tool_plus_file
+    - llm_summarize
+
+# ---------------------------------------------------------------------------
+# LLM labeling configuration
+# ---------------------------------------------------------------------------
+llm_labeling:
+  model: claude-sonnet-4.6
+  temperature: 0.2
+  source: "Raw taxonomy research §9 prompt-tuning notes"
+  retry_on_validation_error: true
+  max_validation_retries: 3
+  prompt_template_path: prompts/activity-step-labeling.md
+
+# ---------------------------------------------------------------------------
+# IAA expectations — calibration targets, not pass/fail gates.
+# ---------------------------------------------------------------------------
+iaa_targets:
+  activity_kappa: { min: 0.55, max: 0.65, source: "AMI corpus topic-level" }
+  step_kappa:     { min: 0.30, max: 0.45, source: "AMI corpus sub-topic / Passonneau & Litman 1997" }

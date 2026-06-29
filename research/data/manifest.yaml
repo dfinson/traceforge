@@ -1,0 +1,117 @@
+# Data manifest — single source of truth for what data exists, where it came from, and its hash.
+# Everything under data/raw/, data/interim/, data/processed/ should be derivable from this file.
+#
+# Schema:
+#   sources:
+#     <source_id>:
+#       kind: hf-dataset | local-file | hf-file
+#       repo: <hf repo id, if applicable>
+#       path: <local path under data/raw/, or absolute path for legacy>
+#       url: <canonical retrieval URL>
+#       description: <one-line>
+#       fetched: <ISO date when first pulled>
+#       sha256: <of canonical file or manifest, when applicable>
+#       count: <session/row count, when knowable>
+
+version: 1
+
+sources:
+
+  # ── Existing local data (legacy — copied from WSL ~/tracemill-labels/ on 2026-06-17) ──
+  # Paths are relative to research/data/raw/. All files are Windows-native here.
+
+  legacy_labels_v2:
+    kind: local-file
+    path: legacy/fulltext/labels_v2.json
+    description: "Per-turn boundary classifier training labels (noise/activity/step). 514 sessions."
+    fetched: 2026-06-17
+    count: 514
+
+  legacy_all_fulltext:
+    kind: local-file
+    path: legacy/fulltext/all_fulltext.json
+    description: "Condensed turn-level transcripts: {session_id, source, turn_count, turns:[{role,text,has_command}]}. 1500 sessions (500 each: swe-agent / openhands / swesmith)."
+    fetched: 2026-06-17
+    count: 1500
+
+  legacy_swe_agent_extracted_v2:
+    kind: local-file
+    path: legacy/swe_agent_extracted_v2.json
+    description: "Per-event tool extractions {seq, tool_name, file_path}. Keyed by __runN; only 3/514 labels match here."
+    fetched: 2026-06-17
+    count: 500
+
+  legacy_openhands_extracted:
+    kind: local-file
+    path: legacy/openhands_extracted.json
+    description: "Per-event tool extractions for OpenHands sessions."
+    fetched: 2026-06-17
+    count: 500
+
+  legacy_swesmith_extracted:
+    kind: local-file
+    path: legacy/swesmith_extracted.json
+    description: "Per-event tool extractions for SWE-smith sessions."
+    fetched: 2026-06-17
+    count: 500
+
+  legacy_phase_labels:
+    kind: local-file
+    path: legacy/fulltext/phase_labels.json
+    description: "Phase-level annotations (separate from boundary labels)."
+    fetched: 2026-06-17
+
+  # ── HuggingFace originals (raw .traj-style histories) ───────────────────
+
+  hf_swe_agent_trajectories:
+    kind: hf-dataset
+    repo: nebius/SWE-agent-trajectories
+    description: "SWE-agent .traj-style histories. 12 parquet shards. Likely source for 390 swe-agent labeled sessions."
+    fetched: null       # set when ingested
+    sha256: null
+
+  hf_swe_smith_trajectories:
+    kind: hf-dataset
+    repo: SWE-bench/SWE-smith-trajectories
+    description: "SWE-smith full trajectories. 8 parquet shards (named ticks-NNNNN-of-00008). Likely source for 500 swesmith sessions."
+    fetched: null
+    sha256: null
+
+  hf_openhands_sampled_trajectories:
+    kind: hf-dataset
+    repo: SWE-Gym/OpenHands-Sampled-Trajectories
+    description: "OpenHands trajectories (raw). 3 parquet shards. Candidate source for 124 openhands labeled sessions."
+    fetched: null
+    sha256: null
+
+  hf_swe_rebench_openhands:
+    kind: hf-dataset
+    repo: nebius/SWE-rebench-openhands-trajectories
+    description: "OpenHands trajectories (alternate). Single trajectories.parquet."
+    fetched: null
+    sha256: null
+
+  # ── Local agent session stores (for live trace ingestion) ───────────────
+  # Found 2026-06-17; not yet ingested.
+
+  local_copilot_windows:
+    kind: local-dir
+    path: C:\Users\davidfinson\.copilot\session-state
+    description: "Local Copilot CLI sessions (Windows) — per-session UUID dir, each contains session.db."
+    fetched: null
+
+  local_claude_windows_sessions:
+    kind: local-dir
+    path: C:\Users\davidfinson\.claude\sessions
+    description: "Local Claude Code session JSONLs (Windows)."
+    fetched: null
+
+  local_claude_code_appdata:
+    kind: local-dir
+    path: C:\Users\davidfinson\AppData\Roaming\Claude\claude-code
+    description: "Claude Code app data (Windows)."
+    fetched: null
+
+# Derived datasets (built by pipelines, content-hashed).
+# Schema: <id>: built_from: [sources], by: <pipeline module>, output: <data/interim or data/processed path>
+derived: {}

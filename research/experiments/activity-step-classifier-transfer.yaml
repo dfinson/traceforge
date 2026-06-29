@@ -1,0 +1,101 @@
+# Cross-framework transfer evaluation for the activity/step boundary classifier.
+#
+# Doc: research/docs/04-transfer-strategy.md
+#
+# Each MLflow run is one cell of the train×test framework matrix or one
+# leave-one-framework-out training. Run names are human-readable
+# ("openhands-train→swe-agent-test"), never serial codes.
+
+experiment:
+  name: activity-step-classifier-transfer
+  mlflow_experiment: activity-step-transfer-v1
+  display_name: "Activity / Step Classifier — Cross-Framework Transfer"
+  description: |
+    Whether the activity/step boundary classifier transfers across agent
+    frameworks. Three sub-questions, each represented as a run group with
+    a parent run aggregating the cells:
+
+      1. In-distribution baselines: train and test on the same framework.
+         Sanity check; should match published numbers.
+      2. Pairwise transfer: train on one framework, test on a different
+         one. Measures host specificity of the learned signal.
+      3. Leave-one-framework-out: train on every labeled framework except
+         one, test on the held-out one. Measures whether multi-framework
+         training generalizes.
+
+    Frameworks in scope: SWE-agent, OpenHands, SWE-smith. Copilot is
+    unlabeled and is excluded from the test column on the first pass; see
+    04-transfer-strategy.md §"The Copilot row problem".
+  tags:
+    classifier: activity-step
+    pillar: generalization
+    research_doc: docs/04-transfer-strategy.md
+    stage: evaluation
+
+dataset:
+  source: labeled-boundary-corpus
+  frameworks: [swe-agent, openhands, swe-smith]
+  copilot_strategy: held-out-as-unlabeled-augmentation-only
+  rationale: >
+    Copilot has no canonical-form boundary labels; treat its data as
+    embedding-domain-adaptation source only until a labeled subset exists.
+
+run_groups:
+  - id: in-distribution
+    description: train and test on same framework
+    cells:
+      - { train: swe-agent,  test: swe-agent }
+      - { train: openhands,  test: openhands }
+      - { train: swe-smith,  test: swe-smith }
+  - id: pairwise-transfer
+    description: train on one framework, test on another
+    cells:
+      - { train: swe-agent,  test: openhands }
+      - { train: swe-agent,  test: swe-smith }
+      - { train: openhands,  test: swe-agent }
+      - { train: openhands,  test: swe-smith }
+      - { train: swe-smith,  test: swe-agent }
+      - { train: swe-smith,  test: openhands }
+  - id: leave-one-framework-out
+    description: train on N-1 frameworks combined, test on held-out
+    cells:
+      - { train: [openhands, swe-smith], test: swe-agent }
+      - { train: [swe-agent, swe-smith], test: openhands }
+      - { train: [swe-agent, openhands], test: swe-smith }
+
+acceptance:
+  in_distribution_min_f1_macro:        { value: 0.55, source: docs/04-transfer-strategy.md }
+  pairwise_transfer_min_f1_macro:      { value: 0.45, source: docs/04-transfer-strategy.md }
+  leave_one_out_min_f1_macro:          { value: 0.50, source: docs/04-transfer-strategy.md }
+  pairwise_floor_below_which_signal_breaks:
+    value: 0.40
+    source: docs/04-transfer-strategy.md
+    note: >
+      Below this floor, treat the feature design as host-specific (model2vec
+      portability claim invalid) or the classifier as overfit.
+
+metrics:
+  primary:
+    - method: f1_macro
+  secondary:
+    - method: per_class_precision
+    - method: per_class_recall
+    - method: per_class_f1
+    - method: confusion_matrix
+
+mlflow:
+  log_params:
+    - feature_set_id
+    - model_class
+    - hyperparameters
+    - train_split
+    - test_split
+  log_tags:
+    - framework_train
+    - framework_test
+    - run_group
+  log_artifacts:
+    - feature_matrix_shape
+    - model_object
+    - test_predictions
+    - confusion_matrix

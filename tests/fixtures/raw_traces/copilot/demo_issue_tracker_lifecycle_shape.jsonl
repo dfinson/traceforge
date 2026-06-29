@@ -1,0 +1,9 @@
+{"type":"session.start","id":"a1","timestamp":"2026-06-29T09:00:00.000Z","parentId":null,"data":{"selectedModel":"claude-opus-4.8","context":{"cwd":"/repo/demo-issue-tracker-api"},"copilotVersion":"1.0.65"}}
+{"type":"session.workspace_file_changed","id":"a2","timestamp":"2026-06-29T09:00:01.000Z","parentId":null,"data":{"path":"src/routes/tickets.py","operation":"create"}}
+{"type":"session.workspace_file_changed","id":"a3","timestamp":"2026-06-29T09:00:02.000Z","parentId":null,"data":{"path":"src/routes/tickets.py","operation":"edit"}}
+{"type":"session.plan_changed","id":"a4","timestamp":"2026-06-29T09:00:03.000Z","parentId":null,"data":{"operation":"create"}}
+{"type":"system.notification","id":"a5","timestamp":"2026-06-29T09:00:04.000Z","parentId":null,"data":{"content":"Agent completed successfully.","kind":{"type":"agent_completed","agentId":"verify","agentType":"research","status":"completed"}}}
+{"type":"session.permissions_changed","id":"a6","timestamp":"2026-06-29T09:00:05.000Z","parentId":null,"data":{"previousAllowAllPermissions":false,"allowAllPermissions":true}}
+{"type":"session.compaction_start","id":"a7","timestamp":"2026-06-29T09:00:06.000Z","parentId":null,"data":{"systemTokens":13824,"conversationTokens":135800,"toolDefinitionsTokens":10834}}
+{"type":"session.compaction_complete","id":"a8","timestamp":"2026-06-29T09:00:07.000Z","parentId":null,"data":{"success":true,"preCompactionTokens":160458,"preCompactionMessagesLength":244,"summaryContent":"Implemented GET /tickets/{id} endpoint and tests."}}
+{"type":"session.shutdown","id":"a9","timestamp":"2026-06-29T09:00:08.000Z","parentId":null,"data":{"shutdownType":"normal","totalApiDurationMs":12345}}

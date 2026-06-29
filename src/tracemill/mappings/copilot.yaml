@@ -60,6 +60,39 @@ events:
     payload:
       message: data.message
 
+  # data.kind.type carries the notification subtype (e.g. agent_completed);
+  # mapped to session.info since it is informational, not a turn message.
+  system.notification:
+    kind: session.info
+    payload:
+      message: data.content
+
+  session.plan_changed:
+    kind: planning.completed
+    payload:
+      operation: data.operation
+
+  session.compaction_start:
+    kind: session.info
+    payload:
+      system_tokens: data.systemTokens
+      conversation_tokens: data.conversationTokens
+      tool_definitions_tokens: data.toolDefinitionsTokens
+
+  session.compaction_complete:
+    kind: session.info
+    payload:
+      success: data.success
+      pre_compaction_tokens: data.preCompactionTokens
+      pre_compaction_messages_length: data.preCompactionMessagesLength
+      summary: data.summaryContent
+
+  session.permissions_changed:
+    kind: permission.granted
+    payload:
+      allow_all: data.allowAllPermissions
+      previous_allow_all: data.previousAllowAllPermissions
+
   session.idle:
     kind: session.idle
     payload: {}
@@ -71,6 +104,15 @@ events:
       model: data.newModel
       reasoning_effort: data.reasoningEffort
       context_tier: data.contextTier
+
+  # ── Workspace files ──────────────────────────────────────────────────────────
+  # operation ∈ {create, edit, delete}; mapped to a generic file edit, with the
+  # exact operation preserved in the payload.
+  session.workspace_file_changed:
+    kind: file.edited
+    payload:
+      path: data.path
+      operation: data.operation
 
   # ── Messages ───────────────────────────────────────────────────────────────
   user.message:

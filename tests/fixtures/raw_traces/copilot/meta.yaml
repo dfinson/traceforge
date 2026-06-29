@@ -6,4 +6,4 @@ model: copilot-default
 captured_at: "2026-06-28T10:57:44Z"
 tracemill_commit: 74a706d
 line_count: 59
-notes: Real headless `copilot -p` session on the vendored demo repo; native ~/.copilot/session-state/<id>/events.jsonl event rows.
+notes: Real headless `copilot -p` session on the vendored demo repo; native ~/.copilot/session-state/<id>/events.jsonl event rows. A second scenario (demo_issue_tracker_lifecycle_shape.jsonl) carries verbatim instances of the lifecycle/notification event types — session.workspace_file_changed, session.plan_changed, system.notification, session.permissions_changed, session.compaction_start/complete — so the golden guards them.

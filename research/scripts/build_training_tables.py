@@ -121,8 +121,12 @@ def main() -> int:
     log.info("loaded %d label files", len(records))
 
     counts = {
-        "labeled": 0, "labeled-flagged": 0, "skipped-too-large": 0,
-        "labeler-failed": 0, "redteam-failed": 0, "validate-failed": 0,
+        "labeled": 0,
+        "labeled-flagged": 0,
+        "skipped-too-large": 0,
+        "labeler-failed": 0,
+        "redteam-failed": 0,
+        "validate-failed": 0,
         "other": 0,
     }
     phase_rows: list[dict] = []
@@ -143,7 +147,9 @@ def main() -> int:
     log.info("status counts: %s", counts)
     log.info(
         "rows: phase=%d boundary=%d toc=%d",
-        len(phase_rows), len(boundary_rows), len(toc_rows),
+        len(phase_rows),
+        len(boundary_rows),
+        len(toc_rows),
     )
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)

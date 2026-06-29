@@ -122,10 +122,7 @@ def main() -> int:
 
         take = src.get("take")
         if take == "all":
-            entries = [
-                {"session_id": sid, "bucket": "all", "n_events": n}
-                for sid, n in rows
-            ]
+            entries = [{"session_id": sid, "bucket": "all", "n_events": n} for sid, n in rows]
             diag = {"all": {"pool": len(rows), "selected": len(rows)}}
         else:
             target = int(src["target_size"]["value"])
@@ -133,20 +130,24 @@ def main() -> int:
             log.info("  target=%d selected=%d", target, len(entries))
 
         for e in entries:
-            sessions_out.append({
-                "session_id": e["session_id"],
-                "source": name,
-                "parquet": f"{subdir}/{e['session_id']}.parquet",
-                "bucket": e["bucket"],
-                "n_events": e["n_events"],
-            })
-        sources_out.append({
-            "name": name,
-            "subdir": subdir,
-            "pool_size": len(rows),
-            "selected_size": sum(d.get("selected", 0) for d in diag.values()),
-            "buckets": diag,
-        })
+            sessions_out.append(
+                {
+                    "session_id": e["session_id"],
+                    "source": name,
+                    "parquet": f"{subdir}/{e['session_id']}.parquet",
+                    "bucket": e["bucket"],
+                    "n_events": e["n_events"],
+                }
+            )
+        sources_out.append(
+            {
+                "name": name,
+                "subdir": subdir,
+                "pool_size": len(rows),
+                "selected_size": sum(d.get("selected", 0) for d in diag.values()),
+                "buckets": diag,
+            }
+        )
 
     # Deterministic global order for resumability stability.
     sessions_out.sort(key=lambda r: (r["source"], r["session_id"]))
@@ -164,8 +165,12 @@ def main() -> int:
     MANIFEST_OUT.parent.mkdir(parents=True, exist_ok=True)
     with MANIFEST_OUT.open("w", encoding="utf-8") as fh:
         yaml.safe_dump(manifest, fh, sort_keys=False)
-    log.info("wrote %s (%d sessions across %d sources)",
-             MANIFEST_OUT, len(sessions_out), len(sources_out))
+    log.info(
+        "wrote %s (%d sessions across %d sources)",
+        MANIFEST_OUT,
+        len(sessions_out),
+        len(sources_out),
+    )
     return 0
 
 

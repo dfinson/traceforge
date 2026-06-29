@@ -45,9 +45,7 @@ DEFAULT_ROOTS = (
 )
 
 
-def _discover_sessions(
-    roots: tuple[Path, ...], idle_minutes: int
-) -> list[tuple[str, Path, int]]:
+def _discover_sessions(roots: tuple[Path, ...], idle_minutes: int) -> list[tuple[str, Path, int]]:
     """Return (session_id, events.jsonl path, byte size) for usable sessions.
 
     Across all roots, dedupes by session_id (snapshots win over live dirs).
@@ -71,8 +69,7 @@ def _discover_sessions(
                 continue
             st = ev.stat()
             if not is_snapshot and st.st_mtime > cutoff:
-                log.debug("skip live session %s (mtime within %d min)",
-                          sid_dir.name, idle_minutes)
+                log.debug("skip live session %s (mtime within %d min)", sid_dir.name, idle_minutes)
                 continue
             # Snapshot wins if both exist
             existing = by_sid.get(sid_dir.name)
@@ -110,8 +107,7 @@ async def _process_session(
                         n_emit += 1
                 except Exception as exc:  # noqa: BLE001
                     # One bad line shouldn't kill the whole session.
-                    log.debug("parse error in %s line %d: %s",
-                              session_id, n_lines, exc)
+                    log.debug("parse error in %s line %d: %s", session_id, n_lines, exc)
     finally:
         await sink.close()
     return n_lines, n_emit
@@ -128,21 +124,18 @@ async def main_async(args: argparse.Namespace) -> int:
         before = len(sessions)
         max_bytes = args.max_mb * 1024 * 1024
         sessions = [s for s in sessions if s[2] <= max_bytes]
-        log.info("size filter: %d → %d (max %d MB)",
-                 before, len(sessions), args.max_mb)
+        log.info("size filter: %d → %d (max %d MB)", before, len(sessions), args.max_mb)
 
     if args.limit:
         sessions = sessions[: args.limit]
 
     log.info("ingesting %d sessions from %s", len(sessions), args.root)
 
-    stats = {"seen": 0, "ok": 0, "empty": 0, "failed": 0,
-             "lines": 0, "events": 0}
+    stats = {"seen": 0, "ok": 0, "empty": 0, "failed": 0, "lines": 0, "events": 0}
     for sid, jsonl, size in sessions:
         stats["seen"] += 1
         try:
-            n_lines, n_emit = await _process_session(
-                mapping_path, sid, jsonl, OUT_DIR)
+            n_lines, n_emit = await _process_session(mapping_path, sid, jsonl, OUT_DIR)
         except Exception as exc:  # noqa: BLE001
             log.exception("session %s failed: %s", sid, exc)
             stats["failed"] += 1
@@ -152,16 +145,23 @@ async def main_async(args: argparse.Namespace) -> int:
             # Empty parquet — clean up so the corpus stays tight.
             parquet = OUT_DIR / f"{sid}.parquet"
             if parquet.exists():
-                try: os.remove(parquet)
-                except OSError: pass
+                try:
+                    os.remove(parquet)
+                except OSError:
+                    pass
         else:
             stats["ok"] += 1
         stats["lines"] += n_lines
         stats["events"] += n_emit
         if stats["seen"] % 25 == 0:
-            log.info("  progress seen=%d ok=%d empty=%d failed=%d "
-                     "events=%d", stats["seen"], stats["ok"],
-                     stats["empty"], stats["failed"], stats["events"])
+            log.info(
+                "  progress seen=%d ok=%d empty=%d failed=%d events=%d",
+                stats["seen"],
+                stats["ok"],
+                stats["empty"],
+                stats["failed"],
+                stats["events"],
+            )
 
     log.info("done: %s", stats)
     log.info("output: %s", OUT_DIR)
@@ -170,22 +170,32 @@ async def main_async(args: argparse.Namespace) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, action="append", default=None,
-                        help="Copilot session-state root (repeatable). "
-                             "Defaults to ~/.copilot/session-state plus "
-                             "~/.copilot/session-state-snapshots.")
-    parser.add_argument("--limit", type=int, default=None,
-                        help="Optional cap on sessions to process.")
     parser.add_argument(
-        "--max-mb", type=int, default=None,
-        help="Skip sessions whose events.jsonl is larger than this. "
-             "Large ones (>>50 MB) are usually long-running infra/agent "
-             "sessions whose token cost dwarfs the labeling-quality gain.",
+        "--root",
+        type=Path,
+        action="append",
+        default=None,
+        help="Copilot session-state root (repeatable). "
+        "Defaults to ~/.copilot/session-state plus "
+        "~/.copilot/session-state-snapshots.",
     )
     parser.add_argument(
-        "--idle-minutes", type=int, default=10,
+        "--limit", type=int, default=None, help="Optional cap on sessions to process."
+    )
+    parser.add_argument(
+        "--max-mb",
+        type=int,
+        default=None,
+        help="Skip sessions whose events.jsonl is larger than this. "
+        "Large ones (>>50 MB) are usually long-running infra/agent "
+        "sessions whose token cost dwarfs the labeling-quality gain.",
+    )
+    parser.add_argument(
+        "--idle-minutes",
+        type=int,
+        default=10,
         help="Skip sessions whose events.jsonl was modified within this "
-             "many minutes — they're likely still being written.",
+        "many minutes — they're likely still being written.",
     )
     args = parser.parse_args()
     if args.root is None:

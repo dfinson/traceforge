@@ -76,9 +76,7 @@ def _logreg_factory():
 
 
 def _gbm_factory():
-    return OneVsRestClassifier(
-        HistGradientBoostingClassifier(random_state=SEED)
-    )
+    return OneVsRestClassifier(HistGradientBoostingClassifier(random_state=SEED))
 
 
 def _rule_predictions(examples, mlb: MultiLabelBinarizer) -> np.ndarray:
@@ -104,7 +102,13 @@ def _evaluate(name, feature_set, factory, examples, y, groups, embeddings, mlb, 
         hyperparams = "{}"
     else:
         y_pred = oof_predictions(
-            examples, y, groups, embeddings, feature_set, factory, N_SPLITS,
+            examples,
+            y,
+            groups,
+            embeddings,
+            feature_set,
+            factory,
+            N_SPLITS,
             drop_prefixes=drop_prefixes,
         )
         est = factory()
@@ -213,7 +217,14 @@ def main() -> int:
     results = {}
     for name, feature_set, factory, drop_prefixes in plan:
         results[name] = _evaluate(
-            name, feature_set, factory, examples, y, groups, embeddings, mlb,
+            name,
+            feature_set,
+            factory,
+            examples,
+            y,
+            groups,
+            embeddings,
+            mlb,
             drop_prefixes=drop_prefixes,
         )
 
@@ -225,11 +236,12 @@ def main() -> int:
         print(f"  {name:<24} f1_macro={m['f1_macro']:.3f}  f1_micro={m['f1_micro']:.3f}")
     print("  per-class F1 (combined-logreg):")
     for c, pc in results["combined-logreg"]["per_class"].items():
-        print(f"    {c:<16} f1={pc['f1']:.3f}  P={pc['precision']:.3f}  R={pc['recall']:.3f}  n={int(pc['support'])}")
+        print(
+            f"    {c:<16} f1={pc['f1']:.3f}  P={pc['precision']:.3f}  R={pc['recall']:.3f}  n={int(pc['support'])}"
+        )
 
     leak_delta = (
-        results["combined-logreg"]["f1_macro"]
-        - results["combined-logreg-noleak"]["f1_macro"]
+        results["combined-logreg"]["f1_macro"] - results["combined-logreg-noleak"]["f1_macro"]
     )
     print("\n  leakage ablation (drop enricher phase_signals from symbolic block):")
     print(f"    combined        f1_macro={results['combined-logreg']['f1_macro']:.3f}")
@@ -257,7 +269,9 @@ def main() -> int:
             f1 = results[name]["f1_macro"]
             print(f"    {name:<32} f1_macro={f1:.3f}  ({f1 - base_f1:+.3f} vs combined)")
     seg_lift = results["combined-seg-logreg"]["f1_macro"] - base_f1
-    nbr_lift = results["combined-seg-nbr-logreg"]["f1_macro"] - results["combined-seg-logreg"]["f1_macro"]
+    nbr_lift = (
+        results["combined-seg-nbr-logreg"]["f1_macro"] - results["combined-seg-logreg"]["f1_macro"]
+    )
     print(f"    segmentation lift (combined-seg - combined):      {seg_lift:+.3f}")
     print(f"    neighbor lift (combined-seg-nbr - combined-seg):  {nbr_lift:+.3f}")
     cos_f1 = results["combined-seg-nbrcos-logreg"]["f1_macro"]
@@ -269,10 +283,14 @@ def main() -> int:
     )
     print(f"    full-context leakage delta (nbr - nbr-noleak):    {ctx_leak:+.3f}")
 
-    print(f"\n  review modifier: {n_review} events folded into {REVIEW_REMAPS_TO}, "
-          f"surfaced as is_review flag (emitted, not gated)")
-    print(f"  GATE F1_macro > {F1_MACRO_GATE}: best={best['f1_macro']:.3f} "
-          f"({best['baseline_id']}) -> {'PASS' if gate else 'FAIL'}")
+    print(
+        f"\n  review modifier: {n_review} events folded into {REVIEW_REMAPS_TO}, "
+        f"surfaced as is_review flag (emitted, not gated)"
+    )
+    print(
+        f"  GATE F1_macro > {F1_MACRO_GATE}: best={best['f1_macro']:.3f} "
+        f"({best['baseline_id']}) -> {'PASS' if gate else 'FAIL'}"
+    )
     print(f"  wrote {out}")
     return 0
 

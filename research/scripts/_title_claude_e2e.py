@@ -75,22 +75,30 @@ def _gen_titles(mdl, tok, dev, contexts):
     out_alts: list[list[str]] = []
     with torch.no_grad():
         for i in range(0, len(contexts), 64):
-            chunk = contexts[i:i + 64]
-            enc = tok([PREFIX + c for c in chunk], padding=True, truncation=True,
-                      max_length=MAX_SRC, return_tensors="pt").to(dev)
-            gen = mdl.generate(**enc, max_new_tokens=MAX_TGT, num_beams=NB,
-                               num_return_sequences=NB, no_repeat_ngram_size=2,
-                               repetition_penalty=1.3, length_penalty=0.8,
-                               early_stopping=True)
+            chunk = contexts[i : i + 64]
+            enc = tok(
+                [PREFIX + c for c in chunk],
+                padding=True,
+                truncation=True,
+                max_length=MAX_SRC,
+                return_tensors="pt",
+            ).to(dev)
+            gen = mdl.generate(
+                **enc,
+                max_new_tokens=MAX_TGT,
+                num_beams=NB,
+                num_return_sequences=NB,
+                no_repeat_ngram_size=2,
+                repetition_penalty=1.3,
+                length_penalty=0.8,
+                early_stopping=True,
+            )
             dec = [s.strip() for s in tok.batch_decode(gen, skip_special_tokens=True)]
             for j in range(len(chunk)):
-                cand = dec[j * NB:(j + 1) * NB]
+                cand = dec[j * NB : (j + 1) * NB]
                 out_main.append(cand[0])
                 out_alts.append(cand)
     return out_main, out_alts
-
-
-
 
 
 async def _run(args: argparse.Namespace) -> int:
@@ -107,8 +115,11 @@ async def _run(args: argparse.Namespace) -> int:
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     tok = AutoTokenizer.from_pretrained(MODEL_DIR)
     mdl = T5ForConditionalGeneration.from_pretrained(MODEL_DIR).to(dev).eval()
-    print(f"device={dev}  boundary classes={model.classes}  "
-          f"decode={'causal' if model.decode_params else 'argmax'}", file=sys.stderr)
+    print(
+        f"device={dev}  boundary classes={model.classes}  "
+        f"decode={'causal' if model.decode_params else 'argmax'}",
+        file=sys.stderr,
+    )
     show_ctx = os.environ.get("SHOW_CTX") == "1"
 
     files = sorted(Path(args.dir).glob("*.jsonl"))
@@ -122,8 +133,7 @@ async def _run(args: argparse.Namespace) -> int:
         if not events:
             print(f"\n SESSION  [claude]  {sid}: no events", file=sys.stderr)
             continue
-        rows_by_id = {ev.id: event_to_feature_row(ev, seq)
-                      for seq, ev in enumerate(events)}
+        rows_by_id = {ev.id: event_to_feature_row(ev, seq) for seq, ev in enumerate(events)}
         preds = predict_session(model, sid, args.boundary_source, rows_by_id)
         acts = _assemble(events, rows_by_id, preds)
 
@@ -145,8 +155,10 @@ async def _run(args: argparse.Namespace) -> int:
         title = {(j[0], j[1]): (m, a) for j, m, a in zip(jobs, mains, alts)}
 
         n_steps = sum(len(a["steps"]) for a in acts)
-        print(f"\n SESSION  [claude]  {sid}  "
-              f"({len(events)} events -> {len(acts)} activities / {n_steps} segments)")
+        print(
+            f"\n SESSION  [claude]  {sid}  "
+            f"({len(events)} events -> {len(acts)} activities / {n_steps} segments)"
+        )
         used: set[str] = set()
         for ai, act in enumerate(acts):
             last_act = ai == len(acts) - 1
@@ -173,14 +185,22 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     default_dir = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "data", "interim", "claude-sessions")
-    p.add_argument("--dir", default=default_dir,
-                   help="directory of Claude *.jsonl transcripts")
-    p.add_argument("--src", default="claude",
-                   help="source key for distilled_context boilerplate filter "
-                        "(claude has no learned boilerplate -> no-op)")
-    p.add_argument("--boundary-source", default="copilot",
-                   help="source arg passed to predict_session feature rows")
+        "data",
+        "interim",
+        "claude-sessions",
+    )
+    p.add_argument("--dir", default=default_dir, help="directory of Claude *.jsonl transcripts")
+    p.add_argument(
+        "--src",
+        default="claude",
+        help="source key for distilled_context boilerplate filter "
+        "(claude has no learned boilerplate -> no-op)",
+    )
+    p.add_argument(
+        "--boundary-source",
+        default="copilot",
+        help="source arg passed to predict_session feature rows",
+    )
     args = p.parse_args()
     return asyncio.run(_run(args))
 

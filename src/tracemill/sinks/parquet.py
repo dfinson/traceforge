@@ -34,9 +34,7 @@ _DEFAULT_MAX_BUFFERED_EVENTS = 5_000
 _DEFAULT_COMPRESSION = "zstd"
 _DEFAULT_ROW_GROUP_SIZE = 10_000
 _SAFE_SESSION_RE = re.compile(r"[^a-zA-Z0-9_\-]")
-_SESSION_END_KINDS = frozenset(
-    {EventKind.SESSION_ENDED, EventKind.SESSION_PAUSED}
-)
+_SESSION_END_KINDS = frozenset({EventKind.SESSION_ENDED, EventKind.SESSION_PAUSED})
 
 
 def _build_title_schema() -> pa.Schema:
@@ -159,11 +157,7 @@ class ParquetSink(StorageSink):
         # Containment check: resolved path must stay under the template's
         # parent directory.
         if "{session_id}" in self._path_template:
-            base_dir = (
-                Path(self._path_template.split("{session_id}")[0])
-                .expanduser()
-                .resolve()
-            )
+            base_dir = Path(self._path_template.split("{session_id}")[0]).expanduser().resolve()
         else:
             base_dir = Path(self._path_template).expanduser().resolve()
         if not str(path).startswith(str(base_dir)):
@@ -202,9 +196,7 @@ class ParquetSink(StorageSink):
         if titles:
             await asyncio.to_thread(self._write_titles, session_id, flush_idx, titles)
 
-    def _write_rows(
-        self, session_id: str, flush_idx: int, rows: list[dict[str, Any]]
-    ) -> None:
+    def _write_rows(self, session_id: str, flush_idx: int, rows: list[dict[str, Any]]) -> None:
         path = self._resolve_path(session_id, flush_idx)
         path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -245,9 +237,7 @@ class ParquetSink(StorageSink):
                 }
             )
 
-    def _write_titles(
-        self, session_id: str, flush_idx: int, rows: list[dict[str, Any]]
-    ) -> None:
+    def _write_titles(self, session_id: str, flush_idx: int, rows: list[dict[str, Any]]) -> None:
         evt_path = self._resolve_path(session_id, flush_idx)
         path = evt_path.with_name(f"{evt_path.stem}.titles{evt_path.suffix}")
         path.parent.mkdir(parents=True, exist_ok=True)

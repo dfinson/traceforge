@@ -75,9 +75,7 @@ def _evaluate(name, feature_set, factory, examples, y, groups, embeddings):
         model_class = "majority-class"
         hyperparams = "{}"
     else:
-        y_pred = oof_predictions(
-            examples, y, groups, embeddings, feature_set, factory, N_SPLITS
-        )
+        y_pred = oof_predictions(examples, y, groups, embeddings, feature_set, factory, N_SPLITS)
         est = factory()
         model_class = type(est).__name__
         hyperparams = json.dumps(est.get_params(), default=str)[:480]
@@ -154,9 +152,7 @@ def main() -> int:
     ]
     results = {}
     for name, feature_set, factory in plan:
-        results[name] = _evaluate(
-            name, feature_set, factory, examples, y, groups, embeddings
-        )
+        results[name] = _evaluate(name, feature_set, factory, examples, y, groups, embeddings)
 
     out = DATA_PROCESSED / "boundary-eval.json"
     out.write_text(json.dumps(results, indent=2), encoding="utf-8")
@@ -167,7 +163,9 @@ def main() -> int:
         print(f"  {name:<20} f1_macro={m['f1_macro']:.3f}  step_f1={step_f1:.3f}")
     print("  per-class (combined-seg-logreg):")
     for c, pc in results["combined-seg-logreg"]["per_class"].items():
-        print(f"    {c:<18} f1={pc['f1']:.3f}  P={pc['precision']:.3f}  R={pc['recall']:.3f}  n={int(pc['support'])}")
+        print(
+            f"    {c:<18} f1={pc['f1']:.3f}  P={pc['precision']:.3f}  R={pc['recall']:.3f}  n={int(pc['support'])}"
+        )
 
     seg_lift = (
         results["combined-seg-logreg"]["per_class"][STEP_CLASS]["f1"]
@@ -178,8 +176,10 @@ def main() -> int:
     best_step = max(results.values(), key=lambda m: m["per_class"][STEP_CLASS]["f1"])
     step_f1 = best_step["per_class"][STEP_CLASS]["f1"]
     gate = step_f1 >= STEP_F1_GATE
-    print(f"\n  GATE step-boundary F1 >= {STEP_F1_GATE}: best={step_f1:.3f} "
-          f"({best_step['baseline_id']}) -> {'PASS' if gate else 'FAIL (rubric needs work)'}")
+    print(
+        f"\n  GATE step-boundary F1 >= {STEP_F1_GATE}: best={step_f1:.3f} "
+        f"({best_step['baseline_id']}) -> {'PASS' if gate else 'FAIL (rubric needs work)'}"
+    )
     print(f"  wrote {out}")
     return 0
 

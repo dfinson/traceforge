@@ -148,25 +148,34 @@ class SessionTitleStream:
         used: set = set()
         if activity_title:
             used.add(norm_key(activity_title))
-            updates.append(TitleUpdate(
-                session_id=self._session_id, segment_id=activity_id,
-                kind="activity", title=activity_title))
+            updates.append(
+                TitleUpdate(
+                    session_id=self._session_id,
+                    segment_id=activity_id,
+                    kind="activity",
+                    title=activity_title,
+                )
+            )
 
         for step in steps:
             step_title = self._inf._title_distinct(step.rows, used) or None
             if step_title:
-                updates.append(TitleUpdate(
-                    session_id=self._session_id, segment_id=step.step_id,
-                    kind="step", title=step_title, parent_id=activity_id))
+                updates.append(
+                    TitleUpdate(
+                        session_id=self._session_id,
+                        segment_id=step.step_id,
+                        kind="step",
+                        title=step_title,
+                        parent_id=activity_id,
+                    )
+                )
         return updates
 
     @staticmethod
-    def _stamp(event: SessionEvent, activity_id: str | None,
-               step_id: str | None) -> SessionEvent:
+    def _stamp(event: SessionEvent, activity_id: str | None, step_id: str | None) -> SessionEvent:
         if event.metadata is None:
             return event
-        new_md = event.metadata.model_copy(
-            update={"activity_id": activity_id, "step_id": step_id})
+        new_md = event.metadata.model_copy(update={"activity_id": activity_id, "step_id": step_id})
         return event.model_copy(update={"metadata": new_md})
 
 

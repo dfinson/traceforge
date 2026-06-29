@@ -30,7 +30,10 @@ MANIFEST = OUT_DIR / "MANIFEST.json"
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument(
-        "--shards", type=int, nargs="+", default=[0],
+        "--shards",
+        type=int,
+        nargs="+",
+        default=[0],
         help="Shard indices to download (default: 0)",
     )
     args = ap.parse_args()
@@ -46,15 +49,19 @@ def main() -> int:
         filename = f"data/train-{idx:05d}-of-00012.parquet"
         log.info("downloading %s/%s", REPO_ID, filename)
         local = hf_hub_download(
-            repo_id=REPO_ID, repo_type=REPO_TYPE, filename=filename,
+            repo_id=REPO_ID,
+            repo_type=REPO_TYPE,
+            filename=filename,
             local_dir=str(OUT_DIR),
         )
-        records.append({
-            "shard": idx,
-            "filename": filename,
-            "local_path": str(Path(local).relative_to(OUT_DIR)),
-            "downloaded_at": datetime.now(UTC).isoformat(),
-        })
+        records.append(
+            {
+                "shard": idx,
+                "filename": filename,
+                "local_path": str(Path(local).relative_to(OUT_DIR)),
+                "downloaded_at": datetime.now(UTC).isoformat(),
+            }
+        )
         log.info("  -> %s", local)
 
     MANIFEST.write_text(json.dumps(records, indent=2))

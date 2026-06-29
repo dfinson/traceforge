@@ -76,10 +76,13 @@ class SweAgentIngestConfig(BaseModel):
         description="If True, keep only target=True (resolved) trajectories.",
     )
     max_sessions: int | None = Field(
-        None, ge=1, description="Optional hard cap (debug / smoke).",
+        None,
+        ge=1,
+        description="Optional hard cap (debug / smoke).",
     )
     max_events_per_session: int | None = Field(
-        None, ge=1,
+        None,
+        ge=1,
         description=(
             "If set, skip any session whose enriched event count exceeds this. "
             "Should match labeling-runtime.yaml canonical_view.max_events_per_call."
@@ -98,6 +101,7 @@ def default_output_dir() -> Path:
 # ---------------------------------------------------------------------------
 # Trajectory → event extraction
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class ParsedAi:
@@ -124,12 +128,15 @@ def _split_ai_entry(text: str) -> ParsedAi:
     head, _, rest = body.partition("\n")
     head = head.strip()
     tool_name = head.split()[0] if head else ""
-    return ParsedAi(reasoning=reasoning, command=head, args=rest.strip(), tool_name=tool_name, raw=text)
+    return ParsedAi(
+        reasoning=reasoning, command=head, args=rest.strip(), tool_name=tool_name, raw=text
+    )
 
 
 # ---------------------------------------------------------------------------
 # Main ingest
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class IngestStats:
@@ -145,7 +152,6 @@ class IngestStats:
 async def ingest(config: SweAgentIngestConfig) -> IngestStats:
     from tracemill.enricher import Enricher
     from tracemill.sinks.parquet import ParquetSink
-    from tracemill.types import EventKind, EventMetadata, SessionEvent
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -206,7 +212,9 @@ async def ingest(config: SweAgentIngestConfig) -> IngestStats:
                     sessions_skipped_too_large += 1
                     logger.info(
                         "skip %s: %d events > cap %d",
-                        sid, len(events), config.max_events_per_session,
+                        sid,
+                        len(events),
+                        config.max_events_per_session,
                     )
                     continue
 
@@ -223,7 +231,9 @@ async def ingest(config: SweAgentIngestConfig) -> IngestStats:
                     events_emitted += out_count
                     logger.info(
                         "ingested %s: %d input -> %d enriched events",
-                        sid, len(events), out_count,
+                        sid,
+                        len(events),
+                        out_count,
                     )
                 except Exception as exc:  # noqa: BLE001
                     failures.append((sid, repr(exc)))
@@ -244,7 +254,9 @@ async def ingest(config: SweAgentIngestConfig) -> IngestStats:
 
 
 def _events_from_trajectory(
-    sid: str, trajectory: Iterable[Any], model_name: str,
+    sid: str,
+    trajectory: Iterable[Any],
+    model_name: str,
 ) -> Iterable[Any]:
     """Yield :class:`SessionEvent` objects from a SWE-agent trajectory list.
 
@@ -293,7 +305,9 @@ def _events_from_trajectory(
             saw_first_user = True
             if kind == EventKind.MESSAGE_USER:
                 yield SessionEvent(
-                    kind=kind, session_id=sid, timestamp=_next_ts(),
+                    kind=kind,
+                    session_id=sid,
+                    timestamp=_next_ts(),
                     payload={"content": text},
                     raw_event={"role": role},
                     metadata=_meta("user_issue"),
@@ -301,7 +315,9 @@ def _events_from_trajectory(
             else:
                 # Observation following a tool call.
                 yield SessionEvent(
-                    kind=kind, session_id=sid, timestamp=_next_ts(),
+                    kind=kind,
+                    session_id=sid,
+                    timestamp=_next_ts(),
                     payload={"output": text, "exit_code": 0},
                     raw_event={"role": role},
                     metadata=_meta("tool_observation"),

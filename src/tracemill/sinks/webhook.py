@@ -53,15 +53,17 @@ class WebhookSink(StorageSink):
         await self._post(payload)
 
     async def on_title_update(self, update: TitleUpdate) -> None:
-        await self._post({
-            "record": "title_update",
-            "session_id": update.session_id,
-            "segment_id": update.segment_id,
-            "kind": update.kind,
-            "title": update.title,
-            "version": update.version,
-            "parent_id": update.parent_id,
-        })
+        await self._post(
+            {
+                "record": "title_update",
+                "session_id": update.session_id,
+                "segment_id": update.segment_id,
+                "kind": update.kind,
+                "title": update.title,
+                "version": update.version,
+                "parent_id": update.parent_id,
+            }
+        )
 
     async def _post(self, payload: dict) -> None:
         body = json.dumps(payload, default=str).encode("utf-8")

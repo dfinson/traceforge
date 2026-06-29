@@ -58,8 +58,28 @@ EXPERIMENT = "titler-grounded-decoding-v1"
 EXPERIMENT_YAML = EXPERIMENTS_DIR / "titler-grounded-decoding.yaml"
 
 _STOP = {
-    "the", "a", "an", "to", "of", "in", "on", "for", "and", "or", "with", "from",
-    "into", "by", "at", "as", "its", "their", "this", "that", "these", "those",
+    "the",
+    "a",
+    "an",
+    "to",
+    "of",
+    "in",
+    "on",
+    "for",
+    "and",
+    "or",
+    "with",
+    "from",
+    "into",
+    "by",
+    "at",
+    "as",
+    "its",
+    "their",
+    "this",
+    "that",
+    "these",
+    "those",
 }
 # identifier-shaped: snake/path separator, hyphenation, internal capital, digit,
 # or dotted extension. Mirrors tracemill.title.inference so the metric scores the
@@ -177,9 +197,13 @@ async def _run(args: argparse.Namespace) -> int:
         return 1
 
     sink = _MetricSink()
-    pipe = EventPipeline(sinks=[sink], enable_phase=True, enable_boundary=True,
-                         title_inferencer=TitleInferencer(model_dir=args.model_dir),
-                         enable_title=True)
+    pipe = EventPipeline(
+        sinks=[sink],
+        enable_phase=True,
+        enable_boundary=True,
+        title_inferencer=TitleInferencer(model_dir=args.model_dir),
+        enable_title=True,
+    )
     print(f"scoring {len(files)} session(s) via production path...", file=sys.stderr)
 
     gold_verbs: list[str] = []
@@ -207,10 +231,9 @@ async def _run(args: argparse.Namespace) -> int:
         for aid, steps in _segments(events):
             n_acts += 1
             step_titles: list[str] = []
-            for kind, seg_id, rows in (
-                [("activity", aid, [r for _, rs in steps for r in rs])]
-                + [("step", st_id, rs) for st_id, rs in steps]
-            ):
+            for kind, seg_id, rows in [("activity", aid, [r for _, rs in steps for r in rs])] + [
+                ("step", st_id, rs) for st_id, rs in steps
+            ]:
                 n_seg += 1
                 title = sink.titles.get((sid, seg_id, kind))
                 if not title:
@@ -230,8 +253,10 @@ async def _run(args: argparse.Namespace) -> int:
                     hallucinated += 1
                 # adjacent self-repeat (same stem twice in a row)
                 allt = [t.lower() for t in _toks(title)]
-                if any(_stem(allt[i]) == _stem(allt[i + 1]) and len(allt[i]) > 2
-                       for i in range(len(allt) - 1)):
+                if any(
+                    _stem(allt[i]) == _stem(allt[i + 1]) and len(allt[i]) > 2
+                    for i in range(len(allt) - 1)
+                ):
                     corrupted += 1
                 # verb stem reappears in object
                 if verb and any(_stem(b) == _stem(verb) for b in body):
@@ -259,8 +284,7 @@ async def _run(args: argparse.Namespace) -> int:
 
     print("\n================  PRODUCTION-PATH TITLE METRICS  ================")
     print(f"sessions scored        : {len(sink.events)}")
-    print(f"segments               : {n_seg}   titled {pct(n_titled, n_seg)}"
-          f"   ({n_titled})")
+    print(f"segments               : {n_seg}   titled {pct(n_titled, n_seg)}   ({n_titled})")
     print("\n-- verb concentration (lower top-share / higher H = more diverse) --")
     print(f"  MODEL  top1 {mt1:5.1%}  top3 {mt3:5.1%}  H/Hmax {mh:.2f}  (n={mn})")
     print(f"  GOLD   top1 {gt1:5.1%}  top3 {gt3:5.1%}  H/Hmax {gh:.2f}  (n={gn})")
@@ -279,8 +303,9 @@ async def _run(args: argparse.Namespace) -> int:
     print(f"  >=1 near dup step    : {pct(act_near_dup, n_acts)}  ({act_near_dup})")
     print("================================================================")
 
-    with start_run(EXPERIMENT, run_name="served-path",
-                   tags={"model_dir": args.model_dir or "packaged"}):
+    with start_run(
+        EXPERIMENT, run_name="served-path", tags={"model_dir": args.model_dir or "packaged"}
+    ):
         log_yaml_params(EXPERIMENT_YAML)
         mlflow.log_param("model_dir", args.model_dir or "packaged")
         mlflow.log_param("sessions_scored", len(sink.events))
@@ -292,30 +317,31 @@ async def _run(args: argparse.Namespace) -> int:
         mlflow.log_metric("content_grounded", mg)
         mlflow.log_metric("titled_frac", n_titled / n_seg if n_seg else 0.0)
         mlflow.log_metric("n_titled", n_titled)
-        mlflow.log_metric("hallucinated_id_frac",
-                          hallucinated / n_titled if n_titled else 0.0)
-        mlflow.log_metric("adjacent_self_repeat_frac",
-                          corrupted / n_titled if n_titled else 0.0)
-        mlflow.log_metric("verb_eq_object_frac",
-                          verb_eq_obj / n_titled if n_titled else 0.0)
-        mlflow.log_metric("near_dup_step_frac",
-                          act_near_dup / n_acts if n_acts else 0.0)
-        mlflow.log_metric("exact_dup_step_frac",
-                          act_exact_dup / n_acts if n_acts else 0.0)
+        mlflow.log_metric("hallucinated_id_frac", hallucinated / n_titled if n_titled else 0.0)
+        mlflow.log_metric("adjacent_self_repeat_frac", corrupted / n_titled if n_titled else 0.0)
+        mlflow.log_metric("verb_eq_object_frac", verb_eq_obj / n_titled if n_titled else 0.0)
+        mlflow.log_metric("near_dup_step_frac", act_near_dup / n_acts if n_acts else 0.0)
+        mlflow.log_metric("exact_dup_step_frac", act_exact_dup / n_acts if n_acts else 0.0)
     return 0
 
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    default_dir = str(Path(__file__).resolve().parent.parent
-                      / "data" / "interim" / "labeling-corpus" / "copilot-cli-native")
+    default_dir = str(
+        Path(__file__).resolve().parent.parent
+        / "data"
+        / "interim"
+        / "labeling-corpus"
+        / "copilot-cli-native"
+    )
     p.add_argument("--dir", default=default_dir)
-    p.add_argument("--largest", type=int, default=12,
-                   help="score the N largest sharded sessions")
-    p.add_argument("--max-events", type=int, default=800,
-                   help="cap events per session (0 = full)")
-    p.add_argument("--model-dir", default=None,
-                   help="override ORT titler dir (default = packaged shipped model)")
+    p.add_argument("--largest", type=int, default=12, help="score the N largest sharded sessions")
+    p.add_argument("--max-events", type=int, default=800, help="cap events per session (0 = full)")
+    p.add_argument(
+        "--model-dir",
+        default=None,
+        help="override ORT titler dir (default = packaged shipped model)",
+    )
     args = p.parse_args()
     return asyncio.run(_run(args))
 

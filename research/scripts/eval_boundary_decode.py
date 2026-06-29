@@ -32,7 +32,6 @@ from sklearn.preprocessing import StandardScaler
 
 from scripts.train_boundary_baselines import _load_seg_params
 from tracemill.boundary.decode import DecodeParams, decode_scores
-from tracemill.boundary.inference import BOUNDARY_CLASSES
 from tracemill.phase.features import embed_texts, feature_set_blocks, merged_symbolic
 from tracemill_research.training.features import load_boundary_examples
 
@@ -47,7 +46,9 @@ MINGAP_PCTILE = 10
 
 
 def _model():
-    return LogisticRegression(C=1.0, class_weight="balanced", max_iter=400, solver="lbfgs", random_state=0)
+    return LogisticRegression(
+        C=1.0, class_weight="balanced", max_iter=400, solver="lbfgs", random_state=0
+    )
 
 
 def _f1_threshold(y_bin, prob):
@@ -67,11 +68,16 @@ def _min_gap(idx_lists):
 
 
 def _tol_match(gold, pred, k):
-    gold = sorted(gold); pred = sorted(pred); used = [False] * len(pred); tp = 0
+    gold = sorted(gold)
+    pred = sorted(pred)
+    used = [False] * len(pred)
+    tp = 0
     for g in gold:
         for j, p in enumerate(pred):
             if not used[j] and abs(p - g) <= k:
-                used[j] = True; tp += 1; break
+                used[j] = True
+                tp += 1
+                break
     return tp, len(gold), len(pred)
 
 
@@ -79,7 +85,9 @@ def _prf(per_sess_gold, per_sess_pred, sessions, k):
     TP = NG = NP = 0
     for sid in sessions:
         tp, ng, npd = _tol_match(per_sess_gold.get(sid, []), per_sess_pred.get(sid, []), k)
-        TP += tp; NG += ng; NP += npd
+        TP += tp
+        NG += ng
+        NP += npd
     p = TP / NP if NP else 0.0
     r = TP / NG if NG else 0.0
     return p, r, (2 * p * r / (p + r) if (p + r) else 0.0), NP
@@ -113,7 +121,9 @@ def main() -> int:
     X = StandardScaler().fit_transform(np.hstack(blocks).astype(np.float64))
     groups = np.array([e.session_id for e in cop])
     y = np.array([e.label for e in cop], dtype=object)
-    log.info("X=%s sessions=%d (%.0fs); running nested CV …", X.shape, len(set(groups)), time.time() - t0)
+    log.info(
+        "X=%s sessions=%d (%.0fs); running nested CV …", X.shape, len(set(groups)), time.time() - t0
+    )
 
     classes = tuple(sorted(set(y)))  # alpha order; decode_scores maps by name
     pred_decode = {c: defaultdict(list) for c in DECODE_CLASSES}

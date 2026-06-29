@@ -14,6 +14,7 @@ Run (repo root, CPU-only, torch-free root venv):
   $env:CUDA_VISIBLE_DEVICES="-1"; $env:PYTHONIOENCODING="utf-8"
   ..\\.venv\\Scripts\\python.exe -u -m scripts._title_codeplane_test --n 30
 """
+
 from __future__ import annotations
 
 import argparse
@@ -24,12 +25,41 @@ from pathlib import Path
 
 from tracemill.title.inference import TitleModel
 
-_PAIRS = (Path(__file__).resolve().parent.parent
-          / "data" / "interim" / "codeplane_title_pairs.json")
+_PAIRS = Path(__file__).resolve().parent.parent / "data" / "interim" / "codeplane_title_pairs.json"
 _STOP = {
-    "the", "a", "an", "to", "of", "in", "on", "for", "and", "or", "with", "from",
-    "into", "by", "at", "as", "its", "their", "this", "that", "these", "those",
-    "is", "are", "be", "it", "so", "when", "i", "my", "we", "you", "should",
+    "the",
+    "a",
+    "an",
+    "to",
+    "of",
+    "in",
+    "on",
+    "for",
+    "and",
+    "or",
+    "with",
+    "from",
+    "into",
+    "by",
+    "at",
+    "as",
+    "its",
+    "their",
+    "this",
+    "that",
+    "these",
+    "those",
+    "is",
+    "are",
+    "be",
+    "it",
+    "so",
+    "when",
+    "i",
+    "my",
+    "we",
+    "you",
+    "should",
 }
 _WORD = re.compile(r"[A-Za-z0-9_./\\-]+")
 
@@ -54,8 +84,7 @@ def _lcs(a: list[str], b: list[str]) -> int:
     dp = [[0] * (len(b) + 1) for _ in range(len(a) + 1)]
     for i in range(len(a) - 1, -1, -1):
         for j in range(len(b) - 1, -1, -1):
-            dp[i][j] = (dp[i + 1][j + 1] + 1 if a[i] == b[j]
-                        else max(dp[i + 1][j], dp[i][j + 1]))
+            dp[i][j] = dp[i + 1][j + 1] + 1 if a[i] == b[j] else max(dp[i + 1][j], dp[i][j + 1])
     return dp[0][0]
 
 

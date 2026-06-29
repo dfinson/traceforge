@@ -47,8 +47,7 @@ def main() -> int:
     by_session_type = Counter(r["session_type"] for r in phase_rows if r.get("session_type"))
     by_source = Counter(r.get("source", "copilot-cli") for r in phase_rows)
     by_source_session_type = Counter(
-        (r.get("source", "copilot-cli"), r.get("session_type", "unknown"))
-        for r in phase_rows
+        (r.get("source", "copilot-cli"), r.get("session_type", "unknown")) for r in phase_rows
     )
     sessions_by_source = Counter()
     seen_sessions: set[tuple[str, str]] = set()

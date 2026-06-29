@@ -23,10 +23,7 @@ def main() -> int:
     count = 0
     for reg in iter_experiment_registrations():
         experiment_id = register_experiment(reg)
-        print(
-            f"registered: {reg.mlflow_experiment} "
-            f"(id={experiment_id}) — {reg.display_name}"
-        )
+        print(f"registered: {reg.mlflow_experiment} (id={experiment_id}) — {reg.display_name}")
         count += 1
     if count == 0:
         print("no registrable experiments found", file=sys.stderr)

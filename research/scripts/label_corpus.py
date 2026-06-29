@@ -111,23 +111,30 @@ async def _run_session(
     if out_path.exists():
         log.info("skip %s (already labeled)", sid)
         return SessionOutcome(
-            session_id=sid, status="labeled", attempts=(),
-            final_labels=None, final_review=None,
-            validation_errors=(), accept_phase=1.0, accept_boundary=1.0,
+            session_id=sid,
+            status="labeled",
+            attempts=(),
+            final_labels=None,
+            final_review=None,
+            validation_errors=(),
+            accept_phase=1.0,
+            accept_boundary=1.0,
         )
 
     async with sem:
         # 1. Build canonical view (concatenates shards by seq if multiple).
         view = load_session_view(parquet_paths, cfg.canonical_view)
         markdown, trimmed = render_markdown(view, cfg.canonical_view)
-        n_tool_events = sum(
-            1 for ev in view.events if not ev.kind.startswith("message.")
-        )
+        n_tool_events = sum(1 for ev in view.events if not ev.kind.startswith("message."))
         session_type = "agent" if n_tool_events >= 1 else "utility"
         log.info(
             "session %s [%s]: %d events (%d tool), %d chars (elided %d)",
-            sid, session_type, len(view.events), n_tool_events,
-            trimmed.total_chars, trimmed.elided_count,
+            sid,
+            session_type,
+            len(view.events),
+            n_tool_events,
+            trimmed.total_chars,
+            trimmed.elided_count,
         )
 
         # Skip sessions too large to fit in a single LLM call. Documented as
@@ -135,16 +142,22 @@ async def _run_session(
         if len(view.events) > cfg.canonical_view.max_events_per_call.value:
             log.warning(
                 "skip %s: %d events > max_events_per_call=%d",
-                sid, len(view.events), cfg.canonical_view.max_events_per_call.value,
+                sid,
+                len(view.events),
+                cfg.canonical_view.max_events_per_call.value,
             )
             return SessionOutcome(
-                session_id=sid, status="skipped-too-large", attempts=(),
-                final_labels=None, final_review=None,
+                session_id=sid,
+                status="skipped-too-large",
+                attempts=(),
+                final_labels=None,
+                final_review=None,
                 validation_errors=(
                     f"events {len(view.events)} > max_events_per_call "
                     f"{cfg.canonical_view.max_events_per_call.value}",
                 ),
-                accept_phase=0.0, accept_boundary=0.0,
+                accept_phase=0.0,
+                accept_boundary=0.0,
             )
 
         attempts: list[AttemptRecord] = []
@@ -160,7 +173,8 @@ async def _run_session(
         last_parse_error: str | None = None
         for parse_attempt in range(2):
             labeler_result = await backend.complete(
-                labeler_prompt, system_message=_LABELER_SYSTEM,
+                labeler_prompt,
+                system_message=_LABELER_SYSTEM,
             )
             RAW_DIR.mkdir(parents=True, exist_ok=True)
             (RAW_DIR / f"{sid}.labeler.{parse_attempt}.txt").write_text(
@@ -175,32 +189,44 @@ async def _run_session(
                 break
             except Exception as exc:  # noqa: BLE001
                 last_parse_error = f"parse: {exc}"
-                log.warning("labeler parse attempt %d failed for %s: %s", parse_attempt + 1, sid, exc)
+                log.warning(
+                    "labeler parse attempt %d failed for %s: %s", parse_attempt + 1, sid, exc
+                )
 
-        attempts.append(AttemptRecord(
-            role="labeler",
-            ok=labels is not None,
-            error=None if labels is not None else last_parse_error,
-            duration_s=time.monotonic() - t0,
-            chunks=labeler_result.chunks if labeler_result else 0,
-            raw_chars=len(labeler_result.text) if labeler_result and labeler_result.text else 0,
-        ))
+        attempts.append(
+            AttemptRecord(
+                role="labeler",
+                ok=labels is not None,
+                error=None if labels is not None else last_parse_error,
+                duration_s=time.monotonic() - t0,
+                chunks=labeler_result.chunks if labeler_result else 0,
+                raw_chars=len(labeler_result.text) if labeler_result and labeler_result.text else 0,
+            )
+        )
         if labels is None:
             return SessionOutcome(
-                session_id=sid, status="labeler-failed", attempts=tuple(attempts),
-                final_labels=None, final_review=None,
+                session_id=sid,
+                status="labeler-failed",
+                attempts=tuple(attempts),
+                final_labels=None,
+                final_review=None,
                 validation_errors=(last_parse_error or "empty",),
-                accept_phase=0.0, accept_boundary=0.0,
+                accept_phase=0.0,
+                accept_boundary=0.0,
             )
 
         ok, errors, labels = validate_combined(labels, trimmed, cfg.combined_labeling)
         if not ok:
             log.warning("labeler validate failed for %s: %s", sid, errors[:3])
             return SessionOutcome(
-                session_id=sid, status="validate-failed", attempts=tuple(attempts),
-                final_labels=labels, final_review=None,
+                session_id=sid,
+                status="validate-failed",
+                attempts=tuple(attempts),
+                final_labels=labels,
+                final_review=None,
                 validation_errors=tuple(errors),
-                accept_phase=0.0, accept_boundary=0.0,
+                accept_phase=0.0,
+                accept_boundary=0.0,
             )
 
         # 3. Red-team.
@@ -212,25 +238,33 @@ async def _run_session(
         )
         t1 = time.monotonic()
         redteam_result = await backend.complete(
-            redteam_prompt, system_message=_LABELER_SYSTEM,
+            redteam_prompt,
+            system_message=_LABELER_SYSTEM,
         )
         (RAW_DIR / f"{sid}.redteam.txt").write_text(
             redteam_result.text or f"<<empty: {redteam_result.error}>>",
             encoding="utf-8",
         )
-        attempts.append(AttemptRecord(
-            role="redteam", ok=bool(redteam_result.text and not redteam_result.error),
-            error=redteam_result.error,
-            duration_s=time.monotonic() - t1,
-            chunks=redteam_result.chunks,
-            raw_chars=len(redteam_result.text),
-        ))
+        attempts.append(
+            AttemptRecord(
+                role="redteam",
+                ok=bool(redteam_result.text and not redteam_result.error),
+                error=redteam_result.error,
+                duration_s=time.monotonic() - t1,
+                chunks=redteam_result.chunks,
+                raw_chars=len(redteam_result.text),
+            )
+        )
         if not redteam_result.text:
             return SessionOutcome(
-                session_id=sid, status="redteam-failed", attempts=tuple(attempts),
-                final_labels=labels, final_review=None,
+                session_id=sid,
+                status="redteam-failed",
+                attempts=tuple(attempts),
+                final_labels=labels,
+                final_review=None,
                 validation_errors=(redteam_result.error or "empty",),
-                accept_phase=0.0, accept_boundary=0.0,
+                accept_phase=0.0,
+                accept_boundary=0.0,
             )
 
         try:
@@ -238,10 +272,14 @@ async def _run_session(
         except Exception as exc:  # noqa: BLE001
             log.warning("redteam parse failed for %s: %s", sid, exc)
             return SessionOutcome(
-                session_id=sid, status="redteam-failed", attempts=tuple(attempts),
-                final_labels=labels, final_review=None,
+                session_id=sid,
+                status="redteam-failed",
+                attempts=tuple(attempts),
+                final_labels=labels,
+                final_review=None,
                 validation_errors=(f"redteam parse: {exc}",),
-                accept_phase=0.0, accept_boundary=0.0,
+                accept_phase=0.0,
+                accept_boundary=0.0,
             )
 
         # 4. Resolve.
@@ -285,7 +323,10 @@ async def _run_session(
         out_path.write_text(json.dumps(record, indent=2), encoding="utf-8")
         log.info(
             "session %s done: status=%s accept_phase=%.2f accept_boundary=%.2f",
-            sid, outcome.status, outcome.accept_phase, outcome.accept_boundary,
+            sid,
+            outcome.status,
+            outcome.accept_phase,
+            outcome.accept_boundary,
         )
         return outcome
 
@@ -307,26 +348,32 @@ def _load_manifest_entries(manifest_path: Path = MANIFEST_PATH) -> list[dict]:
     for row in manifest["sessions"]:
         sid = row["session_id"]
         if schema_version >= 3:
-            entries.append({
-                "session_id": sid,
-                "source": row.get("source", "unknown"),
-                "parquets": list(row.get("parquets") or []),
-                "n_events": int(row.get("n_events") or 0),
-            })
+            entries.append(
+                {
+                    "session_id": sid,
+                    "source": row.get("source", "unknown"),
+                    "parquets": list(row.get("parquets") or []),
+                    "n_events": int(row.get("n_events") or 0),
+                }
+            )
         elif schema_version == 2:
-            entries.append({
-                "session_id": sid,
-                "source": row.get("source", "unknown"),
-                "parquets": [row.get("parquet", f"{sid}.parquet")],
-                "n_events": int(row.get("n_events") or 0),
-            })
+            entries.append(
+                {
+                    "session_id": sid,
+                    "source": row.get("source", "unknown"),
+                    "parquets": [row.get("parquet", f"{sid}.parquet")],
+                    "n_events": int(row.get("n_events") or 0),
+                }
+            )
         else:
-            entries.append({
-                "session_id": sid,
-                "source": "copilot-cli",
-                "parquets": [f"{sid}.parquet"],
-                "n_events": 0,
-            })
+            entries.append(
+                {
+                    "session_id": sid,
+                    "source": "copilot-cli",
+                    "parquets": [f"{sid}.parquet"],
+                    "n_events": 0,
+                }
+            )
     # Process small sessions first — fast wins, plus avoids accidentally
     # spending the early SDK budget on a slow giant if pre-filter misses.
     entries.sort(key=lambda r: (r.get("n_events") or 0, r["session_id"]))
@@ -356,12 +403,14 @@ async def main_async(limit: int | None, source: str | None) -> int:
             continue
         sized.append(e)
     if oversized:
-        log.warning("pre-skip %d oversized sessions (n_events > %d)",
-                    oversized, max_events)
+        log.warning("pre-skip %d oversized sessions (n_events > %d)", oversized, max_events)
     entries = sized
 
-    log.info("running labeller on %d sessions (concurrency=%d)",
-             len(entries), cfg.backend.max_concurrent_sessions.value)
+    log.info(
+        "running labeller on %d sessions (concurrency=%d)",
+        len(entries),
+        cfg.backend.max_concurrent_sessions.value,
+    )
 
     sem = asyncio.Semaphore(cfg.backend.max_concurrent_sessions.value)
 
@@ -371,14 +420,19 @@ async def main_async(limit: int | None, source: str | None) -> int:
         parquet_paths = [CORPUS_DIR / p for p in entry["parquets"]]
         absent = [p for p in parquet_paths if not p.is_file()]
         if absent or not parquet_paths:
-            log.warning("missing parquet shards for %s: %s",
-                        entry["session_id"], [str(p) for p in absent])
+            log.warning(
+                "missing parquet shards for %s: %s", entry["session_id"], [str(p) for p in absent]
+            )
             missing += 1
             continue
         tasks.append(
             _run_session(
-                cfg, backend, parquet_paths, sem,
-                sid=entry["session_id"], source=entry["source"],
+                cfg,
+                backend,
+                parquet_paths,
+                sem,
+                sid=entry["session_id"],
+                source=entry["source"],
             )
         )
     if missing:
@@ -406,10 +460,15 @@ async def main_async(limit: int | None, source: str | None) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--limit", type=int, default=None,
-                        help="Label only the first N sessions from the manifest.")
-    parser.add_argument("--source", type=str, default=None,
-                        help="Filter to a single source (e.g. copilot-cli, swe-agent-nebius).")
+    parser.add_argument(
+        "--limit", type=int, default=None, help="Label only the first N sessions from the manifest."
+    )
+    parser.add_argument(
+        "--source",
+        type=str,
+        default=None,
+        help="Filter to a single source (e.g. copilot-cli, swe-agent-nebius).",
+    )
     args = parser.parse_args()
     return asyncio.run(main_async(args.limit, args.source))
 

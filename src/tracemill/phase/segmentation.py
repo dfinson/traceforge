@@ -72,7 +72,9 @@ def phase_of(phase_signals) -> str:
     return "none"
 
 
-def _bocpd(cats: list[int], hazard: float, alpha: float, r_max: int) -> tuple[list[float], list[float]]:
+def _bocpd(
+    cats: list[int], hazard: float, alpha: float, r_max: int
+) -> tuple[list[float], list[float]]:
     """Categorical BOCPD. Returns (changepoint_prob[t], expected_runlength[t])."""
 
     cp_score: list[float] = []
@@ -114,7 +116,9 @@ def _bocpd(cats: list[int], hazard: float, alpha: float, r_max: int) -> tuple[li
     return cp_score, exp_run
 
 
-def _windowed(cats: list[str], windows: tuple[int, ...], entropy_window: int) -> list[dict[str, float]]:
+def _windowed(
+    cats: list[str], windows: tuple[int, ...], entropy_window: int
+) -> list[dict[str, float]]:
     """Majority-vote-change, steps-since-change, and entropy features per step."""
 
     feats: list[dict[str, float]] = [dict() for _ in cats]

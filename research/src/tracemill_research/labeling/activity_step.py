@@ -51,9 +51,7 @@ class _ActivityStepValidator:
 
         gran = cfg.granularity
         if not (
-            gran.activities_per_session.min
-            <= len(activities)
-            <= gran.activities_per_session.max
+            gran.activities_per_session.min <= len(activities) <= gran.activities_per_session.max
         ):
             errors.append(
                 f"activity count {len(activities)} outside "
@@ -65,19 +63,11 @@ class _ActivityStepValidator:
             label = a.get("label", "")
             tokens = _LABEL_TOKEN_RE.findall(label)
             if not (
-                cfg.label_format.word_count_min
-                <= len(tokens)
-                <= cfg.label_format.word_count_max
+                cfg.label_format.word_count_min <= len(tokens) <= cfg.label_format.word_count_max
             ):
-                errors.append(
-                    f"activity label word-count out of range: {label!r}"
-                )
+                errors.append(f"activity label word-count out of range: {label!r}")
             steps = a.get("steps", [])
-            if not (
-                gran.steps_per_activity.min
-                <= len(steps)
-                <= gran.steps_per_activity.max
-            ):
+            if not (gran.steps_per_activity.min <= len(steps) <= gran.steps_per_activity.max):
                 errors.append(
                     f"step count {len(steps)} for activity {a.get('activity_id')!r} "
                     f"outside [{gran.steps_per_activity.min}, {gran.steps_per_activity.max}]"
@@ -89,17 +79,13 @@ class _ActivityStepValidator:
                     <= len(tokens)
                     <= cfg.label_format.word_count_max
                 ):
-                    errors.append(
-                        f"step label word-count out of range: {s.get('label')!r}"
-                    )
+                    errors.append(f"step label word-count out of range: {s.get('label')!r}")
 
             try:
                 start_t = int(a["start_turn"])
                 end_t = int(a["end_turn"])
             except (KeyError, TypeError, ValueError):
-                errors.append(
-                    f"activity {a.get('activity_id')} missing valid start/end turn"
-                )
+                errors.append(f"activity {a.get('activity_id')} missing valid start/end turn")
                 continue
             if start_t <= prev_end and prev_end != 0:
                 errors.append("activity ranges overlap or non-monotonic")

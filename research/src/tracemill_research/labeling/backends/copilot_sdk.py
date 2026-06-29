@@ -25,7 +25,6 @@ import tempfile
 from dataclasses import dataclass
 
 from copilot import CopilotClient
-from copilot._jsonrpc import JsonRpcError, ProcessExitedError
 from copilot.session import PermissionRequestResult
 
 from ...config import BackendConfig
@@ -57,7 +56,9 @@ class CopilotSdkBackend:
                 return await self._complete_once(prompt, system_message)
             except Exception as exc:  # noqa: BLE001 - one window must never kill the batch
                 last_err = f"{type(exc).__name__}: {exc}"
-                logger.warning("sdk attempt %d/%d failed: %s", attempt + 1, cfg.max_retries.value + 1, last_err)
+                logger.warning(
+                    "sdk attempt %d/%d failed: %s", attempt + 1, cfg.max_retries.value + 1, last_err
+                )
         return CompletionResult(text="", error=last_err or "unknown_error", chunks=0)
 
     async def _complete_once(
@@ -69,14 +70,11 @@ class CopilotSdkBackend:
         client = CopilotClient()
         await client.start()
         try:
+
             async def _reject_all(req, invocation):  # type: ignore[no-untyped-def]
                 return PermissionRequestResult(kind="reject")
 
-            sys_msg = (
-                {"mode": "append", "content": system_message}
-                if system_message
-                else None
-            )
+            sys_msg = {"mode": "append", "content": system_message} if system_message else None
             session = await client.create_session(
                 working_directory=tempfile.gettempdir(),
                 on_permission_request=_reject_all,

@@ -35,8 +35,18 @@ def test_validator_accepts_well_formed_payload() -> None:
                 "start_turn": 1,
                 "end_turn": 10,
                 "steps": [
-                    {"step_id": "1.1", "label": "Search auth routes", "start_turn": 1, "end_turn": 5},
-                    {"step_id": "1.2", "label": "Read middleware files", "start_turn": 6, "end_turn": 10},
+                    {
+                        "step_id": "1.1",
+                        "label": "Search auth routes",
+                        "start_turn": 1,
+                        "end_turn": 5,
+                    },
+                    {
+                        "step_id": "1.2",
+                        "label": "Read middleware files",
+                        "start_turn": 6,
+                        "end_turn": 10,
+                    },
                 ],
             },
             {
@@ -45,8 +55,18 @@ def test_validator_accepts_well_formed_payload() -> None:
                 "start_turn": 11,
                 "end_turn": 25,
                 "steps": [
-                    {"step_id": "2.1", "label": "Edit routes for endpoint", "start_turn": 11, "end_turn": 18},
-                    {"step_id": "2.2", "label": "Write token validation logic", "start_turn": 19, "end_turn": 25},
+                    {
+                        "step_id": "2.1",
+                        "label": "Edit routes for endpoint",
+                        "start_turn": 11,
+                        "end_turn": 18,
+                    },
+                    {
+                        "step_id": "2.2",
+                        "label": "Write token validation logic",
+                        "start_turn": 19,
+                        "end_turn": 25,
+                    },
                 ],
             },
             {
@@ -55,8 +75,18 @@ def test_validator_accepts_well_formed_payload() -> None:
                 "start_turn": 26,
                 "end_turn": 30,
                 "steps": [
-                    {"step_id": "3.1", "label": "Run pytest suite", "start_turn": 26, "end_turn": 28},
-                    {"step_id": "3.2", "label": "Inspect failing tests", "start_turn": 29, "end_turn": 30},
+                    {
+                        "step_id": "3.1",
+                        "label": "Run pytest suite",
+                        "start_turn": 26,
+                        "end_turn": 28,
+                    },
+                    {
+                        "step_id": "3.2",
+                        "label": "Inspect failing tests",
+                        "start_turn": 29,
+                        "end_turn": 30,
+                    },
                 ],
             },
         ]

@@ -15,11 +15,9 @@ Run: cd research; $env:OMP_NUM_THREADS=4; .venv\\Scripts\\python.exe -u -m scrip
 from __future__ import annotations
 
 import collections
-import json
 import math
 import os
 import re
-import sys
 
 import numpy as np
 import pandas as pd
@@ -31,11 +29,13 @@ SRC_DIR = {"swe-agent-nebius": "swe-agent-nebius", "copilot-cli-native": "copilo
 
 STOP = set(
     "the a an of to and in for with on is are be this that it we our us you your i "
-    "let lets now first then next also will should can use via into from as at".split())
+    "let lets now first then next also will should can use via into from as at".split()
+)
 
 # code-shaped = concrete entity: has a dot-ext, snake/camel, ALLCAPS>=2, digit, slash
 _CODESHAPE = re.compile(
-    r"(\.\w{1,5}\b)|(_)|([a-z][A-Z])|(\b[A-Z]{2,}\b)|(\d)|(/)|(\bclass\b|\bfunction\b)")
+    r"(\.\w{1,5}\b)|(_)|([a-z][A-Z])|(\b[A-Z]{2,}\b)|(\d)|(/)|(\bclass\b|\bfunction\b)"
+)
 _IDENT = re.compile(r"[A-Za-z_][\w./-]{2,}")
 
 
@@ -96,8 +96,11 @@ def main():
     idf_hi = float(np.quantile(list(idf.values()), 0.5))  # median split generic/specific
 
     print("(1) lowest-IDF (most GENERIC) title nouns -- learned, not hand-typed:")
-    generic = [w for w, _ in sorted(idf.items(), key=lambda kv: kv[1])
-               if w not in STOP and not _CODESHAPE.search(w)][:30]
+    generic = [
+        w
+        for w, _ in sorted(idf.items(), key=lambda kv: kv[1])
+        if w not in STOP and not _CODESHAPE.search(w)
+    ][:30]
     print("   ", ", ".join(generic))
 
     # ---- build segments with corpus windows ----
@@ -126,7 +129,9 @@ def main():
 
             for _, a in srows.iterrows():
                 items = [(a.start_event_id, a.end_event_id, a.activity_title)]
-                items += [(st["start_event_id"], st["end_event_id"], st["step_title"]) for st in a.steps]
+                items += [
+                    (st["start_event_id"], st["end_event_id"], st["step_title"]) for st in a.steps
+                ]
                 for s_id, e_id, gold in items:
                     if not isinstance(gold, str):
                         continue
@@ -143,10 +148,12 @@ def main():
                         ents = set()
                         for r in window(s_id, e_id):
                             ents |= payload_entities(r)
+
                         def _hit(tokens):
                             return any(
-                                any(s == e or s in e or e in s for e in ents)
-                                for s in tokens)
+                                any(s == e or s in e or e in s for e in ents) for s in tokens
+                            )
+
                         if _hit(spec):
                             recoverable += 1
                             per_src[src][3] += 1
@@ -160,19 +167,25 @@ def main():
                             per_src[src][6] += 1
                             if _hit(topical):
                                 per_src[src][7] += 1
-    print(f"\n(2) MEANINGFUL-RATE: gold titles w/ >=1 specific object token: "
-          f"{meaningful}/{total} = {meaningful/total:.1%}")
-    print(f"(3) RECOVERABILITY: specific token present in segment signal: "
-          f"{recoverable}/{meaningful} = {recoverable/max(meaningful,1):.1%}")
+    print(
+        f"\n(2) MEANINGFUL-RATE: gold titles w/ >=1 specific object token: "
+        f"{meaningful}/{total} = {meaningful / total:.1%}"
+    )
+    print(
+        f"(3) RECOVERABILITY: specific token present in segment signal: "
+        f"{recoverable}/{meaningful} = {recoverable / max(meaningful, 1):.1%}"
+    )
     print("\nby source (total | meaningful% | recover%):")
     for src, c in per_src.items():
         tt, mm, _ss, rr = c[0], c[1], c[2], c[3]
-        print(f"   {src:22s} {tt:5d} | {mm/tt:6.1%} | {rr/max(mm,1):6.1%}")
+        print(f"   {src:22s} {tt:5d} | {mm / tt:6.1%} | {rr / max(mm, 1):6.1%}")
     print("\nCONCRETE (code-shape) vs TOPICAL object recoverability:")
     for src, c in per_src.items():
         conc, conc_hit, top, top_hit = c[4], c[5], c[6], c[7]
-        print(f"   {src:22s} concrete {conc_hit}/{conc}={conc_hit/max(conc,1):.0%}"
-              f"   topical {top_hit}/{top}={top_hit/max(top,1):.0%}")
+        print(
+            f"   {src:22s} concrete {conc_hit}/{conc}={conc_hit / max(conc, 1):.0%}"
+            f"   topical {top_hit}/{top}={top_hit / max(top, 1):.0%}"
+        )
 
     print("\n==== NON-recoverable examples (specific gold object not found in signal) ====")
     for src, gold, spec, ents in examples:

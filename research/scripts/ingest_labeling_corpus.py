@@ -53,7 +53,9 @@ def main() -> int:
     stats = asyncio.run(ingest_from_manifest(cfg, session_ids))
     log.info(
         "stats: sessions=%d, turns=%d, events=%d, failures=%d",
-        stats.sessions_processed, stats.turns_processed, stats.events_emitted,
+        stats.sessions_processed,
+        stats.turns_processed,
+        stats.events_emitted,
         len(stats.failures),
     )
     for sid, err in stats.failures:

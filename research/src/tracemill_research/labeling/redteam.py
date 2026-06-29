@@ -8,7 +8,6 @@ the two into the final labels actually written to disk.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -128,10 +127,8 @@ def render_redteam_prompt(
     labeller_output_json: str,
 ) -> str:
     template = template_path.read_text(encoding="utf-8")
-    return (
-        template
-        .replace("{INSERT_SESSION_MARKDOWN_HERE}", session_markdown)
-        .replace("{INSERT_LABELLER_JSON_HERE}", labeller_output_json)
+    return template.replace("{INSERT_SESSION_MARKDOWN_HERE}", session_markdown).replace(
+        "{INSERT_LABELLER_JSON_HERE}", labeller_output_json
     )
 
 
@@ -146,9 +143,7 @@ def resolve(
     non-empty replacement.
     """
 
-    phase_overrides = {
-        r.event_id: r for r in review.phase_review if r.verdict == "reject"
-    }
+    phase_overrides = {r.event_id: r for r in review.phase_review if r.verdict == "reject"}
     final_phases = tuple(
         PhaseLabel(
             event_id=pl.event_id,

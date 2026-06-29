@@ -128,12 +128,12 @@ def _generate_ort(df: pd.DataFrame) -> list[str]:
     Mirrors the production serve path on bare held-out ctx (no pre-baked options)."""
     from scripts._title_ort import OrtTitler
     from scripts._title_hygiene import clean_title
+
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     tok = os.path.join(root, "data", "interim", "t5-title-model")
     q = os.environ.get("TITLE_ORT_Q", "1") == "1"
     g = OrtTitler(os.path.join(root, "data", "interim", "onnx-base"), tok_dir=tok, q=q)
-    fdir = os.environ.get("TITLE_ORT_FUSE_DIR",
-                          os.path.join(root, "data", "interim", "onnx-fuse"))
+    fdir = os.environ.get("TITLE_ORT_FUSE_DIR", os.path.join(root, "data", "interim", "onnx-fuse"))
     f = OrtTitler(fdir, tok_dir=tok, q=q)
     preds: list[str] = []
     fuse_only = os.environ.get("TITLE_ORT_FUSEONLY") == "1"
@@ -145,10 +145,8 @@ def _generate_ort(df: pd.DataFrame) -> list[str]:
         if fuse_only and "| options:" in c:  # ctx already carries pre-baked options
             preds.append(f.generate(c, num_beams=NB, num_return=1)[0])
             continue
-        cs = list(dict.fromkeys(clean_title(x) for x in
-                                g.generate(c, num_beams=NB, num_return=NB)))
-        preds.append(f.generate(c + " | options: " + "; ".join(cs),
-                                num_beams=NB, num_return=1)[0])
+        cs = list(dict.fromkeys(clean_title(x) for x in g.generate(c, num_beams=NB, num_return=NB)))
+        preds.append(f.generate(c + " | options: " + "; ".join(cs), num_beams=NB, num_return=1)[0])
     return preds
 
 
@@ -168,31 +166,37 @@ def _generate(df: pd.DataFrame) -> list[str]:
     preds: list[str] = []
     with torch.no_grad():
         for i in range(0, len(df), 64):
-            chunk = df.iloc[i:i + 64]
+            chunk = df.iloc[i : i + 64]
             pref = chunk.prefix if "prefix" in chunk.columns else None
-            xs = [(pref.iloc[j] if pref is not None and isinstance(pref.iloc[j], str)
-                   else PREFIX) + c for j, c in enumerate(chunk.ctx)]
-            enc = tok(xs, padding=True,
-                      truncation=True, max_length=MAX_SRC,
-                      return_tensors="pt").to(dev)
-            out = mdl.generate(**enc, max_new_tokens=MAX_TGT, num_beams=NB,
-                               num_return_sequences=NB, no_repeat_ngram_size=2,
-                               repetition_penalty=1.3, length_penalty=0.8,
-                               early_stopping=True)
+            xs = [
+                (pref.iloc[j] if pref is not None and isinstance(pref.iloc[j], str) else PREFIX) + c
+                for j, c in enumerate(chunk.ctx)
+            ]
+            enc = tok(
+                xs, padding=True, truncation=True, max_length=MAX_SRC, return_tensors="pt"
+            ).to(dev)
+            out = mdl.generate(
+                **enc,
+                max_new_tokens=MAX_TGT,
+                num_beams=NB,
+                num_return_sequences=NB,
+                no_repeat_ngram_size=2,
+                repetition_penalty=1.3,
+                length_penalty=0.8,
+                early_stopping=True,
+            )
             dec = [s.strip() for s in tok.batch_decode(out, skip_special_tokens=True)]
             # decode/render hygiene: pick the best non-degenerate beam, cleaned.
             for j in range(len(chunk)):
-                preds.append(best_of(dec[j * NB:(j + 1) * NB]))
+                preds.append(best_of(dec[j * NB : (j + 1) * NB]))
     return preds
 
 
-async def _judge_one(backend: CopilotSdkBackend, sem: asyncio.Semaphore,
-                     row: dict) -> dict | None:
+async def _judge_one(backend: CopilotSdkBackend, sem: asyncio.Semaphore, row: dict) -> dict | None:
     model_is_a = _coin(row["sid"], row["gold"])
     title_a = row["pred"] if model_is_a else row["gold"]
     title_b = row["gold"] if model_is_a else row["pred"]
-    prompt = _RUBRIC.format(context=row["ctx"][:1600],
-                            title_a=title_a, title_b=title_b)
+    prompt = _RUBRIC.format(context=row["ctx"][:1600], title_a=title_a, title_b=title_b)
     try:
         async with sem:
             res = await backend.complete(prompt, system_message=_JUDGE_SYSTEM)
@@ -221,9 +225,14 @@ async def _judge_one(backend: CopilotSdkBackend, sem: asyncio.Semaphore,
         }
 
     return {
-        "src": row["src"], "tier": row["tier"], "sid": row["sid"],
-        "gold": row["gold"], "pred": row["pred"], "winner": winner,
-        "model": _clean(parsed[model_side]), "gold_scores": _clean(parsed[gold_side]),
+        "src": row["src"],
+        "tier": row["tier"],
+        "sid": row["sid"],
+        "gold": row["gold"],
+        "pred": row["pred"],
+        "winner": winner,
+        "model": _clean(parsed[model_side]),
+        "gold_scores": _clean(parsed[gold_side]),
     }
 
 
@@ -233,11 +242,15 @@ def _agg(rows: list[dict], key: str) -> None:
     if not n:
         print("    (no scored items)")
         return
+
     def mean(field: str) -> float:
         return sum(s[field] for s in sub) / n
-    print(f"    faithful {mean('faithful'):.2f}/2  specific {mean('specific'):.2f}/2  "
-          f"fluent {mean('fluent'):.2f}/2  verb!=obj {mean('verb_obj_distinct'):.0%}  "
-          f"coherent {mean('coherent'):.0%}  (n={n})")
+
+    print(
+        f"    faithful {mean('faithful'):.2f}/2  specific {mean('specific'):.2f}/2  "
+        f"fluent {mean('fluent'):.2f}/2  verb!=obj {mean('verb_obj_distinct'):.0%}  "
+        f"coherent {mean('coherent'):.0%}  (n={n})"
+    )
 
 
 async def _run(args: argparse.Namespace) -> int:
@@ -258,8 +271,9 @@ async def _run(args: argparse.Namespace) -> int:
     for src, g in ho.groupby("src"):
         parts.append(g.sample(min(len(g), args.per_source_cap), random_state=17))
     ho = pd.concat(parts).reset_index(drop=True)
-    print(f"judging {len(ho)} held-out segments "
-          f"({ho.src.value_counts().to_dict()})", file=sys.stderr)
+    print(
+        f"judging {len(ho)} held-out segments ({ho.src.value_counts().to_dict()})", file=sys.stderr
+    )
 
     ho = ho.assign(pred=_generate(ho))
 
@@ -276,8 +290,7 @@ async def _run(args: argparse.Namespace) -> int:
         if r:
             scored.append(r)
         if done % 20 == 0:
-            print(f"  judged {done}/{len(tasks)} "
-                  f"({len(scored)} parsed)", file=sys.stderr)
+            print(f"  judged {done}/{len(tasks)} ({len(scored)} parsed)", file=sys.stderr)
 
     if not scored:
         print("no items scored (judge returned no parseable JSON)", file=sys.stderr)
@@ -309,28 +322,30 @@ async def _run(args: argparse.Namespace) -> int:
         wins[r["winner"]] += 1
     n = len(scored)
     print("\n  -- head-to-head (blinded A/B, model vs gold) --")
-    print(f"  model wins {wins['model']/n:.0%}  | tie {wins['tie']/n:.0%}  | "
-          f"gold wins {wins['gold']/n:.0%}  (n={n})")
+    print(
+        f"  model wins {wins['model'] / n:.0%}  | tie {wins['tie'] / n:.0%}  | "
+        f"gold wins {wins['gold'] / n:.0%}  (n={n})"
+    )
     for src in sorted({r["src"] for r in scored}):
         s = [r for r in scored if r["src"] == src]
         w = {"model": 0, "gold": 0, "tie": 0}
         for r in s:
             w[r["winner"]] += 1
         m = len(s)
-        print(f"    {src}: model {w['model']/m:.0%} | tie {w['tie']/m:.0%} | "
-              f"gold {w['gold']/m:.0%}  (n={m})")
+        print(
+            f"    {src}: model {w['model'] / m:.0%} | tie {w['tie'] / m:.0%} | "
+            f"gold {w['gold'] / m:.0%}  (n={m})"
+        )
 
     def _mmean(field: str) -> float:
         vals = [r["model"][field] for r in scored]
         return sum(vals) / len(vals) if vals else 0.0
 
-    with start_run(EXPERIMENT, run_name="llm-judge",
-                   tags={"n_scored": str(len(scored))}):
+    with start_run(EXPERIMENT, run_name="llm-judge", tags={"n_scored": str(len(scored))}):
         log_yaml_params(EXPERIMENT_YAML)
         mlflow.log_param("n_scored", len(scored))
         mlflow.log_param("per_source_cap", args.per_source_cap)
-        for field in ("faithful", "specific", "fluent",
-                      "verb_obj_distinct", "coherent"):
+        for field in ("faithful", "specific", "fluent", "verb_obj_distinct", "coherent"):
             mlflow.log_metric(f"model_{field}", _mmean(field))
         mlflow.log_metric("h2h_model_win", wins["model"] / n)
         mlflow.log_metric("h2h_tie", wins["tie"] / n)
@@ -340,10 +355,13 @@ async def _run(args: argparse.Namespace) -> int:
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--per-source-cap", type=int, default=80,
-                   help="max held-out segments judged per source (copilot first).")
-    p.add_argument("--concurrency", type=int, default=6,
-                   help="max concurrent SDK judge calls.")
+    p.add_argument(
+        "--per-source-cap",
+        type=int,
+        default=80,
+        help="max held-out segments judged per source (copilot first).",
+    )
+    p.add_argument("--concurrency", type=int, default=6, help="max concurrent SDK judge calls.")
     args = p.parse_args()
     return asyncio.run(_run(args))
 

@@ -72,9 +72,7 @@ class StreamingBoundaryDecoder:
         return "noise"
 
 
-def decode_scores(
-    params: DecodeParams, classes: tuple[str, ...], scores: np.ndarray
-) -> list[str]:
+def decode_scores(params: DecodeParams, classes: tuple[str, ...], scores: np.ndarray) -> list[str]:
     """Decode a session's per-gap score matrix (``n_gaps x n_classes``, aligned
     to ``classes``) into labels, causally and in order."""
     dec = StreamingBoundaryDecoder(params)

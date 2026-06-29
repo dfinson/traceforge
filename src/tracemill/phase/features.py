@@ -266,15 +266,15 @@ def _neighbor_features(
         ev_unit = _l2norm(vecs[i])
         d: dict[str, float] = {}
         for w in windows:
-            past = vecs[max(0, i - w):i]
-            fut = vecs[i:min(n, i + w)]
+            past = vecs[max(0, i - w) : i]
+            fut = vecs[i : min(n, i + w)]
             if len(past) and len(fut):
                 pc = _l2norm(past.mean(axis=0))
                 fc = _l2norm(fut.mean(axis=0))
                 d[f"nbr_cos_w{w}"] = float(np.dot(pc, fc))
             else:
                 d[f"nbr_cos_w{w}"] = 1.0
-            trail = vecs[max(0, i - w + 1):i + 1]
+            trail = vecs[max(0, i - w + 1) : i + 1]
             tc = _l2norm(trail.mean(axis=0))
             d[f"nbr_centroid_w{w}"] = float(1.0 - np.dot(ev_unit, tc))
         out[eid] = d
@@ -325,9 +325,7 @@ class StreamingSessionFeaturizer:
         self._source = source
         self._seg = IncrementalSegmentation(seg_params) if seg_params is not None else None
         self._nbr = (
-            IncrementalNeighbor(neighbor_params.windows)
-            if neighbor_params is not None
-            else None
+            IncrementalNeighbor(neighbor_params.windows) if neighbor_params is not None else None
         )
 
     def push(self, event_id: str, event: dict) -> EventExample:

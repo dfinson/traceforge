@@ -101,9 +101,7 @@ def _learn_decode_params(examples, seg_params, n_splits: int = 3) -> DecodeParam
                 col = cls.index(c)
                 for j, row in zip(te, scores):
                     oof[c][j] = row[col]
-    thresholds = {
-        c: _f1_optimal_threshold((y == c).astype(int), oof[c]) for c in _DECODE_CLASSES
-    }
+    thresholds = {c: _f1_optimal_threshold((y == c).astype(int), oof[c]) for c in _DECODE_CLASSES}
     min_gaps = {c: _spacing_min_gap(examples, c) for c in _DECODE_CLASSES}
     log.info("learned decode thresholds=%s min_gaps=%s", thresholds, min_gaps)
     return DecodeParams(thresholds=thresholds, min_gaps=min_gaps)

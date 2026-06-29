@@ -97,8 +97,7 @@ def _design_matrix(
     blocks: list[np.ndarray] = []
     if use_symbolic:
         dicts = [
-            _filter(merged_symbolic(ex, use_seg, nbr_prefixes), drop_prefixes)
-            for ex in examples
+            _filter(merged_symbolic(ex, use_seg, nbr_prefixes), drop_prefixes) for ex in examples
         ]
         m = vectorizer.fit_transform(dicts) if fit else vectorizer.transform(dicts)
         blocks.append(m.toarray() if sparse.issparse(m) else np.asarray(m))

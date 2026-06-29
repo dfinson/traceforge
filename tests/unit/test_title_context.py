@@ -28,9 +28,15 @@ def test_no_signal_when_empty():
 
 
 def test_intent_slot_uses_report_intent_gerund():
-    rows = [_row(tool_name="report_intent",
-                 payload={"tool_name": "report_intent",
-                          "arguments": {"intent": "Adding retry logic to the client"}})]
+    rows = [
+        _row(
+            tool_name="report_intent",
+            payload={
+                "tool_name": "report_intent",
+                "arguments": {"intent": "Adding retry logic to the client"},
+            },
+        )
+    ]
     ctx = distilled_context(rows)
     assert ctx.startswith("intent: Adding retry logic to the client")
 
@@ -43,10 +49,12 @@ def test_actions_slot_dedups_and_orders_tools():
 
 def test_files_slot_excludes_learned_boilerplate():
     # users.js is in the packaged boilerplate set; client.py is not.
-    rows = [_row(tool_name="edit",
-                 payload={"arguments": {"path": "client.py"}}, binaries=["client.py"]),
-            _row(tool_name="edit",
-                 payload={"arguments": {"path": "users.js"}}, binaries=["users.js"])]
+    rows = [
+        _row(
+            tool_name="edit", payload={"arguments": {"path": "client.py"}}, binaries=["client.py"]
+        ),
+        _row(tool_name="edit", payload={"arguments": {"path": "users.js"}}, binaries=["users.js"]),
+    ]
     ctx = distilled_context(rows)
     assert "files:" in ctx
     assert "client.py" in ctx
@@ -54,15 +62,23 @@ def test_files_slot_excludes_learned_boilerplate():
 
 
 def test_symbols_slot_prefers_backticked_identifiers():
-    rows = [_row(kind="message.assistant",
-                 payload={"content": "Updated `validate_token` to reject expired tokens"})]
+    rows = [
+        _row(
+            kind="message.assistant",
+            payload={"content": "Updated `validate_token` to reject expired tokens"},
+        )
+    ]
     ctx = distilled_context(rows)
     assert "validate_token" in ctx
 
 
 def test_notes_slot_from_assistant_narration():
-    rows = [_row(kind="message.assistant",
-                 payload={"content": "I refactored the parser to stream tokens lazily."})]
+    rows = [
+        _row(
+            kind="message.assistant",
+            payload={"content": "I refactored the parser to stream tokens lazily."},
+        )
+    ]
     ctx = distilled_context(rows)
     assert "notes:" in ctx
     assert "refactored the parser" in ctx

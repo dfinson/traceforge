@@ -1,7 +1,9 @@
 import pyarrow.parquet as pq
 from pathlib import Path
 
-p = Path("data/interim/labeling-corpus/swe-agent-nebius/Melevir__cognitive_complexity-15__swe-agent-llama-70b__a000.parquet")
+p = Path(
+    "data/interim/labeling-corpus/swe-agent-nebius/Melevir__cognitive_complexity-15__swe-agent-llama-70b__a000.parquet"
+)
 t = pq.read_table(p)
 df = t.to_pandas()
 print("rows:", len(df))
@@ -11,7 +13,9 @@ print()
 print("first 10 events:")
 for i in range(min(10, len(df))):
     r = df.iloc[i]
-    print(f"  seq={r['seq']:>3} kind={r['kind']:<25} tool={r['tool_name']!s:<15} phases={r['phase_signals']}")
+    print(
+        f"  seq={r['seq']:>3} kind={r['kind']:<25} tool={r['tool_name']!s:<15} phases={r['phase_signals']}"
+    )
 
 print()
 ref = next(Path("data/interim/labeling-corpus").glob("*.parquet"))

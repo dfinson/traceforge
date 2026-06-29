@@ -47,8 +47,7 @@ def test_pick_distinct_avoids_parent_restatement():
 def test_ground_order_demotes_ungrounded_identifiers():
     from tracemill.title.inference import _ground_order, _is_grounded
 
-    ctx = ("intent: fix retry | actions: edit | files: http_client.py | "
-           "symbols: request_with_retry")
+    ctx = "intent: fix retry | actions: edit | files: http_client.py | symbols: request_with_retry"
     # invents an identifier the context never names -> ungrounded
     assert not _is_grounded("Update github-mcp-server-ample", ctx.lower())
     # only names identifiers present in the context -> grounded
@@ -74,8 +73,10 @@ def test_model_titles_a_distilled_context():
     from tracemill.title import TitleModel
 
     model = TitleModel.load()
-    ctx = ("intent: add retry logic to the HTTP client | actions: edit, run | "
-           "files: client.py | symbols: request_with_retry")
+    ctx = (
+        "intent: add retry logic to the HTTP client | actions: edit, run | "
+        "files: client.py | symbols: request_with_retry"
+    )
     out = model.title(ctx)
     assert isinstance(out, str) and out
     assert len(out.split()) <= 8  # short, human-readable

@@ -122,9 +122,7 @@ def oof_predictions(
     return preds
 
 
-def multilabel_report(
-    y_true: np.ndarray, y_pred: np.ndarray, classes: Sequence[str]
-) -> dict:
+def multilabel_report(y_true: np.ndarray, y_pred: np.ndarray, classes: Sequence[str]) -> dict:
     """F1_macro (primary) plus per-class P/R/F1 for a multi-label problem."""
 
     report = classification_report(
@@ -145,9 +143,7 @@ def multilabel_report(
     }
 
 
-def multiclass_report(
-    y_true: np.ndarray, y_pred: np.ndarray, classes: Sequence[str]
-) -> dict:
+def multiclass_report(y_true: np.ndarray, y_pred: np.ndarray, classes: Sequence[str]) -> dict:
     """F1_macro plus per-class P/R/F1 and confusion matrix for a 3-class task."""
 
     report = classification_report(
@@ -155,7 +151,9 @@ def multiclass_report(
     )
     cm = confusion_matrix(y_true, y_pred, labels=list(classes))
     return {
-        "f1_macro": float(f1_score(y_true, y_pred, labels=list(classes), average="macro", zero_division=0)),
+        "f1_macro": float(
+            f1_score(y_true, y_pred, labels=list(classes), average="macro", zero_division=0)
+        ),
         "per_class": {
             c: {
                 "precision": report[c]["precision"],

@@ -1,5 +1,7 @@
 """Int8-quantize the ONNX titler encoders/decoders for low-RAM CPU inference."""
-import sys, os
+
+import sys
+import os
 from optimum.onnxruntime import ORTQuantizer
 from optimum.onnxruntime.configuration import AutoQuantizationConfig
 

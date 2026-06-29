@@ -9,10 +9,9 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..config import CombinedLabelingConfig
 from .canonical_view import CanonicalSessionView
@@ -204,14 +203,14 @@ def validate_combined(
     cleaned_phase = tuple(pl for pl in labels.phase_labels if pl.event_id in visible_set)
     invented = [pl.event_id for pl in labels.phase_labels if pl.event_id not in visible_set]
     if invented:
-        errors.append(f"dropped {len(invented)} phase labels with unknown event_ids (typos/hallucinations)")
+        errors.append(
+            f"dropped {len(invented)} phase labels with unknown event_ids (typos/hallucinations)"
+        )
 
     phase_ids = {pl.event_id for pl in cleaned_phase}
     coverage = len(phase_ids & visible_set) / max(len(visible_set), 1)
     if coverage < v.min_phase_label_coverage.value:
-        errors.append(
-            f"phase coverage {coverage:.3f} < min {v.min_phase_label_coverage.value:.3f}"
-        )
+        errors.append(f"phase coverage {coverage:.3f} < min {v.min_phase_label_coverage.value:.3f}")
 
     expected_gaps = max(len(visible_ids) - 1, 0)
     cleaned_boundary = tuple(
@@ -261,12 +260,12 @@ def validate_combined(
         toc=labels.toc,
     )
 
-    coverage_failure = (
-        coverage < v.min_phase_label_coverage.value
-        or (expected_gaps and (
+    coverage_failure = coverage < v.min_phase_label_coverage.value or (
+        expected_gaps
+        and (
             len({bl.after_event_id for bl in cleaned_boundary}) / expected_gaps
             < v.min_boundary_label_coverage.value
-        ))
+        )
     )
     ok = not coverage_failure and not structural_failure
     return ok, errors, cleaned

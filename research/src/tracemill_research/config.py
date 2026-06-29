@@ -23,6 +23,7 @@ _FROZEN = ConfigDict(frozen=True, extra="forbid")
 # Activity / step taxonomy
 # ---------------------------------------------------------------------------
 
+
 class _PhraseList(BaseModel):
     model_config = _FROZEN
     phrases: tuple[str, ...]
@@ -122,6 +123,7 @@ class TaxonomyConfig(BaseModel):
 # Phase tracker (production tunables; mirrored here for research use)
 # ---------------------------------------------------------------------------
 
+
 class PhaseTrackerConfig(BaseModel):
     """Mirrors the production ``config/phase_tracker.yaml`` schema.
 
@@ -138,6 +140,7 @@ class PhaseTrackerConfig(BaseModel):
 # ---------------------------------------------------------------------------
 # Labeling runtime (sampling + backend + view + tasks)
 # ---------------------------------------------------------------------------
+
 
 class _SourcedFloat(BaseModel):
     model_config = _FROZEN
@@ -222,6 +225,7 @@ class LabelingRuntimeConfig(BaseModel):
 # ---------------------------------------------------------------------------
 # Loader helpers
 # ---------------------------------------------------------------------------
+
 
 def _load_yaml(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8-sig") as fh:

@@ -19,6 +19,7 @@ Run (research venv):
       --tiny-dir data/interim/t5-title-model-tiny-baseline \
       --out data/interim/t5-title-claude-ood.parquet
 """
+
 from __future__ import annotations
 
 import argparse
@@ -55,16 +56,27 @@ def _gen_baseline(tiny_dir: str, contexts: list[str]) -> list[str]:
     out: list[str] = []
     with torch.no_grad():
         for i in range(0, len(contexts), 64):
-            chunk = contexts[i:i + 64]
-            enc = tok([PREFIX + c for c in chunk], padding=True, truncation=True,
-                      max_length=MAX_SRC, return_tensors="pt").to(dev)
-            gen = mdl.generate(**enc, max_new_tokens=MAX_TGT, num_beams=NB,
-                               num_return_sequences=NB, no_repeat_ngram_size=2,
-                               repetition_penalty=1.3, length_penalty=0.8,
-                               early_stopping=True)
+            chunk = contexts[i : i + 64]
+            enc = tok(
+                [PREFIX + c for c in chunk],
+                padding=True,
+                truncation=True,
+                max_length=MAX_SRC,
+                return_tensors="pt",
+            ).to(dev)
+            gen = mdl.generate(
+                **enc,
+                max_new_tokens=MAX_TGT,
+                num_beams=NB,
+                num_return_sequences=NB,
+                no_repeat_ngram_size=2,
+                repetition_penalty=1.3,
+                length_penalty=0.8,
+                early_stopping=True,
+            )
             dec = [s.strip() for s in tok.batch_decode(gen, skip_special_tokens=True)]
             for j in range(len(chunk)):
-                out.append(best_of(dec[j * NB:(j + 1) * NB]))
+                out.append(best_of(dec[j * NB : (j + 1) * NB]))
     return out
 
 
@@ -84,23 +96,39 @@ async def _run(args: argparse.Namespace) -> int:
         events = await _enrich_session(mapping_path, sid, jsonl)
         if not events:
             continue
-        rows_by_id = {ev.id: event_to_feature_row(ev, seq)
-                      for seq, ev in enumerate(events)}
+        rows_by_id = {ev.id: event_to_feature_row(ev, seq) for seq, ev in enumerate(events)}
         preds = predict_session(bmodel, sid, args.boundary_source, rows_by_id)
         acts = _assemble(events, rows_by_id, preds)
         order = 0
         for ai, act in enumerate(acts):
             actx = distilled_context(act["rows"], src="claude")
             if actx and actx != "(no signal)":
-                recs.append(dict(src="claude-cli", sid=sid, aid=ai, order=order,
-                                 tier="activity", ctx=actx, split="heldout"))
+                recs.append(
+                    dict(
+                        src="claude-cli",
+                        sid=sid,
+                        aid=ai,
+                        order=order,
+                        tier="activity",
+                        ctx=actx,
+                        split="heldout",
+                    )
+                )
                 order += 1
             for si, st in enumerate(act["steps"]):
                 sctx = distilled_context(st["rows"], src="claude")
                 if sctx and sctx != "(no signal)":
-                    recs.append(dict(src="claude-cli", sid=sid, aid=ai * 100 + si,
-                                     order=order, tier="step", ctx=sctx,
-                                     split="heldout"))
+                    recs.append(
+                        dict(
+                            src="claude-cli",
+                            sid=sid,
+                            aid=ai * 100 + si,
+                            order=order,
+                            tier="step",
+                            ctx=sctx,
+                            split="heldout",
+                        )
+                    )
                     order += 1
 
     if not recs:
@@ -108,9 +136,11 @@ async def _run(args: argparse.Namespace) -> int:
         return 1
 
     df = pd.DataFrame(recs)
-    print(f"claude segments: {len(df)} "
-          f"({df.tier.value_counts().to_dict()}) from {df.sid.nunique()} sessions",
-          file=sys.stderr)
+    print(
+        f"claude segments: {len(df)} "
+        f"({df.tier.value_counts().to_dict()}) from {df.sid.nunique()} sessions",
+        file=sys.stderr,
+    )
     df["gold"] = _gen_baseline(args.tiny_dir, df.ctx.tolist())
     df.to_parquet(args.out, index=False)
     print(f"wrote {args.out}", file=sys.stderr)
@@ -119,8 +149,9 @@ async def _run(args: argparse.Namespace) -> int:
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        "data", "interim")
+    base = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "interim"
+    )
     p.add_argument("--dir", default=os.path.join(base, "claude-sessions"))
     p.add_argument("--tiny-dir", default=os.path.join(base, "t5-title-model-tiny-baseline"))
     p.add_argument("--out", default=os.path.join(base, "t5-title-claude-ood.parquet"))

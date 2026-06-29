@@ -260,17 +260,19 @@ class PhaseTracker:
                 total_duration_seconds=agg["duration"],
                 fraction_of_events=(agg["event_count"] / total_events) if total_events else 0.0,
                 fraction_of_duration=(agg["duration"] / total_duration) if total_duration else 0.0,
-                avg_block_duration_seconds=(agg["duration"] / agg["block_count"]) if agg["block_count"] else 0.0,
+                avg_block_duration_seconds=(agg["duration"] / agg["block_count"])
+                if agg["block_count"]
+                else 0.0,
             )
-            for phase, agg in sorted(by_phase.items(), key=lambda kv: (-kv[1]["event_count"], kv[0]))
+            for phase, agg in sorted(
+                by_phase.items(), key=lambda kv: (-kv[1]["event_count"], kv[0])
+            )
         )
 
         transition_pairs = Counter((t.from_phase, t.to_phase) for t in timeline.transitions)
         most_common = tuple(
             (frm, to, count)
-            for (frm, to), count in sorted(
-                transition_pairs.items(), key=lambda kv: (-kv[1], kv[0])
-            )
+            for (frm, to), count in sorted(transition_pairs.items(), key=lambda kv: (-kv[1], kv[0]))
         )
 
         return PhaseSummary(

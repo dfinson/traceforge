@@ -33,6 +33,7 @@ async def run() -> int:
     client = CopilotClient()
     await client.start()
     try:
+
         async def _approve_none(req, invocation):  # type: ignore[no-untyped-def]
             return PermissionRequestResult(kind="reject")
 

@@ -67,8 +67,8 @@ MODEL = "claude-sonnet-4.5"
 DEFAULT_MODELS = ["claude-sonnet-4.5", "gpt-5.4", "gemini-3.5-flash"]
 
 # Completion detection.
-QUIESCENCE_S = 30.0       # no events + no pending tools for this long => done
-HARD_CAP_S = 1500.0       # absolute wall-clock ceiling per session (25 min)
+QUIESCENCE_S = 30.0  # no events + no pending tools for this long => done
+HARD_CAP_S = 1500.0  # absolute wall-clock ceiling per session (25 min)
 POLL_S = 5.0
 
 # Destructive / escaping shell patterns we refuse even inside the clone. The
@@ -76,12 +76,12 @@ POLL_S = 5.0
 # (Intune-managed) host. Approve-by-default otherwise so the agent can build,
 # install deps, and run tests -- that is where the rich trace comes from.
 _DENY_PATTERNS = [
-    r"\brm\s+-rf\s+[/~]",          # rm -rf / or ~
+    r"\brm\s+-rf\s+[/~]",  # rm -rf / or ~
     r"\bsudo\b",
     r"\bshutdown\b|\breboot\b|\bhalt\b",
     r"\bmkfs\b|\bdd\s+if=",
-    r":\(\)\s*\{",                  # fork bomb
-    r"\bgit\s+push\b",             # never push to the real remote
+    r":\(\)\s*\{",  # fork bomb
+    r"\bgit\s+push\b",  # never push to the real remote
     r"\bcurl\b[^\n|]*\|\s*(sh|bash|python)",
     r"\bwget\b[^\n|]*\|\s*(sh|bash|python)",
     r">\s*/(etc|usr|bin|boot|dev|sys|proc)\b",
@@ -93,9 +93,9 @@ _DENY_RE = re.compile("|".join(_DENY_PATTERNS), re.IGNORECASE)
 
 @dataclass
 class Target:
-    repo: str          # "owner/name"
+    repo: str  # "owner/name"
     issue: int
-    model: str | None = None   # optional per-target model override
+    model: str | None = None  # optional per-target model override
 
     @property
     def slug(self) -> str:
@@ -129,9 +129,11 @@ DEFAULT_TARGETS = [
 
 def _gh_issue(repo: str, issue: int) -> tuple[str, str]:
     out = subprocess.run(
-        ["gh", "issue", "view", str(issue), "--repo", repo,
-         "--json", "title,body"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        ["gh", "issue", "view", str(issue), "--repo", repo, "--json", "title,body"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=60,
     )
     if out.returncode != 0:
@@ -151,6 +153,7 @@ def _rmtree_robust(path: Path) -> None:
             func(p)
         except Exception:  # noqa: BLE001
             pass
+
     if path.exists():
         shutil.rmtree(path, onerror=_on_err)
 
@@ -158,13 +161,16 @@ def _rmtree_robust(path: Path) -> None:
 def _clone(repo: str, dest: Path) -> None:
     _rmtree_robust(dest)
     if dest.exists():  # rmtree could not fully clear it (locked files) -> sidestep
-        dest = dest.parent / f"repo-{int(time.time()*1000) % 100000}"
+        dest = dest.parent / f"repo-{int(time.time() * 1000) % 100000}"
         _rmtree_robust(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     url = f"https://github.com/{repo}.git"
     out = subprocess.run(
         ["git", "clone", "--depth", "1", url, str(dest)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
     )
     if out.returncode != 0:
@@ -193,11 +199,14 @@ def _task_prompt(repo: str, issue: int, title: str, body: str) -> str:
 
 def _make_permission_handler(result: RunResult):
     def handler(request: PermissionRequest, invocation: dict) -> PermissionRequestResult:
-        cmd = (request.full_command_text or "")
+        cmd = request.full_command_text or ""
         if request.commands:
-            cmd = cmd + " " + " ".join(
-                (c.command if hasattr(c, "command") else str(c)) or ""
-                for c in request.commands
+            cmd = (
+                cmd
+                + " "
+                + " ".join(
+                    (c.command if hasattr(c, "command") else str(c)) or "" for c in request.commands
+                )
             )
         if cmd and _DENY_RE.search(cmd):
             result.denials += 1
@@ -211,8 +220,10 @@ def _make_permission_handler(result: RunResult):
 
 
 def _user_input_handler(request, invocation):  # noqa: ANN001
-    return {"answer": "Use your best judgment and proceed autonomously; "
-                      "do not wait for further input.", "wasFreeform": True}
+    return {
+        "answer": "Use your best judgment and proceed autonomously; do not wait for further input.",
+        "wasFreeform": True,
+    }
 
 
 async def _run_one(target: Target, hard_cap_s: float = HARD_CAP_S) -> RunResult:
@@ -234,8 +245,7 @@ async def _run_one(target: Target, hard_cap_s: float = HARD_CAP_S) -> RunResult:
     client = CopilotClient()
     await client.start()
 
-    state = {"last_ts": time.monotonic(), "pending_tools": 0,
-             "saw_assistant": False, "kinds": {}}
+    state = {"last_ts": time.monotonic(), "pending_tools": 0, "saw_assistant": False, "kinds": {}}
 
     def on_event(ev) -> None:  # noqa: ANN001
         result.events += 1
@@ -244,8 +254,12 @@ async def _run_one(target: Target, hard_cap_s: float = HARD_CAP_S) -> RunResult:
         state["kinds"][kind] = state["kinds"].get(kind, 0) + 1
         if kind in ("tool.execution_start", "tool.call.started"):
             state["pending_tools"] += 1
-        elif kind in ("tool.execution_end", "tool.execution_complete",
-                      "tool.call.completed", "tool.call.failed"):
+        elif kind in (
+            "tool.execution_end",
+            "tool.execution_complete",
+            "tool.call.completed",
+            "tool.call.failed",
+        ):
             state["pending_tools"] = max(0, state["pending_tools"] - 1)
         elif kind in ("assistant.message", "message.assistant"):
             state["saw_assistant"] = True
@@ -274,8 +288,7 @@ async def _run_one(target: Target, hard_cap_s: float = HARD_CAP_S) -> RunResult:
             if now - t0 > hard_cap_s:
                 result.end_reason = "hard-cap"
                 break
-            if (state["saw_assistant"] and state["pending_tools"] == 0
-                    and quiet > QUIESCENCE_S):
+            if state["saw_assistant"] and state["pending_tools"] == 0 and quiet > QUIESCENCE_S:
                 result.end_reason = "quiescent"
                 break
 
@@ -292,15 +305,26 @@ async def _run_one(target: Target, hard_cap_s: float = HARD_CAP_S) -> RunResult:
         except Exception:  # noqa: BLE001
             pass
 
-    log.info("[%s] end=%s events=%d approvals=%d denials=%d kinds=%s",
-             target.slug, result.end_reason, result.events,
-             result.approvals, result.denials, state["kinds"])
+    log.info(
+        "[%s] end=%s events=%d approvals=%d denials=%d kinds=%s",
+        target.slug,
+        result.end_reason,
+        result.events,
+        result.approvals,
+        result.denials,
+        state["kinds"],
+    )
 
     # Did the agent actually change the repo? (cheap signal of a real trace.)
     try:
-        diff = subprocess.run(["git", "-C", str(clone), "status", "--porcelain"],
-                              capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", timeout=60)
+        diff = subprocess.run(
+            ["git", "-C", str(clone), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+        )
         result.file_changed = bool(diff.stdout.strip())
     except Exception:  # noqa: BLE001
         pass
@@ -313,10 +337,10 @@ async def _run_one(target: Target, hard_cap_s: float = HARD_CAP_S) -> RunResult:
             CORPUS_OUT_DIR.mkdir(parents=True, exist_ok=True)
             try:
                 _n_lines, n_emit = await _process_session(
-                    mapping_path, result.session_id, jsonl, CORPUS_OUT_DIR)
+                    mapping_path, result.session_id, jsonl, CORPUS_OUT_DIR
+                )
                 result.ingested_events = n_emit
-                log.info("[%s] ingested %d events from %s",
-                         target.slug, n_emit, result.session_id)
+                log.info("[%s] ingested %d events from %s", target.slug, n_emit, result.session_id)
             except Exception as exc:  # noqa: BLE001
                 result.error = (result.error or "") + f" ingest: {exc}"
         else:
@@ -327,14 +351,24 @@ async def _run_one(target: Target, hard_cap_s: float = HARD_CAP_S) -> RunResult:
     try:
         RUNS_ROOT.mkdir(parents=True, exist_ok=True)
         with open(RUNS_ROOT / "run-manifest.jsonl", "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({
-                "session_id": result.session_id, "model": result.model,
-                "slug": target.slug, "repo": target.repo, "issue": target.issue,
-                "file_changed": result.file_changed, "events": result.events,
-                "ingested_events": result.ingested_events,
-                "end_reason": result.end_reason, "error": result.error,
-                "ts": time.time(),
-            }) + "\n")
+            fh.write(
+                json.dumps(
+                    {
+                        "session_id": result.session_id,
+                        "model": result.model,
+                        "slug": target.slug,
+                        "repo": target.repo,
+                        "issue": target.issue,
+                        "file_changed": result.file_changed,
+                        "events": result.events,
+                        "ingested_events": result.ingested_events,
+                        "end_reason": result.end_reason,
+                        "error": result.error,
+                        "ts": time.time(),
+                    }
+                )
+                + "\n"
+            )
     except Exception:  # noqa: BLE001
         pass
     # The trace is already ingested; the clone is throwaway. Reclaim disk so an
@@ -347,8 +381,9 @@ async def _run_one(target: Target, hard_cap_s: float = HARD_CAP_S) -> RunResult:
     return result
 
 
-async def main_async(targets: list[Target], concurrency: int = 1,
-                     hard_cap_s: float = HARD_CAP_S) -> int:
+async def main_async(
+    targets: list[Target], concurrency: int = 1, hard_cap_s: float = HARD_CAP_S
+) -> int:
     RUNS_ROOT.mkdir(parents=True, exist_ok=True)
     sem = asyncio.Semaphore(max(1, concurrency))
 
@@ -356,18 +391,23 @@ async def main_async(targets: list[Target], concurrency: int = 1,
         async with sem:
             return await _run_one(tgt, hard_cap_s=hard_cap_s)
 
-    log.info("running %d targets (concurrency=%d, cap=%.0fs)",
-             len(targets), concurrency, hard_cap_s)
-    results: list[RunResult] = list(
-        await asyncio.gather(*(_guarded(t) for t in targets))
+    log.info(
+        "running %d targets (concurrency=%d, cap=%.0fs)", len(targets), concurrency, hard_cap_s
     )
+    results: list[RunResult] = list(await asyncio.gather(*(_guarded(t) for t in targets)))
 
     log.info("=== agent-trace run summary ===")
     for r in results:
         log.info(
             "%-28s sid=%s model=%s changed=%s ingested_events=%d end=%s approvals=%d denials=%d%s",
-            r.target.slug, (r.session_id or "-")[:8], r.model, r.file_changed,
-            r.ingested_events, r.end_reason, r.approvals, r.denials,
+            r.target.slug,
+            (r.session_id or "-")[:8],
+            r.model,
+            r.file_changed,
+            r.ingested_events,
+            r.end_reason,
+            r.approvals,
+            r.denials,
             f" ERROR={r.error}" if r.error else "",
         )
     ok = sum(1 for r in results if r.ingested_events > 0 and not r.error)
@@ -380,24 +420,41 @@ async def main_async(targets: list[Target], concurrency: int = 1,
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--target", action="append", default=None,
-                        help="owner/name#issue (repeatable). Defaults to the "
-                             "built-in pilot set.")
-    parser.add_argument("--targets-file", default=None,
-                        help="Path to a file with one owner/name#issue per line "
-                             "(blank lines and #-comments ignored).")
-    parser.add_argument("--concurrency", type=int, default=1,
-                        help="Number of agent sessions to run in parallel.")
-    parser.add_argument("--cap-seconds", type=float, default=HARD_CAP_S,
-                        help="Hard wall-clock ceiling per session (seconds).")
-    parser.add_argument("--models", default=None,
-                        help="Comma-separated Copilot model ids to round-robin "
-                             "across targets (input-style diversity). Defaults "
-                             "to DEFAULT_MODELS. Per-line 'repo#issue @model' "
-                             "overrides win.")
+    parser.add_argument(
+        "--target",
+        action="append",
+        default=None,
+        help="owner/name#issue (repeatable). Defaults to the built-in pilot set.",
+    )
+    parser.add_argument(
+        "--targets-file",
+        default=None,
+        help="Path to a file with one owner/name#issue per line "
+        "(blank lines and #-comments ignored).",
+    )
+    parser.add_argument(
+        "--concurrency", type=int, default=1, help="Number of agent sessions to run in parallel."
+    )
+    parser.add_argument(
+        "--cap-seconds",
+        type=float,
+        default=HARD_CAP_S,
+        help="Hard wall-clock ceiling per session (seconds).",
+    )
+    parser.add_argument(
+        "--models",
+        default=None,
+        help="Comma-separated Copilot model ids to round-robin "
+        "across targets (input-style diversity). Defaults "
+        "to DEFAULT_MODELS. Per-line 'repo#issue @model' "
+        "overrides win.",
+    )
     args = parser.parse_args()
-    models = ([m.strip() for m in args.models.split(",") if m.strip()]
-              if args.models else list(DEFAULT_MODELS))
+    models = (
+        [m.strip() for m in args.models.split(",") if m.strip()]
+        if args.models
+        else list(DEFAULT_MODELS)
+    )
     targets: list[Target] = []
     if args.targets_file:
         for line in Path(args.targets_file).read_text(encoding="utf-8").splitlines():
@@ -407,22 +464,21 @@ def main() -> int:
             spec, _, mdl = line.partition("@")
             spec = spec.strip()
             repo, _, num = spec.partition("#")
-            targets.append(Target(repo.strip(), int(num),
-                                   model=(mdl.strip() or None)))
+            targets.append(Target(repo.strip(), int(num), model=(mdl.strip() or None)))
     if args.target:
         for t in args.target:
             spec, _, mdl = t.partition("@")
             repo, _, num = spec.partition("#")
-            targets.append(Target(repo.strip(), int(num),
-                                   model=(mdl.strip() or None)))
+            targets.append(Target(repo.strip(), int(num), model=(mdl.strip() or None)))
     if not targets:
         targets = DEFAULT_TARGETS
     # Round-robin assign the model roster to any target without an explicit one.
     for i, tgt in enumerate(targets):
         if tgt.model is None:
             tgt.model = models[i % len(models)]
-    return asyncio.run(main_async(targets, concurrency=args.concurrency,
-                                  hard_cap_s=args.cap_seconds))
+    return asyncio.run(
+        main_async(targets, concurrency=args.concurrency, hard_cap_s=args.cap_seconds)
+    )
 
 
 if __name__ == "__main__":

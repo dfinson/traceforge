@@ -42,9 +42,7 @@ QUALITY_SCORES = DATA_INTERIM / "quality-scores.parquet"
 def _read_quality_scores() -> dict[tuple[str, str], dict]:
     """Return {(source, session_id): row_dict} for every session scored."""
     if not QUALITY_SCORES.is_file():
-        raise FileNotFoundError(
-            f"missing {QUALITY_SCORES} — run score_session_quality.py first"
-        )
+        raise FileNotFoundError(f"missing {QUALITY_SCORES} — run score_session_quality.py first")
     rows = pq.read_table(QUALITY_SCORES).to_pylist()
     return {(r["source"], r["session_id"]): r for r in rows}
 
@@ -157,8 +155,11 @@ def main() -> int:
         log.info("=== source %s ===", name)
         shards_by_sid = _enumerate_shards(CORPUS_DIR / subdir)
         pool_size = len(shards_by_sid)
-        log.info("  pool: %d sessions across %d shards",
-                 pool_size, sum(len(v) for v in shards_by_sid.values()))
+        log.info(
+            "  pool: %d sessions across %d shards",
+            pool_size,
+            sum(len(v) for v in shards_by_sid.values()),
+        )
 
         selection_kind = src["selection"]
         if selection_kind == "floor":
@@ -188,13 +189,15 @@ def main() -> int:
                 _format_entry(sid, row, shards_by_sid[sid], source=name, subdir=subdir)
             )
 
-        sources_out.append({
-            "name": name,
-            "subdir": subdir,
-            "selection": selection_kind,
-            "pool_size": pool_size,
-            "selected_size": len(selected),
-        })
+        sources_out.append(
+            {
+                "name": name,
+                "subdir": subdir,
+                "selection": selection_kind,
+                "pool_size": pool_size,
+                "selected_size": len(selected),
+            }
+        )
 
     sessions_out.sort(key=lambda r: (r["source"], -r["quality_score"], r["session_id"]))
 
@@ -203,8 +206,9 @@ def main() -> int:
     if actual < target:
         log.warning("under target: selected %d < target %d", actual, target)
     elif actual > target:
-        log.warning("over target: selected %d > target %d (trim or adjust source quotas)",
-                    actual, target)
+        log.warning(
+            "over target: selected %d > target %d (trim or adjust source quotas)", actual, target
+        )
 
     manifest = {
         "schema_version": 3,
@@ -218,8 +222,7 @@ def main() -> int:
     MANIFEST_OUT.parent.mkdir(parents=True, exist_ok=True)
     with MANIFEST_OUT.open("w", encoding="utf-8") as fh:
         yaml.safe_dump(manifest, fh, sort_keys=False)
-    log.info("wrote %s (%d sessions across %d sources)",
-             MANIFEST_OUT, actual, len(sources_out))
+    log.info("wrote %s (%d sessions across %d sources)", MANIFEST_OUT, actual, len(sources_out))
     return 0
 
 

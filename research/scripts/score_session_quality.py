@@ -52,9 +52,7 @@ OUT_PATH = DATA_INTERIM / "quality-scores.parquet"
 #   grep -rh "effect=\|action=" src/tracemill/classify/ | sort -u
 MUTATION_EFFECTS = frozenset({"mutating", "destructive"})
 MUTATION_ACTION_PREFIXES = ("persist.", "modify.", "delete.")
-MUTATION_ACTION_LEAVES = frozenset(
-    {"write", "edit", "create", "delete", "modify", "patch"}
-)
+MUTATION_ACTION_LEAVES = frozenset({"write", "edit", "create", "delete", "modify", "patch"})
 
 
 def _is_mutation(effect: str | None, actions: list[str] | None) -> bool:
@@ -80,9 +78,17 @@ def _score_session(parquets: list[Path]) -> dict:
     user_chars = 0
 
     for path in parquets:
-        t = pq.read_table(path, columns=[
-            "kind", "tool_name", "effect", "action", "phase_signals", "payload_json",
-        ])
+        t = pq.read_table(
+            path,
+            columns=[
+                "kind",
+                "tool_name",
+                "effect",
+                "action",
+                "phase_signals",
+                "payload_json",
+            ],
+        )
         n_events += t.num_rows
         kinds = t["kind"].to_pylist()
         tool_names = t["tool_name"].to_pylist()
@@ -100,7 +106,7 @@ def _score_session(parquets: list[Path]) -> dict:
                     tools.add(tn)
                 if _is_mutation(eff, act):
                     n_mutation += 1
-            for ph in (ps or []):
+            for ph in ps or []:
                 phases.add(ph)
             if kind and kind.startswith("message."):
                 try:
@@ -139,8 +145,7 @@ def _group_by_session(source_dir: Path) -> dict[str, list[Path]]:
             continue
         sids = set(meta["session_id"].to_pylist())
         if len(sids) != 1:
-            log.warning("parquet %s contains %d sessions, skipping",
-                        p.name, len(sids))
+            log.warning("parquet %s contains %d sessions, skipping", p.name, len(sids))
             continue
         by_sid[next(iter(sids))].append(p)
     return by_sid
@@ -190,9 +195,12 @@ def main() -> int:
             log.info("source %s: missing, skipping", source)
             continue
         groups = _group_by_session(source_dir)
-        log.info("source %s: %d unique sessions across %d parquet shards",
-                 source, len(groups),
-                 sum(len(v) for v in groups.values()))
+        log.info(
+            "source %s: %d unique sessions across %d parquet shards",
+            source,
+            len(groups),
+            sum(len(v) for v in groups.values()),
+        )
 
         rows: list[dict] = []
         for i, (sid, parquets) in enumerate(sorted(groups.items())):
@@ -201,12 +209,14 @@ def main() -> int:
             except Exception as exc:  # noqa: BLE001
                 log.warning("score failed for %s/%s: %s", source, sid, exc)
                 continue
-            rows.append({
-                "session_id": sid,
-                "source": source,
-                "n_shards": len(parquets),
-                **signals,
-            })
+            rows.append(
+                {
+                    "session_id": sid,
+                    "source": source,
+                    "n_shards": len(parquets),
+                    **signals,
+                }
+            )
             if (i + 1) % 200 == 0:
                 log.info("  scored %d/%d", i + 1, len(groups))
 
@@ -216,9 +226,7 @@ def main() -> int:
             for r, rk in zip(rows, ranks, strict=True):
                 r[f"{sig}_rank"] = rk
         for r in rows:
-            r["quality_score"] = sum(
-                r[f"{s}_rank"] for s in SCORING_SIGNALS
-            ) / len(SCORING_SIGNALS)
+            r["quality_score"] = sum(r[f"{s}_rank"] for s in SCORING_SIGNALS) / len(SCORING_SIGNALS)
         all_rows.extend(rows)
 
     if not all_rows:
@@ -226,6 +234,7 @@ def main() -> int:
         return 1
 
     import pyarrow as pa
+
     table = pa.Table.from_pylist(all_rows)
     pq.write_table(table, OUT_PATH)
     log.info("wrote %s (%d rows)", OUT_PATH, len(all_rows))
@@ -241,13 +250,16 @@ def main() -> int:
             r = s_rows[idx]
             log.info(
                 "  p%d  score=%.3f tools=%d phases=%d tool_evs=%d mut=%d a_chars=%d",
-                100 - pct, r["quality_score"], r["n_unique_tools"],
-                r["n_unique_phase_signals"], r["n_tool_events"],
-                r["n_mutation_events"], r["assistant_chars"],
+                100 - pct,
+                r["quality_score"],
+                r["n_unique_tools"],
+                r["n_unique_phase_signals"],
+                r["n_tool_events"],
+                r["n_mutation_events"],
+                r["assistant_chars"],
             )
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

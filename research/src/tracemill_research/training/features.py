@@ -186,9 +186,9 @@ def load_boundary_examples(seg_params=None) -> list[GapExample]:
     rows = [r for r in _read_label_rows(BOUNDARY_LABELS) if r["source"] in FEATURIZABLE_SOURCES]
     labels_by_session: dict[tuple[str, str], dict[str, str]] = {}
     for r in rows:
-        labels_by_session.setdefault((r["source"], r["session_id"]), {})[
-            r["after_event_id"]
-        ] = r["label"]
+        labels_by_session.setdefault((r["source"], r["session_id"]), {})[r["after_event_id"]] = r[
+            "label"
+        ]
 
     out: list[GapExample] = []
     for (source, sid), label_map in labels_by_session.items():

@@ -29,9 +29,7 @@ import json
 import logging
 import sys
 from collections import OrderedDict
-from pathlib import Path
 
-from tracemill_research.config import load_labeling_runtime_config
 from tracemill_research.paths import DATA_PROCESSED
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -73,8 +71,10 @@ def _event_position_in_window(event_id: str, window: dict, w_meta: dict) -> tupl
 
 
 def _pick_better_window(
-    a_window_idx: int, a_centre_dist: int,
-    b_window_idx: int, b_centre_dist: int,
+    a_window_idx: int,
+    a_centre_dist: int,
+    b_window_idx: int,
+    b_centre_dist: int,
 ) -> int:
     """Pick the better window index for an event present in both. Lower
     centre distance wins; ties broken to the earlier window."""
@@ -321,8 +321,7 @@ def stitch_session(sid: str, force: bool = False) -> bool:
     # If any window failed, don't produce a stitched result.
     failed = [w for w in windows if w["status"] not in {"labeled", "labeled-flagged"}]
     if failed:
-        log.warning("session %s has %d failed windows; not stitching",
-                    sid, len(failed))
+        log.warning("session %s has %d failed windows; not stitching", sid, len(failed))
         return False
 
     phase_labels = _stitch_phase_labels(windows, index)
@@ -334,9 +333,9 @@ def stitch_session(sid: str, force: bool = False) -> bool:
         "session_id": sid,
         "source": index.get("source", "unknown"),
         "session_type": "agent",  # oversized sessions are always agent
-        "status": "labeled-flagged" if any(
-            w["status"] == "labeled-flagged" for w in windows
-        ) else "labeled",
+        "status": "labeled-flagged"
+        if any(w["status"] == "labeled-flagged" for w in windows)
+        else "labeled",
         "phase_accept_fraction": metrics["phase"],
         "boundary_accept_fraction": metrics["boundary"],
         "toc_accept": metrics["toc"],
@@ -349,8 +348,7 @@ def stitch_session(sid: str, force: bool = False) -> bool:
         "attempts": [],  # per-window attempts live under labels-windows/
         "canonical_view": {
             "rendered_chars": sum(
-                int((w.get("canonical_view") or {}).get("rendered_chars") or 0)
-                for w in windows
+                int((w.get("canonical_view") or {}).get("rendered_chars") or 0) for w in windows
             ),
             "elided_count": 0,
             "rendered_events": index["n_events"],
@@ -368,8 +366,14 @@ def stitch_session(sid: str, force: bool = False) -> bool:
     log.info(
         "stitched %s: %d events -> %d phases, %d boundaries, %d activities "
         "(accept_phase=%.2f accept_boundary=%.2f toc_accept=%s)",
-        sid, index["n_events"], len(phase_labels), len(boundary_labels),
-        len(toc), metrics["phase"], metrics["boundary"], metrics["toc"],
+        sid,
+        index["n_events"],
+        len(phase_labels),
+        len(boundary_labels),
+        len(toc),
+        metrics["phase"],
+        metrics["boundary"],
+        metrics["toc"],
     )
     return True
 

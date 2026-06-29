@@ -40,15 +40,20 @@ STOP = set(
 _JUNK = re.compile(r"\btoolu_[\w]+\b|\b[0-9a-f]{12,}\b", re.I)
 _INTENT = re.compile(
     r"\b(let'?s|let me|i'?ll|i will|we'?ll|we will|we need to|i need to|we should|"
-    r"i should|going to|i want to|we want to|in order to|now i|now we)\b", re.I)
+    r"i should|going to|i want to|we want to|in order to|now i|now we)\b",
+    re.I,
+)
 _RESULT = re.compile(
     r"\b(has been|have been|appears|confirms?|confirmed|succeeded|successfully|"
     r"the output|the result|now that|great|perfect|it seems|this (?:means|shows|confirms))\b",
-    re.I)
+    re.I,
+)
 _LEAD = re.compile(r"^(first|next|then|now|also|finally|so|ok|okay|alright)[,:]?\s+", re.I)
 _OPENER = re.compile(
     r"^(let'?s|lets|we'?ll|we will|we need to|we should|we can|we are going to|"
-    r"i'?ll|i will|i'?m going to|let me|i need to|i should|i want to|we want to|to)\s+", re.I)
+    r"i'?ll|i will|i'?m going to|let me|i need to|i should|i want to|we want to|to)\s+",
+    re.I,
+)
 
 
 def tokset(s):
@@ -60,7 +65,11 @@ def rouge1(c, g):
     if not cs or not gs:
         return 0.0
     inter = len(cs & gs)
-    return 0.0 if not inter else 2 * (inter / len(cs)) * (inter / len(gs)) / (inter / len(cs) + inter / len(gs))
+    return (
+        0.0
+        if not inter
+        else 2 * (inter / len(cs)) * (inter / len(gs)) / (inter / len(cs) + inter / len(gs))
+    )
 
 
 def lst(v):
@@ -102,7 +111,9 @@ _TOOLSER = re.compile(r"\b(function|report_intent|toolu_\w+|risk-v\d|end_of_edit
 # imperative tool/command tokens that signal the prose has ended and a command begins
 _TOOLWORD = re.compile(
     r"\b(view|edit|str_replace|powershell|bash|sh|cat|run|grep|sed|curl|python|"
-    r"node|npm|pip|git|ls|cd|mkdir|rm|cp|mv|echo|read|write|create|apply_patch)\b", re.I)
+    r"node|npm|pip|git|ls|cd|mkdir|rm|cp|mv|echo|read|write|create|apply_patch)\b",
+    re.I,
+)
 
 
 def denoise(text: str) -> str:
@@ -110,7 +121,7 @@ def denoise(text: str) -> str:
     (absolute paths -> basename, 'function'/'report_intent' markers, ids)."""
     if not text:
         return ""
-    text = _ABS_PATH.sub(r"\1", text)        # collapse long paths to basename
+    text = _ABS_PATH.sub(r"\1", text)  # collapse long paths to basename
     # cut a sentence at the first tool-serialization marker (prose precedes it)
     parts = re.split(r"\b(?:function|end_of_edit)\b", text, flags=re.I)
     text = parts[0]
@@ -123,7 +134,7 @@ def _cut_command_tail(s: str) -> str:
     invocation ("Check its contents: view mcp-config.json" -> "Check its contents")."""
     m = re.search(r"\s*[:\-\u2014]\s+", s)
     if m:
-        head, tail = s[: m.start()], s[m.end():]
+        head, tail = s[: m.start()], s[m.end() :]
         # only cut if head is real prose and tail begins like a command
         if len(head.split()) >= 3 and _TOOLWORD.match(tail.strip()):
             return head
@@ -191,26 +202,30 @@ def seg_sentences(rows):
 N_SURF = 12
 
 
-def surface_feats(sent, idx, n, cent_sim=0.0, cent_rank=0.0, is_central=0.0,
-                  neigh_max=0.0, is_intent_call=0.0):
+def surface_feats(
+    sent, idx, n, cent_sim=0.0, cent_rank=0.0, is_central=0.0, neigh_max=0.0, is_intent_call=0.0
+):
     wc = len(sent.split())
-    return np.array([
-        1.0 if _INTENT.search(sent) else 0.0,
-        1.0 if _RESULT.search(sent) else 0.0,
-        1.0 if idx == 0 else 0.0,
-        idx / max(n - 1, 1),
-        min(wc, 20) / 20.0,
-        1.0 if "`" in sent or re.search(r"\.\w{1,4}\b", sent) else 0.0,
-        # centrality: the title sentence is usually the most representative one
-        cent_sim,
-        cent_rank,
-        is_central,
-        neigh_max,
-        # very short / very long sentences are rarely good titles
-        1.0 if 4 <= wc <= 14 else 0.0,
-        # stated report_intent: gerund-form, near-gold title text
-        is_intent_call,
-    ], dtype=np.float32)
+    return np.array(
+        [
+            1.0 if _INTENT.search(sent) else 0.0,
+            1.0 if _RESULT.search(sent) else 0.0,
+            1.0 if idx == 0 else 0.0,
+            idx / max(n - 1, 1),
+            min(wc, 20) / 20.0,
+            1.0 if "`" in sent or re.search(r"\.\w{1,4}\b", sent) else 0.0,
+            # centrality: the title sentence is usually the most representative one
+            cent_sim,
+            cent_rank,
+            is_central,
+            neigh_max,
+            # very short / very long sentences are rarely good titles
+            1.0 if 4 <= wc <= 14 else 0.0,
+            # stated report_intent: gerund-form, near-gold title text
+            is_intent_call,
+        ],
+        dtype=np.float32,
+    )
 
 
 def main():
@@ -240,11 +255,16 @@ def main():
             for _, a in srows.iterrows():
                 for s_id, e_id, tier, gold in [
                     (a.start_event_id, a.end_event_id, "activity", a.activity_title),
-                    *[(st["start_event_id"], st["end_event_id"], "step", st["step_title"]) for st in a.steps],
+                    *[
+                        (st["start_event_id"], st["end_event_id"], "step", st["step_title"])
+                        for st in a.steps
+                    ],
                 ]:
                     sents = seg_sentences(window(s_id, e_id))
                     if sents:
-                        segs.append(dict(session=sid, source=src, tier=tier, gold=gold, sents=sents))
+                        segs.append(
+                            dict(session=sid, source=src, tier=tier, gold=gold, sents=sents)
+                        )
     print(f"segments with narration: {len(segs)}", file=sys.stderr)
 
     # Embed all sentences + golds once.
@@ -275,10 +295,10 @@ def main():
         # segment centroid (mean of normalized embeddings) -> centrality signal
         cent = En[idxs].mean(0)
         cent /= np.linalg.norm(cent) + 1e-9
-        csim = En[idxs] @ cent                       # each sentence vs centroid
-        order = np.argsort(-csim)                     # high sim first
+        csim = En[idxs] @ cent  # each sentence vs centroid
+        order = np.argsort(-csim)  # high sim first
         rank = np.empty(n, np.float32)
-        rank[order] = np.arange(n) / max(n - 1, 1)    # 0 = most central
+        rank[order] = np.arange(n) / max(n - 1, 1)  # 0 = most central
         central_local = int(np.argmax(csim))
         # max cosine to any OTHER sentence in the segment (redundancy/centrality)
         G = En[idxs] @ En[idxs].T
@@ -286,9 +306,11 @@ def main():
         neigh = G.max(1) if n > 1 else np.zeros(n, np.float32)
         for j, gi in enumerate(idxs):
             surf[gi] = surface_feats(
-                all_sents[gi], j, n,
+                all_sents[gi],
+                j,
+                n,
                 cent_sim=float(csim[j]),
-                cent_rank=1.0 - float(rank[j]),       # 1 = most central
+                cent_rank=1.0 - float(rank[j]),  # 1 = most central
                 is_central=1.0 if j == central_local else 0.0,
                 neigh_max=float(neigh[j]),
                 is_intent_call=float(is_intent[gi]),
@@ -335,9 +357,15 @@ def main():
         learned = idxs[np.argmax(oof[idxs])]
         for name, gi in [("oracle", oracle), ("regex", regex), ("learned", learned)]:
             cand = clean_headline(all_sents[gi]) or all_sents[gi]
-            rows.append((sg["source"], sg["tier"], name,
-                         rouge1(cand, sg["gold"]),
-                         float((En[gi] * Eng[i]).sum())))
+            rows.append(
+                (
+                    sg["source"],
+                    sg["tier"],
+                    name,
+                    rouge1(cand, sg["gold"]),
+                    float((En[gi] * Eng[i]).sum()),
+                )
+            )
     R = pd.DataFrame(rows, columns=["source", "tier", "picker", "rouge1", "cos"])
     print("\n==== title quality by picker (mean) ====")
     print(R.groupby(["tier", "picker"])[["rouge1", "cos"]].mean().round(3).to_string())

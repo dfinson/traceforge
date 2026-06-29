@@ -39,15 +39,13 @@ class LabelingBackend(Protocol):
 class PromptBuilder(Protocol):
     """Builds the per-session prompt from the canonical event payload."""
 
-    def build(self, session_payload: dict[str, Any]) -> str:
-        ...
+    def build(self, session_payload: dict[str, Any]) -> str: ...
 
 
 class LabelingValidator(Protocol):
     """Validates a backend response against the task's schema."""
 
-    def parse(self, raw: str) -> dict[str, Any]:
-        ...
+    def parse(self, raw: str) -> dict[str, Any]: ...
 
     def validate(self, payload: dict[str, Any]) -> tuple[str, ...]:
         """Return a tuple of error messages; empty means valid."""

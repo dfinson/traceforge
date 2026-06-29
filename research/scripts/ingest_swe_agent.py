@@ -15,11 +15,12 @@ from __future__ import annotations
 import json
 import logging
 import sys
-from pathlib import Path
 
 from tracemill_research.config import load_labeling_runtime_config
 from tracemill_research.ingest.swe_agent import (
-    SweAgentIngestConfig, default_output_dir, default_shard_dir, run_sync,
+    SweAgentIngestConfig,
+    default_output_dir,
+    run_sync,
 )
 from tracemill_research.paths import DATA_RAW, EXPERIMENTS_DIR
 
@@ -34,13 +35,13 @@ def main() -> int:
 
     manifest_path = DATA_RAW / "swe-agent-nebius" / "MANIFEST.json"
     if not manifest_path.is_file():
-        log.error("no download manifest at %s; run download_swe_agent_shard.py first", manifest_path)
+        log.error(
+            "no download manifest at %s; run download_swe_agent_shard.py first", manifest_path
+        )
         return 2
 
     records = json.loads(manifest_path.read_text())
-    shard_paths = tuple(
-        sorted((DATA_RAW / "swe-agent-nebius" / r["local_path"]) for r in records)
-    )
+    shard_paths = tuple(sorted((DATA_RAW / "swe-agent-nebius" / r["local_path"]) for r in records))
     log.info("ingesting %d shards: %s", len(shard_paths), [p.name for p in shard_paths])
 
     ingest_cfg = SweAgentIngestConfig(
@@ -53,9 +54,12 @@ def main() -> int:
     stats = run_sync(ingest_cfg)
     log.info(
         "done: seen=%d emitted=%d skipped_too_large=%d skipped_unresolved=%d failed=%d events=%d",
-        stats.sessions_seen, stats.sessions_emitted,
-        stats.sessions_skipped_too_large, stats.sessions_skipped_unresolved,
-        stats.sessions_failed, stats.events_emitted,
+        stats.sessions_seen,
+        stats.sessions_emitted,
+        stats.sessions_skipped_too_large,
+        stats.sessions_skipped_unresolved,
+        stats.sessions_failed,
+        stats.events_emitted,
     )
     return 0
 

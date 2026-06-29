@@ -35,7 +35,12 @@ for _p in ["averaged_perceptron_tagger", "averaged_perceptron_tagger_eng", "punk
     nltk.download(_p, quiet=True)
 
 from scripts._title_object import (  # noqa: E402
-    _CODESHAPE, STOP, content_toks, payload_entities, toks)
+    _CODESHAPE,
+    STOP,
+    content_toks,
+    payload_entities,
+    toks,
+)
 from scripts._title_templates import slot_seq  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -44,8 +49,11 @@ TOC = os.path.join(ROOT, "data", "processed", "activity-step-toc.parquet")
 # claude-cli per-session parquets live at the labeling-corpus ROOT (no subdir),
 # so the empty string resolves os.path.join(CORPUS, "", "<sid>.parquet") to the
 # top-level path. Organic Claude-Code gold, folded in as a 2nd real agent source.
-SRC_DIR = {"swe-agent-nebius": "swe-agent-nebius", "copilot-cli-native": "copilot-cli-native",
-           "claude-cli": ""}
+SRC_DIR = {
+    "swe-agent-nebius": "swe-agent-nebius",
+    "copilot-cli-native": "copilot-cli-native",
+    "claude-cli": "",
+}
 
 _ABS_PATH = re.compile(r"(?:[A-Za-z]:\\|/)[\w\\/.\- ]*?([\w.\-]+\.\w{1,5})")
 
@@ -65,6 +73,7 @@ def sentences(text):
 
 def payload_text(row):
     import json
+
     pj = row.get("payload_json")
     if not isinstance(pj, str):
         return ""
@@ -82,6 +91,7 @@ def payload_text(row):
         elif isinstance(o, (list, tuple)):
             for v in o:
                 yield from it(v)
+
     return " ".join(it(o))
 
 
@@ -89,6 +99,7 @@ def tool_arg_text(row):
     """text from the tool-call ARGUMENTS only (high-salience: what the agent
     chose to act on), not the tool output."""
     import json
+
     pj = row.get("payload_json")
     if not isinstance(pj, str):
         return ""
@@ -141,6 +152,7 @@ def extract_nps(text, verbs=frozenset(), _cache={}):
     stripped ("creating codeplane config" -> "codeplane config"); genuine gerund
     heads ("logging config", log not an imperative verb) are preserved."""
     from nltk import pos_tag, word_tokenize
+
     text = (text or "")[:600]
     ck = (text, id(verbs))
     if ck in _cache:
@@ -174,12 +186,12 @@ def extract_nps(text, verbs=frozenset(), _cache={}):
         while chunk and (_leading_verb(chunk[-1], verbs) or chunk[-1][1] == "VBG"):
             chunk = chunk[:-1]
         words, seen = [], set()
-        for w, t in chunk:                       # dedup repeated tokens, keep tags
+        for w, t in chunk:  # dedup repeated tokens, keep tags
             wl = w.lower()
             if wl not in seen:
                 seen.add(wl)
                 words.append((w, t))
-        words = words[:3]                        # gold objects are 1-3 content words
+        words = words[:3]  # gold objects are 1-3 content words
         # drop if a mis-tagged verb survives in the INTERIOR (real tag NNP/VBG);
         # a plain-NN verb-lexicon word ("test file") is a genuine noun -> keep.
         if any(_leading_verb(wt, verbs) for wt in words):
@@ -239,8 +251,7 @@ def cat_feats(rows):
     """categorical bag over structured fields (tool/action/cap/mech/effect)."""
     f = collections.Counter()
     for r in rows:
-        for col, pre in [("tool_name", "tool"), ("mechanism", "mech"),
-                         ("effect", "eff")]:
+        for col, pre in [("tool_name", "tool"), ("mechanism", "mech"), ("effect", "eff")]:
             v = r.get(col)
             if v is not None and str(v) != "None":
                 f[f"{pre}:{str(v).lower()}"] += 1
@@ -285,12 +296,13 @@ def learn_preps(titles_all):
                 glob[prep] += 1
                 break
     default = glob.most_common(1)[0][0] if glob else "for"
-    prep_of = {v: c.most_common(1)[0][0] for v, c in by_verb.items()
-               if sum(c.values()) >= 3}
+    prep_of = {v: c.most_common(1)[0][0] for v, c in by_verb.items() if sum(c.values()) >= 3}
     return prep_of, default
 
 
-_JUNKTOK = re.compile(r"^(toolu_|tool_|hook_|shellid|toolcallid)|^[0-9a-f]{8,}$|^[0-9a-f-]{16,}$", re.I)
+_JUNKTOK = re.compile(
+    r"^(toolu_|tool_|hook_|shellid|toolcallid)|^[0-9a-f]{8,}$|^[0-9a-f-]{16,}$", re.I
+)
 
 
 def clean_cand(c):
@@ -388,8 +400,7 @@ def main():
     VERBS = [w for w, _ in vcnt.most_common(60)]
     VERBSET_TOP = set(VERBS)
     prep_of, prep_default = learn_preps(titles_all)
-    print(f"  learned preps for {len(prep_of)} verbs, default={prep_default!r}",
-          file=sys.stderr)
+    print(f"  learned preps for {len(prep_of)} verbs, default={prep_default!r}", file=sys.stderr)
 
     # ---- build segments ----
     # LEARNED action vocabulary: every tool_name seen in the corpus. Tool names
@@ -419,8 +430,10 @@ def main():
             for ai, (_, a) in enumerate(srows.iterrows()):
                 aid = f"{sid}#{ai}"
                 items = [(a.start_event_id, a.end_event_id, "activity", a.activity_title, 0)]
-                items += [(st["start_event_id"], st["end_event_id"], "step", st["step_title"], si + 1)
-                          for si, st in enumerate(a.steps)]
+                items += [
+                    (st["start_event_id"], st["end_event_id"], "step", st["step_title"], si + 1)
+                    for si, st in enumerate(a.steps)
+                ]
                 for s_id, e_id, tier, gold, order in items:
                     if not isinstance(gold, str) or not gold.strip():
                         continue
@@ -437,14 +450,24 @@ def main():
                     low_rows = [str(payload_text(r)).lower() for r in rows]
                     for c in cand:
                         ptext[c] = sum(1 for t in low_rows if c in t)
-                    segs.append(dict(
-                        session=sid, source=src, tier=tier, gold=gold,
-                        aid=aid, order=order,
-                        cat={**cat_feats(rows), **struct_counts(rows)},
-                        narr=narr, cand=cand, cmeta=cmeta,
-                        gobj=gobj, gverb=gverb,
-                        tmpl=template_label(gold, verbset),
-                        seg_freq=ptext))
+                    segs.append(
+                        dict(
+                            session=sid,
+                            source=src,
+                            tier=tier,
+                            gold=gold,
+                            aid=aid,
+                            order=order,
+                            cat={**cat_feats(rows), **struct_counts(rows)},
+                            narr=narr,
+                            cand=cand,
+                            cmeta=cmeta,
+                            gobj=gobj,
+                            gverb=gverb,
+                            tmpl=template_label(gold, verbset),
+                            seg_freq=ptext,
+                        )
+                    )
     print(f"segments: {len(segs)}", file=sys.stderr)
 
     sessions = np.array([s["session"] for s in segs])
@@ -458,7 +481,9 @@ def main():
 
     vocab = list({c for s in segs for c in s["cand"]})
     vidx = {c: i for i, c in enumerate(vocab)}
-    Ev = embed_texts(vocab).astype(np.float32) if vocab else np.zeros((0, Eseg.shape[1]), np.float32)
+    Ev = (
+        embed_texts(vocab).astype(np.float32) if vocab else np.zeros((0, Eseg.shape[1]), np.float32)
+    )
     Ev /= np.linalg.norm(Ev, axis=1, keepdims=True) + 1e-9
 
     # ===== L1 TEMPLATE + L2a VERB: shared structured+narration features =====
@@ -473,7 +498,7 @@ def main():
     verb_top1 = np.zeros(len(segs), bool)
     verb_top3 = np.zeros(len(segs), bool)
     verb_pred = np.empty(len(segs), dtype=object)
-    verb_pred2 = np.empty(len(segs), dtype=object)   # 2nd-clause verb for conjunctions
+    verb_pred2 = np.empty(len(segs), dtype=object)  # 2nd-clause verb for conjunctions
     for tr, te in gkf.split(Xshared, tmpl_y, sessions):
         ct = LogisticRegression(max_iter=1000, C=1.0, class_weight="balanced")
         ct.fit(Xshared[tr], tmpl_y[tr])
@@ -496,8 +521,7 @@ def main():
     print("  label dist (gold):", dict(collections.Counter(tmpl_y).most_common()))
     print("\n==== L2a verb classifier ====")
     print("  verb top-1:", round(verb_top1.mean(), 3), " top-3:", round(verb_top3.mean(), 3))
-    print("  (share of gold verbs in top-60 set:",
-          round((verb_y != "other").mean(), 3), ")")
+    print("  (share of gold verbs in top-60 set:", round((verb_y != "other").mean(), 3), ")")
 
     # ===== L2b OBJECT ranker: per-candidate rows =====
     def phrase_idf(c):
@@ -513,15 +537,17 @@ def main():
             if c in VERBSET_TOP or c in tool_vocab or not (ctoks - STOP):
                 continue
             m = s["cmeta"].get(c, {})
-            rc_feat.append([
-                phrase_idf(c),
-                1.0 if _CODESHAPE.search(c) else 0.0,
-                min(s["seg_freq"].get(c, 0), 5) / 5.0,
-                float(m.get("is_entity", 0.0)),
-                float(m.get("in_args", 0.0)),
-                1.0 - float(m.get("first_pos", 1.0)),   # earlier mention = higher
-                min(len(c.split()), 4) / 4.0,
-            ])
+            rc_feat.append(
+                [
+                    phrase_idf(c),
+                    1.0 if _CODESHAPE.search(c) else 0.0,
+                    min(s["seg_freq"].get(c, 0), 5) / 5.0,
+                    float(m.get("is_entity", 0.0)),
+                    float(m.get("in_args", 0.0)),
+                    1.0 - float(m.get("first_pos", 1.0)),  # earlier mention = higher
+                    min(len(c.split()), 4) / 4.0,
+                ]
+            )
             rc_emb.append(Ev[vidx[c]] if c in vidx else np.zeros(Ev.shape[1], np.float32))
             lab = 1 if (ctoks & s["gobj"]) else 0
             rc_seg.append(i)
@@ -573,8 +599,13 @@ def main():
         obj2_score[i] = o2sc
 
     # object recall@1: does picked phrase share a content token with gold object?
-    rec = np.mean([1.0 if (set(obj1[i].split()) & segs[i]["gobj"]) else 0.0
-                   for i in range(len(segs)) if segs[i]["gobj"]])
+    rec = np.mean(
+        [
+            1.0 if (set(obj1[i].split()) & segs[i]["gobj"]) else 0.0
+            for i in range(len(segs))
+            if segs[i]["gobj"]
+        ]
+    )
     print("\n==== L2b object ranker ====")
     print("  obj-token recall@1:", round(rec, 3))
 
@@ -627,7 +658,11 @@ def main():
         if not cs or not gs:
             return 0.0
         inter = len(cs & gs)
-        return 0.0 if not inter else 2 * (inter/len(cs))*(inter/len(gs))/((inter/len(cs))+(inter/len(gs)))
+        return (
+            0.0
+            if not inter
+            else 2 * (inter / len(cs)) * (inter / len(gs)) / ((inter / len(cs)) + (inter / len(gs)))
+        )
 
     rows = []
     for i, s in enumerate(segs):
@@ -642,7 +677,11 @@ def main():
             base = orc = ""
         comp = composed[i]
         for name, cand in [("compose", comp), ("sent_centroid", base), ("sent_oracle", orc)]:
-            ec = embed_texts([cand]).astype(np.float32)[0] if cand else np.zeros(Eg.shape[1], np.float32)
+            ec = (
+                embed_texts([cand]).astype(np.float32)[0]
+                if cand
+                else np.zeros(Eg.shape[1], np.float32)
+            )
             ec = ec / (np.linalg.norm(ec) + 1e-9)
             rows.append((s["source"], s["tier"], name, rouge1(cand, s["gold"]), float(ec @ Eg[i])))
     R = pd.DataFrame(rows, columns=["source", "tier", "method", "rouge1", "cos"])
@@ -653,8 +692,7 @@ def main():
 
     # variety / "not cookie-cutter": unique-rate + template mix + most-repeated form
     uniq = len(set(composed)) / max(len(composed), 1)
-    tmix = {k: round(v / len(composed), 3)
-            for k, v in collections.Counter(tmpl_pred).most_common()}
+    tmix = {k: round(v / len(composed), 3) for k, v in collections.Counter(tmpl_pred).most_common()}
     top_forms = collections.Counter(composed).most_common(5)
     gold_uniq = len(set(s["gold"] for s in segs)) / max(len(segs), 1)
     print("\n==== variety ====")
@@ -673,7 +711,6 @@ def main():
         if s["tier"] == "step" and s["source"] == "copilot-cli-native" and shown < 8:
             print(f"  GOLD={s['gold']!r}\n  COMP={composed[i]!r}  [tmpl={tmpl_pred[i]}]")
             shown += 1
-
 
     # ===== TOC TREE render: a few held-out sessions, gold vs composed =====
     # (every composed[] is an out-of-fold prediction, so these are held-out.)
@@ -709,11 +746,15 @@ def main():
     print("\n========== TOC TREES (held-out, gold vs composed) ==========")
     for src in ("swe-agent-nebius", "copilot-cli-native"):
         keys = [k for k in by_sess if k[0] == src]
+
         # prefer MULTI-activity sessions of modest total size for readability
         def nact(k):
             return len({s["aid"] for s in by_sess[k]})
-        multi = sorted([k for k in keys if 2 <= nact(k) <= 4 and len(by_sess[k]) <= 18],
-                       key=lambda k: len(by_sess[k]))
+
+        multi = sorted(
+            [k for k in keys if 2 <= nact(k) <= 4 and len(by_sess[k]) <= 18],
+            key=lambda k: len(by_sess[k]),
+        )
         picked = multi[:2] or sorted(keys, key=lambda k: len(by_sess[k]))[:2]
         for k in picked:
             render_session(k)

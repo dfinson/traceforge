@@ -14,8 +14,7 @@ import os
 import nltk
 import pandas as pd
 
-for _p in ["averaged_perceptron_tagger", "averaged_perceptron_tagger_eng",
-           "punkt", "punkt_tab"]:
+for _p in ["averaged_perceptron_tagger", "averaged_perceptron_tagger_eng", "punkt", "punkt_tab"]:
     nltk.download(_p, quiet=True)
 from nltk import pos_tag, word_tokenize  # noqa: E402
 
@@ -36,7 +35,7 @@ def slot_seq(title, verbset):
     out = []
     for i, (w, t) in enumerate(tags):
         lw = w.lower()
-        if i == 0 and lw in verbset:          # imperative verb (tagger misses this)
+        if i == 0 and lw in verbset:  # imperative verb (tagger misses this)
             out.append("V")
             continue
         if t in DROP:
@@ -47,7 +46,7 @@ def slot_seq(title, verbset):
             out.append("P")
         elif t in VERBISH or (lw in verbset and (not out or out[-1] in {"C", "P"})):
             out.append("V")
-        else:                                   # NOUNISH and everything else -> object
+        else:  # NOUNISH and everything else -> object
             out.append("N")
     # collapse: runs of N -> OBJ; P followed by its N-run -> PP; V -> VERB; C -> CONJ
     coarse = []
@@ -95,8 +94,10 @@ def main():
     cum = 0
     for i, (k, c) in enumerate(tc.most_common(20), 1):
         cum += c
-        print(f"  {c/n:6.2%}  (cum {cum/n:6.2%})  {k}")
-    print(f"\ndistinct templates: {len(tc)}; top-10 cover {sum(c for _,c in tc.most_common(10))/n:.1%}")
+        print(f"  {c / n:6.2%}  (cum {cum / n:6.2%})  {k}")
+    print(
+        f"\ndistinct templates: {len(tc)}; top-10 cover {sum(c for _, c in tc.most_common(10)) / n:.1%}"
+    )
 
     # show example titles for the top templates
     print("\n==== examples per top template ====")

@@ -37,11 +37,13 @@ from tracemill_research.paths import EXPERIMENTS_DIR  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATASET = os.environ.get(
-    "TITLE_DATASET", os.path.join(ROOT, "data", "interim", "t5-title-dataset.parquet"))
+    "TITLE_DATASET", os.path.join(ROOT, "data", "interim", "t5-title-dataset.parquet")
+)
 # MODEL_DIR / BASE_MODEL are env-overridable so capacity probes (e.g. t5-small)
 # can train + judge a separate checkpoint without clobbering the shipped tiny one.
 MODEL_DIR = os.environ.get(
-    "TITLE_MODEL_DIR", os.path.join(ROOT, "data", "interim", "t5-title-model"))
+    "TITLE_MODEL_DIR", os.path.join(ROOT, "data", "interim", "t5-title-model")
+)
 # Default base = plain 4/4 t5-efficient-tiny. The deeper nl6 (6/6) won the
 # in-distribution depth sweep, but once the corpus was rebalanced with diverse
 # organic copilot gold it lost its edge: nl6 and tiny tie in-distribution while
@@ -103,8 +105,10 @@ def build():
         for ai, (_, a) in enumerate(srows.iterrows()):
             aid = f"{sid}#{ai}"
             segs = [(a.start_event_id, a.end_event_id, "activity", a.activity_title, 0)]
-            segs += [(st["start_event_id"], st["end_event_id"], "step",
-                      st["step_title"], si + 1) for si, st in enumerate(a.steps)]
+            segs += [
+                (st["start_event_id"], st["end_event_id"], "step", st["step_title"], si + 1)
+                for si, st in enumerate(a.steps)
+            ]
             for s_id, e_id, tier, gold, order in segs:
                 if not isinstance(gold, str) or not gold.strip():
                     continue
@@ -114,24 +118,38 @@ def build():
                 ctx = distilled_context(w, src=src)
                 if ctx == "(no signal)":
                     continue
-                rows_out.append(dict(src=src, sid=sid, aid=aid, order=order,
-                                     tier=tier, gold=gold.strip(), ctx=ctx,
-                                     split=split))
+                rows_out.append(
+                    dict(
+                        src=src,
+                        sid=sid,
+                        aid=aid,
+                        order=order,
+                        tier=tier,
+                        gold=gold.strip(),
+                        ctx=ctx,
+                        split=split,
+                    )
+                )
     df = pd.DataFrame(rows_out)
     os.makedirs(os.path.dirname(DATASET), exist_ok=True)
     df.to_parquet(DATASET, index=False)
     print(f"built {len(df)} pairs from {n_sess} sessions -> {DATASET}")
     print(df.groupby(["split", "src"]).size())
-    print(f"\nheld-out sessions: {df[df.split=='heldout'].sid.nunique()} | "
-          f"train sessions: {df[df.split=='train'].sid.nunique()}")
+    print(
+        f"\nheld-out sessions: {df[df.split == 'heldout'].sid.nunique()} | "
+        f"train sessions: {df[df.split == 'train'].sid.nunique()}"
+    )
 
 
 # ----------------------------------------------------------------------------- train
 def train():
     import torch
     from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
-    from transformers import (AutoTokenizer, T5ForConditionalGeneration,
-                              get_linear_schedule_with_warmup)
+    from transformers import (
+        AutoTokenizer,
+        T5ForConditionalGeneration,
+        get_linear_schedule_with_warmup,
+    )
 
     epochs = int(os.environ.get("EPOCHS", "12"))
     bs = int(os.environ.get("BS", "32"))
@@ -175,10 +193,10 @@ def train():
 
     def collate(batch):
         xs, ys = zip(*batch)
-        enc = tok(list(xs), padding=True, truncation=True, max_length=MAX_SRC,
-                  return_tensors="pt")
-        lab = tok(list(ys), padding=True, truncation=True, max_length=MAX_TGT,
-                  return_tensors="pt").input_ids
+        enc = tok(list(xs), padding=True, truncation=True, max_length=MAX_SRC, return_tensors="pt")
+        lab = tok(
+            list(ys), padding=True, truncation=True, max_length=MAX_TGT, return_tensors="pt"
+        ).input_ids
         lab[lab == tok.pad_token_id] = -100
         enc["labels"] = lab
         return enc
@@ -229,9 +247,10 @@ def train():
         _frac = {s: round(_mass[s] / _tot, 3) for s in _mass}
     sampler = WeightedRandomSampler(weights, num_samples=len(tr), replacement=True)
     uniq = tr.groupby("src").gold.nunique().to_dict()
-    print(f"source mix (raw): {src_freq} | distinct titles: {uniq} "
-          f"-> policy={policy} alpha={src_alpha} source mass fraction: {_frac}")
-
+    print(
+        f"source mix (raw): {src_freq} | distinct titles: {uniq} "
+        f"-> policy={policy} alpha={src_alpha} source mass fraction: {_frac}"
+    )
 
     dl = DataLoader(DS(tr), batch_size=bs, sampler=sampler, collate_fn=collate)
     mdl = T5ForConditionalGeneration.from_pretrained(BASE_MODEL).to(dev)
@@ -239,22 +258,27 @@ def train():
     steps = len(dl) * epochs
     sched = get_linear_schedule_with_warmup(opt, int(0.06 * steps), steps)
 
-    with start_run(EXPERIMENT, run_name=f"train:{os.path.basename(BASE_MODEL)}",
-                   tags={"phase": "train", "base_model": BASE_MODEL}):
+    with start_run(
+        EXPERIMENT,
+        run_name=f"train:{os.path.basename(BASE_MODEL)}",
+        tags={"phase": "train", "base_model": BASE_MODEL},
+    ):
         log_yaml_params(EXPERIMENT_YAML)
-        mlflow.log_params({
-            "base_model": BASE_MODEL,
-            "sources": _srcs or "all",
-            "src_alpha": src_alpha,
-            "balance_policy": policy,
-            "epochs": epochs,
-            "bs": bs,
-            "lr": lr,
-            "n_train": len(tr),
-            "max_src": MAX_SRC,
-            "max_tgt": MAX_TGT,
-            "dataset": os.path.basename(DATASET),
-        })
+        mlflow.log_params(
+            {
+                "base_model": BASE_MODEL,
+                "sources": _srcs or "all",
+                "src_alpha": src_alpha,
+                "balance_policy": policy,
+                "epochs": epochs,
+                "bs": bs,
+                "lr": lr,
+                "n_train": len(tr),
+                "max_src": MAX_SRC,
+                "max_tgt": MAX_TGT,
+                "dataset": os.path.basename(DATASET),
+            }
+        )
         for _s, _f in _frac.items():
             mlflow.log_param(f"source_mass_fraction.{_s}", _f)
 
@@ -275,8 +299,10 @@ def train():
                 nb += 1
             last_loss = tot / nb
             mlflow.log_metric("train_loss", last_loss, step=ep + 1)
-            print(f"epoch {ep+1}/{epochs}  loss {last_loss:.4f}  "
-                  f"[{time.time()-t0:.0f}s]", flush=True)
+            print(
+                f"epoch {ep + 1}/{epochs}  loss {last_loss:.4f}  [{time.time() - t0:.0f}s]",
+                flush=True,
+            )
 
         mlflow.log_metric("final_train_loss", last_loss)
         mlflow.log_metric("train_seconds", time.time() - t0)
@@ -316,20 +342,28 @@ def evaluate():
     preds, alts = [], []
     with torch.no_grad():
         for i in range(0, len(ho), 64):
-            chunk = ho.iloc[i:i + 64]
+            chunk = ho.iloc[i : i + 64]
             pref = chunk.prefix if "prefix" in chunk.columns else None
-            xs = [(pref.iloc[j] if pref is not None and isinstance(pref.iloc[j], str)
-                   else PREFIX) + c for j, c in enumerate(chunk.ctx)]
-            enc = tok(xs, padding=True,
-                      truncation=True, max_length=MAX_SRC,
-                      return_tensors="pt").to(dev)
-            out = mdl.generate(**enc, max_new_tokens=MAX_TGT, num_beams=NB,
-                               num_return_sequences=NB, no_repeat_ngram_size=2,
-                               repetition_penalty=1.3, length_penalty=0.8,
-                               early_stopping=True)
+            xs = [
+                (pref.iloc[j] if pref is not None and isinstance(pref.iloc[j], str) else PREFIX) + c
+                for j, c in enumerate(chunk.ctx)
+            ]
+            enc = tok(
+                xs, padding=True, truncation=True, max_length=MAX_SRC, return_tensors="pt"
+            ).to(dev)
+            out = mdl.generate(
+                **enc,
+                max_new_tokens=MAX_TGT,
+                num_beams=NB,
+                num_return_sequences=NB,
+                no_repeat_ngram_size=2,
+                repetition_penalty=1.3,
+                length_penalty=0.8,
+                early_stopping=True,
+            )
             dec = [s.strip() for s in tok.batch_decode(out, skip_special_tokens=True)]
             for j in range(len(chunk)):
-                cand = dec[j * NB:(j + 1) * NB]
+                cand = dec[j * NB : (j + 1) * NB]
                 preds.append(cand[0])
                 alts.append(cand)
     ho = ho.assign(pred=preds, alts=alts)
@@ -342,8 +376,7 @@ def evaluate():
         mlflow.log_metric("n_heldout", len(ho))
         for _src, _g in ho.groupby("src"):
             mlflow.log_metric(f"rouge1_{_src}", float(_g.r1.mean()))
-        mlflow.log_metric("unique_pred_rate",
-                          ho.pred.str.lower().nunique() / max(1, len(ho)))
+        mlflow.log_metric("unique_pred_rate", ho.pred.str.lower().nunique() / max(1, len(ho)))
         mlflow.log_metric("empty_preds", int((ho.pred.str.len() == 0).sum()))
 
     print("\n================= HELD-OUT ROUGE-1 (stopword-stripped F1) =================")
@@ -353,7 +386,9 @@ def evaluate():
     for tier, g in ho.groupby("tier"):
         print(f"  tier={tier:<14}: {g.r1.mean():.3f}  (n={len(g)})")
     uniq = ho.pred.str.lower().nunique() / max(1, len(ho))
-    print(f"  unique-pred rate   : {uniq:.3f}  (gold {ho.gold.str.lower().nunique()/len(ho):.3f})")
+    print(
+        f"  unique-pred rate   : {uniq:.3f}  (gold {ho.gold.str.lower().nunique() / len(ho):.3f})"
+    )
     empties = (ho.pred.str.len() == 0).sum()
     print(f"  empty preds        : {empties}")
     print("  extractive baseline: swe-agent .211 / copilot .147 (compose oracle)")
@@ -386,8 +421,7 @@ def evaluate():
         aids = sorted(acts, key=lambda a: min(x.order for x in acts[a]))
         ntot = len(aids)
         aids = aids[:ACT_CAP]
-        print(f"\n SESSION  [{render_src}]  {sid}  "
-              f"({ntot} activities, showing {len(aids)})")
+        print(f"\n SESSION  [{render_src}]  {sid}  ({ntot} activities, showing {len(aids)})")
         for ai, aid in enumerate(aids):
             grp = sorted(acts[aid], key=lambda x: x.order)
             act = next((x for x in grp if x.tier == "activity"), None)

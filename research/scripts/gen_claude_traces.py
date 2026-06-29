@@ -31,6 +31,7 @@ Run (research venv):
   $env:PYTHONIOENCODING="utf-8"
   .venv\\Scripts\\python.exe -u -m scripts.gen_claude_traces --n 24 --concurrency 2
 """
+
 from __future__ import annotations
 
 import argparse
@@ -40,7 +41,6 @@ import os
 import random
 import shutil
 import sys
-import time
 import uuid
 from pathlib import Path
 
@@ -51,7 +51,10 @@ os.environ.setdefault("MKL_NUM_THREADS", "2")
 os.environ.pop("ANTHROPIC_BASE_URL", None)
 
 from claude_agent_sdk import (  # noqa: E402
-    AssistantMessage, ClaudeAgentOptions, ResultMessage, SystemMessage, query,
+    ClaudeAgentOptions,
+    ResultMessage,
+    SystemMessage,
+    query,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -61,8 +64,17 @@ RUNS_ROOT = Path(os.environ.get("TEMP", "/tmp")) / "claude-gen-runs"
 
 # Tools the agent may use. Web tools enable genuine research sessions; the rest are
 # ordinary coding/data/devops work. Everything is confined to the scratch cwd.
-ALLOWED_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep",
-                 "WebSearch", "WebFetch", "TodoWrite"]
+ALLOWED_TOOLS = [
+    "Read",
+    "Write",
+    "Edit",
+    "Bash",
+    "Glob",
+    "Grep",
+    "WebSearch",
+    "WebFetch",
+    "TodoWrite",
+]
 
 # Domain-diverse task archetypes. Each is a SELF-CONTAINED task the agent does from
 # scratch in an empty dir, producing real multi-step sessions (plan/impl/verify) with
@@ -125,17 +137,47 @@ DOMAINS: dict[str, list[str]] = {
 
 # Slot fillers -- concrete, varied subjects so instances look like different real work.
 FEATURES = [
-    "a token-bucket rate limiter", "an LRU cache", "retry with exponential backoff",
-    "CSV-to-JSON conversion", "a Markdown table parser", "a URL shortener",
-    "daily revenue aggregation", "user-signup funnel metrics", "image thumbnailing",
-    "a priority queue", "semver comparison", "a config loader with env overrides",
-    "pagination over an API", "a debounce utility", "log-line parsing",
-    "sentiment scores for reviews", "a feature-flag evaluator", "JWT validation",
-    "deduplicating event streams", "a sliding-window counter", "a CRON expression parser",
-    "geo-distance between coordinates", "password strength scoring", "a diff algorithm",
+    "a token-bucket rate limiter",
+    "an LRU cache",
+    "retry with exponential backoff",
+    "CSV-to-JSON conversion",
+    "a Markdown table parser",
+    "a URL shortener",
+    "daily revenue aggregation",
+    "user-signup funnel metrics",
+    "image thumbnailing",
+    "a priority queue",
+    "semver comparison",
+    "a config loader with env overrides",
+    "pagination over an API",
+    "a debounce utility",
+    "log-line parsing",
+    "sentiment scores for reviews",
+    "a feature-flag evaluator",
+    "JWT validation",
+    "deduplicating event streams",
+    "a sliding-window counter",
+    "a CRON expression parser",
+    "geo-distance between coordinates",
+    "password strength scoring",
+    "a diff algorithm",
 ]
-MODS = ["core", "util", "service", "handler", "engine", "pipeline", "tool",
-        "widget", "model", "report", "parser", "runner", "client", "store"]
+MODS = [
+    "core",
+    "util",
+    "service",
+    "handler",
+    "engine",
+    "pipeline",
+    "tool",
+    "widget",
+    "model",
+    "report",
+    "parser",
+    "runner",
+    "client",
+    "store",
+]
 
 
 def _make_tasks(n: int, rng: random.Random, only: set[str] | None) -> list[dict]:
@@ -174,8 +216,15 @@ async def _one(task: dict, args, sem: asyncio.Semaphore, idx: int) -> dict:
         allowed_tools=ALLOWED_TOOLS,
         max_turns=args.max_turns,
     )
-    rec = {"idx": idx, "domain": task["domain"], "prompt": task["prompt"],
-           "session_id": None, "transcript": None, "events": 0, "error": None}
+    rec = {
+        "idx": idx,
+        "domain": task["domain"],
+        "prompt": task["prompt"],
+        "session_id": None,
+        "transcript": None,
+        "events": 0,
+        "error": None,
+    }
     backoff = args.backoff
     for attempt in range(args.retries + 1):
         sid = None
@@ -232,8 +281,12 @@ async def _one(task: dict, args, sem: asyncio.Semaphore, idx: int) -> dict:
     if not args.keep:
         shutil.rmtree(work, ignore_errors=True)
     status = "ok" if rec["transcript"] else ("ERR:" + (rec["error"] or "no-transcript"))
-    print(f"  [{idx:>3}] {task['domain']:<16} sid={str(rec['session_id'])[:8]:<8} "
-          f"ev={rec['events']:<3} {status}", file=sys.stderr, flush=True)
+    print(
+        f"  [{idx:>3}] {task['domain']:<16} sid={str(rec['session_id'])[:8]:<8} "
+        f"ev={rec['events']:<3} {status}",
+        file=sys.stderr,
+        flush=True,
+    )
     return rec
 
 
@@ -248,8 +301,11 @@ async def _run(args: argparse.Namespace) -> int:
     RUNS_ROOT.mkdir(parents=True, exist_ok=True)
     only = set(args.domains.split(",")) if args.domains else None
     tasks = _make_tasks(args.n, rng, only)
-    print(f"model={args.model} n={len(tasks)} conc={args.concurrency} "
-          f"max_turns={args.max_turns} out={out}", file=sys.stderr)
+    print(
+        f"model={args.model} n={len(tasks)} conc={args.concurrency} "
+        f"max_turns={args.max_turns} out={out}",
+        file=sys.stderr,
+    )
 
     sem = asyncio.Semaphore(args.concurrency)
     coros = [_one(t, args, sem, i) for i, t in enumerate(tasks)]
@@ -275,8 +331,12 @@ async def _run(args: argparse.Namespace) -> int:
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--n", type=int, default=24, help="number of sessions to generate")
-    p.add_argument("--concurrency", type=int, default=2,
-                   help="parallel sessions (keep low for the Pro rate limit)")
+    p.add_argument(
+        "--concurrency",
+        type=int,
+        default=2,
+        help="parallel sessions (keep low for the Pro rate limit)",
+    )
     p.add_argument("--model", default="haiku", help="Claude model (default: haiku)")
     p.add_argument("--max-turns", type=int, default=14)
     p.add_argument("--retries", type=int, default=2, help="rate-limit/error retries")

@@ -36,7 +36,9 @@ STEP = "step-boundary"
 
 
 def _report(name: str, y_true, y_pred) -> dict:
-    m = multiclass_report(np.asarray(y_true, dtype=object), np.asarray(y_pred, dtype=object), BOUNDARY_CLASSES)
+    m = multiclass_report(
+        np.asarray(y_true, dtype=object), np.asarray(y_pred, dtype=object), BOUNDARY_CLASSES
+    )
     step_f1 = m["per_class"][STEP]["f1"]
     print(f"  {name:<28} f1_macro={m['f1_macro']:.3f}  step_f1={step_f1:.3f}")
     return m
@@ -50,7 +52,10 @@ def main() -> int:
     cop = [e for e in examples if e.source == COPILOT]
     log.info(
         "swe gaps=%d (%d sessions); copilot gaps=%d (%d sessions)",
-        len(swe), len({e.session_id for e in swe}), len(cop), len({e.session_id for e in cop}),
+        len(swe),
+        len({e.session_id for e in swe}),
+        len(cop),
+        len({e.session_id for e in cop}),
     )
     if not cop:
         log.error("no copilot-cli-native gaps found — nothing to transfer-test")
@@ -74,7 +79,9 @@ def main() -> int:
         gkf = GroupKFold(n_splits=n_splits)
         yy = np.array([e.label for e in cop], dtype=object)
         for tr, te in gkf.split(np.zeros(len(cop)), yy, groups):
-            mdl = fit_boundary_model([cop[i] for i in tr], DEFAULT_FEATURE_SET, _logreg_factory, seg_params)
+            mdl = fit_boundary_model(
+                [cop[i] for i in tr], DEFAULT_FEATURE_SET, _logreg_factory, seg_params
+            )
             pr = predict_examples(mdl, [cop[i] for i in te])
             for j, p in zip(te, pr):
                 y_cv[j] = p["label"]
@@ -100,7 +107,9 @@ def main() -> int:
 
     print("\n  per-class (SWE->Copilot transfer):")
     for c, pc in m_transfer["per_class"].items():
-        print(f"    {c:<18} f1={pc['f1']:.3f}  P={pc['precision']:.3f}  R={pc['recall']:.3f}  n={int(pc['support'])}")
+        print(
+            f"    {c:<18} f1={pc['f1']:.3f}  P={pc['precision']:.3f}  R={pc['recall']:.3f}  n={int(pc['support'])}"
+        )
     return 0
 
 

@@ -132,19 +132,18 @@ class TestPipelineTitle:
 
         await pipeline.flush()
         # Flush titles the trailing activity (e2).
-        assert any(u.segment_id == "e2" and u.kind == "activity"
-                   for u in recorder.title_updates)
+        assert any(u.segment_id == "e2" and u.kind == "activity" for u in recorder.title_updates)
 
     async def test_title_disabled_by_default_emits_live(self):
         recorder = RecordingSink()
-        pipeline = EventPipeline(sinks=[recorder.sink], enable_phase=False,
-                                 enable_boundary=False)
+        pipeline = EventPipeline(sinks=[recorder.sink], enable_phase=False, enable_boundary=False)
         event = make_event()
         await pipeline.push(event)
         # No titler -> event streams straight through, no ids, no title updates.
         assert len(recorder.events) == 1
-        assert recorder.events[0].metadata is None or \
-            recorder.events[0].metadata.activity_id is None
+        assert (
+            recorder.events[0].metadata is None or recorder.events[0].metadata.activity_id is None
+        )
         assert recorder.title_updates == []
 
 

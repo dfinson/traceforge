@@ -36,13 +36,18 @@ from tracemill.types import EventMetadata, SessionEvent
 
 
 class _PMC(ctypes.Structure):
-    _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD),
-                ("PeakWorkingSetSize", ctypes.c_size_t), ("WorkingSetSize", ctypes.c_size_t),
-                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
-                ("QuotaPagedPoolUsage", ctypes.c_size_t),
-                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
-                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
-                ("PagefileUsage", ctypes.c_size_t), ("PeakPagefileUsage", ctypes.c_size_t)]
+    _fields_ = [
+        ("cb", wintypes.DWORD),
+        ("PageFaultCount", wintypes.DWORD),
+        ("PeakWorkingSetSize", ctypes.c_size_t),
+        ("WorkingSetSize", ctypes.c_size_t),
+        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+        ("PagefileUsage", ctypes.c_size_t),
+        ("PeakPagefileUsage", ctypes.c_size_t),
+    ]
 
 
 _kernel32 = ctypes.windll.kernel32
@@ -62,11 +67,20 @@ def _mem() -> tuple[float, float]:
 
 
 class NullSink(StorageSink):
-    async def on_event(self, event): pass
-    async def on_span(self, span): pass
-    async def on_usage(self, usage): pass
-    async def flush(self): pass
-    async def close(self): pass
+    async def on_event(self, event):
+        pass
+
+    async def on_span(self, span):
+        pass
+
+    async def on_usage(self, usage):
+        pass
+
+    async def flush(self):
+        pass
+
+    async def close(self):
+        pass
 
 
 def load_events(path: str) -> list[SessionEvent]:
@@ -78,14 +92,22 @@ def load_events(path: str) -> list[SessionEvent]:
         mj = r.get("metadata_json")
         md = EventMetadata.model_validate(json.loads(mj)) if mj else EventMetadata()
         # Drop any previously-stamped structuring so the pipeline produces it fresh.
-        md = md.model_copy(update={"phase": None, "boundary": None,
-                                   "activity_title": None, "step_title": None})
+        md = md.model_copy(
+            update={"phase": None, "boundary": None, "activity_title": None, "step_title": None}
+        )
         ts = r["timestamp_ns"]
         if not isinstance(ts, datetime):
             ts = datetime.fromtimestamp(ts / 1e9, tz=timezone.utc)
-        out.append(SessionEvent(
-            id=r["event_id"], kind=r["kind"], session_id=r["session_id"],
-            timestamp=ts, payload=payload, metadata=md))
+        out.append(
+            SessionEvent(
+                id=r["event_id"],
+                kind=r["kind"],
+                session_id=r["session_id"],
+                timestamp=ts,
+                payload=payload,
+                metadata=md,
+            )
+        )
     return out
 
 
@@ -118,8 +140,12 @@ async def run(events: list[SessionEvent], title: bool) -> dict[str, float]:
     rss0, _ = _mem()
     titler = TimedTitler() if title else None
     pipe = EventPipeline(
-        sinks=[NullSink()], enable_phase=True, enable_boundary=True,
-        title_inferencer=titler, enable_title=False)
+        sinks=[NullSink()],
+        enable_phase=True,
+        enable_boundary=True,
+        title_inferencer=titler,
+        enable_title=False,
+    )
 
     # Heartbeat probe: a coroutine that wants to tick every 10 ms. Whatever gap
     # it actually sees beyond that is the event loop being blocked by synchronous
@@ -167,16 +193,17 @@ async def run(events: list[SessionEvent], title: bool) -> dict[str, float]:
     print(f"push latency  p50  : {p50:8.2f} ms")
     print(f"push latency  p95  : {p95:8.2f} ms")
     print(f"push latency  p99.9: {p999:8.2f} ms")
-    print(f"loop max stall    : {max_stall:8.2f} ms   "
-          f"(10 ms heartbeat; high = event loop blocked)")
+    print(f"loop max stall    : {max_stall:8.2f} ms   (10 ms heartbeat; high = event loop blocked)")
     print(f"RSS before run    : {rss0:8.1f} MB")
     print(f"RSS after  run    : {rss1:8.1f} MB")
     print(f"RSS PEAK          : {peak:8.1f} MB")
     if titler is not None:
         print(f"titler segments   : {titler.calls}")
-        print(f"titler model time : {titler.secs:8.2f} s   "
-              f"({1e3 * titler.secs / max(titler.calls, 1):.0f} ms/segment, "
-              f"{100 * titler.secs / wall:.0f}% of wall)")
+        print(
+            f"titler model time : {titler.secs:8.2f} s   "
+            f"({1e3 * titler.secs / max(titler.calls, 1):.0f} ms/segment, "
+            f"{100 * titler.secs / wall:.0f}% of wall)"
+        )
 
     metrics = {
         "events": n,
@@ -215,8 +242,7 @@ def main() -> None:
     from tracemill_research.paths import EXPERIMENTS_DIR
 
     yaml_path = EXPERIMENTS_DIR / "titler-live-footprint.yaml"
-    with start_run("titler-live-footprint-v1", run_name=f"titling-{mode}",
-                   tags={"titling": mode}):
+    with start_run("titler-live-footprint-v1", run_name=f"titling-{mode}", tags={"titling": mode}):
         log_yaml_params(yaml_path)
         mlflow.log_param("titling", mode)
         mlflow.log_param("events", metrics["events"])

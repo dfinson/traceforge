@@ -49,10 +49,7 @@ class CopilotIngestConfig(BaseModel):
     )
     output_dir: Path = Field(
         ...,
-        description=(
-            "Directory for per-session parquet output. Files named "
-            "<session_id>.parquet."
-        ),
+        description=("Directory for per-session parquet output. Files named <session_id>.parquet."),
     )
     max_sessions: int | None = Field(
         None,
@@ -74,6 +71,7 @@ def default_copilot_store_path() -> Path:
 # SQLite reader
 # ---------------------------------------------------------------------------
 
+
 def _open_readonly(db_path: Path) -> sqlite3.Connection:
     uri = f"file:{db_path}?mode=ro"
     conn = sqlite3.connect(uri, uri=True)
@@ -85,16 +83,13 @@ def iter_sessions(conn: sqlite3.Connection) -> Iterable[str]:
     """Yield distinct session_ids in the turns table, ordered by id."""
 
     rows = conn.execute(
-        "SELECT session_id, MIN(id) AS first_id "
-        "FROM turns GROUP BY session_id ORDER BY first_id"
+        "SELECT session_id, MIN(id) AS first_id FROM turns GROUP BY session_id ORDER BY first_id"
     )
     for row in rows:
         yield row["session_id"]
 
 
-def iter_session_turns(
-    conn: sqlite3.Connection, session_id: str
-) -> Iterable[dict[str, Any]]:
+def iter_session_turns(conn: sqlite3.Connection, session_id: str) -> Iterable[dict[str, Any]]:
     """Yield turn rows for ``session_id`` ordered by turn_index."""
 
     rows = conn.execute(
@@ -109,6 +104,7 @@ def iter_session_turns(
 # ---------------------------------------------------------------------------
 # Pipeline
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class IngestStats:
@@ -191,7 +187,9 @@ async def _ingest_sessions(
                 events_emitted += session_event_count
                 logger.info(
                     "ingested session %s: %d turns -> %d events",
-                    sid, session_turn_count, session_event_count,
+                    sid,
+                    session_turn_count,
+                    session_event_count,
                 )
             except Exception as exc:  # noqa: BLE001
                 failures.append((sid, repr(exc)))
@@ -226,9 +224,7 @@ def _resolve_mapping_path() -> Path:
     pkg_dir = Path(tracemill.__file__).resolve().parent
     candidate = pkg_dir / "mappings" / "copilot_markdown.yaml"
     if not candidate.is_file():
-        raise FileNotFoundError(
-            f"Could not locate copilot_markdown.yaml at {candidate}"
-        )
+        raise FileNotFoundError(f"Could not locate copilot_markdown.yaml at {candidate}")
     return candidate
 
 

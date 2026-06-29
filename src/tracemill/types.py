@@ -309,4 +309,3 @@ class TitleUpdate(FrozenModel):
     title: str
     version: int = Field(default=1, ge=1)
     parent_id: str | None = None  # a step's activity_id, so a flat stream can rebuild the tree
-

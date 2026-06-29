@@ -45,11 +45,11 @@ def collapse_repeats(s: str) -> str:
     for conn in ("and", "then", "to", "&"):
         if conn in low:
             i = low.index(conn)
-            if low[:i] and low[:i] == low[i + 1:]:
+            if low[:i] and low[:i] == low[i + 1 :]:
                 w = w[:i]
                 low = [x.lower() for x in w]
     n = len(w)
-    if n >= 2 and n % 2 == 0 and low[: n // 2] == low[n // 2:]:
+    if n >= 2 and n % 2 == 0 and low[: n // 2] == low[n // 2 :]:
         w = w[: n // 2]
     return " ".join(w)
 

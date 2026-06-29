@@ -71,12 +71,8 @@ def test_stamps_opening_boundary_on_successor(monkeypatch):
 
 def test_refractory_suppresses_then_reopens(monkeypatch):
     # Every gap scores activity high; min_gap=3 must suppress the clustered ones.
-    _install_fake_scores(
-        monkeypatch, {f"e{i}": {"activity-boundary": 0.9} for i in range(6)}
-    )
-    params = DecodeParams(
-        thresholds={"activity-boundary": 0.5}, min_gaps={"activity-boundary": 3}
-    )
+    _install_fake_scores(monkeypatch, {f"e{i}": {"activity-boundary": 0.9} for i in range(6)})
+    params = DecodeParams(thresholds={"activity-boundary": 0.5}, min_gaps={"activity-boundary": 3})
     stream = BoundaryInferencer(model=_fake_model(params)).new_stream("S", "copilot")
 
     out = [stream.push(_event(i)) for i in range(6)]
@@ -172,9 +168,7 @@ async def test_pipeline_stamps_boundary_live(monkeypatch, recording_sink):
         monkeypatch,
         {"e0": {"activity-boundary": 0.9}, "e2": {"step-boundary": 0.9}},
     )
-    params = DecodeParams(
-        thresholds={"activity-boundary": 0.5, "step-boundary": 0.5}, min_gaps={}
-    )
+    params = DecodeParams(thresholds={"activity-boundary": 0.5, "step-boundary": 0.5}, min_gaps={})
     pipeline = EventPipeline(
         sinks=[recording_sink.sink],
         boundary_inferencer=BoundaryInferencer(model=_fake_model(params)),

@@ -19,6 +19,7 @@ Run (repo root, CPU-only):
   $env:CUDA_VISIBLE_DEVICES="-1"; $env:PYTHONIOENCODING="utf-8"
   ..\\.venv\\Scripts\\python.exe -u -m scripts._title_investigate_fit --largest 12 --max-events 800
 """
+
 from __future__ import annotations
 
 import argparse
@@ -38,8 +39,11 @@ from scripts._title_pipebench import load_events  # noqa: E402
 _WORD = re.compile(r"[A-Za-z0-9_./\\-]+")
 # action/effect surface tokens that mean the segment CHANGED the repo (so it is
 # not merely investigation). Structural strings, not tuned thresholds.
-_MUTATE = re.compile(r"edit|write|create|delete|modif|patch|refactor|rename|"
-                     r"insert|append|replace|mutat|format", re.I)
+_MUTATE = re.compile(
+    r"edit|write|create|delete|modif|patch|refactor|rename|"
+    r"insert|append|replace|mutat|format",
+    re.I,
+)
 _VERIFY = re.compile(r"test|verif|run|exec|build|lint|check|compile", re.I)
 
 
@@ -145,9 +149,13 @@ async def _run(a: argparse.Namespace) -> int:
         files = files[: a.largest]
 
     sink = _Sink()
-    pipe = EventPipeline(sinks=[sink], enable_phase=True, enable_boundary=True,
-                         title_inferencer=TitleInferencer(model_dir=a.model_dir),
-                         enable_title=True)
+    pipe = EventPipeline(
+        sinks=[sink],
+        enable_phase=True,
+        enable_boundary=True,
+        title_inferencer=TitleInferencer(model_dir=a.model_dir),
+        enable_title=True,
+    )
     for fp in files:
         events = load_events(str(fp))
         if a.max_events:
@@ -161,10 +169,9 @@ async def _run(a: argparse.Namespace) -> int:
     verb_counts = Counter()
     for sid, events in sink.events.items():
         for aid, steps in _segments(events):
-            for kind, seg_id, rows in (
-                [("activity", aid, [r for _, rs in steps for r in rs])]
-                + [("step", st, rs) for st, rs in steps]
-            ):
+            for kind, seg_id, rows in [("activity", aid, [r for _, rs in steps for r in rs])] + [
+                ("step", st, rs) for st, rs in steps
+            ]:
                 title = sink.titles.get((sid, seg_id, kind))
                 if not title:
                     continue
@@ -182,19 +189,22 @@ async def _run(a: argparse.Namespace) -> int:
     print(f"led by 'investigate'   : {n}  ({100 * n / n_titled:.1f}% of titled)")
     # mutation flag among the 'decent' (explor/planning) buckets = title missed
     # a real change the segment made.
-    missed = sum(1 for v, s, _ in inv
-                 if v in ("fitting", "decent-planning") and "mut=1" in s)
+    missed = sum(1 for v, s, _ in inv if v in ("fitting", "decent-planning") and "mut=1" in s)
     if n:
         print("\n-- verdict (by each segment's own plurality phase) --")
         order = ("fitting", "decent-planning", "borderline", "unfitting")
         for k in order:
-            print(f"  {k:16}: {vc.get(k,0):4d}  ({100*vc.get(k,0)/n:5.1f}%)")
+            print(f"  {k:16}: {vc.get(k, 0):4d}  ({100 * vc.get(k, 0) / n:5.1f}%)")
         decent = vc.get("fitting", 0) + vc.get("decent-planning", 0)
-        print(f"\n  DECENT-IN-CONTEXT (explor+planning) : {decent:4d}  ({100*decent/n:5.1f}%)")
-        print(f"  TRULY UNFITTING   (impl/verif modal): {vc.get('unfitting',0):4d}  "
-              f"({100*vc.get('unfitting',0)/n:5.1f}%)")
-        print(f"  ...of decent, also mutated (title missed a change): {missed} "
-              f"({100*missed/n:.1f}% of investigate)")
+        print(f"\n  DECENT-IN-CONTEXT (explor+planning) : {decent:4d}  ({100 * decent / n:5.1f}%)")
+        print(
+            f"  TRULY UNFITTING   (impl/verif modal): {vc.get('unfitting', 0):4d}  "
+            f"({100 * vc.get('unfitting', 0) / n:5.1f}%)"
+        )
+        print(
+            f"  ...of decent, also mutated (title missed a change): {missed} "
+            f"({100 * missed / n:.1f}% of investigate)"
+        )
         print("\n-- sample TRULY UNFITTING (impl/verif-dominant) --")
         for v, s, t in [x for x in inv if x[0] == "unfitting"][: a.show]:
             print(f"  {t[:46]:46}  {s}")
@@ -207,8 +217,13 @@ async def _run(a: argparse.Namespace) -> int:
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    default_dir = str(Path(__file__).resolve().parent.parent
-                      / "data" / "interim" / "labeling-corpus" / "copilot-cli-native")
+    default_dir = str(
+        Path(__file__).resolve().parent.parent
+        / "data"
+        / "interim"
+        / "labeling-corpus"
+        / "copilot-cli-native"
+    )
     p.add_argument("--dir", default=default_dir)
     p.add_argument("--largest", type=int, default=12)
     p.add_argument("--max-events", type=int, default=800)

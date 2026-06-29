@@ -55,9 +55,7 @@ class TestParquetSinkBuffering:
         sink = ParquetSink(path=str(sink_dir), max_buffered_events=3)
         try:
             for i in range(3):
-                await sink.on_event(
-                    make_event(session_id="bigsession", payload={"i": i})
-                )
+                await sink.on_event(make_event(session_id="bigsession", payload={"i": i}))
             files = list(sink_dir.glob("*.parquet"))
             assert len(files) == 1
             table = pq.read_table(files[0])

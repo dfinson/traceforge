@@ -24,8 +24,7 @@ def inspect(sid: str) -> None:
     )
     print("  phase dist:", dict(pdist.most_common(5)))
     print("  bdy dist:", dict(bdist))
-    print(f"  TOC: {len(toc)} activities, "
-          f"steps per activity: {[len(a['steps']) for a in toc]}")
+    print(f"  TOC: {len(toc)} activities, steps per activity: {[len(a['steps']) for a in toc]}")
     print(f"  titles: {[a['activity_title'] for a in toc]}")
 
 

@@ -21,7 +21,13 @@ import sys
 import pandas as pd
 
 from scripts._title_compose import (  # noqa: E402
-    CORPUS, SRC_DIR, TOC, narration, payload_entities, payload_text)
+    CORPUS,
+    SRC_DIR,
+    TOC,
+    narration,
+    payload_entities,
+    payload_text,
+)
 from scripts._title_object import STOP  # noqa: E402
 from scripts._title_sent import extract_intent  # noqa: E402
 
@@ -35,8 +41,7 @@ _BOILER_SESS_FRAC = 0.90
 # tool-call ids ("toolu_bdrk_01XW9..."), hex blobs, and long high-entropy ids are
 # pure noise tokens that leak into narration; strip them from notes. (\w includes
 # the underscores inside tool-call ids so the whole id is removed, not just a head.)
-_IDJUNK_RE = re.compile(
-    r"\btoolu_\w+|\b[a-fA-F0-9]{16,}\b|\b[A-Za-z0-9]{24,}\b")
+_IDJUNK_RE = re.compile(r"\btoolu_\w+|\b[a-fA-F0-9]{16,}\b|\b[A-Za-z0-9]{24,}\b")
 # web-fetched bundler assets ("monaco-cvufusc8.js", "index-bcttgcnd.css"): a stem
 # carrying a hash-like segment (hyphen/underscore + >=6 chars mixing letters with a
 # digit, or a long vowelless run) -> drop as noise, not a real source file.
@@ -51,7 +56,8 @@ _ASSET_RE = re.compile(r"[-_][a-z0-9]*\d[a-z0-9]*\.|[-_][bcdfghjklmnpqrstvwxz]{6
 _FILE_EXT = (
     "py|pyi|md|rst|txt|js|jsx|ts|tsx|mjs|cjs|json|jsonl|yaml|yml|toml|ini|cfg|"
     "conf|sh|bash|ps1|bat|sql|html|htm|css|scss|go|rs|java|kt|c|h|cpp|hpp|cc|"
-    "rb|php|cs|swift|lock|xml|csv|tsv|env|gitignore|dockerfile|makefile")
+    "rb|php|cs|swift|lock|xml|csv|tsv|env|gitignore|dockerfile|makefile"
+)
 _FILE_RE = re.compile(rf"^[a-z][\w\-]{{1,}}\.({_FILE_EXT})$")
 
 
@@ -83,6 +89,7 @@ def files_touched(rows):
 def _compute_boilerplate():
     """Per-source set of files appearing in >= _BOILER_SESS_FRAC of sessions."""
     import collections
+
     toc = pd.read_parquet(TOC)
     toc = toc[toc.session_type == "agent"]
     out = {}
@@ -160,6 +167,7 @@ def salient_symbols(rows, drop=frozenset(), cap=5):
     identifiers (snake/camel/dotted) by frequency > bare ALL-CAPS keywords.
     Source-agnostic: mines the raw payload text, not a source-specific schema."""
     import collections
+
     dropl = {d.lower() for d in drop} | {os.path.splitext(d)[0].lower() for d in drop}
     bt, struct, acro = collections.Counter(), collections.Counter(), collections.Counter()
     for r in rows:
@@ -221,8 +229,10 @@ def distilled_context(rows, src=None):
     return " | ".join(parts) if parts else "(no signal)"
 
 
-PROMPT = ("Write a short imperative title (3 to 6 words) summarizing this "
-          "software agent step. {ctx} title:")
+PROMPT = (
+    "Write a short imperative title (3 to 6 words) summarizing this "
+    "software agent step. {ctx} title:"
+)
 
 
 def main():
@@ -270,8 +280,10 @@ def main():
         for ai, (_, a) in enumerate(srows.iterrows()):
             aid = f"{sid}#{ai}"
             rowset = [(a.start_event_id, a.end_event_id, "activity", a.activity_title, 0)]
-            rowset += [(st["start_event_id"], st["end_event_id"], "step", st["step_title"], si + 1)
-                       for si, st in enumerate(a.steps)]
+            rowset += [
+                (st["start_event_id"], st["end_event_id"], "step", st["step_title"], si + 1)
+                for si, st in enumerate(a.steps)
+            ]
             for s_id, e_id, tier, gold, order in rowset:
                 if not isinstance(gold, str) or not gold.strip():
                     continue
@@ -300,8 +312,13 @@ def main():
             for it in items:
                 prompt = PROMPT.format(ctx=it[6])
                 enc = tok(prompt, return_tensors="pt", truncation=True, max_length=256)
-                out = mdl.generate(**enc, max_new_tokens=12, num_beams=4,
-                                   no_repeat_ngram_size=2, early_stopping=True)
+                out = mdl.generate(
+                    **enc,
+                    max_new_tokens=12,
+                    num_beams=4,
+                    no_repeat_ngram_size=2,
+                    early_stopping=True,
+                )
                 txt = tok.decode(out[0], skip_special_tokens=True).strip()
                 gen[(it[1], it[2], it[3])] = txt
 

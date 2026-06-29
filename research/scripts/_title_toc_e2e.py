@@ -61,7 +61,8 @@ class _TocSink(StorageSink):
         if md is None or md.activity_id is None:
             return
         self._events.setdefault(event.session_id, []).append(
-            (md.activity_id, md.step_id or md.activity_id))
+            (md.activity_id, md.step_id or md.activity_id)
+        )
 
     async def on_span(self, span) -> None:
         pass
@@ -150,11 +151,18 @@ async def _run(args: argparse.Namespace) -> int:
 
     sink = _TocSink()
     pipe = EventPipeline(
-        sinks=[sink], enable_phase=True, enable_boundary=True,
-        title_inferencer=TitleInferencer(), enable_title=True)
+        sinks=[sink],
+        enable_phase=True,
+        enable_boundary=True,
+        title_inferencer=TitleInferencer(),
+        enable_title=True,
+    )
 
-    print(f"rendering {len(files)} held-out session(s) via the production path "
-          f"(phase+boundary+ORT titler)\n", file=sys.stderr)
+    print(
+        f"rendering {len(files)} held-out session(s) via the production path "
+        f"(phase+boundary+ORT titler)\n",
+        file=sys.stderr,
+    )
 
     rendered = 0
     for fp in files:
@@ -176,16 +184,26 @@ async def _run(args: argparse.Namespace) -> int:
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    default_dir = str(Path(__file__).resolve().parent.parent
-                      / "data" / "interim" / "labeling-corpus" / "copilot-cli-native")
-    p.add_argument("--dir", default=default_dir,
-                   help="directory of *.parquet corpus sessions")
-    p.add_argument("--files", nargs="*", default=None,
-                   help="explicit session ids/filenames to render (default: first --limit)")
-    p.add_argument("--limit", type=int, default=8,
-                   help="max sessions to render when --files is not given")
-    p.add_argument("--max-events", type=int, default=0,
-                   help="cap events per session (0 = full session)")
+    default_dir = str(
+        Path(__file__).resolve().parent.parent
+        / "data"
+        / "interim"
+        / "labeling-corpus"
+        / "copilot-cli-native"
+    )
+    p.add_argument("--dir", default=default_dir, help="directory of *.parquet corpus sessions")
+    p.add_argument(
+        "--files",
+        nargs="*",
+        default=None,
+        help="explicit session ids/filenames to render (default: first --limit)",
+    )
+    p.add_argument(
+        "--limit", type=int, default=8, help="max sessions to render when --files is not given"
+    )
+    p.add_argument(
+        "--max-events", type=int, default=0, help="cap events per session (0 = full session)"
+    )
     p.add_argument("--no-color", action="store_true", help="disable ANSI color")
     args = p.parse_args()
     return asyncio.run(_run(args))

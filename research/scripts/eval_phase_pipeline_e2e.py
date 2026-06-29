@@ -94,9 +94,7 @@ async def _run_session(
 ) -> list[SessionEvent]:
     adapter = MappedJsonAdapter.from_yaml(str(mapping_path), session_id=sid)
     collect = _Collect()
-    pipeline = EventPipeline(
-        sinks=[collect], enricher=Enricher(), phase_inferencer=inferencer
-    )
+    pipeline = EventPipeline(sinks=[collect], enricher=Enricher(), phase_inferencer=inferencer)
     with jsonl.open("r", encoding="utf-8", errors="replace") as fh:
         for line in fh:
             line = line.strip()

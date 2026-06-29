@@ -42,7 +42,8 @@ _ASSET_RE = re.compile(r"[-_][a-z0-9]*\d[a-z0-9]*\.|[-_][bcdfghjklmnpqrstvwxz]{6
 _FILE_EXT = (
     "py|pyi|md|rst|txt|js|jsx|ts|tsx|mjs|cjs|json|jsonl|yaml|yml|toml|ini|cfg|"
     "conf|sh|bash|ps1|bat|sql|html|htm|css|scss|go|rs|java|kt|c|h|cpp|hpp|cc|"
-    "rb|php|cs|swift|lock|xml|csv|tsv|env|gitignore|dockerfile|makefile")
+    "rb|php|cs|swift|lock|xml|csv|tsv|env|gitignore|dockerfile|makefile"
+)
 _FILE_RE = re.compile(rf"^[a-z][\w\-]{{1,}}\.({_FILE_EXT})$")
 
 #: Absolute/relative path -> trailing basename, so notes read cleanly.
@@ -60,13 +61,15 @@ _ACRONYM_RE = re.compile(r"^[A-Z][A-Z0-9]+$")
 #: code-shaped entity test for payload-mined objects (dot-ext, snake/camel,
 #: ALLCAPS>=2, digit, slash, class/function keyword).
 _CODESHAPE = re.compile(
-    r"(\.\w{1,5}\b)|(_)|([a-z][A-Z])|(\b[A-Z]{2,}\b)|(\d)|(/)|(\bclass\b|\bfunction\b)")
+    r"(\.\w{1,5}\b)|(_)|([a-z][A-Z])|(\b[A-Z]{2,}\b)|(\d)|(/)|(\bclass\b|\bfunction\b)"
+)
 _IDENT = re.compile(r"[A-Za-z_][\w./-]{2,}")
 
 #: Stopwords for object-side filtering (shared with the title composer).
 STOP = set(
     "the a an of to and in for with on is are be this that it we our us you your i "
-    "let lets now first then next also will should can use via into from as at".split())
+    "let lets now first then next also will should can use via into from as at".split()
+)
 
 #: Packaged set of boilerplate files learned from the full training corpus.
 _BOILER_FILE = Path(__file__).resolve().parent / "data" / "boilerplate_files.json"
@@ -222,7 +225,9 @@ def _sym_ok(m: str, drop: set[str]) -> bool:
     return bool(_STRUCT_RE.search(m) or _ACRONYM_RE.match(m))
 
 
-def salient_symbols(rows: list[dict], drop: frozenset[str] = frozenset(), cap: int = 5) -> list[str]:
+def salient_symbols(
+    rows: list[dict], drop: frozenset[str] = frozenset(), cap: int = 5
+) -> list[str]:
     """Highest-signal code identifiers acted on in the segment, ranked by
     salience: backtick-quoted > structured (snake/camel/dotted) by frequency >
     bare ALL-CAPS keywords. Source-agnostic (mines raw payload text)."""

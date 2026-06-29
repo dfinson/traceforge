@@ -82,8 +82,10 @@ def main() -> int:
     print(f"  train events   : {reloaded.n_train_examples}")
     print(f"  train sessions : {reloaded.n_train_sessions}")
     print(f"  resubstitution F1_macro (optimistic): {train_f1:.3f}")
-    print(f"  per-class positive predictions: "
-          f"{ {c: int(y_pred[:, i].sum()) for i, c in enumerate(PHASES)} }")
+    print(
+        f"  per-class positive predictions: "
+        f"{ {c: int(y_pred[:, i].sum()) for i, c in enumerate(PHASES)} }"
+    )
     return 0
 
 

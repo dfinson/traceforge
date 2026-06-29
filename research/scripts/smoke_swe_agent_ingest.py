@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import logging
 import sys
-from pathlib import Path
 
 from tracemill_research.ingest.swe_agent import (
-    SweAgentIngestConfig, default_output_dir, default_shard_dir, run_sync,
+    SweAgentIngestConfig,
+    default_output_dir,
+    default_shard_dir,
+    run_sync,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")

@@ -122,9 +122,14 @@ async def _label_view(
     if out_path.exists():
         log.info("skip %s (already labeled)", sub_sid)
         return SessionOutcome(
-            session_id=sub_sid, status="labeled", attempts=(),
-            final_labels=None, final_review=None,
-            validation_errors=(), accept_phase=1.0, accept_boundary=1.0,
+            session_id=sub_sid,
+            status="labeled",
+            attempts=(),
+            final_labels=None,
+            final_review=None,
+            validation_errors=(),
+            accept_phase=1.0,
+            accept_boundary=1.0,
         )
 
     markdown, trimmed = render_markdown(view, cfg.canonical_view)
@@ -132,13 +137,18 @@ async def _label_view(
     session_type = "agent" if n_tool_events >= 1 else "utility"
     log.info(
         "window %s [%s]: %d events (%d tool), %d chars (elided %d)",
-        sub_sid, session_type, len(view.events), n_tool_events,
-        trimmed.total_chars, trimmed.elided_count,
+        sub_sid,
+        session_type,
+        len(view.events),
+        n_tool_events,
+        trimmed.total_chars,
+        trimmed.elided_count,
     )
 
     attempts: list[AttemptRecord] = []
     labeler_prompt = render_prompt(
-        RESEARCH_ROOT / cfg.combined_labeling.prompt_template_path, markdown,
+        RESEARCH_ROOT / cfg.combined_labeling.prompt_template_path,
+        markdown,
     )
 
     # Labeler with one-shot parse retry.
@@ -162,40 +172,52 @@ async def _label_view(
         except Exception as exc:  # noqa: BLE001
             last_err = f"parse: {exc}"
             log.warning("labeler parse attempt %d failed for %s: %s", attempt + 1, sub_sid, exc)
-    attempts.append(AttemptRecord(
-        role="labeler", ok=labels is not None, error=None if labels is not None else last_err,
-        duration_s=time.monotonic() - t0,
-        chunks=labeler_result.chunks if labeler_result else 0,
-        raw_chars=len(labeler_result.text) if labeler_result and labeler_result.text else 0,
-    ))
+    attempts.append(
+        AttemptRecord(
+            role="labeler",
+            ok=labels is not None,
+            error=None if labels is not None else last_err,
+            duration_s=time.monotonic() - t0,
+            chunks=labeler_result.chunks if labeler_result else 0,
+            raw_chars=len(labeler_result.text) if labeler_result and labeler_result.text else 0,
+        )
+    )
     if labels is None:
         outcome = SessionOutcome(
-            session_id=sub_sid, status="labeler-failed", attempts=tuple(attempts),
-            final_labels=None, final_review=None,
+            session_id=sub_sid,
+            status="labeler-failed",
+            attempts=tuple(attempts),
+            final_labels=None,
+            final_review=None,
             validation_errors=(last_err or "empty",),
-            accept_phase=0.0, accept_boundary=0.0,
+            accept_phase=0.0,
+            accept_boundary=0.0,
         )
-        _persist_window(out_path, outcome, source, session_type, trimmed,
-                        n_tool_events, cfg, None)
+        _persist_window(out_path, outcome, source, session_type, trimmed, n_tool_events, cfg, None)
         return outcome
 
     ok, errors, labels = validate_combined(labels, trimmed, cfg.combined_labeling)
     if not ok:
         log.warning("window validate failed for %s: %s", sub_sid, errors[:3])
         outcome = SessionOutcome(
-            session_id=sub_sid, status="validate-failed", attempts=tuple(attempts),
-            final_labels=labels, final_review=None,
+            session_id=sub_sid,
+            status="validate-failed",
+            attempts=tuple(attempts),
+            final_labels=labels,
+            final_review=None,
             validation_errors=tuple(errors),
-            accept_phase=0.0, accept_boundary=0.0,
+            accept_phase=0.0,
+            accept_boundary=0.0,
         )
-        _persist_window(out_path, outcome, source, session_type, trimmed,
-                        n_tool_events, cfg, None)
+        _persist_window(out_path, outcome, source, session_type, trimmed, n_tool_events, cfg, None)
         return outcome
 
     # Red-team.
     labeler_json = labels.model_dump_json()
     redteam_prompt = render_redteam_prompt(
-        RESEARCH_ROOT / cfg.redteam.prompt_template_path, markdown, labeler_json,
+        RESEARCH_ROOT / cfg.redteam.prompt_template_path,
+        markdown,
+        labeler_json,
     )
     t1 = time.monotonic()
     redteam_result = await backend.complete(redteam_prompt, system_message=_LABELER_SYSTEM)
@@ -203,20 +225,28 @@ async def _label_view(
         redteam_result.text or f"<<empty: {redteam_result.error}>>",
         encoding="utf-8",
     )
-    attempts.append(AttemptRecord(
-        role="redteam", ok=bool(redteam_result.text and not redteam_result.error),
-        error=redteam_result.error, duration_s=time.monotonic() - t1,
-        chunks=redteam_result.chunks, raw_chars=len(redteam_result.text),
-    ))
+    attempts.append(
+        AttemptRecord(
+            role="redteam",
+            ok=bool(redteam_result.text and not redteam_result.error),
+            error=redteam_result.error,
+            duration_s=time.monotonic() - t1,
+            chunks=redteam_result.chunks,
+            raw_chars=len(redteam_result.text),
+        )
+    )
     if not redteam_result.text:
         outcome = SessionOutcome(
-            session_id=sub_sid, status="redteam-failed", attempts=tuple(attempts),
-            final_labels=labels, final_review=None,
+            session_id=sub_sid,
+            status="redteam-failed",
+            attempts=tuple(attempts),
+            final_labels=labels,
+            final_review=None,
             validation_errors=(redteam_result.error or "empty",),
-            accept_phase=0.0, accept_boundary=0.0,
+            accept_phase=0.0,
+            accept_boundary=0.0,
         )
-        _persist_window(out_path, outcome, source, session_type, trimmed,
-                        n_tool_events, cfg, None)
+        _persist_window(out_path, outcome, source, session_type, trimmed, n_tool_events, cfg, None)
         return outcome
 
     try:
@@ -224,13 +254,16 @@ async def _label_view(
     except Exception as exc:  # noqa: BLE001
         log.warning("redteam parse failed for %s: %s", sub_sid, exc)
         outcome = SessionOutcome(
-            session_id=sub_sid, status="redteam-failed", attempts=tuple(attempts),
-            final_labels=labels, final_review=None,
+            session_id=sub_sid,
+            status="redteam-failed",
+            attempts=tuple(attempts),
+            final_labels=labels,
+            final_review=None,
             validation_errors=(f"redteam parse: {exc}",),
-            accept_phase=0.0, accept_boundary=0.0,
+            accept_phase=0.0,
+            accept_boundary=0.0,
         )
-        _persist_window(out_path, outcome, source, session_type, trimmed,
-                        n_tool_events, cfg, None)
+        _persist_window(out_path, outcome, source, session_type, trimmed, n_tool_events, cfg, None)
         return outcome
 
     final = resolve(labels, review)
@@ -239,16 +272,19 @@ async def _label_view(
         session_id=sub_sid,
         status="labeled-flagged" if flagged else "labeled",
         attempts=tuple(attempts),
-        final_labels=final, final_review=review,
+        final_labels=final,
+        final_review=review,
         validation_errors=(),
         accept_phase=review.summary.phase_accept_fraction,
         accept_boundary=review.summary.boundary_accept_fraction,
     )
-    _persist_window(out_path, outcome, source, session_type, trimmed,
-                    n_tool_events, cfg, review)
+    _persist_window(out_path, outcome, source, session_type, trimmed, n_tool_events, cfg, review)
     log.info(
         "window %s done: status=%s accept_phase=%.2f accept_boundary=%.2f",
-        sub_sid, outcome.status, outcome.accept_phase, outcome.accept_boundary,
+        sub_sid,
+        outcome.status,
+        outcome.accept_phase,
+        outcome.accept_boundary,
     )
     return outcome
 
@@ -304,12 +340,14 @@ def _load_oversized_entries(cfg: LabelingRuntimeConfig) -> list[dict]:
         if not parquets:
             log.warning("session %s has no parquets, skipping", e.get("session_id"))
             continue
-        entries.append({
-            "session_id": e["session_id"],
-            "source": e.get("source", "unknown"),
-            "n_events": n_ev,
-            "parquet_paths": [CORPUS_DIR / p for p in parquets],
-        })
+        entries.append(
+            {
+                "session_id": e["session_id"],
+                "source": e.get("source", "unknown"),
+                "n_events": n_ev,
+                "parquet_paths": [CORPUS_DIR / p for p in parquets],
+            }
+        )
     # Smallest oversized first for fast wins.
     entries.sort(key=lambda r: (r["n_events"], r["session_id"]))
     return entries
@@ -332,8 +370,9 @@ async def _run_session_windows(
     log.info("loaded session %s: %d events", sid, len(view.events))
 
     ranges = _window_indices(len(view.events), window_size, overlap)
-    log.info("session %s -> %d windows (size=%d overlap=%d)",
-             sid, len(ranges), window_size, overlap)
+    log.info(
+        "session %s -> %d windows (size=%d overlap=%d)", sid, len(ranges), window_size, overlap
+    )
 
     # Persist the window index up front so the stitcher knows the layout.
     index_path = WINDOWS_DIR / f"{sid}.index.json"
@@ -384,8 +423,7 @@ async def _main_async(args: argparse.Namespace) -> int:
     sem = asyncio.Semaphore(args.concurrency)
 
     tasks = [
-        _run_session_windows(cfg, backend, sem, e, args.window_size, args.overlap)
-        for e in entries
+        _run_session_windows(cfg, backend, sem, e, args.window_size, args.overlap) for e in entries
     ]
     await asyncio.gather(*tasks)
     return 0
@@ -395,11 +433,19 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--window-size", type=int, default=200)
     ap.add_argument("--overlap", type=int, default=20)
-    ap.add_argument("--concurrency", type=int, default=2,
-                    help="max concurrent oversized sessions (each runs windows serially)")
+    ap.add_argument(
+        "--concurrency",
+        type=int,
+        default=2,
+        help="max concurrent oversized sessions (each runs windows serially)",
+    )
     ap.add_argument("--limit", type=int, default=None)
-    ap.add_argument("--max-events", type=int, default=None,
-                    help="skip sessions with n_events above this (defer the giants)")
+    ap.add_argument(
+        "--max-events",
+        type=int,
+        default=None,
+        help="skip sessions with n_events above this (defer the giants)",
+    )
     args = ap.parse_args()
     return asyncio.run(_main_async(args))
 

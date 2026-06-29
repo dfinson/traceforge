@@ -42,18 +42,26 @@ def test_single_phase_session_is_one_block():
 
 def test_clean_transition_opens_second_block():
     tr = PhaseTracker("s1", PhaseTrackerConfig(window_size=3, debounce=2))
-    _feed(tr, ["planning", "planning", "planning", "implementation", "implementation", "implementation"])
+    _feed(
+        tr,
+        ["planning", "planning", "planning", "implementation", "implementation", "implementation"],
+    )
     tl = tr.finalize()
     roots = [b.phase_root for b in tl.blocks]
     assert roots == ["planning", "implementation"]
     assert len(tl.transitions) == 1
-    assert (tl.transitions[0].from_phase, tl.transitions[0].to_phase) == ("planning", "implementation")
+    assert (tl.transitions[0].from_phase, tl.transitions[0].to_phase) == (
+        "planning",
+        "implementation",
+    )
 
 
 def test_debounce_suppresses_single_event_spike():
     # One stray 'exploration' inside a run of 'implementation' must NOT split.
     tr = PhaseTracker("s1", PhaseTrackerConfig(window_size=3, debounce=2))
-    _feed(tr, ["implementation", "implementation", "exploration", "implementation", "implementation"])
+    _feed(
+        tr, ["implementation", "implementation", "exploration", "implementation", "implementation"]
+    )
     tl = tr.finalize()
     assert len(tl.blocks) == 1
     assert tl.blocks[0].phase_root == "implementation"

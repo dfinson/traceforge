@@ -49,7 +49,10 @@ def _session() -> dict[str, dict]:
         ("e3", "tool.call.edit", "edit", "write", "implementation"),
         ("e4", "tool.call.shell", "bash", "exec", "verification"),
     ]
-    return {eid: _row(eid, i, kind, tool, mech, ph) for i, (eid, kind, tool, mech, ph) in enumerate(specs)}
+    return {
+        eid: _row(eid, i, kind, tool, mech, ph)
+        for i, (eid, kind, tool, mech, ph) in enumerate(specs)
+    }
 
 
 def test_one_gap_per_event_in_order() -> None:

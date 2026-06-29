@@ -117,8 +117,10 @@ def main() -> int:
     print(f"  F1_micro               : {metrics['f1_micro']:.3f}")
     print("  per-class F1:")
     for c, pc in metrics["per_class"].items():
-        print(f"    {c:<16} f1={pc['f1']:.3f}  P={pc['precision']:.3f}  "
-              f"R={pc['recall']:.3f}  n={int(pc['support'])}")
+        print(
+            f"    {c:<16} f1={pc['f1']:.3f}  P={pc['precision']:.3f}  "
+            f"R={pc['recall']:.3f}  n={int(pc['support'])}"
+        )
     exact = float(np.mean([tuple(t) == tuple(p) for t, p in zip(y_true.tolist(), y_pred.tolist())]))
     print(f"  exact-set match rate   : {exact:.3f}")
     print(f"  wrote {out}")

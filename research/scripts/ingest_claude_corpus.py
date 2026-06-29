@@ -126,14 +126,24 @@ def _update_manifest(new_entries: list[dict]) -> None:
     # reads per-session `source`, not this list).
     sources = manifest.setdefault("sources", [])
     if not any(s.get("name") == SOURCE for s in sources):
-        sources.append({"name": SOURCE, "subdir": "claude-gen",
-                        "selection": "all", "selected_size": len(new_entries)})
+        sources.append(
+            {
+                "name": SOURCE,
+                "subdir": "claude-gen",
+                "selection": "all",
+                "selected_size": len(new_entries),
+            }
+        )
 
     manifest["selected_size"] = len(sessions)
     with MANIFEST_PATH.open("w", encoding="utf-8") as fh:
         yaml.safe_dump(manifest, fh, sort_keys=False, allow_unicode=True)
-    log.info("manifest updated: +%d new (%d refreshed) -> %d total sessions",
-             added, len(new_entries) - added, len(sessions))
+    log.info(
+        "manifest updated: +%d new (%d refreshed) -> %d total sessions",
+        added,
+        len(new_entries) - added,
+        len(sessions),
+    )
 
 
 async def main_async(args: argparse.Namespace) -> int:
@@ -142,8 +152,7 @@ async def main_async(args: argparse.Namespace) -> int:
     transcripts = sorted(GEN_DIR.glob("*.jsonl"))  # top-level only; skips _ratelimited/
     if args.limit:
         transcripts = transcripts[: args.limit]
-    log.info("ingesting %d claude transcripts via mapping %s",
-             len(transcripts), mapping_path.name)
+    log.info("ingesting %d claude transcripts via mapping %s", len(transcripts), mapping_path.name)
 
     entries: list[dict] = []
     failures: list[tuple[str, str]] = []
@@ -154,21 +163,29 @@ async def main_async(args: argparse.Namespace) -> int:
                 failures.append((jsonl.stem, "no events emitted"))
                 log.warning("no events for %s", jsonl.stem)
                 continue
-            entries.append({
-                "session_id": sid,
-                "source": SOURCE,
-                "parquets": shards,
-                "n_events": n_events,
-                "domain": _domain_of(sid),
-            })
-            log.info("ok %-32s -> %d events (%d shard%s)",
-                     sid, n_events, len(shards), "" if len(shards) == 1 else "s")
+            entries.append(
+                {
+                    "session_id": sid,
+                    "source": SOURCE,
+                    "parquets": shards,
+                    "n_events": n_events,
+                    "domain": _domain_of(sid),
+                }
+            )
+            log.info(
+                "ok %-32s -> %d events (%d shard%s)",
+                sid,
+                n_events,
+                len(shards),
+                "" if len(shards) == 1 else "s",
+            )
         except Exception as exc:  # noqa: BLE001
             failures.append((jsonl.stem, repr(exc)))
             log.exception("ingest failed for %s", jsonl.stem)
 
-    log.info("ingested %d/%d transcripts (%d failed)",
-             len(entries), len(transcripts), len(failures))
+    log.info(
+        "ingested %d/%d transcripts (%d failed)", len(entries), len(transcripts), len(failures)
+    )
     if failures:
         for sid, err in failures:
             log.warning("  FAIL %s: %s", sid, err)
@@ -183,8 +200,9 @@ async def main_async(args: argparse.Namespace) -> int:
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--limit", type=int, default=None, help="cap transcripts (smoke)")
-    p.add_argument("--no-manifest", action="store_true",
-                   help="write parquets only; do not touch the manifest")
+    p.add_argument(
+        "--no-manifest", action="store_true", help="write parquets only; do not touch the manifest"
+    )
     return asyncio.run(main_async(p.parse_args()))
 
 

@@ -221,7 +221,6 @@ def render_markdown(
         )
 
     # Greedy two-sided truncation by event count until under budget.
-    lo, hi = 0, len(view.events)
     head_count = hi // 2
     tail_count = hi - head_count
     while head_count + tail_count > 1:

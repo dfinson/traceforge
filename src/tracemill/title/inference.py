@@ -61,17 +61,38 @@ _BEAMS_DEFAULT = int(os.environ.get("TITLE_BEAMS", "5"))
 _BEAMS_MAX = int(os.environ.get("TITLE_BEAMS_MAX", str(2 * _BEAMS_DEFAULT)))
 _WORD_RE = re.compile(r"[A-Za-z0-9_./\\-]+")
 _ID_RE = re.compile(r"[_/\\-]|[a-z][A-Z]|\d|\.[A-Za-z]")
-_GROUND_STOP = frozenset({
-    "the", "a", "an", "to", "of", "in", "on", "for", "and", "or", "with", "from",
-    "into", "by", "at", "as", "its", "their", "this", "that", "these", "those",
-})
+_GROUND_STOP = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "to",
+        "of",
+        "in",
+        "on",
+        "for",
+        "and",
+        "or",
+        "with",
+        "from",
+        "into",
+        "by",
+        "at",
+        "as",
+        "its",
+        "their",
+        "this",
+        "that",
+        "these",
+        "those",
+    }
+)
 
 
 def _identifier_words(title: str) -> list[str]:
     """Identifier-shaped content words of a title (skipping the leading verb)."""
     ws = _WORD_RE.findall(title)
-    return [w for w in ws[1:]
-            if w.lower() not in _GROUND_STOP and _ID_RE.search(w)]
+    return [w for w in ws[1:] if w.lower() not in _GROUND_STOP and _ID_RE.search(w)]
 
 
 def _is_grounded(title: str, ctx_lower: str) -> bool:
@@ -105,8 +126,9 @@ class TitleModel:
 
     # ----------------------------------------------------------------- loading
     @classmethod
-    def load(cls, model_dir: str | os.PathLike[str] | None = None,
-             threads: int = 2) -> "TitleModel":
+    def load(
+        cls, model_dir: str | os.PathLike[str] | None = None, threads: int = 2
+    ) -> "TitleModel":
         """Load the packaged int8 titler (or a custom ``model_dir``).
 
         ``threads`` caps onnxruntime intra-op threads to keep the live CPU
@@ -134,8 +156,16 @@ class TitleModel:
         h = self._enc.run(None, {"input_ids": ids, "attention_mask": mask})[0]
         return h, mask
 
-    def _beams(self, text: str, num_beams: int, num_return: int, max_new: int,
-               no_repeat: int, rep_pen: float, len_pen: float) -> list[str]:
+    def _beams(
+        self,
+        text: str,
+        num_beams: int,
+        num_return: int,
+        max_new: int,
+        no_repeat: int,
+        rep_pen: float,
+        len_pen: float,
+    ) -> list[str]:
         h, mask = self._encode(text)
         B = num_beams
         hB = np.repeat(h, B, axis=0)
@@ -146,21 +176,26 @@ class TitleModel:
         for _ in range(max_new):
             n = len(beams)
             ids = np.asarray(beams, dtype=np.int64)
-            raw = self._dec.run(None, {
-                "input_ids": ids, "encoder_hidden_states": hB[:n],
-                "encoder_attention_mask": mB[:n]})[0][:, -1, :].astype(np.float64)
+            raw = self._dec.run(
+                None,
+                {
+                    "input_ids": ids,
+                    "encoder_hidden_states": hB[:n],
+                    "encoder_attention_mask": mB[:n],
+                },
+            )[0][:, -1, :].astype(np.float64)
             for i, toks in enumerate(beams):
                 for t in set(toks):  # HF repetition penalty on raw logits
                     raw[i, t] = raw[i, t] / rep_pen if raw[i, t] > 0 else raw[i, t] * rep_pen
                 if no_repeat and len(toks) >= no_repeat:  # ban repeated n-grams
-                    pref = tuple(toks[-(no_repeat - 1):]) if no_repeat > 1 else ()
+                    pref = tuple(toks[-(no_repeat - 1) :]) if no_repeat > 1 else ()
                     for k in range(len(toks) - no_repeat + 1):
-                        if tuple(toks[k:k + no_repeat - 1]) == pref:
+                        if tuple(toks[k : k + no_repeat - 1]) == pref:
                             raw[i, toks[k + no_repeat - 1]] = -1e9
             lp = _logsoftmax(raw)
             cand = (scores[:n, None] + lp).reshape(-1)
             V = lp.shape[1]
-            order = np.argpartition(cand, -2 * B)[-2 * B:]
+            order = np.argpartition(cand, -2 * B)[-2 * B :]
             order = order[np.argsort(cand[order])[::-1]]
             new_beams: list[list[int]] = []
             new_scores: list[float] = []
@@ -185,7 +220,9 @@ class TitleModel:
         if len(done) < num_return:
             done = done + sorted(
                 ((s / (len(t) ** len_pen), t) for s, t in zip(scores, beams)),
-                key=lambda x: x[0], reverse=True)
+                key=lambda x: x[0],
+                reverse=True,
+            )
         outs: list[str] = []
         seen: set[str] = set()
         for _score, toks in done:
@@ -197,9 +234,16 @@ class TitleModel:
                 break
         return outs
 
-    def _decode_grounded(self, context: str, num_beams: int, max_new: int,
-                         no_repeat: int, rep_pen: float, len_pen: float,
-                         ground: bool) -> list[str]:
+    def _decode_grounded(
+        self,
+        context: str,
+        num_beams: int,
+        max_new: int,
+        no_repeat: int,
+        rep_pen: float,
+        len_pen: float,
+        ground: bool,
+    ) -> list[str]:
         """Decode candidates, grounding-ordered, with adaptive escalation.
 
         Base-width decode first. Only if grounding is on and *no* base candidate
@@ -207,20 +251,26 @@ class TitleModel:
         pool re-decoded at :data:`_BEAMS_MAX` -- so the faithful majority keeps
         the base footprint and only the collapsing minority pays for more beams.
         """
-        cands = self._beams(context, num_beams, num_beams, max_new,
-                            no_repeat, rep_pen, len_pen)
+        cands = self._beams(context, num_beams, num_beams, max_new, no_repeat, rep_pen, len_pen)
         if not ground:
             return cands
         ctx_low = context.lower()
-        if (not any(_is_grounded(c, ctx_low) for c in cands)
-                and _BEAMS_MAX > num_beams):
-            cands = self._beams(context, _BEAMS_MAX, _BEAMS_MAX, max_new,
-                                no_repeat, rep_pen, len_pen)
+        if not any(_is_grounded(c, ctx_low) for c in cands) and _BEAMS_MAX > num_beams:
+            cands = self._beams(
+                context, _BEAMS_MAX, _BEAMS_MAX, max_new, no_repeat, rep_pen, len_pen
+            )
         return _ground_order(cands, context)
 
-    def title(self, context: str, num_beams: int = _BEAMS_DEFAULT, max_new: int = 32,
-              no_repeat: int = 2, rep_pen: float = 1.3,
-              len_pen: float = 0.8, ground: bool | None = None) -> str:
+    def title(
+        self,
+        context: str,
+        num_beams: int = _BEAMS_DEFAULT,
+        max_new: int = 32,
+        no_repeat: int = 2,
+        rep_pen: float = 1.3,
+        len_pen: float = 0.8,
+        ground: bool | None = None,
+    ) -> str:
         """Return a short imperative title for a distilled span ``context``.
 
         Generates ``num_beams`` candidates and returns the first non-degenerate
@@ -232,13 +282,19 @@ class TitleModel:
         if not context or not context.strip():
             return ""
         g = _GROUND_DEFAULT if ground is None else ground
-        cands = self._decode_grounded(context, num_beams, max_new,
-                                      no_repeat, rep_pen, len_pen, g)
+        cands = self._decode_grounded(context, num_beams, max_new, no_repeat, rep_pen, len_pen, g)
         return best_of(cands)
 
-    def candidates(self, context: str, num_beams: int = _BEAMS_DEFAULT, max_new: int = 32,
-                   no_repeat: int = 2, rep_pen: float = 1.3,
-                   len_pen: float = 0.8, ground: bool | None = None) -> list[str]:
+    def candidates(
+        self,
+        context: str,
+        num_beams: int = _BEAMS_DEFAULT,
+        max_new: int = 32,
+        no_repeat: int = 2,
+        rep_pen: float = 1.3,
+        len_pen: float = 0.8,
+        ground: bool | None = None,
+    ) -> list[str]:
         """Return the cleaned beam candidates (for sibling de-dup via hygiene).
 
         Grounded candidates are ordered first (see :meth:`title`) so both
@@ -247,5 +303,4 @@ class TitleModel:
         if not context or not context.strip():
             return []
         g = _GROUND_DEFAULT if ground is None else ground
-        return self._decode_grounded(context, num_beams, max_new,
-                                     no_repeat, rep_pen, len_pen, g)
+        return self._decode_grounded(context, num_beams, max_new, no_repeat, rep_pen, len_pen, g)

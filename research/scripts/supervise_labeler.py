@@ -1,4 +1,5 @@
 """Supervisor for label_corpus.py: respawn on death until target reached."""
+
 from __future__ import annotations
 
 import datetime as dt

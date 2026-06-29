@@ -6,6 +6,7 @@ footprint constraint. Run:
   $env:TITLE_MODEL_DIR="data\\interim\\t5-title-model"        # tiny
   .venv\\Scripts\\python.exe -u -m scripts._title_footprint
 """
+
 from __future__ import annotations
 
 import os
@@ -32,6 +33,7 @@ def main() -> None:
     ho = df[df.split == "heldout"].sample(N, random_state=0).reset_index(drop=True)
 
     import psutil
+
     proc = psutil.Process()
     rss0 = proc.memory_info().rss / 1e6
 
@@ -44,13 +46,20 @@ def main() -> None:
     peak = rss_load
     with torch.no_grad():
         for c in ho.ctx:  # one segment at a time (live serving)
-            enc = tok(PREFIX + c, padding=True, truncation=True,
-                      max_length=MAX_SRC, return_tensors="pt")
+            enc = tok(
+                PREFIX + c, padding=True, truncation=True, max_length=MAX_SRC, return_tensors="pt"
+            )
             t0 = time.perf_counter()
-            mdl.generate(**enc, max_new_tokens=MAX_TGT, num_beams=NB,
-                         num_return_sequences=NB, no_repeat_ngram_size=2,
-                         repetition_penalty=1.3, length_penalty=0.8,
-                         early_stopping=True)
+            mdl.generate(
+                **enc,
+                max_new_tokens=MAX_TGT,
+                num_beams=NB,
+                num_return_sequences=NB,
+                no_repeat_ngram_size=2,
+                repetition_penalty=1.3,
+                length_penalty=0.8,
+                early_stopping=True,
+            )
             lat.append(time.perf_counter() - t0)
             peak = max(peak, proc.memory_info().rss / 1e6)
 
@@ -59,11 +68,11 @@ def main() -> None:
     p90 = lat[int(len(lat) * 0.9)] * 1000
     mx = lat[-1] * 1000
     print(f"model_dir   : {MODEL_DIR}")
-    print(f"params      : {nparams/1e6:.1f}M")
+    print(f"params      : {nparams / 1e6:.1f}M")
     print(f"threads     : {torch.get_num_threads()}")
     print(f"RSS baseline: {rss0:.0f} MB")
-    print(f"RSS loaded  : {rss_load:.0f} MB  (model add {rss_load-rss0:.0f} MB)")
-    print(f"RSS peak    : {peak:.0f} MB  (decode add {peak-rss_load:.0f} MB)")
+    print(f"RSS loaded  : {rss_load:.0f} MB  (model add {rss_load - rss0:.0f} MB)")
+    print(f"RSS peak    : {peak:.0f} MB  (decode add {peak - rss_load:.0f} MB)")
     print(f"latency/seg : p50 {p50:.0f} ms  p90 {p90:.0f} ms  max {mx:.0f} ms  (n={N}, beams={NB})")
 
     # Log AFTER measurement so the mlflow import never contaminates the RSS probe.
@@ -72,9 +81,11 @@ def main() -> None:
     from tracemill_research.paths import EXPERIMENTS_DIR
 
     yaml_path = EXPERIMENTS_DIR / "titler-architecture-sweep.yaml"
-    with start_run("titler-architecture-sweep-v1",
-                   run_name=os.path.basename(MODEL_DIR),
-                   tags={"probe": "footprint", "model_dir": MODEL_DIR}):
+    with start_run(
+        "titler-architecture-sweep-v1",
+        run_name=os.path.basename(MODEL_DIR),
+        tags={"probe": "footprint", "model_dir": MODEL_DIR},
+    ):
         log_yaml_params(yaml_path)
         mlflow.log_param("model_dir", MODEL_DIR)
         mlflow.log_param("params_m", round(nparams / 1e6, 2))

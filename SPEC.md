@@ -911,21 +911,24 @@ No separate `tracemill init` command needed.
 
 ## §14 — Telemetry / OTEL
 
-🚧 **Stub** — the `telemetry/` package exists with an empty `__init__.py`.
+🚧 **Partial** — span export is implemented; the `telemetry/` package (self-metrics) is still an empty stub.
 
-**Planned:**
-- OpenTelemetry instrumentation (counters, histograms)
-- `OtelSink` that exports spans to a collector
-- Automatic span generation from tool call pairs
-- Pipeline-level metrics (events/sec, enrichment latency, sink write time)
+**Done:**
+- `OtelSink` (`OtelExporterSink`) exports events / spans / usage / title-updates to an OpenTelemetry collector via **OTLP/HTTP JSON**. It is intentionally hand-rolled with **no `opentelemetry-sdk` dependency** (simplified OTLP JSON, not protobuf) to stay lightweight — this is a settled design decision, not a gap.
+- Span generation from tool-call pairs (enricher pairing + `TelemetrySpan` + `OtelExporterSink._event_to_span`).
+
+**Planned (tracked by #48):**
+- Pipeline-level **self-metrics** (events/sec, enrichment latency, sink write time): opt-in and near-zero-footprint by default, surfaced through a metrics hook on `EventPipeline` rather than a global registry. Must not pull in a heavyweight metrics framework as a hard dependency.
 
 ---
 
 ## §15 — EventBus
 
-⬜ **Planned** — not yet implemented or stubbed.
+✅ **Effectively delivered** via the sink model — no separate bus module is needed.
 
-An optional pub/sub mechanism for in-process consumers that want to react to events without implementing a full sink. Lower-commitment than a sink: no flush/close lifecycle, no persistence contract.
+An in-process consumer can react to events without implementing a full sink today: `StorageSink` makes only `on_event` abstract (`flush`/`close`/`on_span`/`on_usage`/`on_title_update` are default no-ops), and `CallbackSink` lets a consumer subscribe with a single async callback. `EventPipeline`'s error-isolated fan-out is the publish side. `EventPipeline(sinks=[CallbackSink(on_event=handler)])` **is** the pub/sub pattern — no flush/close lifecycle, no persistence contract.
+
+**Remaining (tracked by #47, low priority):** optional ergonomics only — a one-line `EventPipeline.subscribe(on_event=...)` sugar and a sync-callback adapter. No message broker / cross-process transport — that is the wrong tier for an embedded library; external egress is handled by the `OtelExporterSink` (OpenTelemetry is the boundary contract).
 
 ---
 
@@ -1197,8 +1200,8 @@ tracemill/
 
 | Item | Priority | Dependencies | Notes |
 |------|----------|--------------|-------|
-| **EventBus** | Low | None | Optional pub/sub for in-process lightweight consumers. |
-| **Telemetry instrumentation** | Medium | `opentelemetry-sdk` | Counters, histograms for pipeline metrics (`telemetry/` is still a stub). |
+| **EventBus sugar** | Low | None | Pub/sub is already delivered via `CallbackSink` + `EventPipeline` fan-out (§15). Remaining is optional only: a `subscribe()` convenience + sync-callback adapter. Tracked by #47. |
+| **Telemetry self-metrics** | Medium | None | OTLP span export is done (`OtelExporterSink`, §14). Remaining is opt-in pipeline self-metrics (events/sec, enrichment latency, sink write time), near-zero footprint, no `opentelemetry-sdk` dep. Tracked by #48. |
 | **Phase/boundary tracking subsystem** | Medium | Enricher | Dedicated `phase/` + `boundary/` + `tracking/` ML subsystem (on PR #35, not yet merged). |
 | **Governance epic remainder** | High | Governance engine | Issues #9–#27: writer queue, backpressure queue, sink emission, observer adapter, test coverage. |
 
@@ -1206,9 +1209,9 @@ tracemill/
 
 `
 1. Governance epic remainder (#9–#27) → completes the assessment engine vision
-2. Phase/boundary tracking merge (PR #35) → live phase classification
-3. Telemetry package         → observability of tracemill itself
-4. EventBus                  → lightweight in-process consumers
+2. Phase/boundary tracking merge (PR #35) → live phase classification + titling
+3. Telemetry self-metrics (#48)        → opt-in observability of tracemill itself
+4. EventBus sugar (#47)                → optional subscribe() convenience
 `
 
 ---

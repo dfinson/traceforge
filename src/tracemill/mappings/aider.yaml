@@ -209,3 +209,8 @@ events:
   command_ok:
     kind: user.command
     payload: {}
+
+  # ── Interactive help (#41: fires on /help <query>, no properties) ──
+  "interactive help":
+    kind: user.command
+    payload: {}

@@ -514,3 +514,79 @@ events:
     kind: agent.log.entry
     payload:
       event_id: event_id
+
+  # ── Plan step lifecycle (#41: sibling to step_observation_*) ──
+  plan_step_started:
+    kind: planning.step.started
+    payload:
+      event_id: event_id
+  plan_step_completed:
+    kind: planning.step.completed
+    payload:
+      event_id: event_id
+      success: success
+      result: result
+      error: error
+
+  # ── Skill system lifecycle (#41) ──
+  skill_discovery_started:
+    kind: skill.discovery.started
+    payload:
+      event_id: event_id
+  skill_discovery_completed:
+    kind: skill.discovery.completed
+    payload:
+      event_id: event_id
+  skill_loaded:
+    kind: skill.loaded
+    payload:
+      event_id: event_id
+  skill_activated:
+    kind: skill.activated
+    payload:
+      event_id: event_id
+  skill_load_failed:
+    kind: skill.load.failed
+    payload:
+      event_id: event_id
+      error: error
+
+  # ── A2A (agent-to-agent) protocol (#41/#32) ──
+  a2a_delegation_started:
+    kind: agent.delegation.started
+    payload:
+      event_id: event_id
+  a2a_delegation_completed:
+    kind: agent.delegation.completed
+    payload:
+      event_id: event_id
+  a2a_conversation_started:
+    kind: agent.conversation.started
+    payload:
+      event_id: event_id
+  a2a_conversation_completed:
+    kind: agent.conversation.completed
+    payload:
+      event_id: event_id
+  a2a_message_sent:
+    kind: agent.message.sent
+    payload:
+      event_id: event_id
+  a2a_response_received:
+    kind: agent.message.received
+    payload:
+      event_id: event_id
+  a2a_artifact_received:
+    kind: agent.artifact.received
+    payload:
+      event_id: event_id
+  a2a_connection_error:
+    kind: agent.connection.failed
+    payload:
+      event_id: event_id
+      error: error
+  a2a_authentication_failed:
+    kind: agent.authentication.failed
+    payload:
+      event_id: event_id
+      error: error

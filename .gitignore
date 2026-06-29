@@ -8,3 +8,19 @@ build/
 *.egg
 .eggs/
 .coverage
+research/labeling-run.log
+
+# Run artifacts from agent-trace / golden-run harnesses
+*.log
+*.pid
+*.err
+
+# agent-trace harness run artifacts
+*.log
+*.log.err
+*.err
+*.pid
+run-golden*.ps1
+agent-targets.txt
+
+commit_msg.txt

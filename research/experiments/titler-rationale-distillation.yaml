@@ -189,3 +189,30 @@ results:
       re-judge BOTH heads in fresh same-run invocations. Warm-start preserves span maturity;
       full span rationales give the span head the auxiliary signal. Promote only if request
       head holds its lift AND copilot/claude span return to parity.
+  warm_start_full_corpus:
+    status: NEGATIVE-strictly-dominated   # both fix hypotheses REJECTED
+    recipe: warm-start from t5-title-multitask-parity-model on COMPLETE corpus (1119 request + 1118 span rationales), same organic-parity / 12ep / LR 3e-4 / MAX_TGT 48
+    model: data/interim/t5-title-rationale-warm-model   # gitignored
+    judge: blinded Sonnet, fresh same-run invocations; baselines = parity-rejudged (request) + parity-span
+    request_head:
+      coherent: "0.35 baseline -> 0.40 warm"   # +5pt only; from-scratch got +16pt (0.512)
+      faithful: "1.175 (== baseline)"            # warm preserved the baseline weakness
+    span_head:
+      copilot_coherent: "0.538 -> 0.487"   # -5.1pt, WORSE than from-scratch
+      claude_coherent: "0.697 -> 0.606"    # -9.1pt, still regressed
+    conclusion: >
+      Warm-start is strictly dominated: weaker request (+5 vs the from-scratch +16) AND no
+      better span. Both fix hypotheses are REJECTED. (1) From-scratch did NOT cause the span
+      regression -- warm regressed span just as much. (2) Partial span rationales were NOT the
+      cause -- the warm run carried the FULL 1118 span rationales and still regressed. Two
+      mechanisms, now isolated: (a) the request comprehension gain REQUIRES from-scratch
+      encoder formation -- warm-starting preserves the promoted encoder's converged
+      "ignore buried intent" prior, which 12 epochs of fine-tuning does not overcome; (b) the
+      span regression is intrinsic to EQUAL (title:rationale) task mass -- co-training a
+      rationale task the span head does not need halves its per-epoch title supervision. The
+      request head floored at 38% and needed the rationale crutch; the span head was already
+      54-70% and is taxed, not helped, by the auxiliary task.
+    forks_for_human:
+      - "Two-model routing: ship the from-scratch rationale model for the REQUEST prefix only, keep the promoted model for SPAN prefixes (titler already routes by prefix). Cost: ~2x served params (~32M total, still tiny/CPU-cheap), elegance."
+      - "Need-weighted rationale mass: weight the rationale task by each head's measured comprehension deficit (request large, span ~0) instead of equal 1/2. Risk: deriving the weight parameter-free from validation faithfulness, not a hand-tuned knob."
+      - "Curriculum anneal: rationale task heavy early (encoder formation) annealed out so late epochs are pure title, restoring full span title supervision after the comprehension prior is set. Parameter-light schedule, untested here."

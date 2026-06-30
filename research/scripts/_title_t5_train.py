@@ -267,10 +267,17 @@ def train():
         tcol = tr["task"].tolist()
         weights = [0.0] * len(tr)
         for t in tasks:
-            sw, sf = _source_weights(tr.src[tr["task"] == t].value_counts().to_dict())
+            freq_t = tr.src[tr["task"] == t].value_counts().to_dict()
+            _, sf = _source_weights(freq_t)
+            # Each task gets equal TOTAL mass (1/n_task) -- DSS weights the label
+            # and rationale objectives equally. Within a task, sources follow the
+            # policy fraction `sf` (sums to 1). Per-row weight sf/freq normalizes a
+            # source to its fraction; /n_task normalizes the task to 1/n_task. Using
+            # the FRACTION (not the raw freq^(alpha-1) weight) is what keeps task
+            # mass independent of how many sources a task happens to contain.
             for i in range(len(tr)):
                 if tcol[i] == t:
-                    weights[i] = sw[srcs[i]] / n_task
+                    weights[i] = sf[srcs[i]] / freq_t[srcs[i]] / n_task
             _frac[t] = sf
     else:
         sw, _frac = _source_weights(tr.src.value_counts().to_dict())

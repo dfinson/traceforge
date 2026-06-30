@@ -156,3 +156,36 @@ results:
     - Span head must be judged for NON-regression (copilot/claude in-dist) before any promote.
     - Full rationale corpus (all 8445 title rows) + span beam-1-vs-best-of-5 measurement (the TITLE_BEAMS cut bonus).
     - If span holds, export int8 ONNX + promote via the standard path (rationale never decoded -> footprint invariant).
+  span_head_nonregression:
+    status: REGRESSED-on-this-checkpoint   # request head proved itself; this pilot checkpoint is NOT promotable
+    eval:
+      dataset: data/interim/t5-title-multitask.parquet
+      sources: copilot-cli-native, claude-cli   # the in-dist organic generalisation targets named in acceptance
+      judge: blinded Sonnet, both models scored in FRESH same-run invocations
+      note: >
+        Per-source UNPAIRED aggregates are the valid read (parse-near-full: rationale
+        146/146, baseline 144/146). Step-level pairing by (src,sid) is INVALID for span
+        rows because sid is the SESSION id, not step-unique, so the join collapses.
+    copilot:
+      coherent: "0.538 -> 0.525"   # within the 2.5pt noise floor: HOLDS
+      specific: "1.49 -> 1.34"
+      fluent: "1.85 -> 1.95"
+    claude:
+      coherent: "0.697 -> 0.591"   # -10.6pt, beyond noise: REGRESSED
+      specific: "1.68 -> 1.47"
+      fluent: "1.88 -> 1.97"
+    diagnosis: >
+      The +16pt request-head lift came at a span-head cost on THIS checkpoint, concentrated
+      on claude coherence and on specificity (both sources). Decode got smoother (fluent up)
+      while span comprehension fell. Two deliberate deviations from the intended recipe explain
+      it, both fixable: (1) trained FROM-SCRATCH, not warm-started from the promoted model, so
+      the checkpoint lacks its span maturity (the from-scratch choice was for clean request-head
+      attribution, not a serving recipe); (2) the training snapshot carried only 281 span
+      rationale rows (all 1119 request rationales but a partial span set), so the span head
+      barely saw the auxiliary task.
+    fix_path: >
+      Retrain WARM-STARTED from the promoted multitask-parity checkpoint on the now-COMPLETE
+      rationale corpus (build finished at 1999 rationale rows incl the full span set), then
+      re-judge BOTH heads in fresh same-run invocations. Warm-start preserves span maturity;
+      full span rationales give the span head the auxiliary signal. Promote only if request
+      head holds its lift AND copilot/claude span return to parity.

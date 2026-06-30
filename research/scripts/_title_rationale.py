@@ -88,6 +88,9 @@ ACTION (one sentence):""",
 def _utf8() -> None:
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        # line-buffered stderr so progress is visible even when redirected to a
+        # file during a long detached run (block buffering hid it otherwise).
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
     except Exception:  # noqa: BLE001
         pass
 
@@ -164,7 +167,34 @@ async def _build(args: argparse.Namespace) -> int:
     base = df.copy()
     base["task"] = "title"
     tr = df[df.split == "train"].reset_index(drop=True) if "split" in df.columns else df
-    rows = tr.to_dict("records")
+
+    # Which rows get a RATIONALE. Title supervision always covers the FULL corpus
+    # (base, above); we only choose which rows additionally get a teacher rationale.
+    # --match-request-head: rationalize every request row (full coverage of the
+    # comprehension target, the smaller head) plus a span sample SIZED TO MATCH the
+    # request head, drawn per-source in proportion to the span corpus's own source
+    # mix. Parameter-free: the budget is the smaller head's size; the per-source
+    # split is the data's own distribution -- no magic number, no source tag.
+    if args.match_request_head and "prefix" in tr.columns:
+        is_req = tr.prefix.astype(str).str.startswith("title task from request")
+        req, span = tr[is_req], tr[~is_req]
+        budget = len(req)
+        sfreq = span.src.value_counts()
+        parts = []
+        for s, n in sfreq.items():
+            take = min(len(span[span.src == s]), round(budget * n / len(span)))
+            parts.append(span[span.src == s].sample(take, random_state=17))
+        span_sub = pd.concat(parts) if parts else span.iloc[:0]
+        sel = pd.concat([req, span_sub]).reset_index(drop=True)
+        print(
+            f"match-request-head: request={len(req)} span={len(span_sub)}/{len(span)} "
+            f"(by src {span_sub.src.value_counts().to_dict()}) -> {len(sel)} to rationalize",
+            file=sys.stderr,
+            flush=True,
+        )
+        rows = sel.to_dict("records")
+    else:
+        rows = tr.to_dict("records")
 
     cfg = load_labeling_runtime_config()
     backend = CopilotSdkBackend(cfg.backend)
@@ -172,7 +202,7 @@ async def _build(args: argparse.Namespace) -> int:
 
     rationale_rows: list[dict] = []
     done = 0
-    flush_every = max(200, len(rows) // 20)  # ~20 checkpoints over the run
+    flush_every = max(100, len(rows) // 20)  # ~20 checkpoints over the run
     tasks = [asyncio.ensure_future(_one(backend, sem, i, r)) for i, r in enumerate(rows)]
     for fut in asyncio.as_completed(tasks):
         idx, rat = await fut
@@ -183,11 +213,17 @@ async def _build(args: argparse.Namespace) -> int:
             nr["prefix"] = _RATIONALE_PREFIX[_kind(rows[idx])]
             nr["task"] = "rationale"
             rationale_rows.append(nr)
-        if done % 100 == 0:
-            print(f"  rationalized {done}/{len(rows)}", file=sys.stderr)
+        if done % 50 == 0:
+            # flush=True: redirected stderr is block-buffered, so progress stays
+            # invisible during a long detached run without an explicit flush.
+            print(f"  rationalized {done}/{len(rows)}", file=sys.stderr, flush=True)
         if done % flush_every == 0:
             _flush(base, rationale_rows, args.out)
-            print(f"  checkpoint -> {args.out} ({len(rationale_rows)} rationales)", file=sys.stderr)
+            print(
+                f"  checkpoint -> {args.out} ({len(rationale_rows)} rationales)",
+                file=sys.stderr,
+                flush=True,
+            )
 
     _flush(base, rationale_rows, args.out)
     out = pd.read_parquet(args.out)
@@ -214,6 +250,11 @@ def main() -> int:
     pb.add_argument("--dataset", default=default_ds)
     pb.add_argument("--out", default=os.path.join(ROOT, "data", "interim", "t5-title-rationale.parquet"))
     pb.add_argument("--concurrency", type=int, default=4)
+    pb.add_argument(
+        "--match-request-head",
+        action="store_true",
+        help="rationalize all request rows + a source-stratified span sample of equal size",
+    )
 
     args = p.parse_args()
     if args.cmd == "probe":

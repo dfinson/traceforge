@@ -114,4 +114,45 @@ acceptance:
     Two-sided; rationale is auxiliary and must not steal capacity from titling.
 
 # Results recorded after the run (judge verdict + beam-cut finding).
-results: {}
+results:
+  pilot_request_head:
+    status: PROVES-ITSELF
+    method_note: >
+      Pilot trained the request head on a richer rationale-distilled corpus. To keep
+      attribution clean, the candidate was trained FROM-SCRATCH on t5-efficient-tiny
+      with the SAME recipe as the promoted model (organic-parity, 12 epochs, BS=32,
+      LR=3e-4, MAX_TGT=48) PLUS the auxiliary rationale task -- NOT warm-started -- so
+      the coherence delta is attributable to the rationale objective alone, not to a
+      better init. Rationale rows: all 1119 request rows + a source-stratified span
+      sample (1999 rationale rows total; subset build, match-request-head).
+    eval:
+      dataset: data/interim/t5-title-codeplane.parquet   # 260 codeplane real prompts, raw first-message
+      heldout_judged: 80                                  # per-source-cap 80, random_state=17 (identical sids both models)
+      judge: blinded Sonnet A/B, both models scored in FRESH same-run invocations (cross-run noise removed)
+      judge_noise_floor: "2.5pt aggregate (same baseline model: 37.5% vs 35.0% across two runs; 8/80 item flips)"
+    paired_coherent:
+      baseline_parity: 0.350
+      rationale_distilled: 0.512
+      delta: "+0.162"           # ~6x the noise floor
+    metrics_rationale_vs_baseline:
+      faithful: "1.19 -> 1.29"   # the GATED metric carries the lift
+      specific: "1.46 -> 1.63"
+      fluent: "1.70 -> 1.78"     # flat: gain is comprehension, not decode fluency
+    mechanism: >
+      Win/loss inspection: baseline GARBLES comprehension on rambling prompts
+      ("Add type annotations to typesr/utils module", "Fix viltaions of DRY and SOLID",
+      "Dejudice cost section to SDKs"); the rationale model emits faithful, specific
+      titles and recovers real entities ("Add type annotations to typer/utils.py",
+      "Add GET /status endpoint"). 17 coherent flips 0->1 vs 6 1->0 (several of the 6
+      are judge noise: identical preds scored differently across runs). Consistent with
+      Distilling Step-by-Step: the auxiliary rationale task forces the encoder to LOCATE
+      buried intent at fixed ~16M params.
+    artifacts:
+      model: data/interim/t5-title-rationale-model            # gitignored
+      train_dataset: data/interim/t5-title-rationale-partial.parquet
+      scores_rationale: data/interim/title-judge-scores-rationale-request.jsonl
+      scores_baseline_rejudged: data/interim/title-judge-scores-parity-rejudged.jsonl
+  next:
+    - Span head must be judged for NON-regression (copilot/claude in-dist) before any promote.
+    - Full rationale corpus (all 8445 title rows) + span beam-1-vs-best-of-5 measurement (the TITLE_BEAMS cut bonus).
+    - If span holds, export int8 ONNX + promote via the standard path (rationale never decoded -> footprint invariant).

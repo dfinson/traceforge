@@ -59,7 +59,11 @@ BASE_MODEL = os.environ.get("TITLE_BASE_MODEL", "google/t5-efficient-tiny")
 PREFIX = "summarize agent step: "
 HELDOUT_FRAC = 0.15
 MAX_SRC = 192
-MAX_TGT = 20
+# Target cap. Titles are short (<=~20 tok); rationale-distillation auxiliary
+# targets are ~30-word teacher sentences (~40-50 tok), so the ceiling is raised
+# to 48 to avoid truncating them. Harmless to title-only datasets (their golds
+# never reach the old ceiling). Env-overridable.
+MAX_TGT = int(os.environ.get("TITLE_MAX_TGT", "48"))
 
 # This script trains + evaluates the served titler; its home MLflow experiment is
 # the domain-diverse organic retrain. Runs are tagged with base_model so a depth
@@ -227,38 +231,56 @@ def train():
     #               alpha=-0.5 -> swe ~29% mass, alpha=-1 -> swe ~14%.
     # Still parameter-free in spirit: one principled knob, no per-title tuning.
     src_alpha = float(os.environ.get("TITLE_SRC_ALPHA", "0.0"))
-    src_freq = tr.src.value_counts().to_dict()
-    # Source-mass policy. Default ("alpha") = freq^alpha temperature (alpha=0 is
-    # equal-per-source). With >=3 sources, equal-per-source steals mass from the
-    # MIDDLE-frequency organic source (copilot) to feed a small new injection,
-    # and no single global alpha can lift the middle source above 1/n (it is the
-    # geometric centre, maximised at alpha=0). "organic-parity" preserves the
-    # original 2-source design intent -- cap the lone dominant (scaffolded)
-    # source at parity with ALL others combined, then split the remainder by
-    # natural row frequency so the primary organic source keeps the lion's share
-    # and a small injection stays a minority. Parameter-free (parity = 1/2; the
-    # split uses the data's own proportions; the dominant source is identified by
-    # max frequency, no source tag).
     policy = os.environ.get("TITLE_BALANCE", "alpha")
-    if policy == "organic-parity" and len(src_freq) >= 3:
-        big = max(src_freq, key=src_freq.get)
-        rest = [s for s in src_freq if s != big]
-        rest_total = sum(src_freq[s] for s in rest)
-        target = {big: 0.5}
-        for s in rest:
-            target[s] = 0.5 * src_freq[s] / rest_total
-        weights = [target[s] / src_freq[s] for s in tr.src]
-        _frac = {s: round(target[s], 3) for s in src_freq}
+
+    def _source_weights(freq: dict) -> tuple[dict, dict]:
+        """Per-source row weight + intended mass fraction, by policy, within a
+        homogeneous group. organic-parity (>=3 sources): cap the lone dominant
+        source at 0.5 vs the rest combined, splitting the remainder by natural
+        frequency; else freq^(alpha-1) temperature (alpha=0 = equal-per-source).
+        Parameter-free: derived from counts alone (no source tag, no tuned knob)."""
+        if policy == "organic-parity" and len(freq) >= 3:
+            big = max(freq, key=freq.get)
+            rest = [s for s in freq if s != big]
+            rest_total = sum(freq[s] for s in rest)
+            target = {big: 0.5}
+            for s in rest:
+                target[s] = 0.5 * freq[s] / rest_total
+            return ({s: target[s] / freq[s] for s in freq},
+                    {s: round(target[s], 3) for s in freq})
+        mass = {s: freq[s] ** src_alpha for s in freq}
+        tot = sum(mass.values())
+        return ({s: freq[s] ** (src_alpha - 1.0) for s in freq},
+                {s: round(mass[s] / tot, 3) for s in freq})
+
+    # (src, task)-parity. Distilling Step-by-Step weights the label and rationale
+    # losses EQUALLY; we realize that by giving each TASK equal total sampling mass
+    # (1/T from the data's own distinct task count), then applying the source
+    # policy WITHIN each task. With a single task (no `task` column, e.g. the
+    # title-only datasets) this collapses to the validated source-only sampler --
+    # identical weights, backward compatible. Parameter-free throughout.
+    tasks = sorted(tr["task"].dropna().unique().tolist()) if "task" in tr.columns else []
+    n_task = max(1, len(tasks))
+    _frac: dict = {}
+    if tasks:
+        srcs = tr.src.tolist()
+        tcol = tr["task"].tolist()
+        weights = [0.0] * len(tr)
+        for t in tasks:
+            sw, sf = _source_weights(tr.src[tr["task"] == t].value_counts().to_dict())
+            for i in range(len(tr)):
+                if tcol[i] == t:
+                    weights[i] = sw[srcs[i]] / n_task
+            _frac[t] = sf
     else:
-        weights = [src_freq[s] ** (src_alpha - 1.0) for s in tr.src]
-        _mass = {s: src_freq[s] ** src_alpha for s in src_freq}
-        _tot = sum(_mass.values())
-        _frac = {s: round(_mass[s] / _tot, 3) for s in _mass}
+        sw, _frac = _source_weights(tr.src.value_counts().to_dict())
+        weights = [sw[s] for s in tr.src]
     sampler = WeightedRandomSampler(weights, num_samples=len(tr), replacement=True)
     uniq = tr.groupby("src").gold.nunique().to_dict()
     print(
-        f"source mix (raw): {src_freq} | distinct titles: {uniq} "
-        f"-> policy={policy} alpha={src_alpha} source mass fraction: {_frac}"
+        f"source mix (raw): {tr.src.value_counts().to_dict()} | distinct titles: {uniq} "
+        f"-> policy={policy} alpha={src_alpha} tasks={tasks or ['(none)']} "
+        f"mass fraction: {_frac}"
     )
 
     dl = DataLoader(DS(tr), batch_size=bs, sampler=sampler, collate_fn=collate)
@@ -288,8 +310,12 @@ def train():
                 "dataset": os.path.basename(DATASET),
             }
         )
-        for _s, _f in _frac.items():
-            mlflow.log_param(f"source_mass_fraction.{_s}", _f)
+        for _k, _v in _frac.items():
+            if isinstance(_v, dict):  # (src,task)-parity: {task: {src: frac}}
+                for _s, _f in _v.items():
+                    mlflow.log_param(f"source_mass_fraction.{_k}.{_s}", _f)
+            else:  # source-only: {src: frac}
+                mlflow.log_param(f"source_mass_fraction.{_k}", _v)
 
         mdl.train()
         t0 = time.time()

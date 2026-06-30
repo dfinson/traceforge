@@ -112,15 +112,26 @@ def _clean_sentence(text: str) -> str:
     return s
 
 
-async def _one(backend: CopilotSdkBackend, sem: asyncio.Semaphore, row: dict) -> str | None:
+async def _one(
+    backend: CopilotSdkBackend, sem: asyncio.Semaphore, idx: int, row: dict
+) -> tuple[int, str | None]:
     kind = _kind(row)
     prompt = _PROMPT[kind].format(gold=row["gold"], ctx=str(row["ctx"])[:1600])
     try:
         async with sem:
             res = await backend.complete(prompt, system_message=_SYSTEM)
     except Exception:  # noqa: BLE001 - one bad SDK call must not abort the batch
-        return None
-    return _clean_sentence(res.text or "") or None
+        return idx, None
+    return idx, (_clean_sentence(res.text or "") or None)
+
+
+def _flush(base: pd.DataFrame, rationale_rows: list[dict], out: str) -> None:
+    """Atomically write base + whatever rationales exist so far (crash-safe)."""
+    frames = [base] + ([pd.DataFrame(rationale_rows)] if rationale_rows else [])
+    combined = pd.concat(frames, ignore_index=True)
+    tmp = out + ".tmp"
+    combined.to_parquet(tmp, index=False)
+    os.replace(tmp, out)
 
 
 async def _probe(args: argparse.Namespace) -> int:
@@ -136,7 +147,10 @@ async def _probe(args: argparse.Namespace) -> int:
     cfg = load_labeling_runtime_config()
     backend = CopilotSdkBackend(cfg.backend)
     sem = asyncio.Semaphore(args.concurrency)
-    rats = await asyncio.gather(*[_one(backend, sem, r) for r in sample])
+    results = await asyncio.gather(*[_one(backend, sem, i, r) for i, r in enumerate(sample)])
+    rats: list[str | None] = [None] * len(sample)
+    for i, rat in results:
+        rats[i] = rat
     for r, rat in zip(sample, rats):
         print(f"\n[{_kind(r)}]  gold: {r['gold']!r}")
         print(f"  ctx : {str(r['ctx'])[:160]!r}")
@@ -158,22 +172,25 @@ async def _build(args: argparse.Namespace) -> int:
 
     rationale_rows: list[dict] = []
     done = 0
-    # gather preserves order, so each rationale stays bound to its source row.
-    rats = await asyncio.gather(*[_one(backend, sem, r) for r in rows])
-    for r, rat in zip(rows, rats):
+    flush_every = max(200, len(rows) // 20)  # ~20 checkpoints over the run
+    tasks = [asyncio.ensure_future(_one(backend, sem, i, r)) for i, r in enumerate(rows)]
+    for fut in asyncio.as_completed(tasks):
+        idx, rat = await fut
         done += 1
-        if not rat:
-            continue
-        nr = dict(r)
-        nr["gold"] = rat
-        nr["prefix"] = _RATIONALE_PREFIX[_kind(r)]
-        nr["task"] = "rationale"
-        rationale_rows.append(nr)
+        if rat:
+            nr = dict(rows[idx])
+            nr["gold"] = rat
+            nr["prefix"] = _RATIONALE_PREFIX[_kind(rows[idx])]
+            nr["task"] = "rationale"
+            rationale_rows.append(nr)
         if done % 100 == 0:
             print(f"  rationalized {done}/{len(rows)}", file=sys.stderr)
+        if done % flush_every == 0:
+            _flush(base, rationale_rows, args.out)
+            print(f"  checkpoint -> {args.out} ({len(rationale_rows)} rationales)", file=sys.stderr)
 
-    out = pd.concat([base, pd.DataFrame(rationale_rows)], ignore_index=True)
-    out.to_parquet(args.out, index=False)
+    _flush(base, rationale_rows, args.out)
+    out = pd.read_parquet(args.out)
     print(
         f"wrote {len(out)} rows -> {args.out}  "
         f"(title={len(base)}, rationale={len(rationale_rows)})"

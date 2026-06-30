@@ -24,6 +24,7 @@ import hashlib
 import os
 import sys
 import time
+from pathlib import Path
 
 import pandas as pd
 
@@ -63,8 +64,16 @@ MAX_TGT = 20
 # This script trains + evaluates the served titler; its home MLflow experiment is
 # the domain-diverse organic retrain. Runs are tagged with base_model so a depth
 # probe (e.g. t5-small) stays self-describing under the same experiment.
-EXPERIMENT = "titler-domain-diverse-retrain-v1"
-EXPERIMENT_YAML = EXPERIMENTS_DIR / "titler-domain-diverse-retrain.yaml"
+# TITLE_EXPERIMENT / TITLE_EXPERIMENT_YAML are env-overridable (same pattern as
+# TITLE_DATASET / TITLE_MODEL_DIR / TITLE_BASE_MODEL) so a sibling head (e.g. the
+# prompt->task-title multitask fold-in) can log to its own experiment + yaml
+# without forking this trainer.
+EXPERIMENT = os.environ.get("TITLE_EXPERIMENT", "titler-domain-diverse-retrain-v1")
+EXPERIMENT_YAML = Path(
+    os.environ.get(
+        "TITLE_EXPERIMENT_YAML", str(EXPERIMENTS_DIR / "titler-domain-diverse-retrain.yaml")
+    )
+)
 
 
 def _utf8():

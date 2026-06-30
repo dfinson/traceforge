@@ -229,3 +229,26 @@ def test_real_model_produces_distinct_nonempty_titles():
     assert activity and all(isinstance(u.title, str) and u.title for u in activity)
     act_title = activity[0].title
     assert all(u.title != act_title for u in steps)
+
+
+_HAS_REQUEST_MODEL = (
+    Path(__file__).resolve().parents[2] / "src/tracemill/title/data-request/encoder.onnx"
+).exists()
+
+
+@pytest.mark.skipif(
+    not (_HAS_DEPS and _HAS_MODEL and _HAS_REQUEST_MODEL),
+    reason="title extra / span+request model artifacts absent",
+)
+def test_packaged_request_head_is_a_separate_model():
+    """When ``data-request/`` is packaged, the request head loads as its own ORT
+    session (the rationale-distilled model), not a reprefix of the span model."""
+    inf = TitleInferencer()
+    span = inf.model
+    req = inf.request_model
+    # Distinct objects, distinct underlying encoder sessions, distinct prefixes.
+    assert req is not span
+    assert req._enc is not span._enc
+    assert req._prefix != span._prefix
+    title = inf.request_title("Add a status endpoint that returns uptime as JSON")
+    assert isinstance(title, str) and title.strip()

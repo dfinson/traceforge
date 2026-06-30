@@ -216,3 +216,27 @@ results:
       - "Two-model routing: ship the from-scratch rationale model for the REQUEST prefix only, keep the promoted model for SPAN prefixes (titler already routes by prefix). Cost: ~2x served params (~32M total, still tiny/CPU-cheap), elegance."
       - "Need-weighted rationale mass: weight the rationale task by each head's measured comprehension deficit (request large, span ~0) instead of equal 1/2. Risk: deriving the weight parameter-free from validation faithfulness, not a hand-tuned knob."
       - "Curriculum anneal: rationale task heavy early (encoder formation) annealed out so late epochs are pure title, restoring full span title supervision after the comprehension prior is set. Parameter-light schedule, untested here."
+
+  shipped:
+    status: SHIPPED   # fork 1 (two-model prefix routing) chosen
+    decision: >
+      Chose fork 1 (two-model prefix routing). The from-scratch rationale model proved
+      itself on the REQUEST head (+16.2pt, the one confound-free gain) but co-training
+      strictly taxes the SPAN head, so a SINGLE model cannot carry both. Routing already
+      keys on the T5 task prefix, so the cleanest ship is to serve the proven request
+      model under the request prefix and keep the unregressed promoted multitask model
+      for span prefixes. Forks 2 (need-weighted mass) and 3 (curriculum anneal) are
+      deferred -- they aim to recover both heads in ONE model, which is an optimization
+      of, not a blocker for, the shipped capability.
+    serve_artifact: src/tracemill/title/data-request/   # int8 ONNX of the from-scratch request model (~33MB, committed like the span data/)
+    routing: >
+      TitleInferencer loads the packaged data-request/ model under the request prefix
+      ("title task from request: ") ONLY on the fully-packaged default path; absent the
+      artifact (or when a model is injected / a custom span dir is given) it falls back
+      to reprefixing the span model -- the prior single-model behaviour, zero extra
+      footprint. The request head is a once-per-session call (session titling), NOT in
+      the hot per-event span loop, so the second ORT session adds memory only (~33MB
+      int8 weights), no hot-path CPU. Both models load lazily and cap intra-op threads
+      at 1. Verified: distinct ORT sessions, correct per-head prefixes, 31 title+pipeline
+      tests pass (incl. a two-session routing regression test), ruff clean.
+

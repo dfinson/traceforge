@@ -24,14 +24,23 @@ The model is loaded lazily on first close and runs CPU-only with a capped thread
 count, so an inactive session costs nothing and an active one runs the heavy
 model once per *segment*, never per event.
 
-The same model also titles the **session** itself: fed the first substantive
-user message under the request prefix (:meth:`TitleInferencer.request_title`),
-it emits a ``kind="session"`` :class:`~tracemill.types.TitleUpdate` keyed by the
-session id -- the session label, live off its opening request, at no extra
-footprint (one shared model, a second learned prefix).
+The same machinery also titles the **session** itself: fed the first substantive
+user message under the request prefix (:meth:`TitleInferencer.request_title`), it
+emits a ``kind="session"`` :class:`~tracemill.types.TitleUpdate` keyed by the
+session id -- the session label, live off its opening request. The request head is
+served by a SEPARATE distilled model when one is packaged (``data-request/``), and
+otherwise falls back to the span model under the request prefix. The two heads were
+split because raw-request comprehension and span summarization pull the shared ~16M
+encoder in different directions: a rationale-distilled request model lifts request
+coherence well past the shared multitask model, but co-training that objective taxes
+the span head (see ``research/experiments/titler-rationale-distillation.yaml``). Two
+tiny int8 models on CPU stay near-zero footprint; both load lazily, so an inactive
+session still costs nothing.
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 from tracemill.phase.event_rows import event_to_feature_row
 from tracemill.types import EventKind, SessionEvent, TitleUpdate
@@ -41,9 +50,13 @@ from .hygiene import best_of, norm_key, pick_distinct
 
 _ACTIVITY = "activity-boundary"
 _STEP = "step-boundary"
-#: The multitask request head's learned T5 prefix (vs the span prefix). Titling a
-#: raw user request is the SAME promoted model under this prefix -- no second model.
+#: The request head's learned T5 prefix (vs the span prefix). When a separate
+#: request model is packaged it is loaded under this prefix; otherwise the span
+#: model is reprefixed to it (single-model fallback, zero extra footprint).
 _REQUEST_PREFIX = "title task from request: "
+#: Packaged separate request-head artifact (the rationale-distilled request model).
+#: Sibling of the span ``data/`` dir; absent -> single-model reprefix fallback.
+_REQUEST_DATA = Path(__file__).resolve().parent / "data-request"
 
 
 class TitleInferencer:
@@ -54,9 +67,15 @@ class TitleInferencer:
     closed segment, so a pipeline with no titled sessions never imports it.
     """
 
-    def __init__(self, model=None, model_dir=None) -> None:
+    def __init__(self, model=None, model_dir=None, request_model_dir=None) -> None:
         self._model = model
         self._model_dir = model_dir
+        self._request_model_dir = request_model_dir
+        #: Two-model request routing engages only on the fully-packaged default
+        #: path; an injected model or a custom span dir keeps the single-model
+        #: reprefix behaviour (so tests and custom deployments are unaffected),
+        #: unless an explicit ``request_model_dir`` is given.
+        self._default_path = model is None and model_dir is None
         self._request_model = None
 
     @property
@@ -67,17 +86,44 @@ class TitleInferencer:
             self._model = TitleModel.load(self._model_dir, threads=1)
         return self._model
 
+    def _resolve_request_dir(self):
+        """The packaged/explicit separate request artifact, or ``None``.
+
+        ``None`` means serve the request head by reprefixing the span model
+        (the single-model fallback). A separate dir is used only when given
+        explicitly, or when relying on the default packaged path and the
+        ``data-request/`` artifact is present.
+        """
+        if self._request_model_dir is not None:
+            return self._request_model_dir
+        if not self._default_path:
+            return None
+        return _REQUEST_DATA if (_REQUEST_DATA / "encoder.onnx").exists() else None
+
     @property
     def request_model(self):
-        """The same loaded model under the request prefix (built once, lazily).
+        """The request head: a separate distilled model when packaged, else the
+        span model under the request prefix.
 
-        Shares the span head's encoder/decoder/tokenizer via
-        :meth:`TitleModel.reprefixed`, so the session/request titling capability
-        costs no extra footprint over the activity/step titler.
+        When ``data-request/`` is packaged (or a ``request_model_dir`` is given),
+        the rationale-distilled request model is loaded under
+        :data:`_REQUEST_PREFIX` -- it lifts raw-request coherence well past the
+        shared multitask model. Absent that artifact, the span head's
+        encoder/decoder/tokenizer are reused via :meth:`TitleModel.reprefixed`,
+        so the request capability still costs no extra footprint. Built once,
+        lazily, either way.
         """
         if self._request_model is None:
-            m = self.model
-            self._request_model = m.reprefixed(_REQUEST_PREFIX) if hasattr(m, "reprefixed") else m
+            rd = self._resolve_request_dir()
+            if rd is not None:
+                from .inference import TitleModel
+
+                self._request_model = TitleModel.load(rd, threads=1).reprefixed(_REQUEST_PREFIX)
+            else:
+                m = self.model
+                self._request_model = (
+                    m.reprefixed(_REQUEST_PREFIX) if hasattr(m, "reprefixed") else m
+                )
         return self._request_model
 
     def request_title(self, text: str) -> str:

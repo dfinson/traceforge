@@ -1,0 +1,117 @@
+# Rationale distillation: teach the tiny titler to COMPREHEND, not just to map.
+#
+# The promoted multitask titler titles distilled spans well, but on RAW user
+# requests it floors at 38% coherent (LLM judge, n=80 codeplane heldout; gold
+# ceiling 92%, h2h model 6% / tie 15% / gold 79%). The failure is NOT output
+# shape -- fluent 1.76/2, verb!=obj 99% -- it is FAITHFULNESS (1.18/2 vs gold
+# 1.88): the 16M encoder cannot locate the buried intent in a rambling clause
+# ("Save reverts to default" lost inside "max concurrent jobs and settings").
+# Beam inspection confirmed the wall: across 6 beams NONE captured the real ask,
+# so no reranker / decode-hygiene / extract-then-title pass can recover it
+# (extract-then-title also DEAD here: narration shrinks these prompts a median
+# of 0% -- the noise is intra-sentence, and 1 in 4 prompts narrate to empty).
+#
+# Capacity bump (t5-small ~60M) is OFF the table for footprint reasons. So the
+# question: can a fixed ~16M T5 be made to comprehend better WITHOUT more params?
+#
+# LEVER (literature-grounded). Distilling Step-by-Step (Hsieh et al., ACL 2023
+# Findings, arXiv:2305.02301): train the small model MULTITASK to predict the
+# label AND a teacher-generated RATIONALE, under distinct task prefixes. The
+# rationale injects "task knowledge the small model would otherwise need lots of
+# data to learn"; their small T5s beat up-to-2000x larger LLMs BECAUSE of it.
+# Our failure mode is precisely "needs to learn to locate intent" -- the rationale
+# task supervises that at fixed params. The rationale head is AUXILIARY: queried
+# only in training, never at serve, so footprint is unchanged (zero extra decode).
+#
+# Architectural fit (arXiv:2109.10686, Tay et al., "Scale Efficiently"): at a
+# fixed small budget, depth buys compositional parsing more than width. The
+# existing nl6/nl8/nl12 depth sweep is the local corroboration; depth-narrow is a
+# parallel lever, not part of this experiment.
+#
+# Companion scripts:
+#   research/scripts/_title_rationale.py   (Sonnet rationale generator + corpus
+#                                            augmentation: appends rationale rows
+#                                            with task=rationale, distinct prefix)
+#   research/scripts/_title_t5_train.py    (train/eval; per-row prefix routing,
+#                                            (src,task)-parity balancing when a
+#                                            `task` column is present)
+#   research/scripts/_title_judge.py       (blinded LLM A/B coherence + h2h vs gold;
+#                                            request head judged on the codeplane reals)
+#   research/scripts/_title_export.py      (torch -> no-past int8 ONNX -> promote)
+#
+# MLflow: _title_t5_train.py logs here via TITLE_EXPERIMENT / TITLE_EXPERIMENT_YAML.
+
+experiment:
+  name: titler-rationale-distillation
+  mlflow_experiment: titler-rationale-distillation-v1
+  display_name: "Titler - Rationale Distillation (comprehension at fixed ~16M)"
+  description: |
+    Add an AUXILIARY rationale task to the multitask tiny titler so the encoder
+    learns to LOCATE the buried request intent, lifting request-head faithfulness
+    without growing params or serve footprint. Method = Distilling Step-by-Step
+    (arXiv:2305.02301): co-train title (label) and rationale tasks under distinct
+    T5 prefixes; the rationale head is discarded at inference (zero extra decode).
+    Two outcomes are measured: (1) request-head coherence on the SAME 260 codeplane
+    real prompts that scored 38% for the promoted model, and (2) whether a sharper
+    top-1 distribution lets the span head match best-of-5 at beam-1 (a serve-time
+    footprint cut, since the hot loop runs TITLE_BEAMS=5 escalating to 10).
+  tags:
+    component: titler
+    pillar: generalization
+    stage: train-and-serve
+    constraint: cpu-near-zero-footprint
+    parent: titler-prompt-to-task
+    method: distilling-step-by-step
+    citations: "arXiv:2305.02301 (Distilling Step-by-Step); arXiv:2109.10686 (Scale Efficiently)"
+
+dataset:
+  source: promoted multitask parquet (span + request rows) + teacher rationale rows
+  augment: research/scripts/_title_rationale.py   (-> t5-title-rationale.parquet)
+  base_rows_from: t5-title-multitask.parquet       (the promoted multitask dataset)
+  rationale_provenance: >
+    For every TRAIN row (span and request), the blessed Sonnet labeler emits ONE
+    plain, entity-rich sentence stating the buried intent (request rows: the
+    concrete action + the specific thing it acts on, grounded in the message;
+    span rows: what the agent did + to what, grounded in the trace). The rationale
+    is richer than the gold title on purpose -- it names the entities and relation
+    the encoder must learn to find, which the terse gerund title omits. One
+    rationale per train row; held-out rows are NOT augmented (judged on title only).
+  task_prefixes:
+    span_title: "summarize agent step: "
+    request_title: "title task from request: "
+    span_rationale: "explain step: "
+    request_rationale: "explain request: "
+  task_column: task            # {title, rationale}; enables (src,task)-parity balancing
+  split: inherited from base parquet (session/content-hash heldout, parameter-free)
+
+model:
+  base: google/t5-efficient-tiny
+  params: ~16M (4 enc / 4 dec)   # UNCHANGED; the lever is the objective, not the size
+  multitask: per-row T5 prefix routes {span,request} x {title,rationale}; one shared model
+  init: warm-start from the promoted multitask checkpoint (data/interim/t5-title-multitask-parity-model)
+  balancing: >
+    (src, task)-parity when a `task` column is present (generalizes the validated
+    equal-per-source sampler to equal-per-(source,task)). Parameter-free: parity =
+    1/n_tasks per source, mirroring Distilling Step-by-Step's equal label/rationale
+    weighting; falls back to source-only balancing for single-task datasets.
+  max_tgt: 48                    # raised from 20 so richer rationale targets are not truncated; titles unaffected
+  serve: torch-free onnxruntime; ONLY the title prefixes are ever decoded -> the
+         rationale task adds ZERO serve footprint. Same int8 export + promote path.
+
+conditions:
+  - id: promoted-multitask-parity
+    role: baseline -- the currently shipped model; request head 38% coherent on codeplane reals
+  - id: rationale-distilled
+    role: candidate -- baseline corpus + auxiliary rationale rows, (src,task)-parity, warm-started
+
+acceptance:
+  rule: >
+    (a) Request head: coherence on the SAME 260 codeplane reals must beat the 38%
+    baseline by a margin outside the judge noise band, with faithfulness (not just
+    fluency) carrying the lift. (b) Span head must NOT regress (copilot/claude
+    coherence at parity). (c) Footprint unchanged at serve (rationale never decoded);
+    BONUS: if span beam-1 coherence matches the current best-of-5, cut TITLE_BEAMS.
+    Two-sided; rationale is auxiliary and must not steal capacity from titling.
+
+# Results recorded after the run (judge verdict + beam-cut finding).
+results: {}

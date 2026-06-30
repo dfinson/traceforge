@@ -40,6 +40,18 @@ def _event(i, tool="edit", boundary=None, payload=None, kind="tool.call", metada
     )
 
 
+def _msg(i, text, kind="message.user"):
+    """A user/assistant message event carrying free text in its payload."""
+    return SessionEvent(
+        id=f"e{i}",
+        kind=kind,
+        session_id="S",
+        timestamp=datetime.now(timezone.utc),
+        payload={"content": text},
+        metadata=EventMetadata(source_framework="copilot"),
+    )
+
+
 class _FakeTitle:
     """Returns a fresh ``"Title <n>"`` candidate list on each call, so titles
     are deterministic and we can assert which span got which call."""
@@ -142,6 +154,44 @@ def test_stamp_passes_through_event_without_metadata():
 
     ev = SimpleNamespace(metadata=None)
     assert SessionTitleStream._stamp(ev, "A", "B") is ev
+
+
+# ─── session title (live, from the first substantive user message) ───────────
+
+
+def test_first_substantive_user_message_titles_session():
+    stream, fake = _stream()
+    _e, updates = stream.push(_msg(0, "Please add retry logic to the HTTP client with backoff"))
+    sess = [u for u in updates if u.kind == "session"]
+    assert len(sess) == 1
+    # Keyed by the session id (the session is the outermost segment), no parent.
+    assert sess[0].segment_id == "S" and sess[0].session_id == "S"
+    assert sess[0].parent_id is None and sess[0].title
+    assert fake.contexts == ["Please add retry logic to the HTTP client with backoff"]
+    # Set-once: a later substantive message never re-titles the session.
+    _e2, updates2 = stream.push(_msg(1, "Also write unit tests for the limiter please"))
+    assert [u for u in updates2 if u.kind == "session"] == []
+
+
+def test_non_substantive_user_message_does_not_title_session():
+    stream, fake = _stream()
+    # A bare greeting yields no sentence under narration hygiene -> no title, and
+    # the model is never invoked (parameter-free substance gate, no threshold).
+    _e, updates = stream.push(_msg(0, "hi"))
+    assert [u for u in updates if u.kind == "session"] == []
+    assert fake.contexts == []
+    # The first SUBSTANTIVE message then titles the session.
+    _e2, updates2 = stream.push(_msg(1, "Fix the failing pagination test in the users API"))
+    assert len([u for u in updates2 if u.kind == "session"]) == 1
+
+
+def test_non_message_events_never_title_session():
+    # Tool/file events are not user messages -> the session title gate ignores
+    # them entirely (existing activity/step behavior is unchanged).
+    stream, fake = _stream()
+    _e, updates = stream.push(_event(0, tool="edit"))
+    assert [u for u in updates if u.kind == "session"] == []
+    assert fake.contexts == []  # request head not invoked on a tool event
 
 
 # ─── real packaged model ─────────────────────────────────────────────────────

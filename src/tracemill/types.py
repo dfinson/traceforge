@@ -292,7 +292,7 @@ class UsageRecord(FrozenModel):
 
 
 class TitleUpdate(FrozenModel):
-    """An append-only title for a closed activity/step segment.
+    """An append-only title for a session / activity / step segment.
 
     Events stream out immediately carrying their ``activity_id``/``step_id``; a
     faithful title needs the whole segment, so it is computed when the segment
@@ -301,11 +301,15 @@ class TitleUpdate(FrozenModel):
     read model — the event log itself is never mutated. ``version`` lets a title
     be revised (e.g. a provisional title refined on close) idempotently: keep the
     highest version per ``segment_id``.
+
+    The ``session`` kind labels the whole session from its opening request; it is
+    keyed by ``segment_id == session_id`` (the session is the outermost segment),
+    emitted live the instant the first substantive user message arrives.
     """
 
     session_id: str
     segment_id: str
-    kind: Literal["activity", "step"]
+    kind: Literal["session", "activity", "step"]
     title: str
     version: int = Field(default=1, ge=1)
     parent_id: str | None = None  # a step's activity_id, so a flat stream can rebuild the tree

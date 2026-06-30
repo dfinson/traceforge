@@ -124,6 +124,16 @@ class TitleModel:
         self._tok = tok
         self._prefix = prefix
 
+    def reprefixed(self, prefix: str) -> "TitleModel":
+        """A zero-cost view of this model under a different task prefix.
+
+        Shares the loaded encoder/decoder sessions and tokenizer (no new ONNX
+        load, no extra RSS), so the multitask request head (prefix
+        ``"title task from request: "``) can be served from the same in-memory
+        model as the span head (prefix ``"summarize agent step: "``).
+        """
+        return TitleModel(self._enc, self._dec, self._tok, prefix)
+
     # ----------------------------------------------------------------- loading
     @classmethod
     def load(

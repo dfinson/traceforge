@@ -23,18 +23,27 @@ parent activity and siblings via :func:`tracemill.title.hygiene.pick_distinct`.
 The model is loaded lazily on first close and runs CPU-only with a capped thread
 count, so an inactive session costs nothing and an active one runs the heavy
 model once per *segment*, never per event.
+
+The same model also titles the **session** itself: fed the first substantive
+user message under the request prefix (:meth:`TitleInferencer.request_title`),
+it emits a ``kind="session"`` :class:`~tracemill.types.TitleUpdate` keyed by the
+session id -- the session label, live off its opening request, at no extra
+footprint (one shared model, a second learned prefix).
 """
 
 from __future__ import annotations
 
 from tracemill.phase.event_rows import event_to_feature_row
-from tracemill.types import SessionEvent, TitleUpdate
+from tracemill.types import EventKind, SessionEvent, TitleUpdate
 
-from .context import distilled_context
+from .context import distilled_context, narration, payload_text
 from .hygiene import best_of, norm_key, pick_distinct
 
 _ACTIVITY = "activity-boundary"
 _STEP = "step-boundary"
+#: The multitask request head's learned T5 prefix (vs the span prefix). Titling a
+#: raw user request is the SAME promoted model under this prefix -- no second model.
+_REQUEST_PREFIX = "title task from request: "
 
 
 class TitleInferencer:
@@ -48,6 +57,7 @@ class TitleInferencer:
     def __init__(self, model=None, model_dir=None) -> None:
         self._model = model
         self._model_dir = model_dir
+        self._request_model = None
 
     @property
     def model(self):
@@ -56,6 +66,30 @@ class TitleInferencer:
 
             self._model = TitleModel.load(self._model_dir, threads=1)
         return self._model
+
+    @property
+    def request_model(self):
+        """The same loaded model under the request prefix (built once, lazily).
+
+        Shares the span head's encoder/decoder/tokenizer via
+        :meth:`TitleModel.reprefixed`, so the session/request titling capability
+        costs no extra footprint over the activity/step titler.
+        """
+        if self._request_model is None:
+            m = self.model
+            self._request_model = m.reprefixed(_REQUEST_PREFIX) if hasattr(m, "reprefixed") else m
+        return self._request_model
+
+    def request_title(self, text: str) -> str:
+        """Title a raw user request via the request head.
+
+        Grounding is off: the span identifier-grounding gate is a span-context
+        device, and the request task was evaluated without it, so disabling it
+        keeps serve parity with the request-task eval distribution.
+        """
+        if not text or not text.strip():
+            return ""
+        return best_of(self.request_model.candidates(text, ground=False))
 
     def _title(self, rows: list[dict]) -> str:
         ctx = distilled_context(rows)
@@ -84,14 +118,16 @@ class _Step:
 
 
 class SessionTitleStream:
-    """Stamps live segment ids and titles each activity when it closes.
+    """Stamps live segment ids, titles the session, and titles each activity.
 
     Feed events (already boundary-stamped) in arrival order via :meth:`push`;
     each call returns ``(event, updates)`` where ``event`` is the same event now
     carrying its ``activity_id``/``step_id`` (ready to emit immediately) and
     ``updates`` is the list of :class:`TitleUpdate` records for the activity that
-    this event just closed (empty while the current activity is still open). Call
-    :meth:`flush` at session end to title the final open activity.
+    this event just closed (empty while the current activity is still open). The
+    first substantive user message also yields a ``kind="session"`` update --
+    the session label, emitted live off its opening request. Call :meth:`flush`
+    at session end to title the final open activity.
     """
 
     def __init__(self, inferencer: "TitleInferencer", session_id: str, source: str) -> None:
@@ -101,10 +137,12 @@ class SessionTitleStream:
         self._seq = 0
         self._activity_id: str | None = None
         self._steps: list[_Step] = []  # steps of the currently-open activity
+        self._session_titled = False  # set-once; the session label is its opening intent
 
     def push(self, event: SessionEvent) -> tuple[SessionEvent, list[TitleUpdate]]:
         """Ingest one event; stamp its segment ids and emit it now, returning
-        any TitleUpdates for the activity it just closed."""
+        any TitleUpdates for the activity it just closed (plus, on the first
+        substantive user message, the session-level title)."""
 
         row = event_to_feature_row(event, self._seq)
         self._seq += 1
@@ -124,7 +162,36 @@ class SessionTitleStream:
         step = self._steps[-1]
         step.rows.append(row)
         stamped = self._stamp(event, self._activity_id, step.step_id)
-        return stamped, updates
+        return stamped, self._maybe_session_title(event, row) + updates
+
+    def _maybe_session_title(self, event: SessionEvent, row: dict) -> list[TitleUpdate]:
+        """Title the session from its first *substantive* user message.
+
+        Substance (R1) reuses the shipped narration hygiene with no new
+        threshold: a message is substantive iff it yields >=1 sentence under
+        :func:`tracemill.title.context.narration` -- greetings / acks collapse to
+        zero, real requests keep one. The title is emitted live the instant that
+        message arrives, keyed by ``segment_id == session_id``. The set-once flag
+        means a mid-session SESSION_ENDED/PAUSED (which can recur on resume) never
+        re-triggers or tears down the session title; a contentless session simply
+        gets none.
+        """
+        if self._session_titled or event.kind != EventKind.MESSAGE_USER:
+            return []
+        if not narration([row]):
+            return []
+        title = self._inf.request_title(payload_text(row))
+        if not title:
+            return []
+        self._session_titled = True
+        return [
+            TitleUpdate(
+                session_id=self._session_id,
+                segment_id=self._session_id,
+                kind="session",
+                title=title,
+            )
+        ]
 
     def flush(self) -> list[TitleUpdate]:
         """Title the final open activity (if any) and return its updates."""

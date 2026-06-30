@@ -246,12 +246,13 @@ def train():
             target = {big: 0.5}
             for s in rest:
                 target[s] = 0.5 * freq[s] / rest_total
-            return ({s: target[s] / freq[s] for s in freq},
-                    {s: round(target[s], 3) for s in freq})
+            return ({s: target[s] / freq[s] for s in freq}, {s: round(target[s], 3) for s in freq})
         mass = {s: freq[s] ** src_alpha for s in freq}
         tot = sum(mass.values())
-        return ({s: freq[s] ** (src_alpha - 1.0) for s in freq},
-                {s: round(mass[s] / tot, 3) for s in freq})
+        return (
+            {s: freq[s] ** (src_alpha - 1.0) for s in freq},
+            {s: round(mass[s] / tot, 3) for s in freq},
+        )
 
     # (src, task)-parity. Distilling Step-by-Step weights the label and rationale
     # losses EQUALLY; we realize that by giving each TASK equal total sampling mass

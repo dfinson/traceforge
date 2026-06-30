@@ -228,8 +228,7 @@ async def _build(args: argparse.Namespace) -> int:
     _flush(base, rationale_rows, args.out)
     out = pd.read_parquet(args.out)
     print(
-        f"wrote {len(out)} rows -> {args.out}  "
-        f"(title={len(base)}, rationale={len(rationale_rows)})"
+        f"wrote {len(out)} rows -> {args.out}  (title={len(base)}, rationale={len(rationale_rows)})"
     )
     print(out.groupby(["task"]).size())
     return 0
@@ -248,7 +247,9 @@ def main() -> int:
 
     pb = sub.add_parser("build")
     pb.add_argument("--dataset", default=default_ds)
-    pb.add_argument("--out", default=os.path.join(ROOT, "data", "interim", "t5-title-rationale.parquet"))
+    pb.add_argument(
+        "--out", default=os.path.join(ROOT, "data", "interim", "t5-title-rationale.parquet")
+    )
     pb.add_argument("--concurrency", type=int, default=4)
     pb.add_argument(
         "--match-request-head",

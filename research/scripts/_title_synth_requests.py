@@ -214,9 +214,7 @@ def _accept(title: str) -> bool:
 
 
 async def _gen_one(backend, sem, n: int, seed: str, emphasis: str) -> list[dict]:
-    prompt = _GEN_RUBRIC.format(
-        n=n, styles=_STYLES, domains=_DOMAINS, emphasis=emphasis, seed=seed
-    )
+    prompt = _GEN_RUBRIC.format(n=n, styles=_STYLES, domains=_DOMAINS, emphasis=emphasis, seed=seed)
     try:
         async with sem:
             res = await backend.complete(prompt, system_message=_GEN_SYSTEM)
@@ -311,7 +309,9 @@ def main() -> int:
     for m in merged:
         by_origin[m["origin"]] = by_origin.get(m["origin"], 0) + 1
     distinct = len({_norm(m["gold"]) for m in merged})
-    print(f"\nwrote {OUT}  ({len(merged)} pairs, {distinct} distinct golds)  by origin: {by_origin}")
+    print(
+        f"\nwrote {OUT}  ({len(merged)} pairs, {distinct} distinct golds)  by origin: {by_origin}"
+    )
     _log_mlflow(reals, synth, merged, args.batches)
     return 0
 

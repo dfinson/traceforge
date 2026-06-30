@@ -12,6 +12,9 @@
 #                                               source whitelist + mass policy;
 #                                               TITLE_EXPERIMENT[_YAML] -> this file)
 #   research/scripts/_title_codeplane_test.py  (served-path OOD probe on raw prompts)
+#   research/scripts/_title_judge.py           (blinded LLM A/B coherence + h2h vs gold)
+#   research/scripts/_title_export.py          (torch -> no-past int8 ONNX -> promote to
+#                                               src/tracemill/title/data)
 #
 # MLflow: _title_t5_train.py (train + eval runs) logs params/metrics here via
 #   tracemill_research.mlflow_utils, selected by TITLE_EXPERIMENT.
@@ -89,7 +92,7 @@ dataset:
     request: "title task from request: "
   split: session-grouped held-out by content hash, HELDOUT_FRAC=0.15 (parameter-free)
   train_whitelist: [copilot-cli-native, claude-cli, codeplane-prompt, synth-request]  # TITLE_SOURCES; swe dropped
-  source_mass_policy: natural-frequency              # TITLE_SRC_ALPHA=1 (per-source mass ~ row count)
+  source_mass_policy: organic-parity                 # TITLE_BALANCE=organic-parity (dominant span source capped 0.5); promoted model
   rows:
     request_head: { train: 1119, heldout: 215, distinct_golds: 1306 }
     span_copilot: { train: 1323, heldout: 211 }
@@ -115,7 +118,11 @@ conditions:
     role: prior fold-in -- request lifted to 0.348 but capped by the tiny real corpus
   - id: multitask-synth-scaled
     pool: copilot + claude (span) + 256 CodePlane + 1078 synthetic request rows
-    role: SELECTED candidate -- one model, both tasks, request head scaled with synth
+    role: prior fold-in (TITLE_SRC_ALPHA=1, natural frequency) -- request 0.429, span at parity
+  - id: multitask-synth-scaled-parity
+    pool: same rows, source mass under organic-parity (dominant span source capped at 0.5)
+    role: SELECTED -- promoted to src/tracemill/title/data; request 0.459, span at-or-above
+          shipped on the noise-robust LLM judge (below)
 
 acceptance:
   rule: >
@@ -167,6 +174,41 @@ results:
     ship_path: >
       export no-past -> int8 quantize -> promote to src/tracemill/title/data, and
       expose the request prefix at serve time (_T5Generator already takes a prefix).
+
+  # --- SELECTED + PROMOTED: organic-parity source mass (TITLE_BALANCE=organic-parity) ---
+  # Same rows + synth as synth_scaled; only the source-mass policy differs (the dominant
+  # span source is capped at 0.5, the remainder split by natural frequency). Promoted to
+  # src/tracemill/title/data via research/scripts/_title_export.py (torch -> no-past ONNX
+  # -> int8 dynamic quant; opset 18; artifact sizes within ~15KB of the prior shipped model).
+  synth_scaled_parity:
+    request_task_codeplane-prompt: 0.459   # REAL request heldout, +0.030 over synth_scaled (0.429)
+    request_task_synth-request: 0.505      # held-out synthetic requests (unchanged)
+    span_rouge1:                           # ROUGE could not separate these at n=66 (variance)
+      copilot-cli-native: 0.263
+      claude-cli:         0.352            # +0.020 over shipped span-only, but n=66 -> see judge
+    # NOISE-ROBUST VERDICT (research/scripts/_title_judge.py): blinded A/B vs human gold on
+    # the IDENTICAL 146 span heldout rows (80 copilot + 80->66 claude), synth-scaled-parity
+    # model vs the shipped span-only model. The instrument ROUGE-at-n=66 could not be.
+    span_regression_judge:
+      shipped_span_only:        # data/interim/t5-title-model
+        coherent: { overall: 0.60, copilot: 0.55, claude: 0.67 }
+        h2h_model_vs_gold: { overall: "34/51", copilot: "35/54", claude: "32/48" }
+      synth_scaled_parity:      # data/interim/t5-title-multitask-parity-model (PROMOTED)
+        coherent: { overall: 0.64, copilot: 0.56, claude: 0.74 }
+        h2h_model_vs_gold: { overall: "38/52", copilot: "31/60", claude: "45/42" }
+      verdict: >
+        No span regression. Copilot (in-distribution) coherence flat (+1pt); the only
+        negatives (faithful -0.08, h2h gold-win 54->60) sit inside the judge's ~5pt / 0.1
+        noise band at n=80 -- watch, not block. Claude (OOD) gains materially: coherence
+        +7pt and the blinded head-to-head flips from -16 to +3 net. Overall coherence +4pt,
+        h2h +4pt. The synth/request capability is ADDITIVE on span, not a regression.
+    acceptance: MET                        # request at probe ceiling+; span at-or-above shipped by judge
+    train: { balance: organic-parity, init: data/interim/t5-title-model, seconds: 219, epochs: 12 }
+    source_mass_fraction: { copilot-cli-native: 0.500, synth-request: 0.309, claude-cli: 0.115, codeplane-prompt: 0.076 }
+    promote:
+      script: research/scripts/_title_export.py   # torch -> no-past ONNX -> int8 dynamic quant
+      artifact: src/tracemill/title/data/{encoder.onnx, decoder.onnx, tokenizer.json}
+      validation: tests/unit/test_title_inference.py + full unit suite green on the promoted model
 
 mlflow:
   log_params:

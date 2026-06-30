@@ -200,9 +200,9 @@ _HAS_DEPS = (
     importlib.util.find_spec("onnxruntime") is not None
     and importlib.util.find_spec("tokenizers") is not None
 )
-_HAS_MODEL = (
-    Path(__file__).resolve().parents[2] / "src/tracemill/title/data/encoder.onnx"
-).exists()
+_MODEL_FILES = ("encoder.onnx", "decoder.onnx", "tokenizer.json")
+_SPAN_DATA_DIR = Path(__file__).resolve().parents[2] / "src/tracemill/title/data"
+_HAS_MODEL = all((_SPAN_DATA_DIR / f).exists() for f in _MODEL_FILES)
 
 
 @pytest.mark.skipif(not (_HAS_DEPS and _HAS_MODEL), reason="title extra / model artifacts absent")
@@ -231,9 +231,8 @@ def test_real_model_produces_distinct_nonempty_titles():
     assert all(u.title != act_title for u in steps)
 
 
-_HAS_REQUEST_MODEL = (
-    Path(__file__).resolve().parents[2] / "src/tracemill/title/data-request/encoder.onnx"
-).exists()
+_REQUEST_DATA_DIR = Path(__file__).resolve().parents[2] / "src/tracemill/title/data-request"
+_HAS_REQUEST_MODEL = all((_REQUEST_DATA_DIR / f).exists() for f in _MODEL_FILES)
 
 
 @pytest.mark.skipif(
@@ -246,7 +245,11 @@ def test_packaged_request_head_is_a_separate_model():
     inf = TitleInferencer()
     span = inf.model
     req = inf.request_model
-    # Distinct objects, distinct underlying encoder sessions, distinct prefixes.
+    # Routing targets the packaged request artifact, not the span dir...
+    assert inf._resolve_request_dir() is not None
+    assert inf._resolve_request_dir().name == "data-request"
+    # ...and the request head is its own ORT session under its own prefix
+    # (a reprefix of the span model would share ``_enc``).
     assert req is not span
     assert req._enc is not span._enc
     assert req._prefix != span._prefix

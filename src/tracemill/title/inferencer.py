@@ -28,14 +28,13 @@ The same machinery also titles the **session** itself: fed the first substantive
 user message under the request prefix (:meth:`TitleInferencer.request_title`), it
 emits a ``kind="session"`` :class:`~tracemill.types.TitleUpdate` keyed by the
 session id -- the session label, live off its opening request. The request head is
-served by a SEPARATE distilled model when one is packaged (``data-request/``), and
-otherwise falls back to the span model under the request prefix. The two heads were
-split because raw-request comprehension and span summarization pull the shared ~16M
-encoder in different directions: a rationale-distilled request model lifts request
-coherence well past the shared multitask model, but co-training that objective taxes
-the span head (see ``research/experiments/titler-rationale-distillation.yaml``). Two
-tiny int8 models on CPU stay near-zero footprint; both load lazily, so an inactive
-session still costs nothing.
+served by a SEPARATE distilled model when one is packaged (``data-request/``), else
+it falls back to the span model under the request prefix. The two were split because
+raw-request comprehension and span summarization pull the shared ~16M encoder in
+different directions: a rationale-distilled request model lifts request coherence
+well past the shared multitask model, but co-training that objective taxes the span
+head (see ``research/experiments/titler-rationale-distillation.yaml``). Both heads are
+int8 and load lazily.
 """
 
 from __future__ import annotations
@@ -50,13 +49,14 @@ from .hygiene import best_of, norm_key, pick_distinct
 
 _ACTIVITY = "activity-boundary"
 _STEP = "step-boundary"
-#: The request head's learned T5 prefix (vs the span prefix). When a separate
-#: request model is packaged it is loaded under this prefix; otherwise the span
-#: model is reprefixed to it (single-model fallback, zero extra footprint).
+#: The request head's learned T5 prefix (the span head uses TitleModel's default).
+#: Routing/fallback for this prefix lives in :meth:`TitleInferencer._resolve_request_dir`.
 _REQUEST_PREFIX = "title task from request: "
-#: Packaged separate request-head artifact (the rationale-distilled request model).
-#: Sibling of the span ``data/`` dir; absent -> single-model reprefix fallback.
+#: Packaged separate request-head artifact (the rationale-distilled request model),
+#: sibling of the span ``data/`` dir. The triad is exactly what TitleModel.load reads;
+#: absent or incomplete -> single-model reprefix fallback.
 _REQUEST_DATA = Path(__file__).resolve().parent / "data-request"
+_REQUEST_FILES = ("encoder.onnx", "decoder.onnx", "tokenizer.json")
 
 
 class TitleInferencer:
@@ -98,20 +98,19 @@ class TitleInferencer:
             return self._request_model_dir
         if not self._default_path:
             return None
-        return _REQUEST_DATA if (_REQUEST_DATA / "encoder.onnx").exists() else None
+        # Route to the packaged model only if COMPLETE: a partial data-request/
+        # must fall back to the span reprefix, not crash the load.
+        complete = all((_REQUEST_DATA / f).exists() for f in _REQUEST_FILES)
+        return _REQUEST_DATA if complete else None
 
     @property
     def request_model(self):
-        """The request head: a separate distilled model when packaged, else the
-        span model under the request prefix.
+        """The request head, built once and lazily.
 
-        When ``data-request/`` is packaged (or a ``request_model_dir`` is given),
-        the rationale-distilled request model is loaded under
-        :data:`_REQUEST_PREFIX` -- it lifts raw-request coherence well past the
-        shared multitask model. Absent that artifact, the span head's
-        encoder/decoder/tokenizer are reused via :meth:`TitleModel.reprefixed`,
-        so the request capability still costs no extra footprint. Built once,
-        lazily, either way.
+        The separately-packaged distilled model under :data:`_REQUEST_PREFIX` when
+        available (see :meth:`_resolve_request_dir`), otherwise the span model
+        reprefixed to it -- the single-model fallback, which adds no footprint. An
+        injected model with no ``reprefixed`` is returned as-is.
         """
         if self._request_model is None:
             rd = self._resolve_request_dir()

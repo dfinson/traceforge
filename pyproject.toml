@@ -33,7 +33,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
-    "ruff>=0.4",
+    "ruff==0.15.20",  # pinned to match CI (ci-lint.yml); ruff format output is version-sensitive
 ]
 s3 = [
     "boto3>=1.28",

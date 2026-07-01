@@ -90,11 +90,20 @@ def build_dataset() -> dict:
     rows = []
     for i, p in enumerate(synth):
         sid = "synthdiv-" + hashlib.md5(f"{p['prompt']}\x00{p['gold']}".encode()).hexdigest()[:16]
-        rows.append({
-            "src": "synth-request", "sid": sid, "aid": sid, "order": i, "tier": "task",
-            "gold": p["gold"], "ctx": p["prompt"], "split": "train",
-            "prefix": REQUEST_PREFIX, "task": "title",
-        })
+        rows.append(
+            {
+                "src": "synth-request",
+                "sid": sid,
+                "aid": sid,
+                "order": i,
+                "tier": "task",
+                "gold": p["gold"],
+                "ctx": p["prompt"],
+                "split": "train",
+                "prefix": REQUEST_PREFIX,
+                "task": "title",
+            }
+        )
     synth_df = pd.DataFrame(rows)
     cols = [c for c in reals.columns if c in synth_df.columns]
     out = pd.concat([reals[cols], synth_df[cols]], ignore_index=True)
@@ -126,8 +135,14 @@ def _run(cmd: list[str], env: dict, log: Path) -> int:
     full = {**os.environ, **BASE_ENV, **env}
     with open(log, "w", encoding="utf-8") as fh:
         proc = subprocess.Popen(
-            cmd, cwd=str(ROOT), env=full, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            encoding="utf-8", errors="replace", bufsize=1,
+            cmd,
+            cwd=str(ROOT),
+            env=full,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
         )
         for line in proc.stdout:  # type: ignore[union-attr]
             fh.write(line)
@@ -142,8 +157,11 @@ def train() -> int:
         return 0
     log = INTERIM / "diverse-train.log"
     print(f"training -> {MODEL_DIR} (log {log})", flush=True)
-    rc = _run([PY, "-u", "-m", "scripts._title_t5_train", "train"],
-              {"TITLE_DATASET": str(OUT_DS), "TITLE_MODEL_DIR": str(MODEL_DIR)}, log)
+    rc = _run(
+        [PY, "-u", "-m", "scripts._title_t5_train", "train"],
+        {"TITLE_DATASET": str(OUT_DS), "TITLE_MODEL_DIR": str(MODEL_DIR)},
+        log,
+    )
     if rc != 0:
         print(f"TRAIN FAILED rc={rc} (see {log})", flush=True)
     return rc
@@ -153,8 +171,20 @@ def judge() -> dict | None:
     if not SCORES.exists():
         log = INTERIM / "diverse-judge.log"
         print(f"judging on held-out reals in {OUT_DS.name} (log {log})", flush=True)
-        rc = _run([PY, "-u", "-m", "scripts._title_judge", "--per-source-cap", "80", "--concurrency", "6"],
-                  {"TITLE_DATASET": str(OUT_DS), "TITLE_MODEL_DIR": str(MODEL_DIR)}, log)
+        rc = _run(
+            [
+                PY,
+                "-u",
+                "-m",
+                "scripts._title_judge",
+                "--per-source-cap",
+                "80",
+                "--concurrency",
+                "6",
+            ],
+            {"TITLE_DATASET": str(OUT_DS), "TITLE_MODEL_DIR": str(MODEL_DIR)},
+            log,
+        )
         written = OUT_DS.parent / "title-judge-scores.jsonl"
         if written.exists():
             written.replace(SCORES)
@@ -172,7 +202,10 @@ def judge() -> dict | None:
         "coherent": sum(r["model"]["coherent"] for r in rows) / n,
         "faithful": sum(r["model"]["faithful"] for r in rows) / n,
         "gold_coherent": sum(r["gold_scores"]["coherent"] for r in rows) / n,
-        "n": n, "h2h_model": wins["model"] / n, "h2h_gold": wins["gold"] / n, "h2h_tie": wins["tie"] / n,
+        "n": n,
+        "h2h_model": wins["model"] / n,
+        "h2h_gold": wins["gold"] / n,
+        "h2h_tie": wins["tie"] / n,
     }
 
 
@@ -189,18 +222,40 @@ def main() -> int:
     if j is None:
         return 1
 
-    print("\n============ DIVERSE 12k + REAL ANCHOR (no rationale) vs BASELINES ============", flush=True)
-    print(f"  diverse+anchor: coherent {j['coherent']:.0%}  faithful {j['faithful']:.2f}/2  "
-          f"gold {j['gold_coherent']:.0%}  h2h m/g/t {j['h2h_model']:.0%}/{j['h2h_gold']:.0%}/{j['h2h_tie']:.0%}  (n={j['n']})", flush=True)
-    print("  baselines     : shipped request head ~0.512  |  prior dedicated ~0.48  "
-          "(NOTE: baselines judged on the full 260 reals which were partly train-leaked -> APPROXIMATE refs only; "
-          "this run's coherent is on a clean never-trained held-out partition)", flush=True)
-    v = "WINS" if j["coherent"] > 0.512 else ("ties/ambiguous" if j["coherent"] >= 0.48 else "LOSES")
+    print(
+        "\n============ DIVERSE 12k + REAL ANCHOR (no rationale) vs BASELINES ============",
+        flush=True,
+    )
+    print(
+        f"  diverse+anchor: coherent {j['coherent']:.0%}  faithful {j['faithful']:.2f}/2  "
+        f"gold {j['gold_coherent']:.0%}  h2h m/g/t {j['h2h_model']:.0%}/{j['h2h_gold']:.0%}/{j['h2h_tie']:.0%}  (n={j['n']})",
+        flush=True,
+    )
+    print(
+        "  baselines     : shipped request head ~0.512  |  prior dedicated ~0.48  "
+        "(NOTE: baselines judged on the full 260 reals which were partly train-leaked -> APPROXIMATE refs only; "
+        "this run's coherent is on a clean never-trained held-out partition)",
+        flush=True,
+    )
+    v = (
+        "WINS"
+        if j["coherent"] > 0.512
+        else ("ties/ambiguous" if j["coherent"] >= 0.48 else "LOSES")
+    )
     print(f"  -> {v} (coherent {j['coherent']:.0%} vs 0.512 / 0.48)", flush=True)
 
-    (INTERIM / "diverse-result.json").write_text(json.dumps(
-        {"composition": comp, "result": j, "baselines": {"shipped": 0.512, "prior_dedicated": 0.48},
-         "elapsed_s": round(time.time() - t0)}, indent=2), encoding="utf-8")
+    (INTERIM / "diverse-result.json").write_text(
+        json.dumps(
+            {
+                "composition": comp,
+                "result": j,
+                "baselines": {"shipped": 0.512, "prior_dedicated": 0.48},
+                "elapsed_s": round(time.time() - t0),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     print(f"\nresult -> {INTERIM / 'diverse-result.json'}", flush=True)
     return 0
 

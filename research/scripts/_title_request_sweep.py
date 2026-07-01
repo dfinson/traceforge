@@ -159,7 +159,9 @@ def _train(ds: Path, model_dir: Path, budget: int) -> float | None:
     if rc != 0:
         print(f"[{budget}] TRAIN FAILED rc={rc} (see {log})", flush=True)
         return None
-    m = re.findall(r"final[_ ]?train[_ ]?loss[^0-9]*([0-9.]+)", log.read_text(encoding="utf-8"), re.I)
+    m = re.findall(
+        r"final[_ ]?train[_ ]?loss[^0-9]*([0-9.]+)", log.read_text(encoding="utf-8"), re.I
+    )
     if not m:
         m = re.findall(r"loss ([0-9.]+)", log.read_text(encoding="utf-8"))
     return float(m[-1]) if m else None
@@ -244,7 +246,10 @@ def main() -> int:
         "SELECT budget, n_train, loss, coherent, gold_coherent, h2h_model, h2h_gold, n_judged, status "
         "FROM req_sweep ORDER BY budget"
     ).fetchall()
-    print(f"{'budget':>7} {'loss':>6} {'coherent':>9} {'gold':>6} {'h2h m/g':>10} {'n':>4}  delta", flush=True)
+    print(
+        f"{'budget':>7} {'loss':>6} {'coherent':>9} {'gold':>6} {'h2h m/g':>10} {'n':>4}  delta",
+        flush=True,
+    )
     prev = None
     for b, nt, loss, coh, gcoh, hm, hg, nj, status in rows:
         if coh is None:
@@ -262,7 +267,22 @@ def main() -> int:
     summary.write_text(
         json.dumps(
             [
-                dict(zip(("budget", "n_train", "loss", "coherent", "gold_coherent", "h2h_model", "h2h_gold", "n_judged", "status"), r))
+                dict(
+                    zip(
+                        (
+                            "budget",
+                            "n_train",
+                            "loss",
+                            "coherent",
+                            "gold_coherent",
+                            "h2h_model",
+                            "h2h_gold",
+                            "n_judged",
+                            "status",
+                        ),
+                        r,
+                    )
+                )
                 for r in rows
             ],
             indent=2,

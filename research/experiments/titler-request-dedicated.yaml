@@ -1,0 +1,182 @@
+# Dedicated request head: make the SECOND model earn its keep.
+#
+# The shipped two-model routing serves a request head under the prefix
+# "title task from request: " from a separate int8 artifact (data-request/).
+# But that artifact is a 4-TASK multitask model -- span-title + request-title +
+# span-rationale + request-rationale, trained from-scratch for the rationale-
+# distillation pilot (see titler-rationale-distillation.yaml) -- that we then
+# serve through ONE prefix. Three of its four learned tasks are dead weight at
+# inference. It exists at all because the pilot's stated goal (one model that
+# comprehends BOTH) FAILED: co-training the rationale task strictly taxed the
+# span head (claude coherent 0.697 -> 0.591), so two-model routing was the
+# fallback fork, not the intended win. The request head is the byproduct.
+#
+# HYPOTHESIS. If the request head is going to be its own 16M model regardless,
+# it should spend all 16M params on the ONE capability it serves. A DEDICATED
+# request-only model -- trained only on the request tasks (request-title +
+# request-rationale), with the synthetic request corpus SCALED so request-title
+# mass replaces the span-title mass it forgoes -- concentrates capacity on
+# request titling and tests whether the shipped head's ~51% coherence ceiling is
+# DATA-bound (scalable) or CAPACITY-bound (a 16M wall).
+#
+# THE BET (falsifiable core, stated up front). Dropping the span-title rows
+# removes the decoder's main "how to write a terse imperative title" transfer
+# signal -- span-title rows are ~1.5x the request-title rows in the current
+# corpus (copilot 1323 + claude 333 = 1656 span vs 1119 request). The dedicated
+# model wins ONLY if scaled synthetic request pairs supply that title-writing
+# signal themselves. Scale too little and you strip the transfer without
+# replacing it and request titling REGRESSES; scale past the forgone span mass
+# and specialization stacks on top. This is the whole experiment.
+#
+# KEEP THE RATIONALE. The pilot's +16pt request gain (0.35 -> 0.512) came from
+# the AUXILIARY rationale task, not the title pairs -- the from-scratch model
+# WITHOUT rationale is the 0.35 baseline. Training "title pairs only" would drop
+# the proven comprehension lever and likely regress to 0.35. So the dedicated
+# model keeps request-rationale (co-trained, never decoded at serve -> zero
+# runtime footprint), and drops ONLY the span tasks.
+#
+# WHY POLISH THE SECOND MODEL INSTEAD OF ELIMINATING IT. The alternative is to
+# dissolve the split back into ONE multitask model via the deferred forks in
+# titler-rationale-distillation.yaml (need-weighted rationale mass; curriculum
+# anneal) -- that would erase the second artifact and its ~33MB entirely. This
+# experiment deliberately takes the OTHER fork: it accepts the two-model ship as
+# given and makes the second model good. If it wins, it REPLACES data-request/
+# (no NEW footprint vs today's two-model ship). If it loses, the dissolve-the-
+# split fork is the fallback. Recorded so the choice is conscious, not drifted.
+#
+# Companion scripts (all EXISTING; this experiment is config + data-gen, no code
+# edits -- a request-only train is TITLE_SOURCES whitelist + (src,task)-parity):
+#   research/scripts/_title_synth_requests.py  (SCALE synthetic request->title
+#                                               pairs -> request-title-pairs.json;
+#                                               --batches drives volume)
+#   research/scripts/_title_prompt_dataset.py  (fold request rows into the parquet)
+#   research/scripts/_title_rationale.py build (append request-rationale rows for
+#                                               the request TRAIN rows only)
+#   research/scripts/_title_t5_train.py        (train/eval; TITLE_SOURCES whitelist
+#                                               to request srcs, TITLE_BALANCE=
+#                                               organic-parity -> (src,task)-parity)
+#   research/scripts/_title_judge.py           (blinded Sonnet A/B on the 260
+#                                               CodePlane reals; request head)
+#   research/scripts/_title_export.py          (torch -> no-past int8 ONNX ->
+#                                               promote to src/tracemill/title/
+#                                               data-request/)
+#
+# MLflow: _title_t5_train.py logs here via TITLE_EXPERIMENT / TITLE_EXPERIMENT_YAML.
+
+experiment:
+  name: titler-request-dedicated
+  mlflow_experiment: titler-request-dedicated-v1
+  display_name: "Titler - Dedicated Request Head (specialize the second model)"
+  description: |
+    Replace the served-through-one-prefix multitask request artifact with a
+    DEDICATED request-only google/t5-efficient-tiny: trained only on the request
+    tasks (request-title + auxiliary request-rationale), with the synthetic
+    request corpus scaled so request-title mass >= the span-title mass the
+    dedicated model forgoes. Concentrates all 16M params on the one served
+    capability and probes whether the shipped request head's ~51% coherence
+    ceiling is data-bound. The rationale task is kept (the proven +16pt lever)
+    and never decoded at serve; the span tasks are dropped entirely. Same arch,
+    same int8 export -> if it wins it REPLACES data-request/, adding no new
+    footprint over today's two-model ship.
+  tags:
+    component: titler
+    pillar: generalization
+    stage: train-and-serve
+    constraint: cpu-near-zero-footprint
+    parent: titler-rationale-distillation
+    method: task-specialization
+    fork_relationship: >
+      Takes the "make the second model good" fork; the sibling "dissolve to one
+      model" fork (need-weighted mass / curriculum anneal, deferred in
+      titler-rationale-distillation.yaml) is the fallback if this loses.
+
+dataset:
+  source: request rows only (real CodePlane + scaled synthetic) + request rationales
+  build:
+    - research/scripts/_title_synth_requests.py   # SCALE: more --batches until the
+      #                                              held-out request learning curve
+      #                                              flattens (see scale_policy)
+    - research/scripts/_title_prompt_dataset.py    # fold request rows -> parquet
+    - research/scripts/_title_rationale.py build   # append request-rationale rows
+  request_rows_from: request-title-pairs.json
+  task_prefixes:
+    request_title: "title task from request: "
+    request_rationale: "explain request: "
+  # A request-only train needs NO new parquet builder and NO code edits: the
+  # rationale-augmented multitask parquet already tags every row with src +
+  # task + prefix; TITLE_SOURCES whitelisting to the request srcs keeps request
+  # title AND request rationale rows (both carry src in {codeplane-prompt,
+  # synth-request}) and drops every span row.
+  train_whitelist: [codeplane-prompt, synth-request]   # TITLE_SOURCES
+  task_column: task                                    # {title, rationale}
+  split: session/content-hash heldout, inherited from the builder (parameter-free)
+  real_anchor: the 256 CodePlane reals stay folded in as a real-distribution anchor
+  scale_policy: >
+    PARAMETER-FREE, two-part. (1) FLOOR: scale synthetic request pairs until the
+    request-title TRAIN mass >= the span-title train mass the dedicated model
+    forgoes (currently 1656), so the decoder's title-writing signal is replaced
+    in kind, not merely dropped -- a quantity read off the existing corpus, not a
+    hand-picked count. (2) CEILING: keep doubling synthetic volume until the
+    held-out request coherence gain between successive doublings falls below the
+    judge noise floor (~2.5pt) -- a plateau stopping rule, not a tuned target.
+    The FLOOR is the minimum viable run; the CEILING curve is added only if the
+    floor run lands inside the noise band vs baseline (ambiguous), to separate
+    "data ceiling" from "capacity wall".
+
+model:
+  base: google/t5-efficient-tiny
+  params: ~16M (4 enc / 4 dec)   # UNCHANGED; the lever is task specialization, not size
+  tasks: request-title + request-rationale ONLY (span tasks dropped)
+  multitask: per-row T5 prefix routes {request-title, request-rationale}; one shared model
+  init: from-scratch on t5-efficient-tiny (matches the pilot's confound-free recipe;
+        warm-start was NEGATIVE-strictly-dominated for the request head there)
+  balancing: >
+    (src, task)-parity via TITLE_BALANCE=organic-parity: equal mass across the
+    (src, task) groups present, remainder by natural frequency. Parameter-free,
+    derived from counts. With span dropped the groups are request-title and
+    request-rationale over {codeplane-prompt, synth-request}.
+  recipe: { epochs: 12, batch_size: 32, lr: 3e-4, max_tgt: 48, device: cuda (RTX A500) }
+  serve: >
+    torch-free onnxruntime; ONLY "title task from request: " is ever decoded ->
+    the rationale task adds ZERO serve footprint. Same int8 dynamic-quant export
+    (opset 18, per_channel=False) and promote path as the span model. Replaces
+    src/tracemill/title/data-request/ 1:1 -- no new artifact, no new RAM/CPU vs
+    the current two-model ship (~33MB int8, once-per-session call, threads=1).
+
+conditions:
+  - id: shipped-request-multitask
+    role: baseline -- the current data-request/ artifact (4-task multitask served
+          through the request prefix). Request coherence 0.512 on the 260 CodePlane
+          reals (titler-rationale-distillation.yaml results.pilot_request_head).
+  - id: dedicated-request-floor
+    role: candidate -- request-only (title + rationale), from-scratch, synth scaled
+          to the FLOOR (request-title mass >= forgone span mass), (src,task)-parity.
+  - id: dedicated-request-curve
+    role: candidate (conditional) -- only if the floor run is ambiguous vs baseline;
+          successive synthetic doublings to detect the coherence plateau.
+
+acceptance:
+  rule: >
+    ONE-SIDED (the elegance of a dedicated model: there is no span head to
+    regress, so the two-sided constraint that killed the one-model approach
+    DISAPPEARS). The dedicated request head's coherence on the SAME 260 CodePlane
+    reals (heldout 80, random_state=17, identical sids) must beat the shipped
+    request head's 0.512 by a margin outside the judge noise floor (~2.5pt
+    aggregate), with FAITHFULNESS (the gated metric, 1.29 baseline) carrying the
+    lift, not fluency alone. Footprint invariant (same arch + int8 export;
+    rationale never decoded). If the floor run lands inside the noise band, run
+    the scale curve to decide data-ceiling vs capacity-wall before promote/reject.
+  judge: >
+    blinded Sonnet A/B, both models scored in FRESH same-run invocations
+    (cross-run noise removed), same protocol as the pilot. Noise floor 2.5pt
+    established at n=80 (37.5% vs 35.0% same-model across runs).
+
+# Recorded after the run.
+results: {}
+
+next:
+  - "Scale synth (_title_synth_requests.py --batches N) to the FLOOR, rebuild request-title-pairs.json -> parquet -> request rationales."
+  - "Train dedicated-request-floor with TITLE_SOURCES=codeplane-prompt,synth-request, TITLE_BALANCE=organic-parity, from-scratch, TITLE_EXPERIMENT=titler-request-dedicated-v1."
+  - "Judge vs the shipped request head on the 260 CodePlane reals (fresh same-run)."
+  - "If it clears the floor, int8 export -> promote to data-request/ (1:1 replace), re-run the 31 title+pipeline tests, ruff clean, push."
+  - "If ambiguous, add curve points until the coherence plateau, then decide promote (data ceiling moved) vs fall back to the dissolve-the-split fork."

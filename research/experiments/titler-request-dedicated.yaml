@@ -220,6 +220,47 @@ results:
       title-judge-scores-diverse.jsonl, diverse-result.json.
 
 
+shipped_head_leakfree_eval:
+  dataset: SWE-bench/SWE-bench_Verified (500 human-validated GitHub issues, MIT)
+  script: research/scripts/_title_eval_swebench.py
+  protocol: >
+    The "fresh real eval set neither model trained on" the diverse verdict said was
+    needed. Each issue problem_statement is `title\nbody`; feed the BODY as the
+    request, hold the first-line TITLE as the human reference ceiling. Generation is
+    the PRODUCTION request head (TitleInferencer().request_title, packaged data-request/
+    ONNX, CPU threads=1). Judged with the same _title_judge SDK rubric, n=100
+    deterministic sample. Leak-free ASSERTED in-run: 0/100 eval golds appear as
+    training targets in t5-title-rationale.parquet (disjoint domains: codeplane/synth
+    vs astropy/django/sympy/matplotlib).
+  scores:
+    coherent: 0.09
+    faithful: 0.62
+    specific: 0.86
+    fluent: 1.51
+    verb_obj_distinct: 0.94
+    gold_ceiling_coherent: 0.90
+    h2h_model: 0.05
+    h2h_gold: 0.94
+    h2h_tie: 0.01
+    n: 100
+  verdict: >
+    First leak-free number for the head we actually SHIP: 9% coherent (vs the
+    leak-inflated 51.2% it was credited with -> ~5.7x inflation), gold ceiling 90%,
+    h2h 5% win / 94% loss. Confirms the leak audit: 0.512 was never a generalization
+    number. CAVEAT (pessimistic floor, not the in-domain number): this is OUT-OF-
+    REGISTER (the head titles agent REQUESTS, SWE-bench feeds bug REPORTS) and the
+    garbled preds ("Fix _No response_ ### Bug summary") show the head choking on raw
+    GitHub issue-template markdown it never trained on. So 9% proves the head does NOT
+    generalize to unseen real dev text, but is not an apples-to-apples swap for the
+    in-register CodePlane number. What this eval IS: a reusable, MIT-licensed, leak-
+    free harness any future head can be ranked on. What it is NOT yet: an in-register
+    clean eval -- that wants held-out report_intent gerund pairs from Copilot traces
+    (real, in-register, and present in the corpus) that neither head trained on.
+  artifacts: >
+    gitignored: title-judge-scores-swebench.jsonl, swebench-eval.log,
+    HF datasets cache. Committed: the _title_eval_swebench.py harness only.
+
+
 next:
   - "Scale synth (_title_synth_requests.py --batches N) to the FLOOR, rebuild request-title-pairs.json -> parquet -> request rationales."
   - "Train dedicated-request-floor with TITLE_SOURCES=codeplane-prompt,synth-request, TITLE_BALANCE=organic-parity, from-scratch, TITLE_EXPERIMENT=titler-request-dedicated-v1."

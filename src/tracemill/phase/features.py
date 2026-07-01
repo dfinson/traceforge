@@ -20,15 +20,13 @@ dependencies; they are imported lazily so importing this module stays cheap.
 from __future__ import annotations
 
 import json
-import logging
 from collections import deque
 from dataclasses import dataclass, field
 from functools import lru_cache
+from pathlib import Path
 from typing import Iterable, Sequence
 
 import numpy as np
-
-logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants (logged as MLflow params by callers; model choice, not a threshold)
@@ -37,6 +35,14 @@ logger = logging.getLogger(__name__)
 #: Static distilled embedder. 256-d, CPU-only, framework-agnostic. See
 #: research/docs/03-feature-design.md Block 5.
 MODEL2VEC_NAME = "minishlab/potion-base-8M"
+
+#: The embedder is VENDORED into the package (``phase/data/potion-base-8M/``) and
+#: loaded from disk, so the live path makes zero network calls -- a Hub fetch on
+#: the serving loop would violate the CPU-only / zero-footprint contract. The
+#: vendored copy was produced with ``StaticModel.from_pretrained(MODEL2VEC_NAME)``
+#: then ``.save_pretrained(MODEL2VEC_DIR)``; refresh it the same way if the model
+#: is ever bumped.
+MODEL2VEC_DIR = Path(__file__).resolve().parent / "data" / "potion-base-8M"
 MODEL2VEC_DIM = 256
 
 #: Payload text is truncated before embedding. model2vec mean-pools tokens, so
@@ -351,41 +357,29 @@ class StreamingSessionFeaturizer:
 
 @lru_cache(maxsize=1)
 def _embedder():
-    """Load the frozen model2vec embedder once.
+    """Load the frozen, VENDORED model2vec embedder from ``MODEL2VEC_DIR``.
 
-    ``lru_cache`` memoises the *result*, including a failed load (returned as
-    ``None``): if the artifact is unavailable — e.g. an offline host with no
-    cached copy — we degrade once and never re-attempt the fetch. Without this,
-    the raising call was not cached, so every event on the live path re-tried the
-    network fetch and stalled the loop on connection timeout.
+    Loads from the on-disk copy shipped inside the package, so serving makes no
+    network calls. A missing artifact is a packaging error, not a runtime
+    condition, so it raises loudly rather than silently degrading feature quality.
     """
-    try:
-        from model2vec import StaticModel
+    from model2vec import StaticModel
 
-        return StaticModel.from_pretrained(MODEL2VEC_NAME)
-    except Exception as exc:  # noqa: BLE001 - any load failure degrades, once
-        logger.warning(
-            "model2vec embedder %r unavailable (%s); phase/boundary text features "
-            "fall back to zeros for this process",
-            MODEL2VEC_NAME,
-            exc,
+    if not MODEL2VEC_DIR.exists():
+        raise FileNotFoundError(
+            f"vendored model2vec embedder not found at {MODEL2VEC_DIR}; the package "
+            "is missing its shipped artifact (regenerate with "
+            f"StaticModel.from_pretrained({MODEL2VEC_NAME!r}).save_pretrained(...))"
         )
-        return None
+    return StaticModel.from_pretrained(str(MODEL2VEC_DIR))
 
 
 def embed_texts(texts: Sequence[str]) -> np.ndarray:
-    """Frozen model2vec embedding of a list of texts → (n, 256) float32.
-
-    Returns zero vectors if the embedder could not be loaded (see
-    :func:`_embedder`), so callers never raise on a missing artifact.
-    """
+    """Frozen model2vec embedding of a list of texts → (n, 256) float32."""
 
     if not texts:
         return np.zeros((0, MODEL2VEC_DIM), dtype=np.float32)
-    model = _embedder()
-    if model is None:
-        return np.zeros((len(texts), MODEL2VEC_DIM), dtype=np.float32)
-    vecs = model.encode(list(texts))
+    vecs = _embedder().encode(list(texts))
     return np.asarray(vecs, dtype=np.float32)
 
 

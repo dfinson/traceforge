@@ -72,7 +72,7 @@ ignore = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tracemill"]
-artifacts = ["src/tracemill/phase/data/*.joblib", "src/tracemill/boundary/data/*.joblib", "src/tracemill/title/data/*.onnx", "src/tracemill/title/data/*.json"]
+artifacts = ["src/tracemill/phase/data/*.joblib", "src/tracemill/phase/data/potion-base-8M/*", "src/tracemill/boundary/data/*.joblib", "src/tracemill/title/data/*.onnx", "src/tracemill/title/data/*.json"]
 
 [dependency-groups]
 dev = [

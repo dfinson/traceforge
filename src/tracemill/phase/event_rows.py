@@ -73,7 +73,6 @@ def event_to_feature_row(event: SessionEvent, seq: int) -> dict[str, Any]:
         "shell_dialect": None,
         "binaries": [],
         "phase_signals": [],
-        "activity": None,
         "motivation": None,
         "payload_json": None,
         "metadata_json": None,
@@ -99,11 +98,7 @@ def event_to_feature_row(event: SessionEvent, seq: int) -> dict[str, Any]:
         if md.phases:
             row["phase_signals"] = sorted(enum_value(p) for p in md.phases if p is not None)
 
-        activity = getattr(md, "activity", None)
-        if activity is not None:
-            row["activity"] = enum_value(activity)
-
-        row["motivation"] = getattr(md, "tool_intent", None)
+        row["motivation"] = md.motivation.intent if md.motivation else None
         row["metadata_json"] = json.dumps(md.model_dump(mode="json", exclude_none=True))
 
     if payload:

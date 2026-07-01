@@ -10,7 +10,7 @@ import pytest
 from tests.conftest import make_event
 from tracemill import EventKind
 from tracemill.classify.core import Classification
-from tracemill.types import EventMetadata, Phase
+from tracemill.types import EventMetadata, Phase, ToolMotivation
 
 
 class TestParquetSinkBuffering:
@@ -122,7 +122,6 @@ class TestParquetSinkSchema:
             "shell_dialect",
             "binaries",
             "phase_signals",
-            "activity",
             "motivation",
             "payload_json",
             "metadata_json",
@@ -152,6 +151,7 @@ class TestParquetSinkClassificationRoundtrip:
         metadata = EventMetadata(
             classification=classification,
             phases=frozenset({Phase.IMPLEMENTATION, Phase.VERIFICATION}),
+            motivation=ToolMotivation(intent="add retry logic to the client"),
         )
         event = make_event(
             kind=EventKind.TOOL_CALL_STARTED,
@@ -178,6 +178,7 @@ class TestParquetSinkClassificationRoundtrip:
         assert first["shell_dialect"] == "bash"
         assert first["binaries"] == ["git", "npm"]
         assert sorted(first["phase_signals"]) == ["implementation", "verification"]
+        assert first["motivation"] == "add retry logic to the client"
 
 
 class TestParquetSinkPathTemplate:

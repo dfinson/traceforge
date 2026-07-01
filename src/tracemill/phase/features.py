@@ -220,10 +220,13 @@ def _symbolic_dict(event: dict) -> dict[str, float]:
     for f in _LIST_FIELDS:
         for v in event.get(f) or ():
             feats[f"{f}={v}"] = 1.0
-    activity = event.get("activity")
-    if activity:
-        root = str(activity).split(".", 1)[0]
-        feats[f"activity_root={root}"] = 1.0
+    # Coarse activity generalisation: the root of each canonical action
+    # (e.g. modify.edit -> modify, persist.commit -> persist) so the model can
+    # back off from a sparse fine-grained action to its activity class. Derived
+    # from the already-populated ``action`` set (the general, framework-agnostic
+    # taxonomy), not a separate column.
+    for a in event.get("action") or ():
+        feats[f"activity_root={str(a).split('.', 1)[0]}"] = 1.0
     return feats
 
 

@@ -172,7 +172,45 @@ acceptance:
     established at n=80 (37.5% vs 35.0% same-model across runs).
 
 # Recorded after the run.
-results: {}
+results:
+  diverse_12k_plus_real_anchor_no_rationale:
+    date: 2026-07-01
+    script: research/scripts/_title_request_diverse.py
+    hypothesis: >
+      The diverse-12k synth pool (0% overlap with the prior dedicated model's synth)
+      had NEVER been folded into a dedicated-head train set. Test the one untested
+      cell: diverse-12k synth + real CodePlane anchor, equal-per-source mass, NO
+      rationale aux-signal. Does synth-title DIVERSITY carry the request head?
+    eval: >
+      LEAK-FIXED. The ~260 CodePlane reals are the only real pool and they ARE the
+      baselines' eval, so training on them leaks. Fixed by partitioning the 260 by
+      CONTENT hash (identical prompts land on one side) into train-anchor (169) vs
+      never-trained held-out eval (91); assert 0 ctx overlap; judge only the heldout.
+      Judged n=80 of the 91 clean reals. Baselines (shipped 0.512 / dedicated 0.48)
+      were judged on the full possibly-leaked 260 -> APPROXIMATE refs only; the
+      leak-immune signal is h2h-vs-gold on this clean partition.
+    scores:
+      coherent: 0.39
+      faithful: 1.21
+      gold_ceiling_coherent: 0.95
+      h2h_model: 0.10
+      h2h_gold: 0.76
+      h2h_tie: 0.14
+      n: 80
+      train_loss_final: 1.67
+    verdict: >
+      LOSES decisively. On the clean, never-trained partition the model wins only
+      10% h2h vs gold (gold 76%) with 39% coherent against a 95% gold ceiling -- the
+      task is well-defined, the model just isn't competitive. This is leak-immune
+      (both sides judged on the same clean 80) so no baseline re-judge can rescue it.
+      CONFIRMS the synth-volume sweep: synth-title DIVERSITY/VOLUME is not the lever;
+      the rationale aux-signal (which the shipped 0.512 head and prior 0.48 dedicated
+      both had) is what carries the request head. The diverse-12k cell is now tested
+      and spent. Shipped 0.512 request head stays canonical; packaged titler untouched.
+    artifacts: >
+      gitignored: t5-title-request-diverse.parquet, t5-title-request-diverse-model/,
+      title-judge-scores-diverse.jsonl, diverse-result.json.
+
 
 next:
   - "Scale synth (_title_synth_requests.py --batches N) to the FLOOR, rebuild request-title-pairs.json -> parquet -> request rationales."

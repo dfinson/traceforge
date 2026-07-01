@@ -137,12 +137,14 @@ class TitleModel:
     # ----------------------------------------------------------------- loading
     @classmethod
     def load(
-        cls, model_dir: str | os.PathLike[str] | None = None, threads: int = 2
+        cls, model_dir: str | os.PathLike[str] | None = None, threads: int = 1
     ) -> "TitleModel":
         """Load the packaged int8 titler (or a custom ``model_dir``).
 
         ``threads`` caps onnxruntime intra-op threads to keep the live CPU
-        footprint near-zero (fan-spin / RAM starvation is a hard failure).
+        footprint near-zero (fan-spin / RAM starvation is a hard failure). The
+        default of ``1`` matches what the live :class:`TitleInferencer` serves, so
+        direct callers and footprint benchmarks measure the shipped config.
         """
         import onnxruntime as ort
         from tokenizers import Tokenizer

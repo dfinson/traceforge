@@ -171,7 +171,10 @@ class PhaseTracker:
 
         ``phase`` is the per-event phase signal (the enricher's collapsed
         ``metadata.phases`` estimate). Returns ``(current_phase, transition_or_None)``;
-        ``current_phase`` is what the enricher stamps onto ``event.metadata.phase``.
+        ``current_phase`` is the debounced phase this tracker intends its consumer
+        to stamp onto ``event.metadata.phase``. (This v1 tracker is not wired into
+        the live pipeline; the trained ``PhaseInferencer`` is the current producer
+        of ``metadata.phase``.)
         """
 
         if self._finalized:

@@ -20,12 +20,15 @@ dependencies; they are imported lazily so importing this module stays cheap.
 from __future__ import annotations
 
 import json
+import logging
 from collections import deque
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Iterable, Sequence
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants (logged as MLflow params by callers; model choice, not a threshold)
@@ -348,17 +351,41 @@ class StreamingSessionFeaturizer:
 
 @lru_cache(maxsize=1)
 def _embedder():
-    from model2vec import StaticModel
+    """Load the frozen model2vec embedder once.
 
-    return StaticModel.from_pretrained(MODEL2VEC_NAME)
+    ``lru_cache`` memoises the *result*, including a failed load (returned as
+    ``None``): if the artifact is unavailable — e.g. an offline host with no
+    cached copy — we degrade once and never re-attempt the fetch. Without this,
+    the raising call was not cached, so every event on the live path re-tried the
+    network fetch and stalled the loop on connection timeout.
+    """
+    try:
+        from model2vec import StaticModel
+
+        return StaticModel.from_pretrained(MODEL2VEC_NAME)
+    except Exception as exc:  # noqa: BLE001 - any load failure degrades, once
+        logger.warning(
+            "model2vec embedder %r unavailable (%s); phase/boundary text features "
+            "fall back to zeros for this process",
+            MODEL2VEC_NAME,
+            exc,
+        )
+        return None
 
 
 def embed_texts(texts: Sequence[str]) -> np.ndarray:
-    """Frozen model2vec embedding of a list of texts → (n, 256) float32."""
+    """Frozen model2vec embedding of a list of texts → (n, 256) float32.
+
+    Returns zero vectors if the embedder could not be loaded (see
+    :func:`_embedder`), so callers never raise on a missing artifact.
+    """
 
     if not texts:
         return np.zeros((0, MODEL2VEC_DIM), dtype=np.float32)
-    vecs = _embedder().encode(list(texts))
+    model = _embedder()
+    if model is None:
+        return np.zeros((len(texts), MODEL2VEC_DIM), dtype=np.float32)
+    vecs = model.encode(list(texts))
     return np.asarray(vecs, dtype=np.float32)
 
 

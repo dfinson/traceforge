@@ -83,9 +83,33 @@ acceptance:
   judge: blinded Sonnet A/B, per-source-cap 80, random_state=17 (same CodePlane protocol).
 
 # Recorded after the run by _title_request_sweep.py -> data/interim/sweep/request-sweep-curve.json
-results: {}
+results:
+  eval: 260 held-out CodePlane reals, n=80 judged per budget (random_state=17), blinded Sonnet A/B
+  curve:                      # coherence on the SAME reals; train loss for the overfit read
+    - { budget: 2000,  train_loss: 3.20, coherent: 0.263, gold_coherent: 0.925, h2h_model: 0.138 }
+    - { budget: 4000,  train_loss: 2.84, coherent: 0.300, gold_coherent: 0.900, h2h_model: 0.163 }
+    - { budget: 8000,  train_loss: 2.54, coherent: 0.300, gold_coherent: 0.913, h2h_model: 0.150 }
+    - { budget: 12000, train_loss: 2.38, coherent: 0.213, gold_coherent: 0.938, h2h_model: 0.138 }
+  knee: 4000                  # peak coherence 0.30; 4k->8k = +0pt, 8k->12k = -9pt
+  finding: >
+    NOT a plateau -- a REGRESSION. Train loss falls monotonically (3.20 -> 2.38,
+    lowest at 12k) while real-prompt coherence peaks at 4k (0.30) and then drops 9pt
+    at 12k, far outside the ~2.5pt noise floor. Classic overfitting: past ~4k the
+    model fits the synthetic gold STYLE ever better while drifting off the real
+    distribution. Synth gold != real gold, so synthetic VOLUME is not merely
+    exhausted as a lever for the synth-only recipe -- beyond ~4-8k it is actively
+    counterproductive. Peak synth-only coherence (0.30) trails the shipped request
+    head's 0.512 baseline and is nowhere near the ~0.90 gold ceiling; the model
+    never wins the blinded h2h vs gold (13-16% across all budgets).
+  implication: >
+    Kills the "just generate more synth" idea. The lever is NOT synth quantity; it
+    is the real-distribution anchor + the rationale comprehension signal (both absent
+    here by design). This VALIDATES titler-request-dedicated.yaml's FLOOR recipe
+    (keep the 256 CodePlane reals as anchor + request-rationale co-training, scale
+    synth only to the forgone-span FLOOR, not beyond). Do NOT spend GPU scaling synth
+    past the floor. Capacity vs data-anchor as the true ceiling is the dedicated-floor
+    run's job to separate, now that synth-volume-alone is ruled out.
 
 next:
-  - "Read data/interim/sweep/request-sweep-curve.json: coherence + h2h vs gold per budget."
-  - "If plateaued by 12k -> synth volume is not the lever; proceed to the dedicated-FLOOR run (with real anchor + rationale) per titler-request-dedicated.yaml."
-  - "If still climbing at 12k -> _title_synth_aoai more batches, extend the curve before the floor run."
+  - "Proceed to the dedicated-FLOOR run per titler-request-dedicated.yaml: real anchor + request-rationale, synth scaled only to the forgone-span floor (~1656), (src,task)-parity."
+  - "Do NOT extend the synth curve -- volume alone regresses; more synthesis is wasted GPU."

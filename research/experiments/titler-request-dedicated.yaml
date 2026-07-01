@@ -199,14 +199,22 @@ results:
       n: 80
       train_loss_final: 1.67
     verdict: >
-      LOSES decisively. On the clean, never-trained partition the model wins only
-      10% h2h vs gold (gold 76%) with 39% coherent against a 95% gold ceiling -- the
-      task is well-defined, the model just isn't competitive. This is leak-immune
-      (both sides judged on the same clean 80) so no baseline re-judge can rescue it.
-      CONFIRMS the synth-volume sweep: synth-title DIVERSITY/VOLUME is not the lever;
-      the rationale aux-signal (which the shipped 0.512 head and prior 0.48 dedicated
-      both had) is what carries the request head. The diverse-12k cell is now tested
-      and spent. Shipped 0.512 request head stays canonical; packaged titler untouched.
+      CLEAN-WEAK, not a clean loss. On 80 never-trained prompts the model scores 39%
+      coherent / 10% h2h vs gold (76% losses) against a 95% gold ceiling -- the FIRST
+      leak-free measurement of any request head. The earlier "loses vs shipped 0.512"
+      framing is RETRACTED: verified that the shipped head trained on 204/253 (~81%)
+      of the codeplane eval prompts as DIRECT title targets (t5-title-rationale.parquet
+      split=train), and the prior dedicated 0.48 the same, so BOTH baselines are
+      leak-inflated and there is NO codeplane partition either baseline did not train
+      on -> a fair diverse-vs-shipped comparison is unrecoverable on existing reals
+      (needs a fresh real eval set neither model trained on). What IS clean-comparable:
+      the synth-ONLY volume sweep never trained on codeplane (clean), peaking at 0.30;
+      diverse+real-anchor at 0.39 clean beats it -> the REAL ANCHOR lifts clean
+      coherence, not synth volume. Decision unchanged in practice (packaged ONNX head
+      stays; diverse model is clean-weak and unproven), but the REASON is honest now:
+      not "diverse loses to 0.512" but "0.39 clean is weak and there is no clean
+      baseline to beat." Methodological finding: every historical request-head number
+      (0.35/0.38/0.48/0.512) was judged on codeplane reals ~81% present in training.
     artifacts: >
       gitignored: t5-title-request-diverse.parquet, t5-title-request-diverse-model/,
       title-judge-scores-diverse.jsonl, diverse-result.json.

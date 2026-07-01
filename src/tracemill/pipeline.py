@@ -114,6 +114,14 @@ class EventPipeline:
         Held under the session lock so concurrent pushes for the same session
         are serialised into the live streams (ordering is the streams' causal
         contract); pushes for distinct sessions still run concurrently.
+
+        Lifecycle contract: ``push`` is only valid before :meth:`flush`/
+        :meth:`close`. ``flush`` is terminal — it drains and reclaims all
+        per-session stream state *outside* the session lock — so pushing after
+        a flush (or concurrently with one) races the drain and is unsupported.
+        A batcher fanning pushes through :func:`asyncio.gather` is fine; a
+        batcher that periodically flushes to persist and then keeps pushing is
+        not.
         """
         async with self._session_lock(event.session_id):
             await self._push_locked(event)
@@ -340,7 +348,14 @@ class EventPipeline:
         await self._fanout((sink.on_usage(usage) for sink in self._sinks), "usage record")
 
     async def flush(self) -> None:
-        """Flush enricher buffered events then flush all sinks. Error-isolated."""
+        """Drain all buffered state to sinks. TERMINAL — see :meth:`push`.
+
+        Flushes the enricher, drains each session's held leading plumbing and
+        final open activity, reclaims every per-session map, then flushes the
+        sinks. This runs *outside* the session lock and reclaims state, so no
+        ``push`` may run during or after it (the caller stops pushing, then
+        flushes/closes). Error-isolated.
+        """
         if self._enricher is not None:
             for event in self._enricher.flush():
                 await self._emit(event)
@@ -358,6 +373,15 @@ class EventPipeline:
         # emitted. Done after phase drain so every event has reached the title
         # stream first.
         await self._flush_title_streams()
+
+        # Boundary streams and per-session locks carry no buffered output to
+        # drain (boundary is O(1) causal state; locks are bare mutexes), but
+        # they are per-session and would otherwise outlive every finalized
+        # session. Reclaim them here so all four per-session maps free together
+        # at teardown, matching the phase/title drain above. Safe because flush
+        # is terminal: no push holds a lock or touches a boundary stream now.
+        self._boundary_streams.clear()
+        self._session_locks.clear()
 
         await self._fanout((sink.flush() for sink in self._sinks), "flush")
 

@@ -97,6 +97,42 @@ class TestPipelinePush:
         event = make_event()
         await pipeline.push(event)  # should not crash
 
+    async def test_same_session_pushes_serialise_under_gather(self):
+        import asyncio
+
+        # A sink whose FIRST on_event awaits longer than the second. Absent
+        # per-session serialisation, two same-session pushes issued via
+        # asyncio.gather would let the later event's fan-out overtake the earlier
+        # one and record out of order. The per-session lock makes push #2 wait
+        # for push #1 to fully complete, so sink order == push order.
+        class ReorderingSink(StorageSink):
+            def __init__(self) -> None:
+                self.events: list[SessionEvent] = []
+                self._first = True
+
+            async def on_event(self, event: SessionEvent) -> None:
+                if self._first:
+                    self._first = False
+                    await asyncio.sleep(0.05)
+                else:
+                    await asyncio.sleep(0)
+                self.events.append(event)
+
+        sink = ReorderingSink()
+        pipeline = EventPipeline(sinks=[sink], enable_phase=False, enable_boundary=False)
+        e0 = make_event(session_id="s", id="e0")
+        e1 = make_event(session_id="s", id="e1")
+        await asyncio.gather(pipeline.push(e0), pipeline.push(e1))
+        assert [e.id for e in sink.events] == ["e0", "e1"]
+
+    async def test_distinct_sessions_get_distinct_locks(self):
+        pipeline = EventPipeline(sinks=[], enable_phase=False, enable_boundary=False)
+        await pipeline.push(make_event(session_id="a", id="a0"))
+        await pipeline.push(make_event(session_id="b", id="b0"))
+        # Each session mints its own lock; distinct sessions never contend.
+        assert set(pipeline._session_locks) == {"a", "b"}
+        assert pipeline._session_lock("a") is not pipeline._session_lock("b")
+
 
 class TestPipelineTitle:
     """The opt-in titler stamps live activity/step ids on events (emitted

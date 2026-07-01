@@ -91,8 +91,34 @@ class EventPipeline:
         self._title_inferencer = title_inferencer
         self._title_streams: dict[str, object] = {}
 
+        # One lock per session serialises the stream-mutating push path. The
+        # phase/boundary/title streams hold unlocked per-session causal state and
+        # ``_title_emit`` yields the loop across its ``to_thread`` offload, so two
+        # events for the same session pushed concurrently (e.g. via
+        # ``asyncio.gather``) could otherwise interleave and corrupt that state
+        # silently. Different sessions take different locks, so cross-session
+        # throughput is unaffected. Lock creation is race-free: the get/insert
+        # below has no ``await`` between the miss and the store.
+        self._session_locks: dict[str, asyncio.Lock] = {}
+
+    def _session_lock(self, session_id: str) -> asyncio.Lock:
+        lock = self._session_locks.get(session_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._session_locks[session_id] = lock
+        return lock
+
     async def push(self, event: SessionEvent) -> None:
-        """Fan-out event to all registered sinks."""
+        """Fan-out event to all registered sinks.
+
+        Held under the session lock so concurrent pushes for the same session
+        are serialised into the live streams (ordering is the streams' causal
+        contract); pushes for distinct sessions still run concurrently.
+        """
+        async with self._session_lock(event.session_id):
+            await self._push_locked(event)
+
+    async def _push_locked(self, event: SessionEvent) -> None:
         if self._enricher is not None:
             try:
                 enriched = self._enricher.process(event)

@@ -115,7 +115,10 @@ class TimedTitler(TitleInferencer):
     """Wraps the real titler to count + time every model invocation."""
 
     def __init__(self):
-        super().__init__()
+        # TITLE_SERVE_DIR points the served artifact at a custom int8 ONNX dir
+        # (encoder/decoder/tokenizer) without touching the packaged tiny model,
+        # so alternate-capacity models can be footprint-benched on the real path.
+        super().__init__(model_dir=os.environ.get("TITLE_SERVE_DIR") or None)
         self.calls = 0
         self.secs = 0.0
 

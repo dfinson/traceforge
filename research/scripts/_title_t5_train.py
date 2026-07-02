@@ -58,7 +58,7 @@ BASE_MODEL = os.environ.get("TITLE_BASE_MODEL", "google/t5-efficient-tiny")
 # families (e.g. Claude, zero training data) without a source token to lean on.
 PREFIX = "summarize agent step: "
 HELDOUT_FRAC = 0.15
-MAX_SRC = 192
+MAX_SRC = int(os.environ.get("TITLE_MAX_SRC", "192"))
 # Target cap. Titles are short (<=~20 tok); rationale-distillation auxiliary
 # targets are ~30-word teacher sentences (~40-50 tok), so the ceiling is raised
 # to 48 to avoid truncating them. Harmless to title-only datasets (their golds
@@ -283,12 +283,21 @@ def train():
     else:
         sw, _frac = _source_weights(tr.src.value_counts().to_dict())
         weights = [sw[s] for s in tr.src]
-    sampler = WeightedRandomSampler(weights, num_samples=len(tr), replacement=True)
+    # Draws-per-epoch is an explicit budget so an A/B stays fair when a source's
+    # RAW size is skewed: the (src,task)-parity sampler makes each epoch's
+    # COMPOSITION invariant to pool size (equal mass per source, with
+    # replacement), so num_samples controls only total gradient exposure, not the
+    # balance. Defaults to len(tr) -- byte-identical to prior runs. Setting
+    # TITLE_NUM_SAMPLES to a baseline's train size holds training budget constant
+    # when folding in a large auxiliary source (e.g. the 627K commitpackft pool)
+    # while still sampling that source's full diversity.
+    num_samples = int(os.environ.get("TITLE_NUM_SAMPLES", str(len(tr))))
+    sampler = WeightedRandomSampler(weights, num_samples=num_samples, replacement=True)
     uniq = tr.groupby("src").gold.nunique().to_dict()
     print(
         f"source mix (raw): {tr.src.value_counts().to_dict()} | distinct titles: {uniq} "
         f"-> policy={policy} alpha={src_alpha} tasks={tasks or ['(none)']} "
-        f"mass fraction: {_frac}"
+        f"num_samples={num_samples} mass fraction: {_frac}"
     )
 
     dl = DataLoader(DS(tr), batch_size=bs, sampler=sampler, collate_fn=collate)

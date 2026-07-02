@@ -223,9 +223,19 @@ def distilled_context(rows, src=None):
     if notes_mode != "none":
         narr = clean_notes(narration(rows))
         if narr:
-            joined = narr[0] if notes_mode == "trim" else " ".join(narr[:2])
-            cap = 100 if notes_mode == "trim" else 240
-            parts.append("notes: " + joined[:cap])
+            if notes_mode == "wide":
+                # Feed the FULL extracted narration; the only bound is the
+                # encoder's own MAX_SRC token budget (tokenizer truncation), not
+                # a hand-picked sentence/char cap. Tests whether the tiny
+                # student's ceiling is the starved 2-sentence context rather than
+                # its capacity. No new constant: narration() already bounds the
+                # sentence set; wide just stops discarding all but the first two.
+                note = " ".join(narr)
+            elif notes_mode == "trim":
+                note = narr[0][:100]
+            else:  # full (shipped default): first 2 sentences, 240-char cap
+                note = " ".join(narr[:2])[:240]
+            parts.append("notes: " + note)
     return " | ".join(parts) if parts else "(no signal)"
 
 

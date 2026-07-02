@@ -42,7 +42,6 @@ import pandas as pd
 import mlflow
 
 from tracemill_research.config import load_labeling_runtime_config
-from tracemill_research.labeling.backends.copilot_sdk import CopilotSdkBackend
 from tracemill_research.mlflow_utils import log_yaml_params, start_run
 from tracemill_research.paths import EXPERIMENTS_DIR
 
@@ -154,7 +153,7 @@ def _generate(df: pd.DataFrame) -> list[str]:
     if os.environ.get("TITLE_ORT") == "1":
         return _generate_ort(df)
     import torch
-    from transformers import AutoTokenizer, T5ForConditionalGeneration
+    from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
     torch.set_num_threads(int(os.environ.get("OMP_NUM_THREADS", "2")))
     dev = "cuda" if torch.cuda.is_available() else "cpu"
@@ -162,7 +161,7 @@ def _generate(df: pd.DataFrame) -> list[str]:
         tok = AutoTokenizer.from_pretrained(MODEL_DIR)
     except Exception:  # downgraded transformers can't read newer saved tok config
         tok = AutoTokenizer.from_pretrained("google/t5-efficient-tiny")
-    mdl = T5ForConditionalGeneration.from_pretrained(MODEL_DIR).to(dev).eval()
+    mdl = AutoModelForSeq2SeqLM.from_pretrained(MODEL_DIR).to(dev).eval()
     preds: list[str] = []
     with torch.no_grad():
         for i in range(0, len(df), 64):
@@ -178,6 +177,7 @@ def _generate(df: pd.DataFrame) -> list[str]:
             out = mdl.generate(
                 **enc,
                 max_new_tokens=MAX_TGT,
+                min_length=0,
                 num_beams=NB,
                 num_return_sequences=NB,
                 no_repeat_ngram_size=2,
@@ -253,31 +253,44 @@ def _agg(rows: list[dict], key: str) -> None:
     )
 
 
-async def _run(args: argparse.Namespace) -> int:
-    _utf8()
-    df = pd.read_parquet(DATASET)
+def _select(df: pd.DataFrame, per_source_cap: int) -> pd.DataFrame:
+    """Deterministic held-out selection shared by generation and scoring so a
+    remote generate-only pass and a local score-only pass pick identical rows."""
     ho = df[df.split == "heldout"].reset_index(drop=True)
-
-    # Source whitelist (mirrors the trainer) so judging is scoped to the deploy
-    # targets only and SDK calls aren't spent on excluded corpora.
     _srcs = os.environ.get("TITLE_SOURCES", "").strip()
     if _srcs:
         keep = {s.strip() for s in _srcs.split(",") if s.strip()}
         ho = ho[ho.src.isin(keep)].reset_index(drop=True)
-
-    # Per-source cap, copilot prioritised (it is the generalisation target and
-    # the rarer source). Deterministic sample for reproducible reruns.
     parts = []
     for src, g in ho.groupby("src"):
-        parts.append(g.sample(min(len(g), args.per_source_cap), random_state=17))
-    ho = pd.concat(parts).reset_index(drop=True)
-    print(
-        f"judging {len(ho)} held-out segments ({ho.src.value_counts().to_dict()})", file=sys.stderr
-    )
+        parts.append(g.sample(min(len(g), per_source_cap), random_state=17))
+    return pd.concat(parts).reset_index(drop=True)
 
-    ho = ho.assign(pred=_generate(ho))
+
+async def _run(args: argparse.Namespace) -> int:
+    _utf8()
+
+    if args.preds:
+        # Score-only: predictions were generated elsewhere (e.g. on GPU). Load the
+        # precomputed selection+preds and skip local generation entirely.
+        ho = pd.read_parquet(args.preds)
+        print(
+            f"judging {len(ho)} held-out segments from preds cache "
+            f"({ho.src.value_counts().to_dict()})",
+            file=sys.stderr,
+        )
+    else:
+        df = pd.read_parquet(DATASET)
+        ho = _select(df, args.per_source_cap)
+        print(
+            f"judging {len(ho)} held-out segments ({ho.src.value_counts().to_dict()})",
+            file=sys.stderr,
+        )
+        ho = ho.assign(pred=_generate(ho))
 
     cfg = load_labeling_runtime_config()
+    from tracemill_research.labeling.backends.copilot_sdk import CopilotSdkBackend
+
     backend = CopilotSdkBackend(cfg.backend)
     sem = asyncio.Semaphore(args.concurrency)
 
@@ -362,7 +375,36 @@ def main() -> int:
         help="max held-out segments judged per source (copilot first).",
     )
     p.add_argument("--concurrency", type=int, default=6, help="max concurrent SDK judge calls.")
+    p.add_argument(
+        "--emit-preds",
+        metavar="PATH",
+        default=None,
+        help="generate-only: run the deterministic selection + model generation, "
+        "write the selected rows (with pred) to PATH parquet, and exit WITHOUT "
+        "scoring. Run this where the GPU/model lives; ship the small parquet back.",
+    )
+    p.add_argument(
+        "--preds",
+        metavar="PATH",
+        default=None,
+        help="score-only: load precomputed selection+preds from PATH (produced by "
+        "--emit-preds) and skip local generation. Needs the Sonnet SDK auth.",
+    )
     args = p.parse_args()
+
+    if args.emit_preds:
+        _utf8()
+        df = pd.read_parquet(DATASET)
+        ho = _select(df, args.per_source_cap)
+        ho = ho.assign(pred=_generate(ho))
+        cols = [c for c in ("sid", "tier", "src", "gold", "ctx", "pred") if c in ho.columns]
+        ho[cols].to_parquet(args.emit_preds, index=False)
+        print(
+            f"emitted {len(ho)} preds ({ho.src.value_counts().to_dict()}) -> {args.emit_preds}",
+            file=sys.stderr,
+        )
+        return 0
+
     return asyncio.run(_run(args))
 
 

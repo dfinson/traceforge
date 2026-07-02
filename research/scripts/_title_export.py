@@ -41,12 +41,12 @@ def _wrappers(model):
     class Enc(torch.nn.Module):
         def __init__(self, m):
             super().__init__()
-            self.m = m
+            # get_encoder() resolves the encoder submodule for any seq2seq arch
+            # (T5: model.encoder, BART: model.model.encoder).
+            self.enc = m.get_encoder()
 
         def forward(self, input_ids, attention_mask):
-            return self.m.encoder(
-                input_ids=input_ids, attention_mask=attention_mask
-            ).last_hidden_state
+            return self.enc(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
 
     class Dec(torch.nn.Module):
         def __init__(self, m):
@@ -66,13 +66,13 @@ def _wrappers(model):
 def export(model_dir: str | os.PathLike[str], out_dir: str | os.PathLike[str]) -> None:
     import torch
     from onnxruntime.quantization import QuantType, quantize_dynamic
-    from transformers import T5ForConditionalGeneration
+    from transformers import AutoModelForSeq2SeqLM
 
     model_dir = Path(model_dir)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    model = T5ForConditionalGeneration.from_pretrained(str(model_dir)).eval()
+    model = AutoModelForSeq2SeqLM.from_pretrained(str(model_dir)).eval()
     hidden = model.config.d_model
     enc, dec = _wrappers(model)
 

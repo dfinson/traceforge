@@ -159,8 +159,8 @@ def train():
     import torch
     from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
     from transformers import (
+        AutoModelForSeq2SeqLM,
         AutoTokenizer,
-        T5ForConditionalGeneration,
         get_linear_schedule_with_warmup,
     )
 
@@ -301,7 +301,7 @@ def train():
     )
 
     dl = DataLoader(DS(tr), batch_size=bs, sampler=sampler, collate_fn=collate)
-    mdl = T5ForConditionalGeneration.from_pretrained(BASE_MODEL).to(dev)
+    mdl = AutoModelForSeq2SeqLM.from_pretrained(BASE_MODEL).to(dev)
     opt = torch.optim.AdamW(mdl.parameters(), lr=lr)
     steps = len(dl) * epochs
     sched = get_linear_schedule_with_warmup(opt, int(0.06 * steps), steps)
@@ -381,14 +381,14 @@ def _rouge1(pred: str, gold: str) -> float:
 def evaluate():
     _utf8()
     import torch
-    from transformers import AutoTokenizer, T5ForConditionalGeneration
+    from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     df = pd.read_parquet(DATASET)
     ho = df[df.split == "heldout"].reset_index(drop=True)
 
     tok = AutoTokenizer.from_pretrained(MODEL_DIR)
-    mdl = T5ForConditionalGeneration.from_pretrained(MODEL_DIR).to(dev).eval()
+    mdl = AutoModelForSeq2SeqLM.from_pretrained(MODEL_DIR).to(dev).eval()
 
     NB = 5  # beams == returned sequences; alt beams feed sibling-dedup at render
     preds, alts = [], []
@@ -406,6 +406,7 @@ def evaluate():
             out = mdl.generate(
                 **enc,
                 max_new_tokens=MAX_TGT,
+                min_length=0,
                 num_beams=NB,
                 num_return_sequences=NB,
                 no_repeat_ngram_size=2,

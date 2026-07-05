@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Literal
 
+from tracemill.governance.registry import SessionRegistry
 from tracemill.governance.results import (
     Evidence,
     EvidencePointer,
@@ -92,7 +93,7 @@ class GovernancePipeline:
         self._project_root = project_root
         self.policy: "GatePolicy | None" = policy
         self._gate_lock = threading.Lock()
-        self._states: dict[str, "SessionState"] = {}
+        self._registry = SessionRegistry(store)
         self._write_failures: dict[str, int] = {}  # session_id → consecutive failure count
         self._MAX_WRITE_FAILURES = 10
         self._phase23_attempts: dict[str, int] = {}  # source_event_key → attempt count
@@ -546,7 +547,7 @@ class GovernancePipeline:
         """
         from tracemill.sdk.gate_types import GateContext
 
-        state = self._states.get(session_id)
+        state = self._registry.get(session_id)
         if state is None:
             return GateContext(session_id=session_id, tool_call_count=0, denied_count=0)
 
@@ -710,16 +711,8 @@ class GovernancePipeline:
         self._ensure_gate_state(session_id).record_allow(tool_call_id=tool_call_id)
 
     def _ensure_gate_state(self, session_id: str):
-        """Lazily create minimal session state for gate context tracking.
-
-        Uses setdefault for thread-safety (CPython dict operations are atomic
-        under the GIL for single-bytecode-instruction calls).
-        """
-        if session_id not in self._states:
-            from tracemill.governance.state import SessionState
-
-            self._states.setdefault(session_id, SessionState(session_id=session_id))
-        return self._states[session_id]
+        """Return session state for gate context tracking (thread-safe, ephemeral)."""
+        return self._registry.ensure(session_id)
 
     def score_tool_call_event(self, event: "tracemill.types.SessionEvent") -> "SessionMeta":
         """Score an enriched SessionEvent via the canonical bridge.
@@ -862,9 +855,8 @@ class GovernancePipeline:
 
         # Use cached state if available; otherwise start fresh (thread-safe,
         # avoids cross-thread sqlite3 access for unknown sessions)
-        if session_id in self._states:
-            state = self._states[session_id]
-        else:
+        state = self._registry.get(session_id)
+        if state is None:
             state = SessionState(session_id=session_id)
 
         # Thread-safe clone — never touches state._db
@@ -905,13 +897,8 @@ class GovernancePipeline:
         )
 
     def get_or_create_state(self, session_id: str) -> "SessionState":
-        """Get or create session state."""
-        from tracemill.governance.state import SessionState
-
-        if session_id not in self._states:
-            state = SessionState.load_from_db(session_id, self._store.connection)
-            self._states[session_id] = state
-        return self._states[session_id]
+        """Get or create session state, rehydrating from the store on a miss."""
+        return self._registry.get_or_create(session_id)
 
     def process_lifecycle(self, session_id: str, event_kind: str) -> SessionMeta:
         """Handle session_start/end — Phase 1 only, skip Phase 2/3."""
@@ -926,7 +913,7 @@ class GovernancePipeline:
             snapshot = state.snapshot()
             self._write_session_summary(session_id, snapshot)
             # Evict session state to prevent unbounded memory growth
-            self._states.pop(session_id, None)
+            self._registry.evict(session_id)
             self._write_failures.pop(session_id, None)
             # Clean up any lingering phase23 attempts for this session's events
             for key in self._phase23_session_keys.pop(session_id, set()):
@@ -989,7 +976,7 @@ class GovernancePipeline:
                     phase1_exc,
                 )
                 # Discard corrupted in-memory state — reload clean from DB
-                del self._states[session_id]
+                self._registry.evict(session_id)
                 state = self.get_or_create_state(session_id)
                 return SessionMeta(
                     classification=None,
@@ -1029,7 +1016,7 @@ class GovernancePipeline:
                 )
                 self._store.rollback()
                 # Discard corrupted in-memory state — reload clean from DB
-                del self._states[session_id]
+                self._registry.evict(session_id)
                 state = self.get_or_create_state(session_id)
                 # Return degraded response — event will be re-delivered
                 return SessionMeta(

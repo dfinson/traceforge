@@ -1,4 +1,8 @@
-"""Governance pipeline orchestrator — Phases 1, 2, 3 and evidence construction."""
+"""Governance composition-root facade.
+
+Wires the governance collaborator graph and forwards the public API to them
+(monitor, scorer, context builder, shield). No governance logic lives here.
+"""
 
 from __future__ import annotations
 
@@ -18,7 +22,7 @@ if TYPE_CHECKING:
     import tracemill.types
 
     from tracemill.classify.config import ClassificationEngine
-    from tracemill.governance.budget import BudgetThresholds, BudgetTracker
+    from tracemill.governance.budget import BudgetTracker
     from tracemill.governance.labeler import GovernanceLabeler
     from tracemill.governance.persistence import SystemStore
     from tracemill.governance.rules import Rule
@@ -44,7 +48,20 @@ def _import_dotted(dotted_path: str):
 
 
 class GovernancePipeline:
-    """Orchestrates Phases 1, 2, 3 of the governance enrichment pipeline."""
+    """Composition-root facade for the governance subsystem.
+
+    Constructs the collaborator object graph (registry, assessor, phase-1,
+    codec, context builder, scorer, shield, monitor) and exposes the public API
+    by delegating to them:
+
+    * observation / lifecycle / state → :class:`SessionMonitor` (the single writer)
+    * read-only scoring & previews → :class:`Scorer`
+    * event → context bridging → :class:`ContextBuilder`
+    * enforcement (preflight/postflight) → :class:`Shield`, to which the
+      ``gate_*`` framework adapters bind at the edge.
+
+    It holds no governance logic of its own — only wiring and forwards.
+    """
 
     def __init__(
         self,
@@ -53,16 +70,15 @@ class GovernancePipeline:
         budget_tracker: "BudgetTracker",
         rules: "list[Rule]",
         engine: "ClassificationEngine",
-        thresholds: "BudgetThresholds | None" = None,
         project_root: str | None = None,
         policy: "GatePolicy | None" = None,
     ) -> None:
+        # ── Facade-observable state ──
         self._store = store
-        self._rules = rules
-        self._engine = engine
-        self._thresholds = thresholds
         self._project_root = project_root
         self.policy: "GatePolicy | None" = policy
+
+        # ── Collaborator object graph (composition root; DIP wiring) ──
         self._registry = SessionRegistry(store)
         self._assessor = DefaultAssessor(labeler, rules, engine)
         self._phase1 = Phase1(budget_tracker, labeler)
@@ -157,7 +173,6 @@ class GovernancePipeline:
             budget_tracker=BudgetTracker(thresholds=thresholds),
             rules=rules,
             engine=engine,
-            thresholds=thresholds,
             policy=policy,
         )
         instance._project_root = config.project_root

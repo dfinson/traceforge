@@ -17,11 +17,10 @@ from tracemill.governance.state import (
 )
 from tracemill.governance.persistence import SystemStore
 from tracemill.governance.labeler import GovernanceLabeler, GovernanceResult
-from tracemill.governance.pipeline import (
+from tracemill.governance.results import (
     Evidence,
     EvidencePointer,
     EscalationContext,
-    GovernancePipeline,
     Phase3Result,
     RecommendedAction,
     RecommendationResult,
@@ -29,6 +28,7 @@ from tracemill.governance.pipeline import (
     SessionMeta,
     TransformSuggestion,
 )
+from tracemill.governance.pipeline import GovernancePipeline
 from tracemill.governance.rules import (
     Predicate,
     Rule,

@@ -8,13 +8,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Literal
 
+from tracemill.governance.assessor import DefaultAssessor
 from tracemill.governance.registry import SessionRegistry
 from tracemill.governance.results import (
     Evidence,
     EvidencePointer,
     EscalationContext,
-    Phase3Result,
-    RecommendationResult,
     RecommendedAction,
     RiskRecommendation,
     SessionMeta,
@@ -26,7 +25,7 @@ if TYPE_CHECKING:
 
     from tracemill.classify.config import ClassificationEngine
     from tracemill.governance.budget import BudgetThresholds, BudgetTracker
-    from tracemill.governance.labeler import GovernanceLabeler, GovernanceResult
+    from tracemill.governance.labeler import GovernanceLabeler
     from tracemill.governance.persistence import SystemStore
     from tracemill.governance.rules import Rule
     from tracemill.governance.state import SessionState, SessionStateSnapshot
@@ -94,6 +93,7 @@ class GovernancePipeline:
         self.policy: "GatePolicy | None" = policy
         self._gate_lock = threading.Lock()
         self._registry = SessionRegistry(store)
+        self._assessor = DefaultAssessor(labeler, rules, engine)
         self._write_failures: dict[str, int] = {}  # session_id → consecutive failure count
         self._MAX_WRITE_FAILURES = 10
         self._phase23_attempts: dict[str, int] = {}  # source_event_key → attempt count
@@ -875,26 +875,7 @@ class GovernancePipeline:
 
         # ── Phase 2/3 (side-effect-free) ──
         snapshot = transient.snapshot()
-        enrichment_ctx = self._with_snapshot(ctx, snapshot)
-
-        gov_result = self._labeler.label(enrichment_ctx)
-        phase3 = self._phase3(enrichment_ctx, gov_result, snapshot)
-
-        rec = None
-        evidence = None
-        if phase3.recommendation_result:
-            rec = phase3.recommendation_result.recommendation
-            evidence = phase3.recommendation_result.evidence
-
-        return SessionMeta(
-            classification=gov_result.classification,
-            risk_assessment=phase3.risk_assessment,
-            recommendation=rec,
-            budget_snapshot=snapshot.budget,
-            drift=gov_result.drift_result,
-            mcp_alerts=gov_result.mcp_alerts,
-            evidence=evidence,
-        )
+        return self._assessor.assess(ctx, snapshot).meta
 
     def get_or_create_state(self, session_id: str) -> "SessionState":
         """Get or create session state, rehydrating from the store on a miss."""
@@ -1041,12 +1022,8 @@ class GovernancePipeline:
                 snapshot = state.snapshot()
         else:
             snapshot = snapshot_for_reservation
-        enrichment_ctx = self._with_snapshot(ctx, snapshot)
         try:
-            gov_result = self._labeler.label(enrichment_ctx)
-
-            # ── Phase 3: Risk + Rules + Evidence ──
-            phase3 = self._phase3(enrichment_ctx, gov_result, snapshot)
+            assessment = self._assessor.assess(ctx, snapshot)
         except Exception as phase23_exc:
             import logging
 
@@ -1139,22 +1116,8 @@ class GovernancePipeline:
         # Phase 2/3 succeeded — clear retry counter ONLY after finalization commits (below)
         phase23_key_to_clear = event.source_event_key
 
-        # Build SessionMeta
-        rec = None
-        evidence = None
-        if phase3.recommendation_result:
-            rec = phase3.recommendation_result.recommendation
-            evidence = phase3.recommendation_result.evidence
-
-        meta = SessionMeta(
-            classification=gov_result.classification,
-            risk_assessment=phase3.risk_assessment,
-            recommendation=rec,
-            budget_snapshot=snapshot.budget,
-            drift=gov_result.drift_result,
-            mcp_alerts=gov_result.mcp_alerts,
-            evidence=evidence,
-        )
+        # Assessment succeeded — surface its verdict + deferred MCP writes
+        meta = assessment.meta
 
         # Finalize idempotency record + deferred MCP writes in single transaction
         try:
@@ -1163,8 +1126,8 @@ class GovernancePipeline:
                 "UPDATE processed_events SET session_meta_json = ? WHERE source_event_key = ?",
                 (meta_json, event.source_event_key),
             )
-            if gov_result.mcp_deferred_writes:
-                self._commit_mcp_writes_no_commit(gov_result.mcp_deferred_writes)
+            if assessment.mcp_deferred_writes:
+                self._commit_mcp_writes_no_commit(assessment.mcp_deferred_writes)
             self._store.commit()
             self._store.cache_processed(event.source_event_key, meta_json)
         except (
@@ -1187,9 +1150,9 @@ class GovernancePipeline:
             # Event stays reserved; next delivery re-runs Phase 2/3
             # Do NOT clear retry counter — finalization did not commit
             return SessionMeta(
-                classification=gov_result.classification,
-                risk_assessment=phase3.risk_assessment,
-                recommendation=rec,
+                classification=meta.classification,
+                risk_assessment=meta.risk_assessment,
+                recommendation=meta.recommendation,
                 budget_snapshot=snapshot.budget,
                 drift=None,
                 mcp_alerts=(),
@@ -1236,109 +1199,6 @@ class GovernancePipeline:
                     (write.payload, write.server, write.tool_name),
                 )
 
-    def _phase3(
-        self,
-        ctx: "EnrichmentContext",
-        result: "GovernanceResult",
-        snapshot: "SessionStateSnapshot" = None,
-    ) -> Phase3Result:
-        """Phase 3: risk assessment + rule evaluation + evidence + escalation context."""
-        from tracemill.governance.canonical import compute_canonical_hash
-        from tracemill.governance.risk_wrapper import assess_governance_risk
-        from tracemill.governance.rules import evaluate_rules
-
-        # Compute risk
-        risk = assess_governance_risk(
-            enriched_classification=result.classification,
-            command_analysis=ctx.command_analysis,
-            risk_modifiers=result.risk_modifiers,
-            engine=self._engine,
-            project_root=ctx.project_root,
-        )
-
-        # Evaluate rules
-        rule_match = evaluate_rules(self._rules, result.classification, risk)
-
-        if rule_match is None:
-            return Phase3Result(risk_assessment=risk, recommendation_result=None)
-
-        # Compute canonical hash
-        command = ctx.command_analysis.command if ctx.command_analysis else None
-        canonical_id = compute_canonical_hash(
-            result.classification,
-            command=command,
-            reason_code=rule_match.template.reason_code,
-        )
-
-        # Render transform suggestion (if template provided)
-        transform = self._render_transform(rule_match.template.transform, ctx)
-
-        # Build recommendation
-        recommendation = RiskRecommendation(
-            recommended_action=RecommendedAction(rule_match.template.recommended_action),
-            assessment=risk,
-            reason_code=rule_match.template.reason_code,
-            canonical_id=canonical_id,
-            message=rule_match.template.message,
-            transform=transform,
-        )
-
-        # Build evidence for non-allow actions
-        evidence = None
-        if recommendation.recommended_action in (
-            RecommendedAction.WARN,
-            RecommendedAction.ESCALATE,
-            RecommendedAction.DENY,
-        ):
-            # Build EscalationContext for escalate/deny
-            escalation = None
-            if recommendation.recommended_action in (
-                RecommendedAction.ESCALATE,
-                RecommendedAction.DENY,
-            ):
-                escalation = self._build_escalation(
-                    ctx,
-                    result,
-                    risk,
-                    recommendation,
-                    canonical_id,
-                    snapshot,
-                )
-
-            evidence = Evidence(
-                canonical_id=canonical_id,
-                timestamp=ctx.event.timestamp,
-                session_id=ctx.event.session_id,
-                mechanism=result.classification.mechanism,
-                effect=result.classification.effect,
-                scope=tuple(sorted(result.classification.scope)),
-                role=tuple(sorted(result.classification.role)),
-                action=tuple(sorted(result.classification.action)),
-                capability=tuple(sorted(result.classification.capability)),
-                structure=tuple(sorted(result.classification.structure)),
-                source_labels=tuple(sorted(result.classification.source_labels)),
-                recommended_action=recommendation.recommended_action,
-                risk_score=risk.score,
-                risk_factors=risk.factors,
-                mitre_techniques=risk.mitre,
-                pointers=(
-                    EvidencePointer(
-                        event_id=ctx.event.event_id,
-                        rule_id=rule_match.rule_id,
-                        detector="rule_engine",
-                    ),
-                ),
-                escalation=escalation,
-            )
-
-        return Phase3Result(
-            risk_assessment=risk,
-            recommendation_result=RecommendationResult(
-                recommendation=recommendation,
-                evidence=evidence,
-            ),
-        )
-
     def _infer_phase(self, ctx: "EnrichmentContext") -> str | None:
         """Infer session phase from classification/event."""
         from tracemill.governance.types import ToolCallEvent
@@ -1363,120 +1223,6 @@ class GovernancePipeline:
         if cls.effect == "informational":
             return "exploration"
         return "exploration"
-
-    def _with_snapshot(
-        self, ctx: "EnrichmentContext", snapshot: "SessionStateSnapshot"
-    ) -> "EnrichmentContext":
-        """Create new context with session state snapshot."""
-        import dataclasses
-
-        return dataclasses.replace(ctx, session_state=snapshot)
-
-    def _render_transform(self, template, ctx: "EnrichmentContext") -> TransformSuggestion | None:
-        """Render TransformTemplate → TransformSuggestion using event data.
-
-        Returns None if target cannot be located in event data.
-        """
-        if template is None:
-            return None
-
-        from tracemill.governance.types import ToolCallEvent
-        import logging
-
-        try:
-            if isinstance(ctx.event, ToolCallEvent) and ctx.command_analysis:
-                original = ctx.command_analysis.command or ""
-                replacement = template.replacement if template.replacement is not None else None
-                return TransformSuggestion(
-                    target_kind="shell_arg",
-                    path=f"command[0:{len(original)}]",
-                    original=original,
-                    replacement=replacement,
-                    rationale=template.description or "Rule suggests transformation",
-                    confidence="medium",
-                )
-            elif isinstance(ctx.event, ToolCallEvent):
-                args_str = ctx.event.tool_args_json
-                return TransformSuggestion(
-                    target_kind="tool_arg",
-                    path="$.args",
-                    original=args_str[:200],
-                    replacement=None,
-                    rationale=template.description or "Rule suggests transformation",
-                    confidence="low",
-                )
-        except (KeyError, AttributeError, TypeError) as e:
-            logging.getLogger(__name__).debug(
-                "Transform rendering failed for template %s: %s", template, e
-            )
-
-        return None
-
-    def _build_escalation(
-        self,
-        ctx: "EnrichmentContext",
-        result: "GovernanceResult",
-        risk,
-        recommendation,
-        canonical_id: str,
-        snapshot,
-    ) -> EscalationContext:
-        """Build full EscalationContext for escalate/deny recommendations."""
-        from tracemill.governance.types import ToolCallEvent
-
-        tool_name = ""
-        tool_args_summary = ""
-        if isinstance(ctx.event, ToolCallEvent):
-            tool_name = ctx.event.tool_name or ""
-            # Sanitize args — truncate and remove obvious secrets
-            raw_args = ctx.event.tool_args_json or ""
-            tool_args_summary = self._sanitize_args(raw_args)
-
-        pii_taint = (
-            "pii_exposure" in result.classification.capability
-            or "credential_exposure" in result.classification.capability
-        )
-        ifc_violations = result.risk_modifiers.ifc_violations
-
-        budget = snapshot.budget if snapshot else None
-
-        return EscalationContext(
-            canonical_id=canonical_id,
-            classification=result.classification,
-            recommended_action=recommendation.recommended_action,
-            reason_code=recommendation.reason_code,
-            mitre_techniques=risk.mitre,
-            drift=result.drift_result,
-            budget_snapshot=budget,
-            pii_taint=pii_taint,
-            ifc_violations=ifc_violations,
-            tool_name=tool_name,
-            tool_args_summary=tool_args_summary,
-            session_id=ctx.event.session_id,
-            timestamp=ctx.event.timestamp,
-        )
-
-    def _sanitize_args(self, raw_args: str, max_len: int = 500) -> str:
-        """Sanitize tool args for escalation context — remove secrets, truncate."""
-        import re
-
-        # Word-boundary anchored to avoid matching "monkey", "turkey", "keyboard" etc.
-        _SENSITIVE_KEYS = r"(?<![a-zA-Z])(?:password|secret|token|api_key|credential|auth|authorization)(?![a-zA-Z])"
-        # Handle JSON-style: "key": "value" or "key":"value"
-        sanitized = re.sub(
-            r'(?i)(["\']?(?:' + _SENSITIVE_KEYS + r')["\']?\s*[:=]\s*)["\']([^"\']*)["\']',
-            r'\1"<REDACTED>"',
-            raw_args,
-        )
-        # Handle bare (non-quoted) values: key=value or key: value (no quotes around value)
-        sanitized = re.sub(
-            r"(?i)((?:" + _SENSITIVE_KEYS + r')\s*[:=]\s*)([^\s"\'}{,\]\)]+)',
-            r"\1<REDACTED>",
-            sanitized,
-        )
-        if len(sanitized) > max_len:
-            sanitized = sanitized[:max_len] + "..."
-        return sanitized
 
     def _write_session_summary(self, session_id: str, snapshot: "SessionStateSnapshot") -> None:
         """Write session summary to session_summaries table (idempotent — won't overwrite existing)."""

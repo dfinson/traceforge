@@ -31,8 +31,6 @@ _PAD, _EOS = 0, 1
 _PREFIX = "summarize agent step: "
 #: Encoder truncation; the saved tokenizer.json otherwise bakes in max_length=20.
 _MAX_SRC = 512
-#: Default packaged int8 model + tokenizer location.
-_DATA = Path(__file__).resolve().parent / "data"
 
 
 def _logsoftmax(x: np.ndarray) -> np.ndarray:
@@ -149,7 +147,15 @@ class TitleModel:
         import onnxruntime as ort
         from tokenizers import Tokenizer
 
-        d = Path(model_dir) if model_dir is not None else _DATA
+        from ._resolve import INSTALL_HINT, span_dir
+
+        if model_dir is not None:
+            d = Path(model_dir)
+        else:
+            resolved = span_dir()
+            if resolved is None:
+                raise FileNotFoundError(INSTALL_HINT)
+            d = resolved
         so = ort.SessionOptions()
         so.intra_op_num_threads = threads
         so.inter_op_num_threads = 1

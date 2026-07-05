@@ -8,16 +8,15 @@ packaged int8 ONNX titler via onnxruntime; it is skipped if the optional
 from __future__ import annotations
 
 import importlib.util
-from pathlib import Path
 
 import pytest
 
+from tracemill.title._resolve import span_dir as _span_dir
 from tracemill.title.hygiene import best_of, clean_title, norm_key, pick_distinct
 
-_DATA = Path(__file__).resolve().parents[2] / "src" / "tracemill" / "title" / "data"
 _HAS_ORT = importlib.util.find_spec("onnxruntime") is not None
 _HAS_TOK = importlib.util.find_spec("tokenizers") is not None
-_HAS_MODEL = (_DATA / "encoder.onnx").exists() and (_DATA / "decoder.onnx").exists()
+_HAS_MODEL = _span_dir() is not None
 _SERVEABLE = _HAS_ORT and _HAS_TOK and _HAS_MODEL
 
 

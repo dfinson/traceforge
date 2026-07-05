@@ -39,12 +39,14 @@ s3 = [
     "boto3>=1.28",
 ]
 title = [
+    "tracemill-title-model>=0.1",
     "numpy>=1.24",
     "onnxruntime>=1.17",
     "tokenizers>=0.15",
 ]
 full = [
     "boto3>=1.28",
+    "tracemill-title-model>=0.1",
     "numpy>=1.24",
     "onnxruntime>=1.17",
     "tokenizers>=0.15",
@@ -72,7 +74,17 @@ ignore = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tracemill"]
-artifacts = ["src/tracemill/phase/data/*.joblib", "src/tracemill/phase/data/potion-base-8M/*", "src/tracemill/boundary/data/*.joblib", "src/tracemill/title/data/*.onnx", "src/tracemill/title/data/*.json"]
+# The titler ONNX weights ship in the separate `tracemill-title-model` package
+# (pulled via the `title` extra), NOT in this wheel. Only the tiny non-model
+# data files (boilerplate list, phase/boundary heads) are force-included here.
+artifacts = ["src/tracemill/phase/data/*.joblib", "src/tracemill/phase/data/potion-base-8M/*", "src/tracemill/boundary/data/*.joblib", "src/tracemill/title/data/*.json"]
+
+# During development, resolve the model package from the in-repo path so an
+# editable `uv sync` serves the real weights without a PyPI/GitHub round-trip.
+# This source is uv-only and is stripped from the published wheel (the extra's
+# `tracemill-title-model>=0.1` dependency is what real installs resolve).
+[tool.uv.sources]
+tracemill-title-model = { path = "packages/tracemill-title-model", editable = true }
 
 [dependency-groups]
 dev = [

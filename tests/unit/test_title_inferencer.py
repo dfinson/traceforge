@@ -20,11 +20,12 @@ from __future__ import annotations
 
 import importlib.util
 from datetime import datetime, timezone
-from pathlib import Path
 
 import pytest
 
 from tracemill.title import SessionTitleStream, TitleInferencer
+from tracemill.title._resolve import request_dir as _request_dir
+from tracemill.title._resolve import span_dir as _span_dir
 from tracemill.types import EventMetadata, SessionEvent
 
 
@@ -200,9 +201,7 @@ _HAS_DEPS = (
     importlib.util.find_spec("onnxruntime") is not None
     and importlib.util.find_spec("tokenizers") is not None
 )
-_MODEL_FILES = ("encoder.onnx", "decoder.onnx", "tokenizer.json")
-_SPAN_DATA_DIR = Path(__file__).resolve().parents[2] / "src/tracemill/title/data"
-_HAS_MODEL = all((_SPAN_DATA_DIR / f).exists() for f in _MODEL_FILES)
+_HAS_MODEL = _span_dir() is not None
 
 
 @pytest.mark.skipif(not (_HAS_DEPS and _HAS_MODEL), reason="title extra / model artifacts absent")
@@ -231,8 +230,7 @@ def test_real_model_produces_distinct_nonempty_titles():
     assert all(u.title != act_title for u in steps)
 
 
-_REQUEST_DATA_DIR = Path(__file__).resolve().parents[2] / "src/tracemill/title/data-request"
-_HAS_REQUEST_MODEL = all((_REQUEST_DATA_DIR / f).exists() for f in _MODEL_FILES)
+_HAS_REQUEST_MODEL = _request_dir() is not None
 
 
 @pytest.mark.skipif(
@@ -240,14 +238,14 @@ _HAS_REQUEST_MODEL = all((_REQUEST_DATA_DIR / f).exists() for f in _MODEL_FILES)
     reason="title extra / span+request model artifacts absent",
 )
 def test_packaged_request_head_is_a_separate_model():
-    """When ``data-request/`` is packaged, the request head loads as its own ORT
-    session (the rationale-distilled model), not a reprefix of the span model."""
+    """When the request head is packaged, it loads as its own ORT session (the
+    rationale-distilled model), not a reprefix of the span model."""
     inf = TitleInferencer()
     span = inf.model
     req = inf.request_model
     # Routing targets the packaged request artifact, not the span dir...
     assert inf._resolve_request_dir() is not None
-    assert inf._resolve_request_dir().name == "data-request"
+    assert inf._resolve_request_dir().name == "request"
     # ...and the request head is its own ORT session under its own prefix
     # (a reprefix of the span model would share ``_enc``).
     assert req is not span

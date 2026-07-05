@@ -39,8 +39,6 @@ int8 and load lazily.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from tracemill.phase.event_rows import event_to_feature_row
 from tracemill.types import EventKind, SessionEvent, TitleUpdate
 
@@ -52,11 +50,6 @@ _STEP = "step-boundary"
 #: The request head's learned T5 prefix (the span head uses TitleModel's default).
 #: Routing/fallback for this prefix lives in :meth:`TitleInferencer._resolve_request_dir`.
 _REQUEST_PREFIX = "title task from request: "
-#: Packaged separate request-head artifact (the rationale-distilled request model),
-#: sibling of the span ``data/`` dir. The triad is exactly what TitleModel.load reads;
-#: absent or incomplete -> single-model reprefix fallback.
-_REQUEST_DATA = Path(__file__).resolve().parent / "data-request"
-_REQUEST_FILES = ("encoder.onnx", "decoder.onnx", "tokenizer.json")
 
 
 class TitleInferencer:
@@ -98,10 +91,12 @@ class TitleInferencer:
             return self._request_model_dir
         if not self._default_path:
             return None
-        # Route to the packaged model only if COMPLETE: a partial data-request/
-        # must fall back to the span reprefix, not crash the load.
-        complete = all((_REQUEST_DATA / f).exists() for f in _REQUEST_FILES)
-        return _REQUEST_DATA if complete else None
+        # The separately-packaged rationale-distilled request head, if the data
+        # package ships it (or a dev dropped it in-tree); a partial/absent head
+        # resolves to None -> span reprefix fallback, never a crash.
+        from ._resolve import request_dir
+
+        return request_dir()
 
     @property
     def request_model(self):

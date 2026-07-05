@@ -1,0 +1,42 @@
+name: Publish title model
+
+# The titler weights are a separate distribution (`tracemill-title-model`) so the
+# core `tracemill` wheel stays code-only. They change rarely (only on a retrain),
+# so they release on their own `title-model-v*` tag — independent of the code
+# `v*` tag handled by publish.yml.
+#
+# Primary: PyPI (trusted publishing). The `tracemill[title]` extra resolves it
+# from there. Mirror: the same wheel is uploaded to the GitHub release so
+# `tracemill download-model --source gh` can fetch it when PyPI is unavailable.
+
+on:
+  push:
+    tags: ["title-model-v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: write   # create the GitHub release + upload the wheel mirror
+      id-token: write   # PyPI trusted publishing (OIDC, no token)
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install build
+      - run: python -m build packages/tracemill-title-model --outdir dist
+      - name: Publish to PyPI (primary)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+      - name: Mirror wheel to the GitHub release (fallback)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "${{ github.ref_name }}"
+          dist/*.whl
+          --repo "${{ github.repository }}"
+          --title "${{ github.ref_name }}"
+          --notes "tracemill-title-model wheel — GitHub-release mirror of the PyPI package. Install: tracemill download-model --source gh"

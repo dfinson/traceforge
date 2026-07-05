@@ -3848,6 +3848,7 @@ full = [
     { name = "numpy" },
     { name = "onnxruntime" },
     { name = "tokenizers" },
+    { name = "tracemill-title-model" },
 ]
 s3 = [
     { name = "boto3" },
@@ -3856,6 +3857,7 @@ title = [
     { name = "numpy" },
     { name = "onnxruntime" },
     { name = "tokenizers" },
+    { name = "tracemill-title-model" },
 ]
 
 [package.dev-dependencies]
@@ -3895,6 +3897,8 @@ requires-dist = [
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "tokenizers", marker = "extra == 'full'", specifier = ">=0.15" },
     { name = "tokenizers", marker = "extra == 'title'", specifier = ">=0.15" },
+    { name = "tracemill-title-model", marker = "extra == 'full'", editable = "packages/tracemill-title-model" },
+    { name = "tracemill-title-model", marker = "extra == 'title'", editable = "packages/tracemill-title-model" },
     { name = "tree-sitter", specifier = ">=0.24" },
     { name = "tree-sitter-bash", specifier = ">=0.24" },
     { name = "tree-sitter-markdown", specifier = ">=0.5" },
@@ -3916,6 +3920,11 @@ dev = [
     { name = "semantic-kernel", specifier = ">=1.20" },
     { name = "smolagents", specifier = ">=1.0" },
 ]
+
+[[package]]
+name = "tracemill-title-model"
+version = "0.1.0"
+source = { editable = "packages/tracemill-title-model" }
 
 [[package]]
 name = "tree-sitter"

@@ -23,6 +23,21 @@ Source → [Parser] → Adapter → Enricher → Pipeline → Sink(s)
 pip install tracemill
 ```
 
+The core install is code-only. Live activity/step and session titling is an
+optional feature whose model weights (~90 MB int8 ONNX) ship in a separate
+`tracemill-title-model` package — pulled in only via the `title` extra:
+
+```bash
+pip install "tracemill[title]"      # or: uv add "tracemill[title]"
+```
+
+The weights are hosted on PyPI (primary) and mirrored on this repo's
+`title-model-v*` GitHub releases. If PyPI is ever unavailable, fetch the mirror:
+
+```bash
+tracemill download-model --source gh
+```
+
 ## Quick start
 
 ```yaml

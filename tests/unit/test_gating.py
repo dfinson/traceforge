@@ -320,7 +320,9 @@ class TestGateContextTracking:
 
         assert calls == [0, 1, 2]
 
-    def test_tool_call_count_increments_on_allow(self):
+    def test_tool_call_count_advances_on_observed_completion(self):
+        """Single-writer counter: it advances only when a call is observed at
+        completion (post-execution), never at preflight. The shield reads it."""
         calls = []
 
         def counting_gate(req, ctx):
@@ -331,7 +333,10 @@ class TestGateContextTracking:
 
         for _ in range(3):
             payload = {"tool_name": "x", "tool_input": {}, "session_id": "s1"}
-            pipeline._score_and_gate_preflight(payload)
+            trace, verdict = pipeline._score_and_gate_preflight(payload)
+            assert verdict.allowed
+            # Completion is where the trace observes the allowed call and counts it.
+            pipeline._enforce_postflight(trace, session_id=trace.session_id, output={"r": "ok"})
 
         assert calls == [0, 1, 2]
 

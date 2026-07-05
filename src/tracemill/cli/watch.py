@@ -14,6 +14,7 @@ import yaml
 
 from tracemill.cli.runner import (
     ResolvedPipeline,
+    load_mapping_path,
     resolve_pipelines,
     watch_directory,
     watch_jsonl_file,
@@ -173,87 +174,117 @@ async def _run_once(
 
 
 async def _watch_pipeline(pipeline: ResolvedPipeline, governance: "GovernancePipeline") -> None:
-    """Watch a single pipeline's source and process events."""
+    """Watch a single pipeline's source and feed events through the unified pipeline."""
     logger.info("Starting watcher for %s at %s", pipeline.name, pipeline.source_path)
 
-    if pipeline.source_path.is_dir():
-        # Watch directory for JSONL files
-        pattern = "*.jsonl" if pipeline.name != "continue" else "*.json"
-        async for file_path, line in watch_directory(pipeline.source_path, pattern=pattern):
-            await _process_line(line, pipeline, governance)
-    elif pipeline.source_path.is_file():
-        # Watch single file
-        async for line in watch_jsonl_file(pipeline.source_path, start_at="end"):
-            await _process_line(line, pipeline, governance)
-    else:
+    if not (pipeline.source_path.is_dir() or pipeline.source_path.is_file()):
         logger.warning("Source path does not exist: %s", pipeline.source_path)
+        return
+
+    adapter, event_pipeline = _build_pipeline_runtime(pipeline, governance)
+    try:
+        if pipeline.source_path.is_dir():
+            # Watch directory for JSONL files
+            pattern = "*.jsonl" if pipeline.name != "continue" else "*.json"
+            async for _file_path, line in watch_directory(pipeline.source_path, pattern=pattern):
+                await _feed_line(line, adapter, event_pipeline)
+        else:
+            # Watch single file
+            async for line in watch_jsonl_file(pipeline.source_path, start_at="end"):
+                await _feed_line(line, adapter, event_pipeline)
+    finally:
+        # Emit any buffered (unpaired tool-start) events and release sink resources.
+        await event_pipeline.close()
 
 
 async def _process_pipeline_once(
     pipeline: ResolvedPipeline, governance: "GovernancePipeline"
 ) -> None:
-    """Process existing content in a pipeline's source (no watching)."""
+    """Process existing content in a pipeline's source once (no watching)."""
     logger.info("Processing %s at %s", pipeline.name, pipeline.source_path)
 
-    if pipeline.source_path.is_dir():
-        pattern = "*.jsonl" if pipeline.name != "continue" else "*.json"
-        for f in pipeline.source_path.rglob(pattern):
-            if f.is_file():
-                for line in f.read_text(encoding="utf-8").splitlines():
-                    stripped = line.strip()
-                    if stripped:
-                        await _process_line(stripped, pipeline, governance)
-    elif pipeline.source_path.is_file():
-        for line in pipeline.source_path.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if stripped:
-                await _process_line(stripped, pipeline, governance)
+    if not (pipeline.source_path.is_dir() or pipeline.source_path.is_file()):
+        return
+
+    adapter, event_pipeline = _build_pipeline_runtime(pipeline, governance)
+    try:
+        if pipeline.source_path.is_dir():
+            pattern = "*.jsonl" if pipeline.name != "continue" else "*.json"
+            for f in pipeline.source_path.rglob(pattern):
+                if f.is_file():
+                    for line in f.read_text(encoding="utf-8").splitlines():
+                        stripped = line.strip()
+                        if stripped:
+                            await _feed_line(stripped, adapter, event_pipeline)
+        else:
+            for line in pipeline.source_path.read_text(encoding="utf-8").splitlines():
+                stripped = line.strip()
+                if stripped:
+                    await _feed_line(stripped, adapter, event_pipeline)
+    finally:
+        await event_pipeline.close()
 
 
-async def _process_line(
-    line: str, pipeline: ResolvedPipeline, governance: "GovernancePipeline"
-) -> None:
-    """Parse a raw line through the adapter and governance pipeline."""
-    from tracemill.adapters.mapped_json import MappedJsonAdapter
-    from tracemill.cli.runner import load_mapping_path
+def _build_sinks(pipeline: ResolvedPipeline) -> list:
+    """Instantiate the configured sink objects for a resolved pipeline (once)."""
     from tracemill.sinks.console import ConsoleSink
     from tracemill.sinks.jsonl import JsonlSink
     from tracemill.sinks.sqlite_output import SqliteOutputSink
 
+    sinks: list = []
+    for sink_config in pipeline.sinks:
+        sink_type = getattr(sink_config, "type", None)
+        if sink_type == "console":
+            sinks.append(
+                ConsoleSink(
+                    filter_actions=getattr(sink_config, "filter", None),
+                    color=getattr(sink_config, "color", True),
+                )
+            )
+        elif sink_type == "sqlite":
+            sinks.append(SqliteOutputSink(path=sink_config.path))
+        elif sink_type == "jsonl":
+            sinks.append(JsonlSink(path=sink_config.path))
+        else:
+            logger.warning("Unknown sink type %r in pipeline %s", sink_type, pipeline.name)
+    return sinks
+
+
+def _build_pipeline_runtime(pipeline: ResolvedPipeline, governance: "GovernancePipeline"):
+    """Build the ``(adapter, EventPipeline)`` runtime for a resolved pipeline.
+
+    The daemon runs the same unified pipeline as the SDK: adapt -> enrich ->
+    classify -> govern -> sinks, with ``governance`` wired in as a *stage* so every
+    emitted event carries ``metadata.governance``. Governance is one stage here, not
+    the pipeline itself. The shared governance engine also backs the Gate/Score IPC
+    servers, so session budget/drift state stays unified across observation and
+    preflight. Live ML structuring (phase + boundary labeling) is enabled by
+    default, matching the SDK ``Pipeline``.
+    """
+    from tracemill.adapters.mapped_json import MappedJsonAdapter
+    from tracemill.enricher import Enricher
+    from tracemill.pipeline import EventPipeline
+
+    mapping_path = load_mapping_path(pipeline.adapter.mapping)
+    adapter = MappedJsonAdapter.from_yaml(str(mapping_path), session_id=pipeline.name)
+    event_pipeline = EventPipeline(
+        sinks=_build_sinks(pipeline),
+        enricher=Enricher(),
+        governance=governance,
+    )
+    return adapter, event_pipeline
+
+
+async def _feed_line(line: str, adapter, event_pipeline) -> None:
+    """Parse one raw line and push each resulting event through the pipeline."""
     try:
         data = json.loads(line)
     except json.JSONDecodeError:
-        logger.debug("Skipping non-JSON line in %s", pipeline.name)
+        logger.debug("Skipping non-JSON line")
         return
 
-    # Adapt raw data to SessionEvent
-    mapping_path = load_mapping_path(pipeline.adapter.mapping)
-    adapter = MappedJsonAdapter.from_yaml(str(mapping_path), session_id=pipeline.name)
-    events = list(adapter.parse_dict(data))
-
-    for event in events:
-        # Run through governance (bridge SessionEvent → EnrichmentContext)
-        ctx = governance.context_from_session_event(event)
-        governance.process_event(ctx)
-
-        # Emit to sinks
-        for sink_config in pipeline.sinks:
-            try:
-                sink_type = getattr(sink_config, "type", None)
-                if sink_type == "console":
-                    sink = ConsoleSink(
-                        filter_actions=getattr(sink_config, "filter", None),
-                        color=getattr(sink_config, "color", True),
-                    )
-                    await sink.emit(event)
-                elif sink_type == "sqlite":
-                    sink = SqliteOutputSink(path=sink_config.path)
-                    await sink.emit(event)
-                elif sink_type == "jsonl":
-                    sink = JsonlSink(base_path=sink_config.path)
-                    await sink.emit(event)
-            except Exception as exc:
-                logger.warning("Sink error (%s): %s", sink_config, exc)
+    for event in adapter.parse_dict(data):
+        await event_pipeline.push(event)
 
 
 def _load_config(config_path: str | None) -> dict | None:

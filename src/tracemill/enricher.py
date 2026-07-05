@@ -38,7 +38,7 @@ class Enricher:
                 config_path is provided, the default discovery chain is used.
         """
         self._custom_classifications = custom_classifications
-        self._pending: dict[str, SessionEvent] = {}
+        self._pending: dict[tuple[str, str], SessionEvent] = {}
 
         # Build engine eagerly so config errors surface at construction time
         if config is not None:
@@ -52,17 +52,32 @@ class Enricher:
         """Enrich a single event. Returns None if event is buffered (tool_start waiting
         for its tool_complete pair). Returns enriched event when ready. May return a list
         if a displaced orphan start needs to be emitted alongside buffering a new start."""
+        if event.metadata is None:
+            # Defensive: SessionEvent defaults metadata to EventMetadata(), but a
+            # model_construct-built event may carry None. Normalize up front so the
+            # pairing/classification helpers below never raise — a raise here would
+            # push the raw event straight to sinks and bypass the exactly-once
+            # tool-call pairing guarantee the downstream governance stage relies on.
+            event = event.model_copy(update={"metadata": EventMetadata()})
         if event.kind == EventKind.TOOL_CALL_STARTED:
             event = self._classify(event)
             event = self._set_visibility(event)
             event = self._set_phase(event)
             tool_call_id = _extract_tool_call_id(event)
             if tool_call_id:
-                displaced = self._pending.pop(tool_call_id, None)
-                self._pending[tool_call_id] = event
+                # Key pending starts by (session_id, tool_call_id): a single
+                # Enricher instance serves interleaved sessions, and tool_call_ids
+                # are only unique within a session. Keying on the id alone lets
+                # one session's start displace another's and lets a completion
+                # pair across sessions — double-scoring one real call.
+                key = (event.session_id, tool_call_id)
+                displaced = self._pending.pop(key, None)
+                self._pending[key] = event
                 if displaced is not None:
                     logger.warning(
-                        "Duplicate TOOL_START for tool_call_id=%s; emitting previous as orphan",
+                        "Duplicate TOOL_START for session_id=%s tool_call_id=%s; "
+                        "emitting previous as orphan",
+                        event.session_id,
                         tool_call_id,
                     )
                     orphan_metadata = displaced.metadata.model_copy(update={"duration_ms": None})
@@ -72,7 +87,9 @@ class Enricher:
 
         if event.kind == EventKind.TOOL_CALL_COMPLETED:
             tool_call_id = _extract_tool_call_id(event)
-            start_event = self._pending.get(tool_call_id) if tool_call_id else None
+            start_event = (
+                self._pending.get((event.session_id, tool_call_id)) if tool_call_id else None
+            )
 
             if start_event is not None:
                 duration_ms = _compute_duration_ms(start_event.timestamp, event.timestamp)
@@ -90,13 +107,32 @@ class Enricher:
                 event = event.model_copy(
                     update={"payload": merged_payload, "metadata": merged_metadata}
                 )
-                del self._pending[tool_call_id]
+                del self._pending[(event.session_id, tool_call_id)]
             else:
                 event = self._classify(event)
                 event = self._set_visibility(event)
 
             event = self._set_phase(event)
             return event
+
+        if event.kind == EventKind.SESSION_ENDED:
+            # Flush this session's still-buffered tool starts as orphans BEFORE the
+            # session-ended event. A governance stage finalizes and evicts session
+            # state on session.ended; without this, buffered unpaired starts would
+            # surface only at pipeline close (Enricher.flush) — i.e. after the
+            # session summary was already written — and be scored into a resurrected
+            # state that never gets finalized.
+            #
+            # This assumes session.ended is terminal for the session (the contract
+            # every supported adapter emits). A tool.call.completed arriving AFTER
+            # its own session.ended is a malformed stream: its start was already
+            # flushed+scored here, so the late completion would be observed a second
+            # time into a resurrected state. We do not carry per-session tombstones
+            # to dedup that case — it does not occur in well-formed input.
+            orphans = self._flush_session(event.session_id)
+            event = self._set_visibility(event)
+            event = self._set_phase(event)
+            return [*orphans, event] if orphans else event
 
         # Non-tool events: set visibility and phase, pass through
         event = self._set_visibility(event)
@@ -112,6 +148,20 @@ class Enricher:
             new_metadata = event.metadata.model_copy(update={"duration_ms": None})
             result.append(event.model_copy(update={"metadata": new_metadata}))
         self._pending.clear()
+        return result
+
+    def _flush_session(self, session_id: str) -> list[SessionEvent]:
+        """Emit and remove this session's buffered unpaired tool-starts as orphans.
+
+        Like :meth:`flush` but scoped to a single session — used to drain pending
+        starts the instant that session ends, rather than waiting for pipeline
+        close, so a governance stage sees them before it finalizes the session."""
+        result: list[SessionEvent] = []
+        for key, event in list(self._pending.items()):
+            if event.session_id == session_id:
+                new_metadata = event.metadata.model_copy(update={"duration_ms": None})
+                result.append(event.model_copy(update={"metadata": new_metadata}))
+                del self._pending[key]
         return result
 
     # --- Private helpers ---

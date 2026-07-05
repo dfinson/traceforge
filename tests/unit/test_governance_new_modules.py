@@ -13,7 +13,8 @@ from tracemill.governance.mcp_drift import (
 )
 from tracemill.governance.drift import DriftAssessment, DriftDetector, _TRANSITION_BONUSES
 from tracemill.governance.observer import TracemillObserver
-from tracemill.governance.pipeline import SessionMeta, EscalationContext, TransformSuggestion
+from tracemill.governance.pipeline import SessionMeta
+from tracemill.governance.results import EscalationContext, TransformSuggestion
 
 
 # ─── ContextGapEvent Tests ───
@@ -448,7 +449,7 @@ class TestTransformSuggestion:
 
 class TestEscalationContext:
     def test_creation(self):
-        from tracemill.governance.pipeline import RecommendedAction
+        from tracemill.governance.results import RecommendedAction
 
         esc = EscalationContext(
             canonical_id="sha256:abc",

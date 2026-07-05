@@ -21,7 +21,6 @@ native blocking mechanism. The postflight callback receives the tool output for 
 
 from __future__ import annotations
 
-from tracemill.governance.pipeline import GovernancePipeline as Pipeline  # noqa: E402
 from tracemill.sdk.gate_policy import GatePolicy  # noqa: E402
 from tracemill.sdk.gate_types import (  # noqa: E402
     GateContext,
@@ -37,6 +36,11 @@ from tracemill.sdk.verdict import (  # noqa: E402
     Verdict,
 )
 from tracemill.trace import EventTrace, TraceStage  # noqa: E402
+
+# Imported last so every SDK submodule symbol above is already defined before the
+# facade (which pulls in the governance engine + core EventPipeline) resolves,
+# keeping this package free of import-cycle ordering hazards.
+from tracemill.sdk.pipeline import Pipeline  # noqa: E402
 
 __all__ = [
     "Pipeline",

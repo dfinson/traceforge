@@ -34,7 +34,7 @@ from tracemill_research.config import load_labeling_runtime_config
 from tracemill_research.labeling.backends.copilot_sdk import CopilotSdkBackend
 
 INTERIM = Path(__file__).resolve().parents[1] / "data" / "interim"
-ROWS = INTERIM / "preds-session-kd-small.parquet"          # 91 rows: sid,tier,src,gold,ctx
+ROWS = INTERIM / "preds-session-kd-small.parquet"  # 91 rows: sid,tier,src,gold,ctx
 CLIPS = INTERIM / "preds-session-heuristic-hybrid.parquet"  # heuristic clip in `pred`
 
 # The Copilot CLI backend is an agent: fed a bare user message it tries to HELP
@@ -99,7 +99,9 @@ async def _run(args: argparse.Namespace) -> int:
     base = pd.read_parquet(ROWS)
     clips = pd.read_parquet(CLIPS).set_index("sid")["pred"].to_dict()
     records = base.to_dict("records")
-    print(f"probing {len(records)} rows x 2 conditions (concurrency={args.concurrency})", flush=True)
+    print(
+        f"probing {len(records)} rows x 2 conditions (concurrency={args.concurrency})", flush=True
+    )
 
     cfg = load_labeling_runtime_config()
     backend = CopilotSdkBackend(cfg.backend)

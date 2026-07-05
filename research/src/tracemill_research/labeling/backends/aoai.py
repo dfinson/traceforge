@@ -147,7 +147,9 @@ class AzureOpenAIBackend:
     def _url(self) -> str:
         c = self._config
         base = c.endpoint.rstrip("/")
-        return f"{base}/openai/deployments/{c.deployment}/chat/completions?api-version={c.api_version}"
+        return (
+            f"{base}/openai/deployments/{c.deployment}/chat/completions?api-version={c.api_version}"
+        )
 
     def _body(self, prompt: str, system_message: str | None, temperature: float | None) -> dict:
         c = self._config

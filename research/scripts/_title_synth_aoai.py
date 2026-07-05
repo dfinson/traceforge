@@ -465,13 +465,25 @@ async def generate(
         # limit out rather than drop its output. Pure transport patience, not a model
         # knob and not tuned to any dataset.
         b41 = AzureOpenAIBackend(
-            AoaiConfig(ENDPOINT, "gpt-4.1-mini", reasoning=False, temperature=1.0,
-                       max_output_tokens=400, max_retries=8),
+            AoaiConfig(
+                ENDPOINT,
+                "gpt-4.1-mini",
+                reasoning=False,
+                temperature=1.0,
+                max_output_tokens=400,
+                max_retries=8,
+            ),
             client=client,
         )
         b4o = AzureOpenAIBackend(
-            AoaiConfig(ENDPOINT, "gpt-4o-mini", reasoning=False, temperature=1.0,
-                       max_output_tokens=400, max_retries=8),
+            AoaiConfig(
+                ENDPOINT,
+                "gpt-4o-mini",
+                reasoning=False,
+                temperature=1.0,
+                max_output_tokens=400,
+                max_retries=8,
+            ),
             client=client,
         )
         # Weighted 1:2 to match the two deployments' TPM ceilings (50K vs 100K) so
@@ -481,8 +493,9 @@ async def generate(
         # Structured, short-output steps go to the high-TPM reasoning deployment;
         # a generous budget absorbs any reasoning tokens so content is never empty.
         batch_backend = AzureOpenAIBackend(
-            AoaiConfig(ENDPOINT, "gpt-5-mini", reasoning=True, max_output_tokens=1500,
-                       max_retries=8),
+            AoaiConfig(
+                ENDPOINT, "gpt-5-mini", reasoning=True, max_output_tokens=1500, max_retries=8
+            ),
             client=client,
         )
 
@@ -498,8 +511,16 @@ async def generate(
             if len(accepted) >= target:
                 break
             batch, stats = await _run_round(
-                gen_backends, batch_backend, round_size, idx, real_prompts,
-                title_batch, exemplars_k, gen_concurrency, batch_concurrency, rng,
+                gen_backends,
+                batch_backend,
+                round_size,
+                idx,
+                real_prompts,
+                title_batch,
+                exemplars_k,
+                gen_concurrency,
+                batch_concurrency,
+                rng,
             )
             idx += round_size
             for pair in batch:
@@ -534,8 +555,12 @@ async def generate(
         audit: dict = {}
         if accepted and real_prompts and audit_batches > 0:
             audit = await _run_audit(
-                batch_backend, [a["prompt"] for a in accepted], real_prompts,
-                rng, audit_batches, batch_concurrency,
+                batch_backend,
+                [a["prompt"] for a in accepted],
+                real_prompts,
+                rng,
+                audit_batches,
+                batch_concurrency,
             )
             print(
                 f"\naudit (forced-choice, {audit['batches']} balanced batches): "
@@ -567,12 +592,16 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--target", type=int, default=12000, help="accepted synth pairs to produce")
     p.add_argument("--gen-concurrency", type=int, default=12, help="concurrent Step-A calls")
-    p.add_argument("--batch-concurrency", type=int, default=10, help="concurrent Step-B/audit calls")
+    p.add_argument(
+        "--batch-concurrency", type=int, default=10, help="concurrent Step-B/audit calls"
+    )
     p.add_argument("--round-size", type=int, default=600, help="candidates generated per round")
     p.add_argument("--max-rounds", type=int, default=60, help="safety cap on rounds")
     p.add_argument("--title-batch", type=int, default=12, help="prompts per title call")
     p.add_argument("--exemplars", type=int, default=3, help="real prompts few-shot per gen call")
-    p.add_argument("--audit-batches", type=int, default=20, help="forced-choice audit batches (0=skip)")
+    p.add_argument(
+        "--audit-batches", type=int, default=20, help="forced-choice audit batches (0=skip)"
+    )
     p.add_argument("--no-oracle", action="store_true", help="reals only; skip generation")
     args = p.parse_args()
 
@@ -587,9 +616,16 @@ def main() -> int:
         checkpoint_path = OUT.with_name(OUT.stem + ".synth.ckpt.json")
         raw, _audit = asyncio.run(
             generate(
-                args.target, args.gen_concurrency, args.batch_concurrency, args.round_size,
-                args.max_rounds, args.title_batch, args.exemplars, args.audit_batches,
-                real_prompts, checkpoint_path,
+                args.target,
+                args.gen_concurrency,
+                args.batch_concurrency,
+                args.round_size,
+                args.max_rounds,
+                args.title_batch,
+                args.exemplars,
+                args.audit_batches,
+                real_prompts,
+                checkpoint_path,
             )
         )
         synth = [{**r, "origin": "synth-distill"} for r in raw]
@@ -601,7 +637,9 @@ def main() -> int:
     for m in merged:
         by_origin[m["origin"]] = by_origin.get(m["origin"], 0) + 1
     distinct = len({_norm(m["gold"]) for m in merged})
-    print(f"\nwrote {OUT}  ({len(merged)} pairs, {distinct} distinct golds)  by origin: {by_origin}")
+    print(
+        f"\nwrote {OUT}  ({len(merged)} pairs, {distinct} distinct golds)  by origin: {by_origin}"
+    )
     return 0
 
 

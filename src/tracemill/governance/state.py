@@ -90,8 +90,8 @@ class SessionState:
     _last_sequence: int | None = None
     _gap_ordinal: int = 0
     _db: sqlite3.Connection | None = None
-    # Gate tracking fields
-    _tool_call_count: int = 0
+    # Shield (enforcement) decision log. The tool-call counter itself is NOT
+    # here — it is _total_tool_calls above, advanced only by increment_budget.
     _denied_count: int = 0
     _prior_verdicts: deque = field(default_factory=lambda: deque(maxlen=100))
     _prior_tool_call_ids: deque = field(default_factory=lambda: deque(maxlen=100))
@@ -175,6 +175,40 @@ class SessionState:
 
     def set_last_user(self, event_id: str) -> None:
         self._last_user_event_id = event_id
+
+    # ─── Enforcement (shield) decision tracking ──────────────────────────────
+    # The tool-call counter is single-writer: it advances ONLY through
+    # increment_budget() when a call is observed. The shield READS
+    # tool_call_count and owns only its own denial/allow decision log below.
+
+    @property
+    def tool_call_count(self) -> int:
+        """Tool calls observed this session — the single source of truth."""
+        return self._total_tool_calls
+
+    @property
+    def denied_count(self) -> int:
+        """Tool calls the shield has denied this session."""
+        return self._denied_count
+
+    def prior_verdicts(self) -> tuple:
+        """Recent enforcement verdicts (most-recent-last, bounded)."""
+        return tuple(self._prior_verdicts)
+
+    def prior_tool_call_ids(self) -> tuple[str, ...]:
+        """Recent allowed tool-call ids (most-recent-last, bounded)."""
+        return tuple(self._prior_tool_call_ids)
+
+    def record_denial(self, verdict) -> None:
+        """Record a shield denial. Does NOT touch the tool-call counter."""
+        self._denied_count += 1
+        self._prior_verdicts.append(verdict)  # deque(maxlen=100) auto-evicts
+
+    def record_allow(self, tool_call_id: str | None = None) -> None:
+        """Record a shield allow. Logs the id only — the counter advances via
+        observation (increment_budget), never here."""
+        if tool_call_id:
+            self._prior_tool_call_ids.append(tool_call_id)  # deque(maxlen=100)
 
     def check_pressure(self, thresholds: dict | None) -> bool:
         """Check if any threshold is exceeded. Updates pressure flag."""

@@ -539,21 +539,23 @@ class GovernancePipeline:
     # ─── Central gate execution helpers ───────────────────────────────────────
 
     def _build_gate_context(self, session_id: str) -> "GateContext":
-        """Build a GateContext from current session state."""
+        """Build a GateContext from current session state.
+
+        Reads only — the counter and decision log are owned by SessionState and
+        exposed through methods. The shield never mutates state from here.
+        """
         from tracemill.sdk.gate_types import GateContext
 
         state = self._states.get(session_id)
-        tool_call_count = state._tool_call_count if state else 0
-        denied_count = state._denied_count if state else 0
-        prior_verdicts = tuple(state._prior_verdicts) if state else ()
-        prior_ids = tuple(state._prior_tool_call_ids) if state else ()
+        if state is None:
+            return GateContext(session_id=session_id, tool_call_count=0, denied_count=0)
 
         return GateContext(
             session_id=session_id,
-            tool_call_count=tool_call_count,
-            denied_count=denied_count,
-            prior_verdicts=prior_verdicts,
-            prior_tool_call_ids=prior_ids,
+            tool_call_count=state.tool_call_count,
+            denied_count=state.denied_count,
+            prior_verdicts=state.prior_verdicts(),
+            prior_tool_call_ids=state.prior_tool_call_ids(),
         )
 
     def _to_tool_call_request(self, trace: "EventTrace") -> "ToolCallRequest":
@@ -698,17 +700,14 @@ class GovernancePipeline:
         return most_severe
 
     def _record_denial(self, session_id: str, verdict: "Verdict") -> None:
-        """Record a denial in session state for GateContext tracking."""
-        state = self._ensure_gate_state(session_id)
-        state._denied_count += 1
-        state._prior_verdicts.append(verdict)  # deque(maxlen=100) auto-evicts
+        """Record a shield denial. Does not touch the tool-call counter."""
+        self._ensure_gate_state(session_id).record_denial(verdict)
 
     def _record_allow(self, session_id: str, *, tool_call_id: str | None = None) -> None:
-        """Record an allow in session state."""
-        state = self._ensure_gate_state(session_id)
-        state._tool_call_count += 1
-        if tool_call_id:
-            state._prior_tool_call_ids.append(tool_call_id)  # deque(maxlen=100) auto-evicts
+        """Record a shield allow. The tool-call counter is NOT advanced here —
+        it advances only when the allowed call is observed at completion
+        (see _observe_completed_call). The shield only reads the counter."""
+        self._ensure_gate_state(session_id).record_allow(tool_call_id=tool_call_id)
 
     def _ensure_gate_state(self, session_id: str):
         """Lazily create minimal session state for gate context tracking.
@@ -1911,21 +1910,41 @@ class GovernancePipeline:
         duration_ms: int | None = None,
         error: str | None = None,
     ) -> "PostflightVerdict":
-        """Run postflight chain and return the verdict for caller enforcement.
+        """Observe the completed call, then run the postflight chain.
 
-        Callers must check verdict.action and act:
+        This is the post-execution point: the call the shield allowed has now
+        run, so the trace observes it here — the single place the tool-call
+        counter advances in the gate channel. Then callers check verdict.action:
           - ACCEPT: return result normally
           - REDACT: strip keys from output before returning
           - SUPPRESS: return empty/neutral output to the model
           - TERMINATE: raise/signal session termination
           - ALERT: return result normally but log alert
         """
+        self._observe_completed_call(trace, session_id=session_id)
         return self._run_postflight(
             trace,
             session_id=session_id,
             output=output,
             duration_ms=duration_ms,
             error=error,
+        )
+
+    def _observe_completed_call(self, trace: "EventTrace", *, session_id: str) -> None:
+        """Advance the single tool-call counter for a shield-allowed call that
+        has now executed. The trace only ever observes what the gate allowed, so
+        this is the one writer of the counter in the gate channel."""
+        state = self._ensure_gate_state(session_id)
+        phase_window = state.snapshot().phase_window
+        state.increment_budget(
+            mechanism=trace.mechanism,
+            effect=trace.effect,
+            scope=frozenset(trace.scope),
+            role=frozenset(trace.role),
+            action=frozenset(trace.action),
+            capability=frozenset(trace.capability),
+            structure=frozenset(trace.structure),
+            phase=phase_window[-1] if phase_window else None,
         )
 
     @staticmethod

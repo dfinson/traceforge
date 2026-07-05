@@ -574,7 +574,8 @@ class TestGatePolicyIntegration:
         assert "Destructive tool blocked" in verdict.reason
 
     def test_session_state_accumulates(self):
-        """Gate context tracks tool_call_count across calls."""
+        """tool_call_count is single-writer: it advances when a call is observed
+        (post-execution), not at preflight. The shield reads it to rate-limit."""
         pipeline = make_pipeline(preflight=deny_after_3_calls)
 
         for i in range(3):
@@ -587,6 +588,8 @@ class TestGatePolicyIntegration:
             )
             verdict = pipeline._run_preflight(trace, session_id="rate-test")
             assert verdict.allowed, f"Call {i} should be allowed"
+            # Completion observes the allowed call; this is where the count advances.
+            pipeline._enforce_postflight(trace, session_id="rate-test", output={"r": "ok"})
 
         # 4th call should be denied
         trace = pipeline.score_tool_call(
@@ -646,7 +649,7 @@ class TestGatePolicyIntegration:
         """Different session_ids maintain separate state."""
         pipeline = make_pipeline(preflight=deny_after_3_calls)
 
-        # Session A: 3 calls
+        # Session A: 3 calls (each observed at completion, which advances count)
         for i in range(3):
             trace = pipeline.score_tool_call(
                 {
@@ -655,7 +658,8 @@ class TestGatePolicyIntegration:
                     "session_id": "session-A",
                 }
             )
-            pipeline._run_preflight(trace, session_id="session-A")
+            assert pipeline._run_preflight(trace, session_id="session-A").allowed
+            pipeline._enforce_postflight(trace, session_id="session-A", output={"r": "ok"})
 
         # Session A: 4th call denied
         trace = pipeline.score_tool_call(

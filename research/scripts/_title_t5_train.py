@@ -301,10 +301,26 @@ def train():
     )
 
     dl = DataLoader(DS(tr), batch_size=bs, sampler=sampler, collate_fn=collate)
-    mdl = AutoModelForSeq2SeqLM.from_pretrained(BASE_MODEL).to(dev)
-    opt = torch.optim.AdamW(mdl.parameters(), lr=lr)
     steps = len(dl) * epochs
-    sched = get_linear_schedule_with_warmup(opt, int(0.06 * steps), steps)
+    # Per-epoch checkpoint + resume: an expensive GPU run (esp. on a Lightning studio
+    # that SUSPENDS when the client goes idle) must never lose all its epochs on a
+    # kill/suspend. A fresh run (no training_state.pt) is byte-identical to before;
+    # a resumed run reloads the last saved weights + optimizer/scheduler and continues.
+    state_path = os.path.join(MODEL_DIR, "training_state.pt")
+    start_ep = 0
+    if os.path.exists(state_path):
+        mdl = AutoModelForSeq2SeqLM.from_pretrained(MODEL_DIR).to(dev)
+        opt = torch.optim.AdamW(mdl.parameters(), lr=lr)
+        sched = get_linear_schedule_with_warmup(opt, int(0.06 * steps), steps)
+        _st = torch.load(state_path, map_location=dev, weights_only=False)
+        opt.load_state_dict(_st["opt"])
+        sched.load_state_dict(_st["sched"])
+        start_ep = int(_st["epoch"])
+        print(f"resumed from checkpoint: starting epoch {start_ep + 1}/{epochs}", flush=True)
+    else:
+        mdl = AutoModelForSeq2SeqLM.from_pretrained(BASE_MODEL).to(dev)
+        opt = torch.optim.AdamW(mdl.parameters(), lr=lr)
+        sched = get_linear_schedule_with_warmup(opt, int(0.06 * steps), steps)
 
     with start_run(
         EXPERIMENT,
@@ -337,7 +353,7 @@ def train():
         mdl.train()
         t0 = time.time()
         last_loss = 0.0
-        for ep in range(epochs):
+        for ep in range(start_ep, epochs):
             tot, nb = 0.0, 0
             for batch in dl:
                 batch = {k: v.to(dev) for k, v in batch.items()}
@@ -355,6 +371,17 @@ def train():
                 f"epoch {ep + 1}/{epochs}  loss {last_loss:.4f}  [{time.time() - t0:.0f}s]",
                 flush=True,
             )
+            # Checkpoint after every epoch. Weights first, then the resume-gate state
+            # file via atomic replace, so an interrupt mid-save costs at most one epoch.
+            os.makedirs(MODEL_DIR, exist_ok=True)
+            mdl.save_pretrained(MODEL_DIR)
+            tok.save_pretrained(MODEL_DIR)
+            _tmp = state_path + ".tmp"
+            torch.save(
+                {"epoch": ep + 1, "opt": opt.state_dict(), "sched": sched.state_dict()},
+                _tmp,
+            )
+            os.replace(_tmp, state_path)
 
         mlflow.log_metric("final_train_loss", last_loss)
         mlflow.log_metric("train_seconds", time.time() - t0)

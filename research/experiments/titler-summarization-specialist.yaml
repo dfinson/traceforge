@@ -75,7 +75,8 @@ hypothesis: >-
   ceiling is intrinsic to titling a distilled span at CPU tier, and the titler
   closes: no backbone, data, capacity, decoding, or input lever moves it.
 
-status: OPEN-POSITIVE (quality) / FOOTPRINT-FAIL (ship). distilbart (306M,
+status: >-
+  OPEN-POSITIVE (quality) / FOOTPRINT-FAIL (ship). distilbart (306M,
   summarization-pretrained) is the FIRST lever to meaningfully move FAITHFULNESS and
   CLOSE the gold gap. distilbart-XSUM (single-sentence-summary prior) reaches
   essentially GOLD PARITY -- coherent 70% vs gold 72%, faithful 1.57 vs gold 1.62
@@ -211,3 +212,74 @@ distillation:
     teacher lifts the ceiling the student distills toward). (3) Optional: a mid
     student (t5-base 220M) to test whether more student capacity recovers the
     teacher's coherence, if its footprint still clears the mandate.
+
+
+# ----------------------------------------------------------------------------
+# DOES THE SPAN SEQ-KD WIN TRANSFER TO THE SESSION-NAMING (request->title) HEAD?
+# The ship path above is proven for the SPAN head. The session/request head is
+# the weak one (leak-free shipped = 9% coherent). Two questions, in order:
+# (1) zero-shot: does the span-distilled flan-t5-small already serve session
+#     naming? (2) if not, does a DEDICATED session-naming seq-KD arm (teacher
+#     re-trained on the request dataset -> flan-t5-small student) break the wall?
+# Eval is the content-hash CLEAN heldout of the 260 CodePlane reals (the 91 never-
+# trained prompts; same partition as titler-request-dedicated.yaml), REAL gold,
+# same _title_judge Sonnet rubric. Probe = _title_session_probe.py (the exact
+# _REQUEST_PREFIX serve path, grounding off, over the int8 ONNX student).
+session_naming_transfer:
+  zero_shot_span_distill_small:            # span-KD small applied AS-IS to session naming
+    date: 2026-07-03
+    preds: preds-session-distill-small.parquet
+    scores: {coherent: 0.15, faithful: 0.65, specific: 0.88, fluent: 1.74, h2h_model: 0.05, h2h_tie: 0.02, h2h_gold: 0.93, n: 260}
+    gold_ceiling: {coherent: 0.91, faithful: 1.86}
+    finding: >-
+      NO TRANSFER. The span faithfulness win (1.56 on spans) COLLAPSES to 0.65 on
+      session naming -- barely above the 0.62 shipped head. The span head and the
+      request head are different distributions; a span-distilled student is floor-
+      level zero-shot on prompts. Confirms session naming needs its OWN arm.
+  dedicated_session_kd_small:              # distilbart-xsum RE-TRAINED on the request dataset -> flan-t5-small seq-KD student
+    date: 2026-07-04
+    dataset: t5-title-request-diverse.parquet   # 12,260 rows (12k synth-request + 260 CodePlane reals); 12,169 train / 91 clean heldout
+    pipeline: teacher train -> seq-KD decode -> flan-t5-small student -> int8 ONNX -> probe on 91 heldout -> local judge
+    student: google/flan-t5-small (90MB int8)   # t5-title-request-distill-small-onnx/
+    preds: preds-session-kd-small.parquet
+    scores: {coherent: 0.41, faithful: 1.18, specific: 1.47, fluent: 1.68, verb_obj_distinct: 0.91, h2h_model: 0.13, h2h_tie: 0.14, h2h_gold: 0.73, n: 91}
+    gold_ceiling: {coherent: 0.95, faithful: 1.87, specific: 1.90}
+    clean_baseline_same_heldout:           # the honest comparator -- SAME content-hash clean partition
+      dedicated_t5_tiny_diverse: {coherent: 0.39, faithful: 1.21, h2h_model: 0.10, h2h_tie: 0.14, h2h_gold: 0.76, n: 80, footprint: ~31MB}
+      # source: titler-request-dedicated.yaml results.diverse_12k_plus_real_anchor_no_rationale
+    finding: >-
+      TIE, NOT A WIN. On the identical clean heldout the seq-KD flan-t5-small
+      student (41% coherent / 1.18 faithful / 90MB) MATCHES the already-recorded
+      dedicated t5-tiny diverse model (39% / 1.21 / ~31MB) within the 2.5pt judge
+      noise floor -- at 3x the footprint. The 41% only beats the WEAK comparators
+      (9% shipped SWE-bench-OOD, 15% zero-shot span-KD). Unlike the span head
+      (seq-KD gave +0.13 faithful over the tiny anchor), seq-KD delivers NO
+      footprint-justified gain for the session-naming head: a 90MB distilled
+      student does not beat a 16M model trained directly on real gold + diverse
+      synth. The faithfulness wall the span head BROKE (1.43 -> 1.56) does NOT
+      break here -- both dedicated approaches plateau at ~1.2, and h2h stays ~73-76%
+      losses to gold. Slight h2h edge (13/14/73 vs 10/14/76) is inside noise.
+  verdict: >-
+    Session naming is NOT solved and seq-KD is NOT its lever. The request/session
+    head sits at ~40% coherent / ~1.2 faithful across BOTH dedicated arms (direct-
+    train tiny and seq-KD small), a hard plateau ~2x under the 95% gold ceiling.
+    Capacity is not the bind (90MB small ties 31MB tiny); the seq-KD teacher-target
+    trick that unlocked the span head does not transfer. The remaining honest gap
+    is the request DISTRIBUTION itself (spoken/rambling CodePlane prompts vs terse
+    span ctx) -- not student size, not distillation.
+  next: >-
+    (1) Do NOT promote distill-small for the request head -- it is a footprint
+    regression at parity quality; the ~31MB tiny diverse model is the better clean
+    point if any dedicated head ships. (2) To move the ~1.2 faithfulness wall,
+    attack the TEACHER for the request register (the span teacher was distilbart-
+    xsum on span ctx; a request teacher wants request-shaped summarization signal
+    -- rationale-augmented or a stronger backbone) rather than growing the student.
+    (3) Land a fresh IN-REGISTER real eval (held-out Copilot report_intent gerund
+    pairs neither head trained on) so future request-head numbers stop leaning on
+    the leak-inflated CodePlane 260 and the out-of-register SWE-bench floor.
+  artifacts: >-
+    gitignored (data/interim): t5-title-request-distill-small-onnx/,
+    preds-session-kd-small.parquet, preds-session-distill-small.parquet,
+    title-judge-scores-session-kd-small.jsonl,
+    title-judge-scores-session-distill-small.jsonl. Committed: the probe/train
+    scripts + this record.

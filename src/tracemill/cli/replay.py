@@ -41,7 +41,10 @@ async def _replay(source: Path, adapter_name: str, output_path: str | None) -> N
     from tracemill.adapters.mapped_json import MappedJsonAdapter
     from tracemill.cli.factory import create_default_pipeline
     from tracemill.cli.runner import load_mapping_path
+    from tracemill.enricher import Enricher
     from tracemill.governance.persistence import SystemStore
+    from tracemill.pipeline import EventPipeline
+    from tracemill.sinks.callback import CallbackSink
     from tracemill.sinks.console import ConsoleSink
     from tracemill.sinks.jsonl import JsonlSink
 
@@ -49,17 +52,33 @@ async def _replay(source: Path, adapter_name: str, output_path: str | None) -> N
     db_path = Path.home() / ".tracemill" / "system.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     store = SystemStore(db_path)
-    pipeline = create_default_pipeline(store)
+    governance = create_default_pipeline(store)
 
     # Load adapter
     mapping_path = load_mapping_path(adapter_name)
     adapter = MappedJsonAdapter.from_yaml(str(mapping_path), session_id="replay")
 
-    # Set up sink
+    # Output sink
     if output_path:
-        sink = JsonlSink(base_path=Path(output_path))
+        output_sink = JsonlSink(path=Path(output_path))
     else:
-        sink = ConsoleSink(filter_actions=None, color=True)
+        output_sink = ConsoleSink(filter_actions=None, color=True)
+
+    # Count governed events as the unified pipeline stamps and emits them.
+    total_governed = 0
+
+    async def _count(event) -> None:
+        nonlocal total_governed
+        if event.metadata is not None and event.metadata.governance is not None:
+            total_governed += 1
+
+    # Unified pipeline: adapt -> enrich -> classify -> govern (stage) -> sinks, so
+    # governance is one stage and each emitted event carries metadata.governance.
+    event_pipeline = EventPipeline(
+        sinks=[output_sink, CallbackSink(on_event=_count)],
+        enricher=Enricher(),
+        governance=governance,
+    )
 
     # Collect files to process
     files: list[Path] = []
@@ -69,7 +88,6 @@ async def _replay(source: Path, adapter_name: str, output_path: str | None) -> N
         files = [source]
 
     total_events = 0
-    total_governed = 0
 
     for f in files:
         click.echo(f"Processing: {f.name}")
@@ -95,13 +113,12 @@ async def _replay(source: Path, adapter_name: str, output_path: str | None) -> N
             except json.JSONDecodeError:
                 continue
 
-            events = list(adapter.parse_dict(data))
-            for event in events:
+            for event in adapter.parse_dict(data):
                 total_events += 1
-                pipeline.process_event(event)
-                if event.metadata and event.metadata.governance:
-                    total_governed += 1
-                await sink.emit(event)
+                await event_pipeline.push(event)
+
+    # Flush buffered (unpaired tool-start) events, then close sinks.
+    await event_pipeline.close()
 
     click.echo(f"\nReplay complete: {total_events} events, {total_governed} governed")
     store.close()

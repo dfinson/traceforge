@@ -735,6 +735,21 @@ class GovernancePipeline:
         self._persist_score(ctx.event.source_event_key, ctx.event.session_id, meta)
         return meta
 
+    def observe_event(self, event: "tracemill.types.SessionEvent") -> "SessionMeta":
+        """Observation-path scoring for use as a live pipeline stage.
+
+        Unlike :meth:`score_tool_call_event` (read-only preflight), this runs the
+        full state-mutating observation path (budget/taint/drift accrual plus
+        classification, assessment, and recommendation) and returns the
+        ``SessionMeta`` to stamp onto the event's ``metadata.governance``.
+
+        This is the method :class:`~tracemill.pipeline.EventPipeline` calls when a
+        governance stage is wired in, making governance one stage of the pipeline
+        rather than a separate track.
+        """
+        ctx = self.context_from_session_event(event)
+        return self.process_event(ctx)
+
     def _persist_score(self, source_event_key: str, session_id: str, meta: "SessionMeta") -> None:
         """Persist a scoring result to the audit trail.
 

@@ -2,7 +2,7 @@
 
 A pluggable event observation pipeline for AI agent sessions.
 
-Mills raw agent traces into structured, classified, risk-scored output. Framework-agnostic -- adding support for a new agent framework requires only a YAML mapping file.
+Mills raw agent traces into structured, classified, risk-scored, and governance-assessed output. Framework-agnostic -- adding support for a new agent framework requires only a YAML mapping file.
 
 ## What it does
 
@@ -13,9 +13,10 @@ Source → [Parser] → Adapter → Enricher → Pipeline → Sink(s)
 1. **Sources** transport raw data from files, HTTP endpoints, SSE streams, SQLite databases, or replays
 2. **Parsers** pre-process non-structured formats (markdown logs, chunked data) into structured dicts
 3. **Adapters** parse raw input into a common `SessionEvent` type using declarative YAML mappings
-4. **Enricher** adds metadata: tool pairing, duration, multi-dimensional classification, risk scoring, phase detection, visibility
-5. **Pipeline** routes enriched events to one or more storage sinks with error isolation
+4. **Enricher** adds metadata: tool pairing, duration, multi-dimensional classification, risk scoring, visibility
+5. **Pipeline** stamps live structure onto the stream -- phase, activity/step boundaries, and titles -- then routes enriched events to one or more storage sinks with error isolation
 6. **Sinks** write to storage backends or call custom handlers
+7. **Governance** (opt-in) scores the same events -- data labeling, taint / drift / budget tracking, and rule evaluation -- into per-event recommendations, with optional gate policies for consumers that want enforcement
 
 ## Install
 
@@ -79,7 +80,7 @@ pipelines:
 ```
 
 ```bash
-tracemill run  # (CLI runner -- planned)
+tracemill watch  # run a config-driven pipeline from tracemill.yaml
 ```
 
 No Python code required. Configure sources, pick a mapping, choose your sinks.
@@ -179,6 +180,54 @@ YAML-driven, multi-dimensional classification for tool invocations (14 modules, 
 
 Risk scoring produces a 0-100 score across 5 layers: structural, flag modifiers, injection patterns, pipeline taint, context adjustments.
 
+## Live structure
+
+Beyond per-event enrichment, the pipeline reconstructs the *shape* of a session as events
+stream in, using packaged CPU-only ONNX models (no torch, no GPU):
+
+- **Phase** -- each event is stamped with a coarse workflow phase (planning, implementation,
+  verification, exploration, review) live, as it arrives
+- **Boundaries** -- the stream is segmented into activities and their constituent steps,
+  stamped on `metadata.boundary`
+- **Titles** (opt-in) -- each activity/step segment gets a short human title, emitted
+  out-of-band as append-only `TitleUpdate` records so live emission is never blocked
+
+Phase and boundary inference are on by default; titling is opt-in (`enable_title=True`).
+See [Session naming](#session-naming) for how whole sessions are titled.
+
+## Governance & assessment
+
+Governance is a first-class stage of the pipeline, not a separate track. The same
+`SessionEvent` stream that feeds the sinks also drives a scoring engine that turns each
+tool call into a strongly typed assessment (`SessionMeta`, attached to the event's
+metadata under `governance`):
+
+- **Data labeling** -- sensitivity / provenance labels on tool inputs and outputs
+- **Information-flow control** -- taint tracking across tool calls, with violation counts
+- **Drift detection** -- MCP/tool and phase drift against expected profiles
+- **Budget tracking** -- token / cost / step budgets with threshold snapshots
+- **Rule evaluation** -- data-driven `recommendation_rules.yaml` yields a `RecommendedAction`
+  (`allow` / `warn` / `escalate` / `deny` / `transform`) plus the matched reason and evidence
+
+It is observation-first: by default the engine *recommends* and the consumer decides. For
+consumers that want tracemill to decide, the SDK ships an opt-in gate layer
+(`GatePolicy` -> `Verdict`) with preflight/postflight hooks and ready-made adapters for
+CrewAI, LangChain, and the Microsoft Agent Framework.
+
+```python
+from tracemill.governance.pipeline import GovernancePipeline
+
+gov = GovernancePipeline.create()          # zero-config, or pass GovernanceConfig
+meta = gov.score_tool_call_event(event)     # -> SessionMeta
+rec = meta.recommendation
+if rec and rec.recommended_action.value in ("deny", "escalate"):
+    alert(event, rec.reason_code)
+```
+
+The `tracemill` CLI exposes the same engine: `tracemill score` runs a preflight scoring
+HTTP server, `tracemill gate` applies a gate policy, and `tracemill watch` runs a full
+config-driven pipeline.
+
 ## Storage sinks
 
 All configurable via YAML -- no code required:
@@ -186,10 +235,13 @@ All configurable via YAML -- no code required:
 | Sink | Status | Output |
 | --- | --- | --- |
 | `CallbackSink` | ✅ Done | User-provided async callables (SDK use) |
-| `SqliteSink` | ⬜ Planned | Local SQLite database |
-| `JsonlSink` | ⬜ Planned | Append-only JSONL files |
-| `S3Sink` | ⬜ Planned | Cloud object storage |
-| `OtelSink` | ⬜ Planned | OpenTelemetry collector export |
+| `ConsoleSink` | ✅ Done | Pretty-printed events / assessments to terminal |
+| `JsonlSink` | ✅ Done | Append-only JSONL files (rotation supported) |
+| `SqliteSink` | ✅ Done | Local SQLite database |
+| `S3Sink` | ✅ Done | Cloud object storage |
+| `ParquetSink` | ✅ Done | Columnar Parquet files for analytics |
+| `OtelExporterSink` | ✅ Done | OpenTelemetry (OTLP) span export |
+| `WebhookSink` | ✅ Done | POST events / assessments to a webhook URL |
 
 ```yaml
 sinks:
@@ -236,7 +288,7 @@ See [SPEC.md](SPEC.md) for the full architecture specification.
 
 🚧 **Under development** -- not yet published to PyPI.
 
-Core pipeline is complete (sources, adapters, enricher, classification, risk scoring). Remaining work: storage sink implementations (SQLite, JSONL, S3), CLI runner, telemetry instrumentation. See [SPEC.md](SPEC.md) for full roadmap.
+The pipeline is feature-complete: sources, adapters, enricher, classification, risk scoring, live phase/boundary/title structuring, the governance/assessment engine, all 8 storage sinks, and the `tracemill` CLI all ship. Remaining work is narrow: opt-in telemetry self-metrics ([#48](https://github.com/dfinson/tracemill/issues/48)), an optional EventBus `subscribe()` convenience ([#47](https://github.com/dfinson/tracemill/issues/47)), and the PyPI release. See [SPEC.md](SPEC.md) for the full roadmap.
 
 ## License
 

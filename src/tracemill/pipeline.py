@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Iterable
 
 from tracemill.enricher import Enricher
 from tracemill.sinks.base import StorageSink
-from tracemill.types import SessionEvent, TelemetrySpan, TitleUpdate, UsageRecord
+from tracemill.types import EventMetadata, SessionEvent, TelemetrySpan, TitleUpdate, UsageRecord
 
 logger = logging.getLogger(__name__)
 
@@ -77,9 +77,17 @@ class EventPipeline:
         enable_boundary: bool = True,
         enable_title: bool = False,
         max_sessions: int | None = _DEFAULT_MAX_SESSIONS,
+        governance=None,
     ) -> None:
         self._sinks = list(sinks)
         self._enricher = enricher
+        # Optional governance stage: any object exposing
+        # ``observe_event(event) -> SessionMeta | None``. When supplied, each event
+        # is scored and its SessionMeta stamped onto ``metadata.governance`` at the
+        # single sink choke point, so governance is one stage of the pipeline
+        # rather than a separate track. ``None`` (default) = pure observation, no
+        # governance, existing behaviour unchanged.
+        self._governance = governance
 
         if phase_inferencer is None and enable_phase:
             from tracemill.phase import PhaseInferencer
@@ -598,8 +606,44 @@ class EventPipeline:
         await self._fanout((sink.flush() for sink in self._sinks), "flush")
 
     async def _push_to_sinks(self, event: SessionEvent) -> None:
-        """Push event directly to sinks (bypassing enricher)."""
+        """Push event to sinks, stamping governance first if a stage is wired in.
+
+        Governance is the pipeline's final enrichment stage: it runs after the
+        live phase/boundary/title structuring, so the SessionMeta it produces is
+        attached to the fully-structured event, then the event fans out to every
+        sink. Every event passes through here (the single sink choke point), so
+        this is where governance belongs as one stage of the pipeline.
+        """
+        if self._governance is not None:
+            event = self._annotate_governance(event)
         await self._fanout((sink.on_event(event) for sink in self._sinks), f"event {event.id}")
+
+    def _annotate_governance(self, event: SessionEvent) -> SessionEvent:
+        """Score one event through the governance stage and stamp its SessionMeta.
+
+        Returns a copy of the event with ``metadata.governance`` populated. The
+        stage is error-isolated: on any governance failure the original event is
+        emitted unchanged (logged), so the observation stream is never blocked by
+        the governance stage.
+        """
+        try:
+            meta = self._governance.observe_event(event)
+        except Exception as exc:
+            logger.error(
+                "Governance stage failed on event %s: %s -- emitting ungoverned",
+                event.id,
+                exc,
+                exc_info=True,
+            )
+            return event
+        if meta is None:
+            return event
+        metadata = event.metadata
+        if metadata is None:
+            metadata = EventMetadata.model_construct(governance=meta)
+        else:
+            metadata = metadata.model_copy(update={"governance": meta})
+        return event.model_copy(update={"metadata": metadata})
 
     async def close(self) -> None:
         """Flush then close all sinks. Error-isolated."""

@@ -13,7 +13,8 @@ from tracemill.governance.mcp_drift import (
 )
 from tracemill.governance.drift import DriftAssessment, DriftDetector, _TRANSITION_BONUSES
 from tracemill.governance.observer import TracemillObserver
-from tracemill.governance.pipeline import SessionMeta, EscalationContext, TransformSuggestion
+from tracemill.governance.pipeline import SessionMeta
+from tracemill.governance.results import EscalationContext, TransformSuggestion
 
 
 # ─── ContextGapEvent Tests ───

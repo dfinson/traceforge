@@ -12,7 +12,8 @@ from tracemill.classify.config import get_default_engine
 from tracemill.governance.budget import BudgetTracker
 from tracemill.governance.labeler import GovernanceLabeler
 from tracemill.governance.persistence import SystemStore
-from tracemill.governance.pipeline import GovernancePipeline, RecommendedAction
+from tracemill.governance.pipeline import GovernancePipeline
+from tracemill.governance.results import RecommendedAction
 from tracemill.trace import EventTrace
 
 
@@ -429,7 +430,7 @@ class TestFailClosed:
         assert "RuntimeError" in result.reason
 
     def test_preflight_error_returns_escalate(self, pipeline):
-        with patch.object(pipeline, "preflight_event", side_effect=RuntimeError("crash")):
+        with patch.object(pipeline._scorer, "preflight_event", side_effect=RuntimeError("crash")):
             result = pipeline.score_tool_call(
                 {
                     "tool_name": "bash",

@@ -449,7 +449,7 @@ class TestTransformSuggestion:
 
 class TestEscalationContext:
     def test_creation(self):
-        from tracemill.governance.pipeline import RecommendedAction
+        from tracemill.governance.results import RecommendedAction
 
         esc = EscalationContext(
             canonical_id="sha256:abc",

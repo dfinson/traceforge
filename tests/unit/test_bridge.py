@@ -12,7 +12,8 @@ from tracemill.classify.core import Classification, Mechanism
 from tracemill.governance.budget import BudgetTracker
 from tracemill.governance.labeler import GovernanceLabeler
 from tracemill.governance.persistence import SystemStore
-from tracemill.governance.pipeline import GovernancePipeline, RecommendedAction, SessionMeta
+from tracemill.governance.pipeline import GovernancePipeline, SessionMeta
+from tracemill.governance.results import RecommendedAction
 from tracemill.governance.rules import parse_rules
 from tracemill.types import EventKind, EventMetadata, SessionEvent
 
@@ -230,17 +231,18 @@ class TestAssessEvent:
     def test_fail_closed_on_broken_event(self, pipeline):
         """If classification somehow raises, we get ESCALATE."""
         event = _make_event(tool_name="bash", arguments={"command": "ls"})
-        # Monkey-patch to force an exception in the bridge
-        orig = pipeline.context_from_session_event
+        # Monkey-patch to force an exception in the bridge (the ContextBuilder seam
+        # the Scorer actually calls — patched on the shared instance).
+        orig = pipeline._context.from_session_event
 
         def _boom(e):
             raise RuntimeError("synthetic failure")
 
-        pipeline.context_from_session_event = _boom
+        pipeline._context.from_session_event = _boom
         result = pipeline.score_tool_call_event(event)
         assert result.recommendation.recommended_action == RecommendedAction.ESCALATE
         assert "RuntimeError" in result.recommendation.reason_code
-        pipeline.context_from_session_event = orig
+        pipeline._context.from_session_event = orig
 
     def test_read_only_no_state_mutation(self, pipeline):
         cls = Classification(mechanism=CodingMechanism.PROCESS_SHELL, effect=None)

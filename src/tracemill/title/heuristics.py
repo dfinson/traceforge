@@ -394,6 +394,25 @@ _METHODS = {
 }
 
 
+def _enforce_char_cap(out: str, max_chars: int) -> str:
+    """Guarantee ``len(out) <= max_chars`` at a word/separator boundary.
+
+    A final safety net for every method: ``hybrid`` can lead with a salient
+    identifier longer than the whole budget, which would otherwise return a
+    title over ``max_chars``. Only ever shortens, and prefers a whole-word (then
+    path/dotted-separator) boundary so it does not gratuitously split a token.
+    """
+    if len(out) <= max_chars:
+        return out
+    cut = out[:max_chars]
+    if " " in cut.strip():
+        return _TRAILING_JUNK.sub("", cut[: cut.rfind(" ")].rstrip())
+    for sep in ("/", ".", "_", "-"):
+        if sep in cut[1:]:
+            return cut[: cut.rindex(sep, 1)]
+    return cut
+
+
 def heuristic_title(
     text: str,
     method: str = "hybrid",
@@ -404,7 +423,7 @@ def heuristic_title(
     if not text or not text.strip():
         return ""
     fn = _METHODS.get(method, hybrid)
-    return fn(text, max_words, max_chars)
+    return _enforce_char_cap(fn(text, max_words, max_chars), max_chars)
 
 
 __all__ = ["heuristic_title", "clip", "imperative", "keyphrase", "hybrid"]

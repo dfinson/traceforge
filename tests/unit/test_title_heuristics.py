@@ -90,6 +90,15 @@ def test_char_budget_is_respected():
     assert len(out) <= 30
 
 
+def test_hybrid_caps_overlong_salient_identifier():
+    # A substantive request whose salient identifier alone exceeds the char
+    # budget must still respect max_chars (regression: hybrid used to return the
+    # bare over-length identifier when no room remained for the gist).
+    text = "fix the SomeReallyLongClassNameThatGoesOnAndOnAndKeepsGoingForever handler"
+    out = heuristic_title(text, "hybrid", max_words=8, max_chars=60)
+    assert len(out) <= 60
+
+
 def test_unknown_method_defaults_to_hybrid():
     text = "refactor the session manager to be async"
     assert heuristic_title(text, "not-a-method") == heuristic_title(text, "hybrid")

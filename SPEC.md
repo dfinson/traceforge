@@ -99,8 +99,8 @@ tracemill was extracted from CodePlane as a standalone library. CodePlane's obse
 ### Data Flow Summary
 
 `
-Observation: Source → [Parser] → Adapter → Enricher → Pipeline → Sink(s)
-Gate:        Hook Payload → Adapter.parse_one() → Enricher.classify() → PolicyEngine → Verdict
+Observation: Source → [Parser] → Adapter → Enricher → Pipeline (SessionMonitor) → Sink(s)
+Gate:        Hook Payload → Adapter.parse_one() → Enricher.classify() → Shield (GatePolicy) → Verdict
                                     ↑ same classify/ rules ↑
 `
 
@@ -1299,7 +1299,7 @@ tracemill/
 | CLI | ✅ Complete | `cli/` (Click): watch, replay, score, gate, detect, config, status, init, download-model |
 | Gate module | ✅ Complete | Sync scoring path + PII gate + registry (`gate/`, `gates/`) |
 | Live structuring (phase / boundary / title) | ✅ Complete | Packaged CPU-only ONNX models: PhaseInferencer + BoundaryInferencer default-on, TitleInferencer opt-in (emits `TitleUpdate`) |
-| Governance / assessment engine | ✅ Complete | 18-module `governance/`: labeler, rules, PII, IFC, integrity, drift, budget, canonical hash, observer, persistence. Epic #7 (#9–#27) delivered. See §22 |
+| Governance / assessment engine | ✅ Complete | `governance/` monitor + shield object model (SOLID): `SessionMonitor` (single writer), `SessionRegistry`, `Assessor`, `Shield`, one-counter `SessionState`, `GovernancePipeline` facade; plus labeler, rules, PII, IFC, integrity, drift, budget, observer, persistence. Epic #7 (#9–#27) delivered. See §22 |
 | Configuration system | ✅ Complete | Hierarchical loading, env overrides, discriminated unions, bootstrap |
 | Classify data files (9 YAMLs) | ✅ Complete | Binary info, rules, profiles, risk config |
 | CI/CD | ✅ Complete | Lint, test matrix, publish, weekly audits |
@@ -1329,25 +1329,129 @@ tracemill/
 
 ---
 
-## §22 — SDK, Governance Stage & Gating
+## §22 — SDK, Runtime Monitor & Shield
 
-*Observe → structure backbone. Governance is one opt-in stage. Gating is an opt-in layer.*
+*One session-state authority. The **monitor** observes; the **shield** enforces. Both compose
+the same assessment. Objects with single responsibilities, wired by dependency injection.*
 
 ### Scope
 
-tracemill's pipeline observes, parses, enriches, classifies, risk-scores, and structures
-agent events (§9–§11). **Governance/assessment is one stage of that pipeline** — not a
-separate track, and not the whole pipeline. When enabled, it consumes the same enriched
-events and scores them (data labeling, information-flow control, drift detection, budget
-tracking, rule evaluation), stamping a `SessionMeta` onto `event.metadata.governance`
-before the sinks see it.
+tracemill observes, parses, enriches, classifies, risk-scores, and structures agent events
+(§9–§11). **Governance is neither a separate track nor the whole pipeline** — it is a *runtime
+monitor* over a session's event trace, plus an optional *shield* (runtime enforcement) at the
+framework's execution boundary.
 
-By default the stage is **observation-first**: it recommends (`allow` / `warn` /
-`escalate` / `deny` / `transform`) and the consumer decides. For consumers that want
-tracemill to decide, an **opt-in gate layer** (`GatePolicy` → `Verdict`) turns those
-recommendations into enforced verdicts using each framework's native blocking mechanism.
-Nothing is gated unless a `GatePolicy` is registered, so the default posture stays pure
-observation.
+* The **monitor** consumes enriched events, advances one per-session state, and produces an
+  assessment (data labeling, information-flow control, drift, budget, rule evaluation) stamped
+  onto `event.metadata.governance` as a `SessionMeta`. It is observation-first: it *recommends*
+  (`allow` / `warn` / `escalate` / `deny` / `transform`) and the consumer decides.
+* The **shield** is opt-in. When a `GatePolicy` is registered, it turns a recommendation into an
+  enforced `Verdict` at the framework's native pre/post-execution hook. Nothing is enforced
+  unless a policy is registered, so the default posture stays pure observation.
+
+Monitor and shield are **objects with single responsibilities composed by dependency injection**,
+not a monolith. This section specifies that object model.
+
+### The object model
+
+The engine dissolves into focused collaborators, each with one reason to change.
+`GovernancePipeline` is the **composition root / facade** that wires them and exposes the public
+API; the SDK `Pipeline` composes it with the observation backbone.
+
+| Collaborator | Single responsibility | Depends on |
+|---|---|---|
+| `SessionState` | Encapsulate one session's accumulators — **one** tool-call counter, budget dimensions, taint ledger, phase window, gate history. Mutated only through its own methods; exposes an immutable `snapshot()`. | — |
+| `SystemStore` | Durability: idempotency reservations, atomic commit, crash recovery, audit persistence. | sqlite |
+| `SessionRegistry` | Residency: the one place sessions are created, found, and LRU-evicted; reservation bookkeeping. | `SystemStore` |
+| `Assessor` | Turn `(snapshot, event)` into a `SessionMeta` — label + risk + recommendation + drift + MCP. Side-effect-free. | labeler, rules, engine |
+| `SessionMonitor` | The **single writer**: per event, advance `SessionState` (Phase 1) then call the `Assessor`. Owns `observe` / `preflight` / `lifecycle`. | `SessionRegistry`, `Assessor` |
+| `GatePolicy` (Policy) | Map an assessed request/result to a `Verdict` (pre) / `PostflightVerdict` (post). An injected strategy. | — |
+| `Shield` | Runtime enforcement: build the gate context from `SessionState`, run the policy's pre/post chains, record allow/deny. | `GatePolicy`, `SessionRegistry` |
+| `gate_*` adapters | Bind one framework's execution hooks to the `Shield` (the edit-automaton at the edge). | `Shield` |
+| `GovernancePipeline` | **Composition root + facade**: build the collaborators; delegate `observe_event` / `score_tool_call*` / `process_*` / `gate_*`. | all of the above |
+
+```mermaid
+flowchart TB
+  subgraph Facade["GovernancePipeline — composition root / facade"]
+    direction TB
+    MON["SessionMonitor<br/>(single writer)"]
+    SH["Shield<br/>(enforcement)"]
+  end
+  REG["SessionRegistry<br/>(residency + eviction)"]
+  ST["SessionState<br/>(one counter, methods only)"]
+  ASS["Assessor<br/>(label · risk · drift · recommend)"]
+  POL["GatePolicy<br/>(Verdict strategy)"]
+  STORE["SystemStore<br/>(durability)"]
+
+  MON --> REG
+  MON --> ASS
+  SH --> REG
+  SH --> POL
+  REG --> ST
+  REG --> STORE
+  MON -. reads snapshot .-> ST
+  SH -. reads via methods .-> ST
+
+  classDef writer fill:#fde2e8,stroke:#b3365f;
+  class MON writer;
+```
+
+* **Single Responsibility** — no object both accumulates state and decides enforcement.
+* **Open/Closed** — `Assessor` and `GatePolicy` are strategies; swap them without editing the
+  monitor.
+* **Liskov** — any `Assessor` / `GatePolicy` implementation is substitutable.
+* **Interface Segregation** — the shield reads gate history through narrow `SessionState`
+  methods, never its fields.
+* **Dependency Inversion** — the monitor and shield depend on injected collaborators,
+  constructed once at the composition root.
+
+### One session-state authority
+
+`SessionState` owns exactly one tool-call counter. It previously carried two — a budget counter
+(advanced on observation) and a gate counter (advanced on allow) — the same quantity written by
+two owners on two clocks, never reconciled. They are now a single `tool_call_count` advanced
+through one method; budget pressure and the gate context both read it. State is mutated only
+through methods (`observe_tool_call`, `record_allow`, `record_denial`, `add_taint`, …), and
+collaborators that need gate history call methods (`denied_count`, `prior_verdicts`,
+`prior_tool_call_ids`) rather than touching fields. Encapsulation makes the twin-counter and
+cross-module-poke classes of bug unrepresentable.
+
+### Monitor observes, shield enforces
+
+Two compositions of the same collaborators:
+
+* **Observation (monitor alone).** Every pushed event is enriched → classified → structured →
+  **observed** (state advances once, on the canonical tool-call event) → assessed → emitted with
+  its `SessionMeta`. With no `GatePolicy`, nothing is enforced.
+* **Enforcement (monitor + shield).** At a framework's pre-execution hook the shield builds a
+  gate context from `SessionState`, runs the policy's preflight chain, and returns a `Verdict`
+  (allow / deny) enforced by the framework's native mechanism; a postflight chain can
+  redact / suppress / alert on the result. The shield records the outcome back into the same
+  `SessionState`, so budget stays honest: a denied call never reaches the monitor's commit and
+  costs no budget.
+
+`SessionMonitor` exposes three entry points, distinguished by state semantics:
+
+| Method (facade) | Input | Session state | Returns | Use |
+|--------|-------|---------------|---------|-----|
+| `observe_event(event)` | `SessionEvent` | **advances** | `SessionMeta` | the pipeline stage (budget / taint / drift accrue) |
+| `score_tool_call_event(event)` | `SessionEvent` | read-only | `SessionMeta` | preflight from an adapted event |
+| `score_tool_call(payload)` | `dict` | read-only | `EventTrace` | preflight from a hook |
+
+`observe_event` is the mutating stage the `EventPipeline` calls; `score_tool_call*` score against
+current state without committing. Internally the monitor is the single writer and the assessor is
+side-effect-free, so a read-only score is literally "assess a snapshot the monitor did not
+advance."
+
+### Determinism contract
+
+Replaying a trace must reproduce the live assessment. Therefore **non-deterministic enrichment is
+an injected collaborator whose output is captured onto the event, never re-derived inside state
+mutation.** ML structurers (phase / boundary / title, §11) run once at ingestion and write their
+result onto the event; the monitor's Phase-1 mutation reads only captured values and
+deterministic heuristics. Replay injects a "captured-value" inferencer and reaches identical
+state. (Dependency Inversion applied to time: the *source* of a value is a dependency, so live
+and replay differ only in which implementation is injected.)
 
 ### The SDK facade: `tracemill.sdk.Pipeline`
 
@@ -1355,18 +1459,17 @@ The SDK's top-level entry point composes tracemill's two halves into one object:
 
 * the **observation backbone** (`tracemill.pipeline.EventPipeline`) — enrich → classify →
   ML-structure (phase / boundary / title) → sinks, and
-* the **governance engine** (`tracemill.governance.pipeline.GovernancePipeline`) — scoring,
-  budgets / drift, and the gating helpers.
+* the **governance engine** (`GovernancePipeline`) — the monitor (+ optional shield).
 
-Governance is wired in as **one stage**: when enabled, each pushed event is scored and its
-`SessionMeta` stamped onto `event.metadata.governance` just before the sinks. It is not a
-separate pipeline and not a precondition — structuring runs with or without it.
+Governance is wired in as **one stage**: when enabled, each pushed event is observed and its
+`SessionMeta` stamped onto `event.metadata.governance` just before the sinks. Structuring runs
+with or without it.
 
 ```python
 from tracemill.sdk import Pipeline
 from tracemill.sinks.jsonl import JsonlSink
 
-# Observe a stream: enrich -> classify -> structure -> govern -> emit
+# Observe a stream: enrich -> classify -> structure -> observe -> emit
 async with Pipeline.create(sinks=[JsonlSink("events.jsonl")]) as pipeline:
     async for event in adapter.stream(...):
         await pipeline.push(event)   # emitted events carry metadata.governance
@@ -1382,32 +1485,29 @@ Pipeline.create(
 Pipeline.from_config(path=None, *, policy=None, sinks=None, ...) -> Pipeline
 ```
 
-* `config` — a `GovernanceConfig` for the governance engine (in-memory DB + defaults when
-  omitted). `from_config` loads it from a `tracemill.yaml` instead.
-* `policy` — a `GatePolicy` enabling the gating layer (the `gate_*` helpers). Omit for
+* `config` — a `GovernanceConfig` for the engine (in-memory DB + defaults when omitted).
+  `from_config` loads it from a `tracemill.yaml` instead.
+* `policy` — a `GatePolicy` enabling the shield (the `gate_*` helpers). Omit for
   observation-only usage.
 * `sinks` — observation destinations for pushed events. Omit for gating-only usage.
-* `enable_structure` / `enable_title` — phase + boundary (and optional title) ML
-  structuring. Models load lazily on first push, so gating-only usage pays nothing.
-* `governance` — wire the governance engine in as a stage so pushed events get
-  `metadata.governance` stamped (default `True`). Set `False` for pure observation;
-  `gate_*` / `score_tool_call` still use the engine.
+* `enable_structure` / `enable_title` — phase + boundary (and optional title) ML structuring.
+  Models load lazily on first push, so gating-only usage pays nothing.
+* `governance` — wire the monitor in as a stage so pushed events get `metadata.governance`
+  stamped (default `True`). Set `False` for pure observation; `gate_*` / `score_tool_call` still
+  use the engine.
 
-The returned `Pipeline` exposes:
-
-* `await push(event)` / `push_span(span)` / `push_usage(usage)` / `flush()` / `close()`,
-  and `async with` (closes on exit).
-* `score_tool_call(payload) -> EventTrace` — read-only preflight (delegates to the engine).
-* `gate_crewai()`, `gate_langchain(tool)`, `gate_langgraph(tools)`,
-  `gate_semantic_kernel(kernel)`, `gate_maf()`, `gate_smolagents(agent_cls=None)`,
-  `gate_pydantic_ai(agent)`, `gate_openai_agents(agent)` — opt-in gating.
-* `.governance` (the `GovernancePipeline` engine) and `.backbone` (the `EventPipeline`) —
-  escape hatches for advanced use.
+The returned `Pipeline` exposes `await push(event)` / `push_span(span)` / `push_usage(usage)` /
+`flush()` / `close()`, `async with` (closes on exit), `score_tool_call(payload) -> EventTrace`
+(read-only preflight), the `gate_*` helpers (`gate_crewai()`, `gate_langchain(tool)`,
+`gate_langgraph(tools)`, `gate_semantic_kernel(kernel)`, `gate_maf()`,
+`gate_smolagents(agent_cls=None)`, `gate_pydantic_ai(agent)`, `gate_openai_agents(agent)`), and
+the `.governance` (engine) / `.backbone` (`EventPipeline`) escape hatches.
 
 ### The governance engine: `GovernancePipeline`
 
-The scoring stage + gating engine, usable standalone. The `score` / `gate` CLIs and
-gating-only SDK use go straight to it; the facade delegates to it.
+The composition root and facade, usable standalone. The `score` / `gate` CLIs and gating-only SDK
+use go straight to it; the SDK facade delegates to it. It constructs the `SessionRegistry`,
+`Assessor`, `SessionMonitor`, and `Shield`, then forwards to them.
 
 ```python
 from tracemill.governance.pipeline import GovernancePipeline
@@ -1424,21 +1524,8 @@ trace = gov.score_tool_call({
 # trace.suggested_action == "escalate"; trace.reason == "risk_score_danger"
 ```
 
-Three scoring entry points, distinguished by state semantics:
-
-| Method | Input | Session state | Returns | Use |
-|--------|-------|---------------|---------|-----|
-| `score_tool_call(payload)` | `dict` | read-only | `EventTrace` | preflight from a hook |
-| `score_tool_call_event(event)` | `SessionEvent` | read-only | `SessionMeta` | preflight from an adapted event |
-| `observe_event(event)` | `SessionEvent` | **mutating** | `SessionMeta` | the pipeline stage (budget/taint/drift accrue) |
-
-`observe_event` is the method the `EventPipeline` governance stage calls: it runs the full
-state-mutating observation path and returns the `SessionMeta` stamped onto
-`metadata.governance`. `score_tool_call*` are read-only — they score against current state
-but never mutate budget / taint / drift.
-
-`EventTrace` (`tracemill.trace`) is the unified pipeline record — identity, classification,
-and assessment on one frozen object (abridged):
+`EventTrace` (`tracemill.trace`) is the unified pipeline record — identity, classification, and
+assessment on one frozen object (abridged):
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -1454,7 +1541,7 @@ class EventTrace:
     action: tuple[Action, ...]
     capability: tuple[Capability, ...]
     structure: tuple[Structure, ...]
-    # assessment (scorer fills)
+    # assessment (assessor fills)
     risk_score: int | None
     risk_band: RiskBand | None
     suggested_action: Recommendation | None   # allow/warn/escalate/deny/transform
@@ -1464,8 +1551,8 @@ class EventTrace:
 
 `SessionMeta` (`tracemill.governance.results`) is the richer stateful output attached to
 `event.metadata.governance`: `classification`, `risk_assessment`, `recommendation` (a
-`RiskRecommendation` with `.recommended_action`, `.reason_code`, `.transform`),
-`budget_snapshot`, `drift`, `mcp_alerts`, `evidence`.
+`RiskRecommendation` with `.recommended_action`, `.reason_code`, `.transform`), `budget_snapshot`,
+`drift`, `mcp_alerts`, `evidence`.
 
 The recommendation enum (`tracemill.governance.results`):
 
@@ -1478,16 +1565,16 @@ class RecommendedAction(StrEnum):
     TRANSFORM = "transform"
 ```
 
-These are **recommendations from the rules engine**. On their own they enforce nothing; a
-registered `GatePolicy` is what turns a recommendation into an enforced `Verdict`.
+These are **recommendations from the rules engine** (the `Assessor`). On their own they enforce
+nothing; a registered `GatePolicy` is what turns a recommendation into an enforced `Verdict` at
+the `Shield`.
 
 ### Interaction Models
 
-#### Push: observation (governance as a stage)
+#### Push: observation (the monitor as a stage)
 
-Every event pushed through the pipeline is enriched, classified, optionally structured,
-scored, and emitted with its `SessionMeta` on `metadata.governance`. A `CallbackSink` can
-react to each one:
+Every event pushed through the pipeline is enriched, classified, optionally structured, observed,
+and emitted with its `SessionMeta` on `metadata.governance`. A `CallbackSink` can react to each:
 
 ```python
 from tracemill.sdk import Pipeline
@@ -1503,8 +1590,8 @@ async def on_enriched_event(event):
 pipeline = Pipeline.create(sinks=[CallbackSink(on_event=on_enriched_event)])
 ```
 
-`metadata.governance` is a `SessionMeta` attribute (not a dict key). Sinks (JSONL, SQLite,
-…) persist independently; the callback fires regardless of sink configuration.
+`metadata.governance` is a `SessionMeta` attribute (not a dict key). Sinks persist independently;
+the callback fires regardless of sink configuration.
 
 #### Pull: synchronous scoring
 
@@ -1523,9 +1610,8 @@ trace = gov.score_tool_call({
 # trace.suggested_action == "escalate"; trace.risk_score == 72; trace.reason == "risk_score_danger"
 ```
 
-`score_tool_call()` is read-only — it scores against current session state but does NOT
-mutate budget / taint / drift and does NOT commit state. `observe_event()` is the
-observation counterpart that commits state.
+`score_tool_call()` is read-only — the monitor scores a snapshot it did not advance, so budget /
+taint / drift are untouched. `observe_event()` is the observation counterpart that advances state.
 
 ### CLI
 
@@ -1550,18 +1636,16 @@ tracemill watch
 tracemill replay ./traces --adapter copilot
 ```
 
-`tracemill score` serves read-only assessments; `tracemill gate` returns an enforced
-verdict from a pipeline that has a `GatePolicy` registered; `tracemill watch` / `replay`
+`tracemill score` serves read-only assessments (monitor only); `tracemill gate` returns an
+enforced verdict from a pipeline whose `Shield` has a `GatePolicy`; `tracemill watch` / `replay`
 run the unified observe → structure → govern → sinks pipeline.
 
 ### Integration Patterns
 
-How consumers wire the scoring stage and gating layer into framework hooks.
-
 #### In-process gating (SDK)
 
-The SDK composes a `GatePolicy` (preflight/postflight callbacks returning a `Verdict`)
-onto the pipeline, then attaches it to a framework with one call:
+The SDK composes a `GatePolicy` (preflight/postflight callbacks returning a `Verdict`) onto the
+pipeline's `Shield`, then binds it to a framework with one call:
 
 ```python
 from tracemill.sdk import Pipeline, GatePolicy, Verdict, ToolCallRequest, GateContext
@@ -1572,21 +1656,21 @@ def preflight(request: ToolCallRequest, ctx: GateContext) -> Verdict:
     return Verdict.allow()
 
 policy = GatePolicy().preflight(preflight)
-pipeline = Pipeline.create(policy=policy)   # facade; gating enabled
+pipeline = Pipeline.create(policy=policy)   # facade; shield enabled
 
-pipeline.gate_crewai()           # CrewAI hooks
+pipeline.gate_crewai()                 # CrewAI hooks
 tool = pipeline.gate_langchain(tool)   # wrap a LangChain tool
-pipeline.gate_maf()              # Microsoft Agent Framework middleware
+pipeline.gate_maf()                    # Microsoft Agent Framework middleware
 ```
 
-tracemill enforces the returned `Verdict` using each framework's native blocking
-mechanism. The optional postflight callback receives the tool output for audit. (The
-`gate_*` helpers also exist directly on `GovernancePipeline` for gating-only use.)
+The `Shield` enforces the returned `Verdict` using each framework's native blocking mechanism.
+The optional postflight callback receives the tool output for audit. (The `gate_*` helpers also
+exist directly on `GovernancePipeline` for gating-only use.)
 
 #### Shell hook (Copilot / Claude Code CLI)
 
-The consumer's hook script pipes the tool-call event to `tracemill gate`, which relays it
-to the running pipeline's IPC server and prints a verdict in the framework's format:
+The consumer's hook script pipes the tool-call event to `tracemill gate`, which relays it to the
+running pipeline's IPC server and prints a verdict in the framework's format:
 
 ```bash
 #!/bin/bash
@@ -1619,46 +1703,46 @@ async def can_use_tool(tool_name, input_data, session_id):
 |-----------|----------|
 | Observation pipeline (always-on) | Which events / sources to observe |
 | Event parsing (framework mappings) | Escalation flow (human-in-the-loop) |
-| Classification + risk scoring | Notification channels (Slack, email) |
+| Classification + risk scoring (`Assessor`) | Notification channels (Slack, email) |
 | Rule evaluation → `RecommendedAction` | Final authority over allow / deny |
-| Session state (taint, drift, budget) | Registering a `GatePolicy` (opt-in) |
+| One session-state authority (taint, drift, budget) | Registering a `GatePolicy` (opt-in) |
 | Storage (sinks) | Audit retention policy |
-| `score_tool_call()` / `observe_event()` | Interpreting the assessment |
-| Opt-in `GatePolicy` → `Verdict` enforcement | Timeout / failure handling |
+| `observe_event()` / `score_tool_call()` | Interpreting the assessment |
+| Opt-in `Shield` → `Verdict` enforcement | Timeout / failure handling |
 
 ### The Single Flow
 
 ```
 1. Agent session starts
 2. tracemill observation pipeline starts (reads from configured source)
-3. Events stream in -> parse -> enrich -> classify -> structure -> govern (stage)
-   • Session state accumulates (taint, drift, budget) — ONLY on observed execution
+3. Events stream in -> parse -> enrich -> classify -> structure -> observe (monitor stage)
+   • SessionState advances once per real tool call — the single writer, single counter
    • Each emitted event carries its SessionMeta on metadata.governance; sinks persist
-4. IF a gate is registered AND a pre-execution hook fires:
+4. IF a Shield (GatePolicy) is registered AND a pre-execution hook fires:
    a. Hook relays the pending call (score_tool_call / tracemill gate)
-   b. Pipeline scores it read-only against current session state
+   b. Monitor scores it read-only against current session state
    c. GatePolicy maps the recommendation to a Verdict (allow / deny)
-   d. tracemill enforces via the framework's native mechanism
+   d. Shield enforces via the framework's native mechanism, records the outcome in SessionState
 5. Observation continues:
-   • Allowed events: appear in source -> state mutates -> persist
-   • Denied events: never in source -> no state mutation (budget stays accurate)
+   • Allowed events: appear in source -> monitor advances state -> persist
+   • Denied events: never in source, never committed -> no state mutation (budget stays accurate)
 ```
 
 ### Deduplication
 
-`score_tool_call()` is **read-only** — it scores against accumulated state but does NOT
-mutate budget, taint, or drift. State changes only occur when the observation pipeline
-processes an event from its source via `observe_event` (confirming execution):
+`score_tool_call()` is **read-only** — it scores against accumulated state but does NOT advance
+the counter, budget, taint, or drift. State changes only when the monitor observes an event from
+its source via `observe_event` (confirming execution):
 
-- **Allowed events:** observation sees them naturally, scores them, commits state, persists.
-- **Denied events:** never appear in the source, so they never mutate state.
+- **Allowed events:** observation sees them naturally, scores them, advances state, persists.
+- **Denied events:** never appear in the source, so they never advance state.
 
-Blocked calls therefore never corrupt budget/taint state. The observation pipeline is the
-single source of truth for state mutations.
+Blocked calls therefore never corrupt budget / taint state. The monitor is the single source of
+truth for state mutations.
 
 ### Configuration (`tracemill.yaml`)
 
-The `governance` section configures the scoring stage. Same shape in YAML and SDK:
+The `governance` section configures the monitor + assessor. Same shape in YAML and SDK:
 
 ```yaml
 # tracemill.yaml
@@ -1706,22 +1790,21 @@ enforcement decisions.
 
 ### Design Constraints
 
-1. **Governance is one stage, not the whole pipeline** — it consumes enriched events and
-   scores them; observation, enrichment, and structuring are separate stages.
-2. **Observation-first by default** — with no `GatePolicy`, tracemill only recommends; the
-   consumer decides.
-3. **Enforcement is opt-in** — a registered `GatePolicy` yields a `Verdict`, enforced via
-   the framework's native mechanism. Final authority stays with the consumer.
-4. **Scoring is opt-in but uniform** — when the governance stage is enabled, every emitted
-   event gets a `SessionMeta`; when disabled, the backbone still observes and structures.
-5. **`score_tool_call()` is read-only** — it never mutates budget/taint/drift; only
-   `observe_event` (the stage) commits state.
-6. **Shared session state** — preflight scoring and observation share the same state
-   snapshot; observation alone commits mutations.
-7. **No framework dependencies in the core** — governance never imports Copilot, Claude,
+1. **One state authority** — `SessionState` owns a single tool-call counter and is mutated only
+   through its own methods; there is no second counter and no external field access.
+2. **Single writer** — only the `SessionMonitor` advances `SessionState`; the `Assessor` is
+   side-effect-free, so a read-only score is an assessment of an un-advanced snapshot.
+3. **Monitor observes, shield enforces** — observation recommends; enforcement is opt-in via a
+   registered `GatePolicy`. Final authority stays with the consumer.
+4. **Program to interfaces (DIP/OCP)** — `Assessor` and `GatePolicy` are injected strategies
+   constructed at the `GovernancePipeline` composition root; collaborators depend on abstractions.
+5. **Determinism** — non-deterministic enrichment is captured onto the event and never
+   re-derived during state mutation, so replay reproduces the live assessment.
+6. **No framework dependencies in the core** — the monitor / shield never import Copilot, Claude,
    LangGraph, etc.; the `gate_*` adapters wrap frameworks at the edge.
-8. **Rules are data** — `recommendation_rules.yaml`. Turing-incomplete.
-9. **Callbacks and gates are optional** — sinks persist regardless.
+7. **Rules are data** — `recommendation_rules.yaml`. Turing-incomplete.
+8. **Fail-closed enforcement** — any error inside the shield's chains yields DENY (preflight) or
+   SUPPRESS (postflight); sinks and callbacks remain optional.
 
 ### Framework Compatibility
 
@@ -1744,8 +1827,8 @@ enforcement decisions.
 | 15 | **smolagents** | Class wrap | `pipeline.gate_smolagents()` | ✓ |
 | 16 | **SWE-agent** | None | — | ✗ (observation only) |
 
-Rows 14 and 16 have no pre-execution hook. tracemill observes and scores their events, but
-no consumer can block their tool calls.
+Rows 14 and 16 have no pre-execution hook. tracemill observes and scores their events, but no
+consumer can block their tool calls.
 
 ### File Structure
 
@@ -1754,15 +1837,23 @@ src/tracemill/
 ├── pipeline.py              # EventPipeline — observation backbone + governance stage
 ├── enricher.py              # Classification + risk enrichment
 ├── trace.py                 # EventTrace, TraceStage (unified record)
-├── governance/              # The scoring stage + gating engine
-│   ├── pipeline.py          # GovernancePipeline (score_tool_call, observe_event, gate_*)
+├── governance/              # The monitor + shield engine
+│   ├── pipeline.py          # GovernancePipeline — composition root / facade (delegates)
+│   ├── monitor.py           # SessionMonitor — single writer (observe / preflight / lifecycle)
+│   ├── registry.py          # SessionRegistry — residency + LRU eviction + reservations
+│   ├── assessor.py          # Assessor — (snapshot, event) -> SessionMeta (label+risk+drift)
+│   ├── shield.py            # Shield — gate context + preflight/postflight + record allow/deny
+│   ├── state.py             # SessionState — one counter, mutated only via methods
+│   ├── persistence.py       # SystemStore — durability (reservations, atomic commit)
 │   ├── results.py           # RecommendedAction, RiskRecommendation, SessionMeta
-│   ├── rules.py             # Rule, Predicate, evaluate_rules()
 │   ├── labeler.py           # GovernanceLabeler
-│   ├── state.py             # SessionState (taint, budget, drift)
-│   └── ...                  # pii, ifc, integrity, drift, budget, observer, persistence
-├── sdk/                     # Pipeline facade + GatePolicy + Verdict + gates
-│   └── pipeline.py          # Pipeline — backbone + governance stage + gating delegates
+│   ├── rules.py             # Rule, Predicate, evaluate_rules()
+│   └── ...                  # pii, ifc, integrity, drift, budget, observer
+├── sdk/                     # Pipeline facade + GatePolicy + Verdict + gate_* helpers
+│   ├── pipeline.py          # Pipeline — backbone + governance stage + gating delegates
+│   ├── gate_policy.py       # GatePolicy (Policy strategy)
+│   ├── gate_types.py        # GateContext, ToolCallRequest/Result, PostflightVerdict
+│   └── verdict.py           # Verdict
 ├── gate/                    # Cross-process gate IPC (tracemill gate)
 ├── gates/                   # Bundled detectors (PII)
 ├── classify/                # Classification engine + data/recommendation_rules.yaml

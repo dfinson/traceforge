@@ -215,8 +215,100 @@ class TestPipelineSessionEviction:
         assert "A" not in pipeline._title_streams and "A" not in pipeline._session_locks
         assert "B" in pipeline._title_streams
 
+    async def test_eviction_cancels_pending_session_refinement(self):
+        # Finding-2 race: a slow API refinement scheduled before eviction must
+        # not emit a stale session title after the session's stream is dropped
+        # (and possibly recreated). Eviction cancels the victim's in-flight
+        # refinement, so the survivor's refinement still lands but the evicted
+        # session keeps only its heuristic.
+        import threading
+        from datetime import datetime, timezone
 
-class TestPipelineTitle:
+        from tests.unit.test_title_inferencer import _FakeTitle
+
+        from tracemill.title import TitleInferencer
+        from tracemill.types import EventMetadata, SessionEvent
+
+        def _umsg(session_id: str, text: str) -> SessionEvent:
+            return SessionEvent(
+                id=f"{session_id}-0",
+                kind="message.user",
+                session_id=session_id,
+                timestamp=datetime.now(timezone.utc),
+                payload={"content": text},
+                metadata=EventMetadata(source_framework="copilot"),
+            )
+
+        release = threading.Event()
+
+        def heuristic(text: str) -> str:
+            return "Heuristic " + text.split()[0]
+
+        def refiner(text: str) -> str:
+            release.wait(timeout=5)  # block so the refinement is still in-flight
+            return "Refined " + text.split()[0]
+
+        recorder = RecordingSink()
+        pipeline = EventPipeline(
+            sinks=[recorder.sink],
+            enable_phase=False,
+            enable_boundary=False,
+            title_inferencer=TitleInferencer(
+                model=_FakeTitle(), session_titler=heuristic, session_refiner=refiner
+            ),
+            max_sessions=1,
+        )
+        await pipeline.push(_umsg("A", "Alpha add retry logic to the HTTP client with backoff"))
+        # A's refinement is now scheduled and blocked in its worker thread.
+        await pipeline.push(_umsg("B", "Bravo build the pagination endpoint for the users API"))
+        # Pushing B put the count over the cap -> A was finalized/evicted, which
+        # cancels A's pending refinement before it can emit.
+        release.set()
+        await pipeline.flush()
+
+        a_sess = [
+            u.title for u in recorder.title_updates if u.session_id == "A" and u.kind == "session"
+        ]
+        b_sess = [
+            u.title for u in recorder.title_updates if u.session_id == "B" and u.kind == "session"
+        ]
+        # A's refinement was cancelled -> only its heuristic ever emitted.
+        assert a_sess == ["Heuristic Alpha"]
+        # B was not evicted -> its refinement lands on top of its heuristic.
+        assert b_sess == ["Heuristic Bravo", "Refined Bravo"]
+
+    async def test_acquire_session_retries_when_held_lock_is_evicted(self):
+        # Finding-1 race: a pusher may be queued on a session lock that eviction
+        # then drops from the registry. When it wakes holding that now-stale lock
+        # it must re-validate and converge on the session's current lock, so two
+        # pushers never serialize under different locks.
+        import asyncio
+
+        pipeline = EventPipeline(
+            sinks=[], enable_phase=False, enable_boundary=False, max_sessions=None
+        )
+        l1 = pipeline._session_lock("s")
+        await l1.acquire()  # hold L1 so the acquirer below queues on it
+
+        acquired: dict[str, asyncio.Lock] = {}
+
+        async def acquirer() -> None:
+            lock = await pipeline._acquire_session("s")
+            acquired["lock"] = lock
+            lock.release()
+
+        task = asyncio.create_task(acquirer())
+        await asyncio.sleep(0)  # let the acquirer queue on L1
+
+        # Simulate eviction replacing the lock, then release the stale one.
+        pipeline._session_locks.pop("s")
+        l2 = pipeline._session_lock("s")  # a fresh lock is now the registered one
+        l1.release()  # the acquirer wakes holding the now-stale L1
+
+        await task
+        assert l1 is not l2
+        assert acquired["lock"] is l2  # re-validated onto the current lock
+
     """The opt-in titler stamps live activity/step ids on events (emitted
     immediately) and publishes each closed activity's titles as append-only
     TitleUpdate records to the sinks."""

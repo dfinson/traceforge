@@ -100,10 +100,13 @@ class EventPipeline:
         self._boundary_streams: dict[str, object] = {}
         self._title_inferencer = title_inferencer
         self._title_streams: dict[str, object] = {}
-        # In-flight off-hot-path session-title API refinements. Each is a tracked
-        # background task so live emission never blocks on the network; ``flush``
-        # awaits any still-pending before teardown so no refinement is lost.
-        self._refine_tasks: set[asyncio.Task] = set()
+        # In-flight off-hot-path session-title API refinements, keyed by session
+        # so eviction can cancel a session's pending refinement (a stale refine
+        # must never emit after the session was evicted and its title stream
+        # replaced). Each is a tracked background task so live emission never
+        # blocks on the network; ``flush`` awaits any still-pending before
+        # teardown so no refinement is lost.
+        self._refine_tasks: dict[str, set[asyncio.Task]] = {}
 
         # One lock per session serialises the stream-mutating push path. The
         # phase/boundary/title streams hold unlocked per-session causal state and
@@ -152,11 +155,32 @@ class EventPipeline:
         takes only the victim's own lock, so it never blocks or deadlocks the
         push path.
         """
-        async with self._session_lock(event.session_id):
+        lock = await self._acquire_session(event.session_id)
+        try:
             await self._push_locked(event)
+        finally:
+            lock.release()
         self._session_order[event.session_id] = None
         self._session_order.move_to_end(event.session_id)
         await self._evict_over_cap()
+
+    async def _acquire_session(self, session_id: str) -> asyncio.Lock:
+        """Acquire the session's *current* lock, tolerant of concurrent eviction.
+
+        Eviction may pop a session's lock (:meth:`_evict_over_cap`) between our
+        fetch and our acquire; a pusher already queued on that lock would then
+        wake holding a now-unregistered lock while a later pusher mints a fresh
+        one — two locks, one session, serialization broken. Guard against that by
+        re-checking after acquire: if the lock we hold is no longer the
+        registered one, release and retry, so every live pusher for a session
+        always converges on the single current lock object.
+        """
+        while True:
+            lock = self._session_lock(session_id)
+            await lock.acquire()
+            if self._session_locks.get(session_id) is lock:
+                return lock
+            lock.release()
 
     async def _evict_over_cap(self) -> None:
         """Finalize + evict least-recently-used sessions beyond ``max_sessions``.
@@ -196,17 +220,25 @@ class EventPipeline:
                     continue
                 self._session_order.pop(victim, None)
                 await self._finalize_session(victim)
-            self._session_locks.pop(victim, None)
+            # Drop the victim's lock only if it is still the one we held: a
+            # concurrent push never replaces a live lock (creation is guarded on
+            # absence), so this is the same object, but the identity check keeps
+            # eviction from ever removing a successor lock.
+            if self._session_locks.get(victim) is lock:
+                self._session_locks.pop(victim, None)
 
     async def _finalize_session(self, session_id: str) -> None:
         """Drain + title a single session's trailing state, then drop it.
 
-        Mirrors :meth:`flush` for one session: emit any held leading plumbing
-        (phase drain), title the trailing open activity (title-stream flush), and
-        discard the boundary stream. Called under the session's lock by
-        :meth:`_evict_over_cap`. The phase drain runs first so every event has
-        reached the title stream before it is flushed, matching flush ordering.
+        Mirrors :meth:`flush` for one session: cancel any in-flight session-title
+        refinement (so it can't emit after this session's title stream is gone),
+        emit any held leading plumbing (phase drain), title the trailing open
+        activity (title-stream flush), and discard the boundary stream. Called
+        under the session's lock by :meth:`_evict_over_cap`. The phase drain runs
+        first so every event has reached the title stream before it is flushed,
+        matching flush ordering.
         """
+        self._cancel_session_refinements(session_id)
         if self._phase_inferencer is not None:
             await self._drain_stream(session_id)
         if self._title_inferencer is not None:
@@ -358,12 +390,35 @@ class EventPipeline:
         """Refine a session title via the API off the hot path (fire-and-forget).
 
         Spawns a tracked background task so live event emission is never blocked
-        on the network. :meth:`flush` awaits any still-pending refinement before
-        teardown so a slow-but-successful upgrade is never dropped.
+        on the network. The task is indexed by session so eviction can cancel it
+        (:meth:`_finalize_session`); :meth:`flush` awaits any still-pending
+        refinement before teardown so a slow-but-successful upgrade is never
+        dropped.
         """
         task = asyncio.create_task(self._session_refine(session_id, text))
-        self._refine_tasks.add(task)
-        task.add_done_callback(self._refine_tasks.discard)
+        self._refine_tasks.setdefault(session_id, set()).add(task)
+        task.add_done_callback(lambda t: self._discard_refine_task(session_id, t))
+
+    def _discard_refine_task(self, session_id: str, task: asyncio.Task) -> None:
+        """Drop a finished refinement task, reclaiming its session bucket."""
+        tasks = self._refine_tasks.get(session_id)
+        if tasks is None:
+            return
+        tasks.discard(task)
+        if not tasks:
+            self._refine_tasks.pop(session_id, None)
+
+    def _cancel_session_refinements(self, session_id: str) -> None:
+        """Cancel a session's in-flight refinements (called on eviction).
+
+        A refinement started before eviction must not emit a title update after
+        the session's title stream has been dropped and possibly replaced by a
+        fresh stream on resume — that would clobber the newer heuristic. Cancel
+        happens strictly before any post-eviction re-push, so no stale refinement
+        can overwrite a later title.
+        """
+        for task in list(self._refine_tasks.get(session_id, ())):
+            task.cancel()
 
     async def _session_refine(self, session_id: str, text: str) -> None:
         """Compute the API session title in a worker thread and emit it.
@@ -526,8 +581,9 @@ class EventPipeline:
         # successful upgrade lands (as its own title update) before the sinks are
         # flushed and closed. Error-isolated: a failed refinement already logged
         # inside the task and left the heuristic standing.
-        if self._refine_tasks:
-            await asyncio.gather(*self._refine_tasks, return_exceptions=True)
+        pending = [task for tasks in self._refine_tasks.values() for task in tasks]
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
 
         # Boundary streams and per-session locks carry no buffered output to
         # drain (boundary is O(1) causal state; locks are bare mutexes), but

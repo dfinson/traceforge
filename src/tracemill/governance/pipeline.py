@@ -233,8 +233,17 @@ class GovernancePipeline:
         """
         from tracemill.governance.types import EnrichmentContext, ToolCallEvent
 
+        # Normalize metadata: events may arrive with metadata=None (e.g. pushed
+        # directly, bypassing the Enricher). Fall back to an empty EventMetadata so
+        # attribute access below never raises.
+        metadata = event.metadata
+        if metadata is None:
+            from tracemill.types import EventMetadata
+
+            metadata = EventMetadata()
+
         # Extract classification (already computed by Enricher)
-        classification = event.metadata.classification
+        classification = metadata.classification
         if classification is None:
             from tracemill.classify.core import Classification, Mechanism
 
@@ -256,7 +265,7 @@ class GovernancePipeline:
             session_id=event.session_id,
             timestamp=event.timestamp,
             source_event_key=event.id,
-            span_id=event.metadata.span_id or event.id,
+            span_id=metadata.span_id or event.id,
             tool_name=tool_name,
             server_namespace=server_namespace,
             tool_args_json=tool_args_json,
@@ -735,20 +744,56 @@ class GovernancePipeline:
         self._persist_score(ctx.event.source_event_key, ctx.event.session_id, meta)
         return meta
 
-    def observe_event(self, event: "tracemill.types.SessionEvent") -> "SessionMeta":
+    def observe_event(self, event: "tracemill.types.SessionEvent") -> "SessionMeta | None":
         """Observation-path scoring for use as a live pipeline stage.
 
         Unlike :meth:`score_tool_call_event` (read-only preflight), this runs the
-        full state-mutating observation path (budget/taint/drift accrual plus
-        classification, assessment, and recommendation) and returns the
-        ``SessionMeta`` to stamp onto the event's ``metadata.governance``.
+        state-mutating observation path and returns the ``SessionMeta`` to stamp
+        onto the event's ``metadata.governance`` — or ``None`` when the event is
+        not governance-relevant.
 
         This is the method :class:`~tracemill.pipeline.EventPipeline` calls when a
         governance stage is wired in, making governance one stage of the pipeline
-        rather than a separate track.
+        rather than a separate track. Because the stage sees *every* event kind at
+        the sink choke point, it must dispatch by kind:
+
+        * Session lifecycle (``session.started`` / ``session.ended``) →
+          :meth:`process_lifecycle` (Phase 1 only; ``session.ended`` also
+          finalizes the summary and evicts session state).
+        * Tool calls → the state-mutating :meth:`process_event`. Every
+          ``tool.call.completed`` is scored; a ``tool.call.started`` is scored
+          only when it is an id-bearing orphan (an unpaired start flushed at
+          session end / pipeline close, or a displaced duplicate), since the
+          Enricher buffers a paired start into its completion and emits a no-id
+          start's completion separately. This keeps each real tool call observed
+          exactly once.
+        * Any other kind (messages, turns, llm/planning chunks, spans, usage, …)
+          is *not* a tool call and must not advance the tool-call budget, so it is
+          left ungoverned (``None`` → no ``metadata.governance`` stamp).
         """
-        ctx = self.context_from_session_event(event)
-        return self.process_event(ctx)
+        from tracemill.types import EventKind
+
+        kind = event.kind
+        if kind == EventKind.SESSION_STARTED:
+            return self.process_lifecycle(event.session_id, "session_start")
+        if kind == EventKind.SESSION_ENDED:
+            return self.process_lifecycle(event.session_id, "session_end")
+        if kind == EventKind.TOOL_CALL_COMPLETED:
+            return self.process_event(self.context_from_session_event(event))
+        if kind == EventKind.TOOL_CALL_STARTED:
+            # A started event only reaches the stage (rather than being buffered)
+            # as either a genuine orphan — an unpaired start flushed at session
+            # end / pipeline close, or a displaced duplicate, all of which carry a
+            # tool_call_id and MUST be scored since no completion will — or a no-id
+            # "provisional" start the Enricher cannot pair, whose completion is
+            # emitted and scored separately. Scoring the latter would double-count,
+            # so discriminate on the same id the Enricher pairs on.
+            from tracemill.enricher import _extract_tool_call_id
+
+            if _extract_tool_call_id(event) is None:
+                return None
+            return self.process_event(self.context_from_session_event(event))
+        return None
 
     def _persist_score(self, source_event_key: str, session_id: str, meta: "SessionMeta") -> None:
         """Persist a scoring result to the audit trail.

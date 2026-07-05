@@ -89,36 +89,42 @@ async def _replay(source: Path, adapter_name: str, output_path: str | None) -> N
 
     total_events = 0
 
-    for f in files:
-        click.echo(f"Processing: {f.name}")
-        content = f.read_text(encoding="utf-8")
+    try:
+        for f in files:
+            click.echo(f"Processing: {f.name}")
+            content = f.read_text(encoding="utf-8")
 
-        # Handle JSONL (line-delimited) vs single JSON
-        if f.suffix == ".jsonl":
-            lines = [l.strip() for l in content.splitlines() if l.strip()]
-        else:
-            # Single JSON file — try as array or single object
-            try:
-                parsed = json.loads(content)
-                lines = (
-                    [json.dumps(item) for item in parsed] if isinstance(parsed, list) else [content]
-                )
-            except json.JSONDecodeError:
-                click.echo(f"  Skipping (invalid JSON): {f.name}", err=True)
-                continue
+            # Handle JSONL (line-delimited) vs single JSON
+            if f.suffix == ".jsonl":
+                lines = [l.strip() for l in content.splitlines() if l.strip()]
+            else:
+                # Single JSON file — try as array or single object
+                try:
+                    parsed = json.loads(content)
+                    lines = (
+                        [json.dumps(item) for item in parsed]
+                        if isinstance(parsed, list)
+                        else [content]
+                    )
+                except json.JSONDecodeError:
+                    click.echo(f"  Skipping (invalid JSON): {f.name}", err=True)
+                    continue
 
-        for line in lines:
-            try:
-                data = json.loads(line)
-            except json.JSONDecodeError:
-                continue
+            for line in lines:
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
 
-            for event in adapter.parse_dict(data):
-                total_events += 1
-                await event_pipeline.push(event)
-
-    # Flush buffered (unpaired tool-start) events, then close sinks.
-    await event_pipeline.close()
+                for event in adapter.parse_dict(data):
+                    total_events += 1
+                    await event_pipeline.push(event)
+    finally:
+        # Flush buffered (unpaired tool-start) events and release resources even
+        # if processing raised, so the Enricher buffer is never silently dropped.
+        try:
+            await event_pipeline.close()
+        finally:
+            store.close()
 
     click.echo(f"\nReplay complete: {total_events} events, {total_governed} governed")
-    store.close()

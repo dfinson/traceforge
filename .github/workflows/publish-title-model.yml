@@ -22,11 +22,15 @@ jobs:
       id-token: write   # PyPI trusted publishing (OIDC, no token)
     steps:
       - uses: actions/checkout@v6
+        with:
+          lfs: true
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       - run: pip install build
       - run: python -m build packages/tracemill-title-model --outdir dist
+      - name: Verify weights are real (not LFS pointers)
+        run: python scripts/verify_no_lfs_pointers.py dist --require .onnx
       - name: Publish to PyPI (primary)
         uses: pypa/gh-action-pypi-publish@release/v1
         with:

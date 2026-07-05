@@ -48,7 +48,10 @@ def download_model(source: str, version: str) -> None:
     when PyPI is unreachable (``--source gh``).
     """
     target = "tracemill-title-model" if source == "pypi" else _gh_wheel_url(version)
-    cmd = [sys.executable, "-m", "pip", "install", "--upgrade", target]
+    # --force-reinstall so this reliably *repairs*: a plain --upgrade would no-op
+    # ("already satisfied") when the same version is installed but its files are
+    # missing/corrupt/LFS-pointer stubs -- exactly the state this command fixes.
+    cmd = [sys.executable, "-m", "pip", "install", "--force-reinstall", target]
     click.echo(f"Installing titler weights from {source}: {target}")
     try:
         subprocess.run(cmd, check=True)

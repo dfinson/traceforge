@@ -20,6 +20,11 @@ from pathlib import Path
 #: The three files :meth:`tracemill.title.TitleModel.load` reads for one head.
 TRIAD = ("encoder.onnx", "decoder.onnx", "tokenizer.json")
 
+_LFS_MAGIC = b"version https://git-lfs.github.com/spec/v1"
+#: Real ONNX heads are tens of MB; a Git LFS pointer is ~133 bytes. This floor
+#: cleanly separates a smudged binary from a pointer (or a truncated artifact).
+_MIN_ONNX_BYTES = 1_000_000
+
 _HERE = Path(__file__).resolve().parent
 #: In-tree dev fallback. Empty in a normal install (weights live in the data
 #: package); populated only if a developer drops the ONNX here by hand.
@@ -35,8 +40,28 @@ INSTALL_HINT = (
 )
 
 
+def _usable(f: Path) -> bool:
+    """A weight file that is present *and* a real binary (not an LFS pointer).
+
+    Guards the pointer-in-wheel failure mode: if a package was built from a
+    checkout that never smudged LFS, the files exist but are ~133-byte pointer
+    stubs. Existence alone would then resolve as "installed" and fail only later,
+    deep inside onnxruntime. Reject pointers (and implausibly small ONNX) here so
+    the caller falls back / surfaces :data:`INSTALL_HINT` instead.
+    """
+    try:
+        if not f.is_file():
+            return False
+        if f.suffix == ".onnx" and f.stat().st_size < _MIN_ONNX_BYTES:
+            return False
+        with f.open("rb") as fh:
+            return not fh.read(len(_LFS_MAGIC)).startswith(_LFS_MAGIC)
+    except OSError:
+        return False
+
+
 def _complete(d: Path | None) -> bool:
-    return d is not None and all((d / f).exists() for f in TRIAD)
+    return d is not None and all(_usable(d / f) for f in TRIAD)
 
 
 def _pkg_dir() -> Path | None:

@@ -73,7 +73,9 @@ def main() -> int:
         return 2
 
     members = _members(dist)
-    problems = [f"  {art}:{name} -- {why}" for art, name, data in members if (why := _is_bad(name, data))]
+    problems = [
+        f"  {art}:{name} -- {why}" for art, name, data in members if (why := _is_bad(name, data))
+    ]
     for art, name, data in members:
         if not _is_bad(name, data):
             print(f"OK  {art}:{name} ({len(data):,} bytes)")

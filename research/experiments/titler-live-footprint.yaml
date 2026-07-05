@@ -97,6 +97,42 @@ acceptance:
     as the live default. The ~3.6 s activity-close blocking spike is acceptable
     for v1 but should be offloaded off the event loop next.
 
+# ---------------------------------------------------------------------------
+# SMALL-HEAD PROMOTION (2026-07-05): swap packaged span head tiny -> small.
+# The proven seq-KD flan-t5-small (faithful 1.56 vs tiny 1.43; see
+# titler-summarization-specialist.yaml distillation block) was benched ON THE
+# REAL SERVE PATH via _title_pipebench.py TITLE_SERVE_DIR, same 3527-event
+# session, intra_op=1, CPU-only. Confirms it clears the single-core gate before
+# packaging it as src/tracemill/title/data/. Host is a different laptop than the
+# original off/on-1t rows above (higher RSS baseline, faster per-seg), so read
+# the tiny_repro vs small_promoted DELTA, not absolutes.
+small_head_promotion:
+  host_note: re-measured off/tiny/small on one host for an apples-to-apples delta
+  off_baseline:
+    cpu_pct_of_core: 91
+    peak_rss_mb: 421
+  tiny_repro:            # current shipped 31MB t5-efficient-tiny, packaged default
+    cpu_pct_of_core: 98
+    peak_rss_mb: 712
+    ms_per_segment: 110
+    segments: 345
+    push_p999_ms: 1809
+  small_promoted:        # 90MB flan-t5-small seq-KD (onnx-distill-small), via TITLE_SERVE_DIR
+    cpu_pct_of_core: 99   # 98.8 -> still one core (intra_op=1 fixes parallelism)
+    peak_rss_mb: 636      # NOT worse than tiny; ORT arena dominates, model bytes barely move RSS
+    ms_per_segment: 205   # ~2x tiny; fired once per CLOSED segment, never per event
+    segments: 346
+    push_p999_ms: 3261    # close-spike grows but within documented ~3600 v1 envelope
+  package_footprint_mb: {tiny: 33.3, small: 92.2}  # committed (non-LFS) binary weight
+  verdict: >
+    SMALL CLEARS THE HARD GATE. CPU stays at one core (98.8%) because the live
+    titler loads TitleModel.load(threads=1); peak RSS is not worse than tiny
+    (636 vs 712 MB). The only real cost is per-segment latency (~2x, still
+    205 ms once per closed activity) and a larger synchronous activity-close
+    spike (~3.3 s, inside the known ~3.6 s v1 envelope; the to_thread offload
+    already recommended above is the fix). Packaged as the default span head;
+    24/24 titler tests pass on the packaged path incl. the ONNX integration test.
+
 mlflow:
   log_params:
     - condition

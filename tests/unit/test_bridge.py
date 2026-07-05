@@ -317,3 +317,55 @@ class TestBridgeFieldMapping:
         event = _make_event(tool_name="bash", arguments={"command": "ls"})
         ctx = pipeline.context_from_session_event(event)
         assert ctx.project_root == pipeline._project_root
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Scoring a SessionEvent must not suppress a later observation of the same event
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestScoreDoesNotSuppressObservation:
+    """Regression: the SessionEvent scoring path must namespace its audit key.
+
+    ``score_tool_call_event`` used to persist its audit row under the raw
+    ``event.id`` — unlike the dict path, which mints a ``score:``-prefixed key in
+    ``ToolCallEvent.from_dict``. Because ``process_event``'s idempotency guard
+    (``is_duplicate``) matches on ``source_event_key`` with no ``scored`` filter,
+    that collision let a prior score short-circuit observation, so the single
+    writer never advanced session state for the observed event. ``_persist_score``
+    now enforces the ``score:`` namespace for both intake channels.
+    """
+
+    def _keys(self, store, session_id):
+        return [
+            r[0]
+            for r in store._conn.execute(
+                "SELECT source_event_key FROM processed_events WHERE session_id = ?",
+                (session_id,),
+            ).fetchall()
+        ]
+
+    def test_scored_session_event_does_not_suppress_observation(self, pipeline, store):
+        event = _make_event(
+            tool_name="bash",
+            arguments={"command": "ls"},
+            kind=EventKind.TOOL_CALL_COMPLETED,
+            session_id="score-then-observe",
+        )
+
+        # Read side: preflight-score the SessionEvent. The audit row is
+        # score:-namespaced, never stored under the raw event id.
+        pipeline.score_tool_call_event(event)
+        assert self._keys(store, "score-then-observe") == [f"score:{event.id}"]
+        assert event.id not in self._keys(store, "score-then-observe")
+
+        # Write side: observing the SAME event must not be swallowed as a
+        # duplicate — the single writer advances Phase-1 state exactly once.
+        pipeline.observe_event(event)
+        assert pipeline.get_or_create_state("score-then-observe").tool_call_count == 1
+
+        # Both records coexist: the score: audit row and the raw-id observation row.
+        assert set(self._keys(store, "score-then-observe")) == {
+            f"score:{event.id}",
+            event.id,
+        }

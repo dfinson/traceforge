@@ -197,11 +197,25 @@ class Scorer:
     def _persist_score(self, source_event_key: str, session_id: str, meta: "SessionMeta") -> None:
         """Persist a scoring result to the audit trail.
 
-        Uses a distinct source_event_key (score:{id}) that never collides with
-        observation events. If the same tool call later executes and arrives via
-        the standard pipeline, both records coexist — enabling correlation of
+        Enforces a distinct, ``score:``-namespaced source_event_key so a scoring
+        record never collides with the observation record for the same event. The
+        dict intake path already mints a ``score:`` key in
+        :meth:`ToolCallEvent.from_dict`; the SessionEvent path (score_tool_call_event)
+        carries the raw ``event.id``, so the namespace is applied here to keep both
+        intake channels consistent. If the same tool call later executes and arrives
+        via the standard pipeline, both records coexist — enabling correlation of
         'what we recommended' vs 'what actually happened'.
         """
+        # Guarantee the score: namespace regardless of intake channel — idempotent
+        # for the dict path (already prefixed). Without it, a SessionEvent scored via
+        # score_tool_call_event would persist under its raw event id, and a later
+        # observation of that same event would be swallowed as a duplicate
+        # (is_duplicate short-circuits process_event before Phase 1 advances state).
+        audit_key = (
+            source_event_key
+            if source_event_key.startswith("score:")
+            else f"score:{source_event_key}"
+        )
         try:
             meta_dict = self._codec.serialize_meta(meta)
             meta_dict["scored"] = True
@@ -209,10 +223,10 @@ class Scorer:
             now = datetime.now(timezone.utc).isoformat()
             self._store.execute_in_transaction(
                 "INSERT OR IGNORE INTO processed_events (source_event_key, session_id, session_meta_json, processed_at) VALUES (?, ?, ?, ?)",
-                (source_event_key, session_id, meta_json, now),
+                (audit_key, session_id, meta_json, now),
             )
             self._store.commit()
-            self._store.cache_processed(source_event_key, meta_json)
+            self._store.cache_processed(audit_key, meta_json)
         except Exception:
             # Best-effort persistence — scoring result was already returned to caller.
             # If this fails, the score is still usable but won't be in the audit trail.

@@ -12,8 +12,8 @@ Two layers, mirroring the boundary-stream tests:
   distinctness, and the flush of the trailing activity, without the heavy ONNX
   titler; and
 * *real model* — the packaged titler proves the end-to-end serve path produces
-  non-empty, distinct titles from real span context (skipped when the optional
-  ``title`` deps / artifacts are absent).
+  non-empty, distinct titles from real span context (skipped when the span model
+  artifacts are absent).
 """
 
 from __future__ import annotations
@@ -24,7 +24,6 @@ from datetime import datetime, timezone
 import pytest
 
 from tracemill.title import SessionTitleStream, TitleInferencer
-from tracemill.title._resolve import request_dir as _request_dir
 from tracemill.title._resolve import span_dir as _span_dir
 from tracemill.types import EventMetadata, SessionEvent
 
@@ -160,30 +159,57 @@ def test_stamp_passes_through_event_without_metadata():
 # ─── session title (live, from the first substantive user message) ───────────
 
 
+def _recording_titler():
+    """A deterministic session titler that records the texts it was asked to name."""
+    calls: list[str] = []
+
+    def titler(text: str) -> str:
+        calls.append(text)
+        return f"Session {len(calls)}"
+
+    return titler, calls
+
+
 def test_first_substantive_user_message_titles_session():
-    stream, fake = _stream()
+    titler, calls = _recording_titler()
+    stream = TitleInferencer(model=_FakeTitle(), session_titler=titler).new_stream("S", "copilot")
     _e, updates = stream.push(_msg(0, "Please add retry logic to the HTTP client with backoff"))
     sess = [u for u in updates if u.kind == "session"]
     assert len(sess) == 1
     # Keyed by the session id (the session is the outermost segment), no parent.
     assert sess[0].segment_id == "S" and sess[0].session_id == "S"
     assert sess[0].parent_id is None and sess[0].title
-    assert fake.contexts == ["Please add retry logic to the HTTP client with backoff"]
+    # The session titler (not the span model) saw the raw user message.
+    assert calls == ["Please add retry logic to the HTTP client with backoff"]
     # Set-once: a later substantive message never re-titles the session.
     _e2, updates2 = stream.push(_msg(1, "Also write unit tests for the limiter please"))
     assert [u for u in updates2 if u.kind == "session"] == []
+    assert len(calls) == 1
 
 
 def test_non_substantive_user_message_does_not_title_session():
-    stream, fake = _stream()
+    titler, calls = _recording_titler()
+    stream = TitleInferencer(model=_FakeTitle(), session_titler=titler).new_stream("S", "copilot")
     # A bare greeting yields no sentence under narration hygiene -> no title, and
-    # the model is never invoked (parameter-free substance gate, no threshold).
+    # the titler is never invoked (parameter-free substance gate, no threshold).
     _e, updates = stream.push(_msg(0, "hi"))
     assert [u for u in updates if u.kind == "session"] == []
-    assert fake.contexts == []
+    assert calls == []
     # The first SUBSTANTIVE message then titles the session.
     _e2, updates2 = stream.push(_msg(1, "Fix the failing pagination test in the users API"))
     assert len([u for u in updates2 if u.kind == "session"]) == 1
+    assert calls == ["Fix the failing pagination test in the users API"]
+
+
+def test_session_title_uses_heuristic_by_default():
+    # No injected session_titler -> lazily built from config (heuristic default),
+    # so the end-to-end serve path names a session from the user's own words with
+    # no model, key, or network.
+    stream = TitleInferencer(model=_FakeTitle()).new_stream("S", "copilot")
+    _e, updates = stream.push(_msg(0, "please refactor the auth module to use async tokens"))
+    sess = [u for u in updates if u.kind == "session"]
+    assert len(sess) == 1
+    assert sess[0].title and "auth" in sess[0].title.lower()
 
 
 def test_non_message_events_never_title_session():
@@ -192,7 +218,7 @@ def test_non_message_events_never_title_session():
     stream, fake = _stream()
     _e, updates = stream.push(_event(0, tool="edit"))
     assert [u for u in updates if u.kind == "session"] == []
-    assert fake.contexts == []  # request head not invoked on a tool event
+    assert fake.contexts == []  # session titler not invoked on a tool event
 
 
 # ─── real packaged model ─────────────────────────────────────────────────────
@@ -204,7 +230,7 @@ _HAS_DEPS = (
 _HAS_MODEL = _span_dir() is not None
 
 
-@pytest.mark.skipif(not (_HAS_DEPS and _HAS_MODEL), reason="title extra / model artifacts absent")
+@pytest.mark.skipif(not (_HAS_DEPS and _HAS_MODEL), reason="span model artifacts absent")
 def test_real_model_produces_distinct_nonempty_titles():
     stream = TitleInferencer().new_stream("S", "copilot")
     intent = {"arguments": {"intent": "Adding retry logic to the HTTP client"}}
@@ -228,28 +254,3 @@ def test_real_model_produces_distinct_nonempty_titles():
     assert activity and all(isinstance(u.title, str) and u.title for u in activity)
     act_title = activity[0].title
     assert all(u.title != act_title for u in steps)
-
-
-_HAS_REQUEST_MODEL = _request_dir() is not None
-
-
-@pytest.mark.skipif(
-    not (_HAS_DEPS and _HAS_MODEL and _HAS_REQUEST_MODEL),
-    reason="title extra / span+request model artifacts absent",
-)
-def test_packaged_request_head_is_a_separate_model():
-    """When the request head is packaged, it loads as its own ORT session (the
-    rationale-distilled model), not a reprefix of the span model."""
-    inf = TitleInferencer()
-    span = inf.model
-    req = inf.request_model
-    # Routing targets the packaged request artifact, not the span dir...
-    assert inf._resolve_request_dir() is not None
-    assert inf._resolve_request_dir().name == "request"
-    # ...and the request head is its own ORT session under its own prefix
-    # (a reprefix of the span model would share ``_enc``).
-    assert req is not span
-    assert req._enc is not span._enc
-    assert req._prefix != span._prefix
-    title = inf.request_title("Add a status endpoint that returns uptime as JSON")
-    assert isinstance(title, str) and title.strip()

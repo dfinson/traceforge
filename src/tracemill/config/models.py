@@ -323,6 +323,83 @@ class PhaseTrackerConfig(StrictModel):
     phase_root_depth: int = Field(default=1, ge=1)
 
 
+# ─── Title Config ─────────────────────────────────────────────────────────────
+
+
+class SessionNamingHeuristicConfig(StrictModel):
+    """Deterministic, zero-cost session-title heuristic (the default floor).
+
+    Session naming derives a session title from the first substantive user
+    message. The heuristic is *extractive* -- it reuses the user's own words --
+    so it is coherent by construction (no model, no network, no key). Its ceiling
+    is the phrasing already in the message; for abstractive titles, opt into the
+    ``api`` strategy.
+    """
+
+    method: Literal["clip", "imperative", "keyphrase", "hybrid"] = "hybrid"
+    max_words: int = Field(default=8, ge=1)
+    max_chars: int = Field(default=60, ge=8)
+
+
+class SessionNamingApiConfig(StrictModel):
+    """Opt-in LLM API tier for session naming, served via LiteLLM.
+
+    The API key is **never** stored here. LiteLLM reads it from the provider's
+    conventional environment variable (``OPENAI_API_KEY``, ``ANTHROPIC_API_KEY``,
+    ``AZURE_API_KEY`` …). Set ``api_key_env`` only to name a *different* env var
+    to read from. ``model`` is any LiteLLM model string, so OpenAI, Azure,
+    Anthropic, Gemini, and local runtimes (``ollama/…``, ``vllm/…`` via
+    ``api_base``) are all reachable through one code path.
+    """
+
+    model: str = "gpt-4o-mini"
+    api_base: str | None = None
+    api_key_env: str | None = None
+    timeout: float = Field(default=10.0, gt=0)
+    max_tokens: int = Field(default=24, ge=1)
+
+
+class SessionNamingConfig(StrictModel):
+    """How the session title is generated from the first substantive user message.
+
+        # tracemill.yaml
+        title:
+          session_naming:
+            strategy: heuristic        # heuristic | api  (DEFAULT: heuristic)
+            heuristic:
+              method: hybrid           # clip | imperative | keyphrase | hybrid
+              max_words: 8
+              max_chars: 60
+            api:
+              model: gpt-4o-mini       # any LiteLLM model string
+              api_base: null           # azure / ollama / vllm / openai-compatible
+              api_key_env: null        # override env var name (else LiteLLM default)
+              timeout: 10
+              max_tokens: 24
+
+    ``heuristic`` (default) is free and coherent by construction. ``api`` engages
+    LiteLLM for an abstractive title and takes effect **only** when the provider's
+    API key is present in the environment; otherwise it silently falls back to the
+    heuristic, so a missing key never errors or blocks.
+    """
+
+    strategy: Literal["heuristic", "api"] = "heuristic"
+    heuristic: SessionNamingHeuristicConfig = Field(default_factory=SessionNamingHeuristicConfig)
+    api: SessionNamingApiConfig = Field(default_factory=SessionNamingApiConfig)
+
+
+class TitleConfig(StrictModel):
+    """Titling configuration.
+
+    Activity/step (span) titles always use the packaged ``tracemill-title-model``
+    (the seq-KD flan-t5-small, proven strong at that task and shipped with every
+    install). Only *session naming* is configurable, because the tiny model was
+    proven weak at it; see :class:`SessionNamingConfig`.
+    """
+
+    session_naming: SessionNamingConfig = Field(default_factory=SessionNamingConfig)
+
+
 # ─── Root Config ─────────────────────────────────────────────────────────────
 
 
@@ -361,6 +438,9 @@ class TracemillConfig(StrictModel):
 
     # Phase tracker (session-level phase segmentation)
     phase_tracker: PhaseTrackerConfig = Field(default_factory=PhaseTrackerConfig)
+
+    # Titling (span titles + configurable session naming)
+    title: TitleConfig = Field(default_factory=TitleConfig)
 
     @field_validator("pipelines")
     @classmethod

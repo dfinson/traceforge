@@ -12,12 +12,16 @@ from tracemill.config.models import (
     PipelineConfig,
     ReplaySourceConfig,
     SDKConfig,
+    SessionNamingApiConfig,
+    SessionNamingConfig,
+    SessionNamingHeuristicConfig,
     SinkConfig,
     SourceConfig,
     SSESourceConfig,
     SqliteSinkConfig,
     JsonlSinkConfig,
     S3SinkConfig,
+    TitleConfig,
     TracemillConfig,
 )
 from tracemill.config.loader import load_config, get_config, reset_config
@@ -49,6 +53,11 @@ __all__ = [
     # Governance
     "GovernanceConfig",
     "BudgetConfig",
+    # Title
+    "TitleConfig",
+    "SessionNamingConfig",
+    "SessionNamingHeuristicConfig",
+    "SessionNamingApiConfig",
     # Loading
     "load_config",
     "get_config",

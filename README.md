@@ -20,23 +20,45 @@ Source → [Parser] → Adapter → Enricher → Pipeline → Sink(s)
 ## Install
 
 ```bash
-pip install tracemill
+pip install tracemill      # or: uv add tracemill
 ```
 
-The core install is code-only. Live activity/step and session titling is an
-optional feature whose model weights (~90 MB int8 ONNX) ship in a separate
-`tracemill-title-model` package — pulled in only via the `title` extra:
-
-```bash
-pip install "tracemill[title]"      # or: uv add "tracemill[title]"
-```
-
-The weights are hosted on PyPI (primary) and mirrored on this repo's
-`title-model-v*` GitHub releases. If PyPI is ever unavailable, fetch the mirror:
+Everything ships with a single install — no extras. The activity/step titler model
+weights (~90 MB int8 ONNX) live in a separate `tracemill-title-model` package that
+`tracemill` depends on, so `pip install tracemill` pulls them automatically. The
+weights are hosted on PyPI (primary) and mirrored on this repo's `title-model-v*`
+GitHub releases; if PyPI is ever unavailable, fetch the mirror:
 
 ```bash
 tracemill download-model --source gh
 ```
+
+### Session naming
+
+Sessions are named from the first substantive user message. By default this uses a
+zero-cost, offline **heuristic** over the user's own words (no model, key, or
+network). You can opt into an LLM API for more polished abstractive titles via
+[LiteLLM](https://docs.litellm.ai/) — any provider (OpenAI, Azure, Anthropic,
+openai-compatible) or a local runtime (Ollama, vLLM):
+
+```yaml
+# tracemill.yaml
+title:
+  session_naming:
+    strategy: api            # heuristic (default) | api
+    heuristic:
+      method: hybrid         # clip | imperative | keyphrase | hybrid
+      max_words: 8
+    api:
+      model: gpt-4o-mini     # any LiteLLM model string
+      # api_base: http://localhost:11434   # e.g. Ollama / vLLM / openai-compatible
+      # api_key_env: OPENAI_API_KEY        # override which env var holds the key
+```
+
+The API key is **never** read from config — LiteLLM sources it from the provider's
+conventional environment variable (`OPENAI_API_KEY`, `AZURE_API_KEY`, …). When
+`strategy: api` but no key is present (or a call fails or times out), session naming
+silently falls back to the heuristic, so a missing key never errors or blocks.
 
 ## Quick start
 

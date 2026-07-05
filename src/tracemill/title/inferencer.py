@@ -25,16 +25,13 @@ count, so an inactive session costs nothing and an active one runs the heavy
 model once per *segment*, never per event.
 
 The same machinery also titles the **session** itself: fed the first substantive
-user message under the request prefix (:meth:`TitleInferencer.request_title`), it
-emits a ``kind="session"`` :class:`~tracemill.types.TitleUpdate` keyed by the
-session id -- the session label, live off its opening request. The request head is
-served by a SEPARATE distilled model when one is packaged (``data-request/``), else
-it falls back to the span model under the request prefix. The two were split because
-raw-request comprehension and span summarization pull the shared ~16M encoder in
-different directions: a rationale-distilled request model lifts request coherence
-well past the shared multitask model, but co-training that objective taxes the span
-head (see ``research/experiments/titler-rationale-distillation.yaml``). Both heads are
-int8 and load lazily.
+user message (:meth:`TitleInferencer.request_title`), it emits a ``kind="session"``
+:class:`~tracemill.types.TitleUpdate` keyed by the session id -- the session label,
+live off its opening request. Session naming does **not** use the span model: the
+distilled request head was proven weak at it (~9% coherent on the honest CodePlane
+heldout), so the session title is produced by :mod:`tracemill.title.naming` -- a
+deterministic, zero-cost heuristic over the user's own words by default, with an
+opt-in LiteLLM API tier engaged only when a key is configured.
 """
 
 from __future__ import annotations
@@ -47,29 +44,22 @@ from .hygiene import best_of, norm_key, pick_distinct
 
 _ACTIVITY = "activity-boundary"
 _STEP = "step-boundary"
-#: The request head's learned T5 prefix (the span head uses TitleModel's default).
-#: Routing/fallback for this prefix lives in :meth:`TitleInferencer._resolve_request_dir`.
-_REQUEST_PREFIX = "title task from request: "
 
 
 class TitleInferencer:
     """Loads the torch-free titler once and applies it to live spans.
 
     Construct with an explicit ``model``/``model_dir`` or rely on the packaged
-    default. The (heavy, optional-dependency) model loads lazily on the first
-    closed segment, so a pipeline with no titled sessions never imports it.
+    default. The (heavy, optional-dependency) span model loads lazily on the
+    first closed segment, so a pipeline with no titled activities never imports
+    it. Session naming is served separately by :mod:`tracemill.title.naming`;
+    inject a ``session_titler`` callable to override it (e.g. in tests).
     """
 
-    def __init__(self, model=None, model_dir=None, request_model_dir=None) -> None:
+    def __init__(self, model=None, model_dir=None, session_titler=None) -> None:
         self._model = model
         self._model_dir = model_dir
-        self._request_model_dir = request_model_dir
-        #: Two-model request routing engages only on the fully-packaged default
-        #: path; an injected model or a custom span dir keeps the single-model
-        #: reprefix behaviour (so tests and custom deployments are unaffected),
-        #: unless an explicit ``request_model_dir`` is given.
-        self._default_path = model is None and model_dir is None
-        self._request_model = None
+        self._session_titler = session_titler
 
     @property
     def model(self):
@@ -79,57 +69,22 @@ class TitleInferencer:
             self._model = TitleModel.load(self._model_dir, threads=1)
         return self._model
 
-    def _resolve_request_dir(self):
-        """The packaged/explicit separate request artifact, or ``None``.
-
-        ``None`` means serve the request head by reprefixing the span model
-        (the single-model fallback). A separate dir is used only when given
-        explicitly, or when relying on the default packaged path and the
-        ``data-request/`` artifact is present.
-        """
-        if self._request_model_dir is not None:
-            return self._request_model_dir
-        if not self._default_path:
-            return None
-        # The separately-packaged rationale-distilled request head, if the data
-        # package ships it (or a dev dropped it in-tree); a partial/absent head
-        # resolves to None -> span reprefix fallback, never a crash.
-        from ._resolve import request_dir
-
-        return request_dir()
-
-    @property
-    def request_model(self):
-        """The request head, built once and lazily.
-
-        The separately-packaged distilled model under :data:`_REQUEST_PREFIX` when
-        available (see :meth:`_resolve_request_dir`), otherwise the span model
-        reprefixed to it -- the single-model fallback, which adds no footprint. An
-        injected model with no ``reprefixed`` is returned as-is.
-        """
-        if self._request_model is None:
-            rd = self._resolve_request_dir()
-            if rd is not None:
-                from .inference import TitleModel
-
-                self._request_model = TitleModel.load(rd, threads=1).reprefixed(_REQUEST_PREFIX)
-            else:
-                m = self.model
-                self._request_model = (
-                    m.reprefixed(_REQUEST_PREFIX) if hasattr(m, "reprefixed") else m
-                )
-        return self._request_model
-
     def request_title(self, text: str) -> str:
-        """Title a raw user request via the request head.
+        """Title the session from its first substantive user message.
 
-        Grounding is off: the span identifier-grounding gate is a span-context
-        device, and the request task was evaluated without it, so disabling it
-        keeps serve parity with the request-task eval distribution.
+        Delegates to the configured session titler (the heuristic floor, or the
+        opt-in LiteLLM API tier when a key is present); see
+        :mod:`tracemill.title.naming`. The titler is built lazily from the global
+        config on first use, so a pipeline that never titles a session pays
+        nothing.
         """
         if not text or not text.strip():
             return ""
-        return best_of(self.request_model.candidates(text, ground=False))
+        if self._session_titler is None:
+            from .naming import build_session_titler
+
+            self._session_titler = build_session_titler()
+        return self._session_titler(text)
 
     def _title(self, rows: list[dict]) -> str:
         ctx = distilled_context(rows)

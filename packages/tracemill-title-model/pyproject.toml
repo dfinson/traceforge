@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tracemill-title-model"
-version = "0.1.0"
-description = "Pretrained int8 ONNX titler weights for tracemill (span + request heads)"
+version = "0.2.0"
+description = "Pretrained int8 ONNX titler weights for tracemill (activity/step span head)"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11,<3.14"
 # Pure data distribution: no runtime imports of its own. The onnxruntime /
-# tokenizers stack that *reads* these files ships with `tracemill[title]`.
+# tokenizers stack that *reads* these files ships as a tracemill dependency.
 dependencies = []
 
 [project.urls]
@@ -24,8 +24,6 @@ packages = ["src/tracemill_title_model"]
 artifacts = [
     "src/tracemill_title_model/data/span/*.onnx",
     "src/tracemill_title_model/data/span/*.json",
-    "src/tracemill_title_model/data/request/*.onnx",
-    "src/tracemill_title_model/data/request/*.json",
 ]
 
 [tool.hatch.build.targets.sdist]

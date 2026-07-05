@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import OrderedDict
 from collections.abc import Awaitable, Iterable
 
 from tracemill.enricher import Enricher
@@ -11,6 +12,14 @@ from tracemill.sinks.base import StorageSink
 from tracemill.types import SessionEvent, TelemetrySpan, TitleUpdate, UsageRecord
 
 logger = logging.getLogger(__name__)
+
+#: Default cap on the number of sessions whose live per-session stream state
+#: (phase/boundary/title streams + lock) is retained at once. When exceeded, the
+#: least-recently-used session is finalized (its held plumbing + trailing
+#: activity title emitted) and evicted, so a long-lived multi-session daemon
+#: does not grow unbounded. Generous enough that realistic concurrent workloads
+#: never evict an active session; pass ``max_sessions=None`` to disable.
+_DEFAULT_MAX_SESSIONS = 4096
 
 
 class EventPipeline:
@@ -67,6 +76,7 @@ class EventPipeline:
         enable_phase: bool = True,
         enable_boundary: bool = True,
         enable_title: bool = False,
+        max_sessions: int | None = _DEFAULT_MAX_SESSIONS,
     ) -> None:
         self._sinks = list(sinks)
         self._enricher = enricher
@@ -105,6 +115,14 @@ class EventPipeline:
         # below has no ``await`` between the miss and the store.
         self._session_locks: dict[str, asyncio.Lock] = {}
 
+        # Recency of sessions holding live per-session state, most-recent last.
+        # Bounds memory for long-lived daemons: when the tracked count exceeds
+        # ``_max_sessions`` the least-recently-used session is finalized and
+        # evicted (see :meth:`_evict_over_cap`). ``None`` disables the cap
+        # (unbounded, reclaimed only at :meth:`flush`).
+        self._session_order: OrderedDict[str, None] = OrderedDict()
+        self._max_sessions = max_sessions
+
     def _session_lock(self, session_id: str) -> asyncio.Lock:
         lock = self._session_locks.get(session_id)
         if lock is None:
@@ -126,9 +144,87 @@ class EventPipeline:
         A batcher fanning pushes through :func:`asyncio.gather` is fine; a
         batcher that periodically flushes to persist and then keeps pushing is
         not.
+
+        For long-lived daemons the pipeline caps how many sessions' live state
+        it retains (``max_sessions``): after each push the least-recently-used
+        session beyond the cap is finalized and evicted (:meth:`_evict_over_cap`)
+        so memory stays bounded. Eviction runs *outside* this session's lock and
+        takes only the victim's own lock, so it never blocks or deadlocks the
+        push path.
         """
         async with self._session_lock(event.session_id):
             await self._push_locked(event)
+        self._session_order[event.session_id] = None
+        self._session_order.move_to_end(event.session_id)
+        await self._evict_over_cap()
+
+    async def _evict_over_cap(self) -> None:
+        """Finalize + evict least-recently-used sessions beyond ``max_sessions``.
+
+        Bounds per-session state for a long-lived multi-session daemon. Each
+        victim is the current oldest session; it is finalized under *its own*
+        lock (draining any held leading plumbing and titling its trailing open
+        activity, so no event or title is lost) and then dropped from every
+        per-session map. Running outside the caller's lock and taking at most one
+        lock at a time makes eviction deadlock-free; re-validating the victim
+        under its lock makes concurrent evictions and late pushes race-safe.
+
+        A session evicted this way that later receives another event simply
+        starts fresh (cold causal state) — acceptable only because the victim is,
+        by construction, the least-recently-active of ``max_sessions`` sessions.
+        """
+        if self._max_sessions is None:
+            return
+        while len(self._session_order) > self._max_sessions:
+            victim = next(iter(self._session_order), None)
+            if victim is None:
+                return
+            lock = self._session_locks.get(victim)
+            if lock is None:
+                # No lock: mid-eviction by another task or never fully set up.
+                self._session_order.pop(victim, None)
+                continue
+            async with lock:
+                # Re-validate under the lock: still tracked, still the oldest,
+                # still over cap. A concurrent push may have re-touched it (no
+                # longer oldest) or another eviction may have removed it.
+                if (
+                    victim not in self._session_order
+                    or next(iter(self._session_order), None) != victim
+                    or len(self._session_order) <= self._max_sessions
+                ):
+                    continue
+                self._session_order.pop(victim, None)
+                await self._finalize_session(victim)
+            self._session_locks.pop(victim, None)
+
+    async def _finalize_session(self, session_id: str) -> None:
+        """Drain + title a single session's trailing state, then drop it.
+
+        Mirrors :meth:`flush` for one session: emit any held leading plumbing
+        (phase drain), title the trailing open activity (title-stream flush), and
+        discard the boundary stream. Called under the session's lock by
+        :meth:`_evict_over_cap`. The phase drain runs first so every event has
+        reached the title stream before it is flushed, matching flush ordering.
+        """
+        if self._phase_inferencer is not None:
+            await self._drain_stream(session_id)
+        if self._title_inferencer is not None:
+            stream = self._title_streams.pop(session_id, None)
+            if stream is not None:
+                try:
+                    updates = await asyncio.to_thread(stream.flush)
+                except Exception as exc:
+                    logger.error(
+                        "Title stream flush failed for evicted session %s: %s",
+                        session_id,
+                        exc,
+                        exc_info=True,
+                    )
+                    updates = []
+                for update in updates:
+                    await self._push_title_update(update)
+        self._boundary_streams.pop(session_id, None)
 
     async def _push_locked(self, event: SessionEvent) -> None:
         if self._enricher is not None:
@@ -441,6 +537,7 @@ class EventPipeline:
         # is terminal: no push holds a lock or touches a boundary stream now.
         self._boundary_streams.clear()
         self._session_locks.clear()
+        self._session_order.clear()
 
         await self._fanout((sink.flush() for sink in self._sinks), "flush")
 

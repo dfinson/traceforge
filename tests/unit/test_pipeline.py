@@ -134,6 +134,88 @@ class TestPipelinePush:
         assert pipeline._session_lock("a") is not pipeline._session_lock("b")
 
 
+class TestPipelineSessionEviction:
+    """The LRU cap bounds retained per-session state for long-lived daemons:
+    beyond ``max_sessions`` the least-recently-used session is finalized and its
+    stream/lock state reclaimed, without waiting for the terminal flush."""
+
+    async def test_lru_evicts_oldest_session_state_beyond_cap(self):
+        # Transport-only: the only per-session state is the lock + recency entry.
+        pipeline = EventPipeline(
+            sinks=[], enable_phase=False, enable_boundary=False, max_sessions=2
+        )
+        await pipeline.push(make_event(session_id="a", id="a0"))
+        await pipeline.push(make_event(session_id="b", id="b0"))
+        assert set(pipeline._session_order) == {"a", "b"}
+
+        # The 3rd distinct session pushes the count over the cap; the oldest (a)
+        # is finalized and evicted from every per-session map.
+        await pipeline.push(make_event(session_id="c", id="c0"))
+        assert set(pipeline._session_order) == {"b", "c"}
+        assert "a" not in pipeline._session_locks
+
+    async def test_recent_use_protects_session_from_eviction(self):
+        # Re-touching a session makes it most-recent, so a later over-cap push
+        # evicts the *next* oldest instead — LRU, not FIFO.
+        pipeline = EventPipeline(
+            sinks=[], enable_phase=False, enable_boundary=False, max_sessions=2
+        )
+        await pipeline.push(make_event(session_id="a", id="a0"))
+        await pipeline.push(make_event(session_id="b", id="b0"))
+        await pipeline.push(make_event(session_id="a", id="a1"))  # touch a
+        await pipeline.push(make_event(session_id="c", id="c0"))  # over cap -> evict b
+        assert set(pipeline._session_order) == {"a", "c"}
+        assert "b" not in pipeline._session_locks
+
+    async def test_disabled_cap_retains_all_sessions(self):
+        pipeline = EventPipeline(
+            sinks=[], enable_phase=False, enable_boundary=False, max_sessions=None
+        )
+        for i in range(20):
+            await pipeline.push(make_event(session_id=f"s{i}", id=f"s{i}-0"))
+        assert len(pipeline._session_order) == 20
+        assert len(pipeline._session_locks) == 20
+
+    async def test_eviction_titles_trailing_activity_before_dropping(self):
+        # Eviction must not lose the trailing open activity's title: finalizing a
+        # victim titles it (and emits the update) just like flush would, then
+        # drops its title stream.
+        from datetime import datetime, timezone
+
+        from tests.unit.test_title_inferencer import _FakeTitle
+
+        from tracemill.title import TitleInferencer
+        from tracemill.types import EventMetadata, SessionEvent
+
+        def _sev(session_id: str) -> SessionEvent:
+            return SessionEvent(
+                id=f"{session_id}-0",
+                kind="tool.call",
+                session_id=session_id,
+                timestamp=datetime.now(timezone.utc),
+                payload={"tool_name": "edit"},
+                metadata=EventMetadata(source_framework="copilot"),
+            )
+
+        recorder = RecordingSink()
+        pipeline = EventPipeline(
+            sinks=[recorder.sink],
+            enable_phase=False,
+            enable_boundary=False,
+            title_inferencer=TitleInferencer(model=_FakeTitle()),
+            max_sessions=1,
+        )
+        await pipeline.push(_sev("A"))  # opens activity "A-0"
+        assert recorder.title_updates == []  # activity still open, no title yet
+
+        await pipeline.push(_sev("B"))  # over cap -> finalize + evict A
+        acts = [u for u in recorder.title_updates if u.session_id == "A" and u.kind == "activity"]
+        assert len(acts) == 1 and acts[0].segment_id == "A-0" and acts[0].title
+        # A's per-session state is gone; B's is retained.
+        assert "A" not in pipeline._title_streams and "A" not in pipeline._session_locks
+        assert "B" in pipeline._title_streams
+
+
 class TestPipelineTitle:
     """The opt-in titler stamps live activity/step ids on events (emitted
     immediately) and publishes each closed activity's titles as append-only

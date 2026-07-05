@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable
 
 from .hygiene import clean_title
@@ -143,6 +144,46 @@ def build_session_titler(cfg: "SessionNamingConfig | None" = None) -> Callable[[
 
     The returned callable maps the first substantive user message to a title.
     Falls back to the heuristic whenever the API tier is unconfigured/unusable.
+
+    This is the *blocking* single-callable form (API tier tried inline, then the
+    heuristic). The live pipeline instead uses :func:`build_session_titler_split`
+    so it can emit the heuristic immediately and refine via the API off the hot
+    path; this form is retained for callers that want one synchronous title.
+    """
+    split = build_session_titler_split(cfg)
+    if split.api_refiner is not None:
+        return _WithFallback(split.api_refiner, split.heuristic)
+    return split.heuristic
+
+
+@dataclass(frozen=True)
+class SessionTitler:
+    """A session titler split into an immediate floor and an optional refiner.
+
+    * ``heuristic`` -- the free, offline, non-blocking title. Always present; it
+      is emitted the instant the opening request arrives so the event stream
+      never waits on a title.
+    * ``api_refiner`` -- present only when ``strategy=api`` *and* a usable API key
+      is configured. It returns an abstractive upgrade of the title (or ``""`` on
+      any failure/timeout) and is meant to run **off the hot path**: the pipeline
+      runs it in a worker thread and emits its result as a later session
+      :class:`~tracemill.types.TitleUpdate`. ``None`` when no usable API tier is
+      configured, in which case the heuristic is the final title.
+    """
+
+    heuristic: Callable[[str], str]
+    api_refiner: Callable[[str], str] | None
+
+
+def build_session_titler_split(
+    cfg: "SessionNamingConfig | None" = None,
+) -> SessionTitler:
+    """Build the session titler as a non-blocking heuristic + optional refiner.
+
+    Unlike :func:`build_session_titler`, the API tier (when configured and keyed)
+    is returned *separately* as ``api_refiner`` rather than wrapped inline, so the
+    pipeline can emit the heuristic title immediately and only later replace it
+    with the API result — never blocking live event emission on the network.
     """
     if cfg is None:
         from tracemill.config import get_config
@@ -151,18 +192,20 @@ def build_session_titler(cfg: "SessionNamingConfig | None" = None) -> Callable[[
 
     heuristic = HeuristicProvider(cfg.heuristic)
     if cfg.strategy == "api" and _api_key_present(cfg.api):
-        return _WithFallback(ApiProvider(cfg.api, cfg.heuristic.max_words), heuristic)
+        return SessionTitler(heuristic, ApiProvider(cfg.api, cfg.heuristic.max_words))
     if cfg.strategy == "api":
         logger.info(
             "title.session_naming.strategy=api but no API key for model %r found in "
             "the environment; using the offline heuristic.",
             cfg.api.model,
         )
-    return heuristic
+    return SessionTitler(heuristic, None)
 
 
 __all__ = [
     "HeuristicProvider",
     "ApiProvider",
+    "SessionTitler",
     "build_session_titler",
+    "build_session_titler_split",
 ]

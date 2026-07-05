@@ -90,6 +90,10 @@ class EventPipeline:
         self._boundary_streams: dict[str, object] = {}
         self._title_inferencer = title_inferencer
         self._title_streams: dict[str, object] = {}
+        # In-flight off-hot-path session-title API refinements. Each is a tracked
+        # background task so live emission never blocks on the network; ``flush``
+        # awaits any still-pending before teardown so no refinement is lost.
+        self._refine_tasks: set[asyncio.Task] = set()
 
         # One lock per session serialises the stream-mutating push path. The
         # phase/boundary/title streams hold unlocked per-session causal state and
@@ -246,6 +250,54 @@ class EventPipeline:
         for update in updates:
             await self._push_title_update(update)
 
+        # The session title was emitted above as the immediate heuristic. When an
+        # API tier is configured the stream queued the request text for an
+        # abstractive upgrade; run it off the hot path so the network never
+        # delays live emission and emit the result as a later session update.
+        refine_text = stream.take_session_refinement()
+        if refine_text is not None:
+            self._schedule_session_refine(event.session_id, refine_text)
+
+    def _schedule_session_refine(self, session_id: str, text: str) -> None:
+        """Refine a session title via the API off the hot path (fire-and-forget).
+
+        Spawns a tracked background task so live event emission is never blocked
+        on the network. :meth:`flush` awaits any still-pending refinement before
+        teardown so a slow-but-successful upgrade is never dropped.
+        """
+        task = asyncio.create_task(self._session_refine(session_id, text))
+        self._refine_tasks.add(task)
+        task.add_done_callback(self._refine_tasks.discard)
+
+    async def _session_refine(self, session_id: str, text: str) -> None:
+        """Compute the API session title in a worker thread and emit it.
+
+        Runs off the hot path. On empty output (unconfigured refiner, timeout, or
+        any provider error) the heuristic title already emitted stands and nothing
+        further is published. Error-isolated so a failing refinement never
+        propagates into the event loop.
+        """
+        try:
+            refined = await asyncio.to_thread(self._title_inferencer.refine_title, text)
+        except Exception as exc:
+            logger.error(
+                "Session-title API refinement failed for session %s: %s — keeping heuristic",
+                session_id,
+                exc,
+                exc_info=True,
+            )
+            return
+        if not refined or not refined.strip():
+            return
+        await self._push_title_update(
+            TitleUpdate(
+                session_id=session_id,
+                segment_id=session_id,
+                kind="session",
+                title=refined,
+            )
+        )
+
     def _boundary_stamp(self, event: SessionEvent) -> SessionEvent:
         """Run one event through its session's live boundary stream."""
 
@@ -373,6 +425,13 @@ class EventPipeline:
         # emitted. Done after phase drain so every event has reached the title
         # stream first.
         await self._flush_title_streams()
+
+        # Await any in-flight session-title API refinements so a slow-but-
+        # successful upgrade lands (as its own title update) before the sinks are
+        # flushed and closed. Error-isolated: a failed refinement already logged
+        # inside the task and left the heuristic standing.
+        if self._refine_tasks:
+            await asyncio.gather(*self._refine_tasks, return_exceptions=True)
 
         # Boundary streams and per-session locks carry no buffered output to
         # drain (boundary is O(1) causal state; locks are bare mutexes), but

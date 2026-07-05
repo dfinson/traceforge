@@ -221,6 +221,66 @@ def test_non_message_events_never_title_session():
     assert fake.contexts == []  # session titler not invoked on a tool event
 
 
+# ─── session-title API refinement queueing (fix a: heuristic now, API later) ──
+
+
+def test_no_refiner_configured_queues_no_refinement():
+    # With only the immediate (heuristic) titler, the session title is emitted
+    # inline and nothing is queued for off-hot-path refinement.
+    titler, _calls = _recording_titler()
+    stream = TitleInferencer(model=_FakeTitle(), session_titler=titler).new_stream("S", "copilot")
+    _e, updates = stream.push(_msg(0, "Please add retry logic to the HTTP client with backoff"))
+    assert len([u for u in updates if u.kind == "session"]) == 1
+    assert stream.take_session_refinement() is None
+
+
+def test_refiner_queues_raw_text_once_and_emits_heuristic_now():
+    # When an API refiner is configured the HEURISTIC title is still emitted
+    # immediately (never blocking on the refiner), and the raw request text is
+    # queued exactly once for the pipeline to upgrade off the hot path.
+    titler, hcalls = _recording_titler()
+    refiner_calls: list[str] = []
+
+    def refiner(text: str) -> str:
+        refiner_calls.append(text)
+        return f"Refined {len(refiner_calls)}"
+
+    stream = TitleInferencer(
+        model=_FakeTitle(), session_titler=titler, session_refiner=refiner
+    ).new_stream("S", "copilot")
+
+    text = "Please add retry logic to the HTTP client with backoff"
+    _e, updates = stream.push(_msg(0, text))
+    sess = [u for u in updates if u.kind == "session"]
+    assert len(sess) == 1
+    assert sess[0].title == "Session 1"  # the immediate heuristic, not the refiner
+    assert hcalls == [text]  # heuristic ran inline
+    assert refiner_calls == []  # refiner is NOT invoked on the hot path
+    # The raw request text is available once for off-hot-path refinement.
+    assert stream.take_session_refinement() == text
+    assert stream.take_session_refinement() is None  # popped, not re-queued
+
+    # Set-once: a later substantive message neither re-titles nor re-queues.
+    _e2, updates2 = stream.push(_msg(1, "Also add unit tests for the limiter please"))
+    assert [u for u in updates2 if u.kind == "session"] == []
+    assert stream.take_session_refinement() is None
+
+
+def test_non_substantive_message_queues_no_refinement():
+    # A message that never titles the session must not queue a refinement either.
+    titler, _calls = _recording_titler()
+
+    def refiner(text: str) -> str:  # pragma: no cover - must never run
+        raise AssertionError("refiner queued for a non-substantive message")
+
+    stream = TitleInferencer(
+        model=_FakeTitle(), session_titler=titler, session_refiner=refiner
+    ).new_stream("S", "copilot")
+    _e, updates = stream.push(_msg(0, "hi"))
+    assert [u for u in updates if u.kind == "session"] == []
+    assert stream.take_session_refinement() is None
+
+
 # ─── real packaged model ─────────────────────────────────────────────────────
 
 _HAS_DEPS = (

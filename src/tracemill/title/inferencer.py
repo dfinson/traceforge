@@ -56,10 +56,20 @@ class TitleInferencer:
     inject a ``session_titler`` callable to override it (e.g. in tests).
     """
 
-    def __init__(self, model=None, model_dir=None, session_titler=None) -> None:
+    def __init__(
+        self, model=None, model_dir=None, session_titler=None, session_refiner=None
+    ) -> None:
         self._model = model
         self._model_dir = model_dir
+        # Explicit overrides for the session titler (tests inject plain
+        # callables). ``session_titler`` is the *immediate* heuristic title;
+        # ``session_refiner`` is the optional off-hot-path API upgrade. When
+        # neither is given both are built lazily from the global config.
         self._session_titler = session_titler
+        self._session_refiner_override = session_refiner
+        self._titler_built = False
+        self._session_heuristic = None
+        self._session_refiner = None
 
     @property
     def model(self):
@@ -69,22 +79,61 @@ class TitleInferencer:
             self._model = TitleModel.load(self._model_dir, threads=1)
         return self._model
 
-    def request_title(self, text: str) -> str:
-        """Title the session from its first substantive user message.
+    def _ensure_session_titler(self) -> None:
+        if self._titler_built:
+            return
+        if self._session_titler is not None or self._session_refiner_override is not None:
+            heuristic = self._session_titler
+            if heuristic is None:
+                from .naming import build_session_titler_split
 
-        Delegates to the configured session titler (the heuristic floor, or the
-        opt-in LiteLLM API tier when a key is present); see
-        :mod:`tracemill.title.naming`. The titler is built lazily from the global
-        config on first use, so a pipeline that never titles a session pays
-        nothing.
+                heuristic = build_session_titler_split().heuristic
+            self._session_heuristic = heuristic
+            self._session_refiner = self._session_refiner_override
+        else:
+            from .naming import build_session_titler_split
+
+            split = build_session_titler_split()
+            self._session_heuristic = split.heuristic
+            self._session_refiner = split.api_refiner
+        self._titler_built = True
+
+    def request_title(self, text: str) -> str:
+        """Immediate, non-blocking session title (the heuristic floor).
+
+        Returns the free extractive title over the user's own words the instant
+        the opening request arrives; it never touches the network, so live event
+        emission is never blocked on a title. When ``strategy=api`` is configured
+        the abstractive upgrade is served separately by :meth:`refine_title`, run
+        by the pipeline off the hot path. The titler is built lazily from the
+        global config on first use, so a pipeline that never titles a session
+        pays nothing.
         """
         if not text or not text.strip():
             return ""
-        if self._session_titler is None:
-            from .naming import build_session_titler
+        self._ensure_session_titler()
+        return self._session_heuristic(text)
 
-            self._session_titler = build_session_titler()
-        return self._session_titler(text)
+    @property
+    def has_session_refiner(self) -> bool:
+        """Whether an off-hot-path API session-title refiner is configured."""
+        self._ensure_session_titler()
+        return self._session_refiner is not None
+
+    def refine_title(self, text: str) -> str:
+        """Abstractive session-title upgrade for the opt-in API tier.
+
+        Returns the API-refined title, or ``""`` when no refiner is configured or
+        the API call fails/times out (the caller then keeps the heuristic). This
+        blocks on the network and MUST be run off the hot path (the pipeline runs
+        it in a worker thread and emits the result as a later ``TitleUpdate``).
+        """
+        if not text or not text.strip():
+            return ""
+        self._ensure_session_titler()
+        if self._session_refiner is None:
+            return ""
+        return self._session_refiner(text)
 
     def _title(self, rows: list[dict]) -> str:
         ctx = distilled_context(rows)
@@ -133,6 +182,11 @@ class SessionTitleStream:
         self._activity_id: str | None = None
         self._steps: list[_Step] = []  # steps of the currently-open activity
         self._session_titled = False  # set-once; the session label is its opening intent
+        # Text queued for off-hot-path API session-title refinement, set when the
+        # heuristic title is emitted and an API refiner is configured. The
+        # pipeline pops it via :meth:`take_session_refinement` and refines in a
+        # worker thread, so the network never blocks live emission.
+        self._pending_refine_text: str | None = None
 
     def push(self, event: SessionEvent) -> tuple[SessionEvent, list[TitleUpdate]]:
         """Ingest one event; stamp its segment ids and emit it now, returning
@@ -165,20 +219,26 @@ class SessionTitleStream:
         Substance (R1) reuses the shipped narration hygiene with no new
         threshold: a message is substantive iff it yields >=1 sentence under
         :func:`tracemill.title.context.narration` -- greetings / acks collapse to
-        zero, real requests keep one. The title is emitted live the instant that
-        message arrives, keyed by ``segment_id == session_id``. The set-once flag
-        means a mid-session SESSION_ENDED/PAUSED (which can recur on resume) never
-        re-triggers or tears down the session title; a contentless session simply
-        gets none.
+        zero, real requests keep one. The **heuristic** title is emitted live and
+        non-blocking the instant that message arrives, keyed by
+        ``segment_id == session_id``. When an API refiner is configured the raw
+        request text is queued (see :meth:`take_session_refinement`) so the
+        pipeline can upgrade the title off the hot path -- the network never
+        blocks live emission. The set-once flag means a mid-session
+        SESSION_ENDED/PAUSED (which can recur on resume) never re-triggers or
+        tears down the session title; a contentless session simply gets none.
         """
         if self._session_titled or event.kind != EventKind.MESSAGE_USER:
             return []
         if not narration([row]):
             return []
-        title = self._inf.request_title(payload_text(row))
+        text = payload_text(row)
+        title = self._inf.request_title(text)
         if not title:
             return []
         self._session_titled = True
+        if self._inf.has_session_refiner:
+            self._pending_refine_text = text
         return [
             TitleUpdate(
                 session_id=self._session_id,
@@ -187,6 +247,18 @@ class SessionTitleStream:
                 title=title,
             )
         ]
+
+    def take_session_refinement(self) -> str | None:
+        """Pop the request text queued for off-hot-path API title refinement.
+
+        Returns the text once (then ``None``), or ``None`` if no refinement is
+        pending. The pipeline calls this right after :meth:`push` and, when a
+        text is returned, refines the session title in a worker thread and emits
+        the result as a later session :class:`TitleUpdate`.
+        """
+        text = self._pending_refine_text
+        self._pending_refine_text = None
+        return text
 
     def flush(self) -> list[TitleUpdate]:
         """Title the final open activity (if any) and return its updates."""

@@ -182,6 +182,111 @@ class TestPipelineTitle:
         )
         assert recorder.title_updates == []
 
+    async def test_session_title_emits_heuristic_now_and_api_refinement_later(self):
+        # With an API refiner configured the session title is emitted immediately
+        # as the heuristic (event never blocks on the network); the API upgrade
+        # arrives later as a second session update, awaited at flush.
+        from tests.unit.test_title_inferencer import _FakeTitle, _msg
+
+        from tracemill.title import TitleInferencer
+
+        def heuristic(text: str) -> str:
+            return "Heuristic title"
+
+        def refiner(text: str) -> str:
+            return "Refined API title"
+
+        recorder = RecordingSink()
+        pipeline = EventPipeline(
+            sinks=[recorder.sink],
+            enable_phase=False,
+            enable_boundary=False,
+            title_inferencer=TitleInferencer(
+                model=_FakeTitle(), session_titler=heuristic, session_refiner=refiner
+            ),
+        )
+        await pipeline.push(_msg(0, "Please add retry logic to the HTTP client with backoff"))
+
+        # The event emitted immediately and the heuristic session title landed —
+        # without waiting on the (still-unscheduled) API refinement.
+        assert [e.id for e in recorder.events] == ["e0"]
+        sess = [u for u in recorder.title_updates if u.kind == "session"]
+        assert len(sess) == 1 and sess[0].title == "Heuristic title"
+
+        await pipeline.flush()
+        # Flush awaited the background refinement: a second session update with
+        # the API title now supersedes the heuristic (same segment id).
+        sess = [u for u in recorder.title_updates if u.kind == "session"]
+        assert [u.title for u in sess] == ["Heuristic title", "Refined API title"]
+        assert all(u.segment_id == "S" for u in sess)
+
+    async def test_session_title_api_failure_keeps_heuristic(self):
+        # An empty/failed refinement (timeout, provider error) leaves the
+        # heuristic standing — no second session update is published.
+        from tests.unit.test_title_inferencer import _FakeTitle, _msg
+
+        from tracemill.title import TitleInferencer
+
+        def heuristic(text: str) -> str:
+            return "Heuristic title"
+
+        def refiner(text: str) -> str:
+            return ""  # models `ApiProvider` returning "" on any failure
+
+        recorder = RecordingSink()
+        pipeline = EventPipeline(
+            sinks=[recorder.sink],
+            enable_phase=False,
+            enable_boundary=False,
+            title_inferencer=TitleInferencer(
+                model=_FakeTitle(), session_titler=heuristic, session_refiner=refiner
+            ),
+        )
+        await pipeline.push(_msg(0, "Please add retry logic to the HTTP client with backoff"))
+        await pipeline.flush()
+        sess = [u for u in recorder.title_updates if u.kind == "session"]
+        assert [u.title for u in sess] == ["Heuristic title"]
+
+    async def test_session_title_refinement_does_not_block_later_events(self):
+        # A slow API refinement must not delay subsequent live events: while the
+        # refiner blocks in its worker thread, further events keep streaming out.
+        import threading
+
+        from tests.unit.test_title_inferencer import _FakeTitle, _event, _msg
+
+        from tracemill.title import TitleInferencer
+
+        release = threading.Event()
+
+        def heuristic(text: str) -> str:
+            return "Heuristic title"
+
+        def refiner(text: str) -> str:
+            release.wait(timeout=5)  # block until the test lets it finish
+            return "Refined API title"
+
+        recorder = RecordingSink()
+        pipeline = EventPipeline(
+            sinks=[recorder.sink],
+            enable_phase=False,
+            enable_boundary=False,
+            title_inferencer=TitleInferencer(
+                model=_FakeTitle(), session_titler=heuristic, session_refiner=refiner
+            ),
+        )
+        await pipeline.push(_msg(0, "Please add retry logic to the HTTP client with backoff"))
+        # Refinement is now blocked in a worker thread; a following event still
+        # emits without waiting for it.
+        await pipeline.push(_event(1))
+        assert [e.id for e in recorder.events] == ["e0", "e1"]
+        sess = [u for u in recorder.title_updates if u.kind == "session"]
+        assert len(sess) == 1  # only the heuristic so far; refinement still pending
+
+        release.set()  # let the refinement complete
+        await pipeline.flush()
+        sess = [u for u in recorder.title_updates if u.kind == "session"]
+        assert [u.title for u in sess] == ["Heuristic title", "Refined API title"]
+
 
 class TestPipelineSpanAndUsage:
     async def test_push_span_fanout(self):

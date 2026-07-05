@@ -283,6 +283,7 @@ See [SPEC.md](SPEC.md) for the full architecture specification.
 - **Immutable domain objects** -- all events are frozen Pydantic models
 - **Error isolation** -- one failing sink cannot block others
 - **Data-driven rules** -- classification, risk scoring, MCP profiles all externalized to YAML
+- **Monitor + shield object model** -- governance dissolves into single-responsibility collaborators (one session-state writer, a side-effect-free assessor, an opt-in shield) wired by dependency injection; see [SPEC §22](SPEC.md)
 
 ## Status
 

@@ -1118,9 +1118,17 @@ tracemill/
 │   │   ├── __init__.py
 │   │   ├── models.py
 │   │   └── phase_tracker.py     # PhaseTracker
-│   ├── governance/              # Governance / assessment engine (18 modules)
+│   ├── governance/              # Governance / assessment engine (26 modules)
 │   │   ├── __init__.py          # Public API re-exports
-│   │   ├── pipeline.py          # GovernancePipeline (score_tool_call -> EventTrace, process_event -> SessionMeta)
+│   │   ├── pipeline.py          # GovernancePipeline — composition root / facade (delegates)
+│   │   ├── monitor.py           # SessionMonitor — single writer (observe / process / lifecycle)
+│   │   ├── scorer.py            # Scorer — read-only preview (score_tool_call* / preflight)
+│   │   ├── context.py           # ContextBuilder — payload / event -> EnrichmentContext
+│   │   ├── phase1.py            # Phase1 — Phase-1 state-advance step (writer + preview share it)
+│   │   ├── assessor.py          # Assessor — (snapshot, event) -> SessionMeta (label+risk+drift)
+│   │   ├── registry.py          # SessionRegistry — residency + LRU eviction + reservations
+│   │   ├── codec.py             # MetaCodec — (de)serialize SessionMeta + snapshots
+│   │   ├── shield.py            # Shield — enforcement (gate context + pre/postflight + record)
 │   │   ├── results.py           # RecommendedAction, RiskRecommendation, SessionMeta, Evidence
 │   │   ├── types.py             # EnrichmentContext, ToolCallEvent, ToolResultEvent
 │   │   ├── state.py             # SessionState, budget / taint snapshots
@@ -1299,7 +1307,7 @@ tracemill/
 | CLI | ✅ Complete | `cli/` (Click): watch, replay, score, gate, detect, config, status, init, download-model |
 | Gate module | ✅ Complete | Sync scoring path + PII gate + registry (`gate/`, `gates/`) |
 | Live structuring (phase / boundary / title) | ✅ Complete | Packaged CPU-only ONNX models: PhaseInferencer + BoundaryInferencer default-on, TitleInferencer opt-in (emits `TitleUpdate`) |
-| Governance / assessment engine | ✅ Complete | `governance/` monitor + shield object model (SOLID): `SessionMonitor` (single writer), `SessionRegistry`, `Assessor`, `Shield`, one-counter `SessionState`, `GovernancePipeline` facade; plus labeler, rules, PII, IFC, integrity, drift, budget, observer, persistence. Epic #7 (#9–#27) delivered. See §22 |
+| Governance / assessment engine | ✅ Complete | `governance/` monitor + shield object model (SOLID): `SessionMonitor` (single writer), `Scorer` (read-only preview), `SessionRegistry`, `Assessor`, `Shield`, one-counter `SessionState`, `GovernancePipeline` facade; plus labeler, rules, PII, IFC, integrity, drift, budget, observer, persistence. Epic #7 (#9–#27) delivered. See §22 |
 | Configuration system | ✅ Complete | Hierarchical loading, env overrides, discriminated unions, bootstrap |
 | Classify data files (9 YAMLs) | ✅ Complete | Binary info, rules, profiles, risk config |
 | CI/CD | ✅ Complete | Lint, test matrix, publish, weekly audits |
@@ -1360,11 +1368,15 @@ API; the SDK `Pipeline` composes it with the observation backbone.
 
 | Collaborator | Single responsibility | Depends on |
 |---|---|---|
-| `SessionState` | Encapsulate one session's accumulators — **one** tool-call counter, budget dimensions, taint ledger, phase window, gate history. Mutated only through its own methods; exposes an immutable `snapshot()`. | — |
+| `SessionState` | Encapsulate one session's accumulators — **one** tool-call counter, budget dimensions, taint ledger, phase window, gate history. Mutated only through its own methods; exposes an immutable `snapshot()` and a detached `clone` for previews. | — |
 | `SystemStore` | Durability: idempotency reservations, atomic commit, crash recovery, audit persistence. | sqlite |
 | `SessionRegistry` | Residency: the one place sessions are created, found, and LRU-evicted; reservation bookkeeping. | `SystemStore` |
+| `ContextBuilder` | Bridge a raw hook payload / adapted `SessionEvent` into an `EnrichmentContext` (classification + shell-command analysis). | engine |
+| `Phase1` | The Phase-1 state-advance step — budget, taint (IFC), phase window, pressure — applied to whichever `SessionState` it is handed (the real one, or a clone). | budget, labeler |
 | `Assessor` | Turn `(snapshot, event)` into a `SessionMeta` — label + risk + recommendation + drift + MCP. Side-effect-free. | labeler, rules, engine |
-| `SessionMonitor` | The **single writer**: per event, advance `SessionState` (Phase 1) then call the `Assessor`. Owns `observe` / `preflight` / `lifecycle`. | `SessionRegistry`, `Assessor` |
+| `MetaCodec` | Serialize / deserialize `SessionMeta` and state snapshots for reservations and the audit trail. | — |
+| `SessionMonitor` | The **single writer**: per event, advance the real `SessionState` via `Phase1`, commit atomically, then call the `Assessor`. Owns `observe` / `process` / `lifecycle`. | `SessionRegistry`, `Phase1`, `Assessor`, `MetaCodec` |
+| `Scorer` | The **read side**: preview the same `Phase1` + `Assessor` against a **detached clone**, mutating no session state (audit-only persistence). Owns `score_tool_call*` / `preflight`. | `ContextBuilder`, `Phase1`, `Assessor`, `SessionRegistry` |
 | `GatePolicy` (Policy) | Map an assessed request/result to a `Verdict` (pre) / `PostflightVerdict` (post). An injected strategy. | — |
 | `Shield` | Runtime enforcement: build the gate context from `SessionState`, run the policy's pre/post chains, record allow/deny. | `GatePolicy`, `SessionRegistry` |
 | `gate_*` adapters | Bind one framework's execution hooks to the `Shield` (the edit-automaton at the edge). | `Shield` |
@@ -1375,6 +1387,7 @@ flowchart TB
   subgraph Facade["GovernancePipeline — composition root / facade"]
     direction TB
     MON["SessionMonitor<br/>(single writer)"]
+    SCO["Scorer<br/>(read-only preview)"]
     SH["Shield<br/>(enforcement)"]
   end
   REG["SessionRegistry<br/>(residency + eviction)"]
@@ -1385,11 +1398,14 @@ flowchart TB
 
   MON --> REG
   MON --> ASS
+  SCO --> REG
+  SCO --> ASS
   SH --> REG
   SH --> POL
   REG --> ST
   REG --> STORE
-  MON -. reads snapshot .-> ST
+  MON -. advances .-> ST
+  SCO -. clones · no write .-> ST
   SH -. reads via methods .-> ST
 
   classDef writer fill:#fde2e8,stroke:#b3365f;
@@ -1430,18 +1446,20 @@ Two compositions of the same collaborators:
   `SessionState`, so budget stays honest: a denied call never reaches the monitor's commit and
   costs no budget.
 
-`SessionMonitor` exposes three entry points, distinguished by state semantics:
+The facade exposes one **write** entry point (the monitor) and two **read** entry points (the
+scorer), distinguished by state semantics:
 
-| Method (facade) | Input | Session state | Returns | Use |
-|--------|-------|---------------|---------|-----|
-| `observe_event(event)` | `SessionEvent` | **advances** | `SessionMeta` | the pipeline stage (budget / taint / drift accrue) |
-| `score_tool_call_event(event)` | `SessionEvent` | read-only | `SessionMeta` | preflight from an adapted event |
-| `score_tool_call(payload)` | `dict` | read-only | `EventTrace` | preflight from a hook |
+| Method (facade) | Owner | Input | Session state | Returns | Use |
+|--------|--------|-------|---------------|---------|-----|
+| `observe_event(event)` | `SessionMonitor` | `SessionEvent` | **advances (persists)** | `SessionMeta` | the pipeline stage (budget / taint / drift accrue) |
+| `score_tool_call_event(event)` | `Scorer` | `SessionEvent` | read-only (clone) | `SessionMeta` | preflight from an adapted event |
+| `score_tool_call(payload)` | `Scorer` | `dict` | read-only (clone) | `EventTrace` | preflight from a hook |
 
-`observe_event` is the mutating stage the `EventPipeline` calls; `score_tool_call*` score against
-current state without committing. Internally the monitor is the single writer and the assessor is
-side-effect-free, so a read-only score is literally "assess a snapshot the monitor did not
-advance."
+`observe_event` is the mutating stage the `EventPipeline` calls; `score_tool_call*` preview against
+a **detached clone** of current state, committing nothing. Because the monitor is the single writer
+and the assessor is side-effect-free, a read-only score is literally "advance a throwaway clone the
+real session never sees, then assess its snapshot." Writer (`SessionMonitor`) and reader (`Scorer`)
+share the same `Phase1` and `Assessor`, so preview and live scoring cannot diverge.
 
 ### Determinism contract
 
@@ -1507,7 +1525,8 @@ the `.governance` (engine) / `.backbone` (`EventPipeline`) escape hatches.
 
 The composition root and facade, usable standalone. The `score` / `gate` CLIs and gating-only SDK
 use go straight to it; the SDK facade delegates to it. It constructs the `SessionRegistry`,
-`Assessor`, `SessionMonitor`, and `Shield`, then forwards to them.
+`Assessor`, `SessionMonitor` (writer), `Scorer` (read-only preview), and `Shield`, then forwards
+to them.
 
 ```python
 from tracemill.governance.pipeline import GovernancePipeline
@@ -1839,9 +1858,13 @@ src/tracemill/
 ├── trace.py                 # EventTrace, TraceStage (unified record)
 ├── governance/              # The monitor + shield engine
 │   ├── pipeline.py          # GovernancePipeline — composition root / facade (delegates)
-│   ├── monitor.py           # SessionMonitor — single writer (observe / preflight / lifecycle)
+│   ├── monitor.py           # SessionMonitor — single writer (observe / process / lifecycle)
+│   ├── scorer.py            # Scorer — read-only preview (score_tool_call* / preflight)
+│   ├── context.py           # ContextBuilder — payload / event -> EnrichmentContext
+│   ├── phase1.py            # Phase1 — the Phase-1 state-advance step (writer + preview share it)
 │   ├── registry.py          # SessionRegistry — residency + LRU eviction + reservations
 │   ├── assessor.py          # Assessor — (snapshot, event) -> SessionMeta (label+risk+drift)
+│   ├── codec.py             # MetaCodec — (de)serialize SessionMeta + snapshots
 │   ├── shield.py            # Shield — gate context + preflight/postflight + record allow/deny
 │   ├── state.py             # SessionState — one counter, mutated only via methods
 │   ├── persistence.py       # SystemStore — durability (reservations, atomic commit)

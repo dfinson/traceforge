@@ -51,11 +51,43 @@ governance:
   #   max_by_effect:
   #     destructive: 10
 
+# ─── Phase tracker (session-level phase segmentation) ───────────────────────
+# Smooths per-event activity labels into stable workflow phases via a debounced
+# majority vote. Defaults are literature-seeded; recalibrate with the
+# phase-tracker-window-sweep experiment.
+# phase_tracker:
+#   enabled: true
+#   window_size: 3      # sliding window whose mode is the current phase
+#   debounce: 2         # consecutive events before a boundary commits
+#   phase_root_depth: 1 # dot-path depth grouped into the boundary root
+
 # ─── SDK configuration (in-process push mode) ───────────────────────────────
 sdk:
   batch_size: 64
   flush_interval: 5.0
   max_queue_size: 10000
+
+# ─── Titling ────────────────────────────────────────────────────────────────
+# Activity/step titles always use the packaged model. Session naming (the title
+# derived from the first substantive user message) defaults to a free, offline
+# heuristic over the user's own words. Opt into an LLM for abstractive titles by
+# setting strategy: api and providing the provider's API key in the environment
+# (e.g. export OPENAI_API_KEY=...). No key => it silently stays on the heuristic.
+#
+# title:
+#   session_naming:
+#     strategy: heuristic     # heuristic | api
+#     heuristic:
+#       method: hybrid        # clip | imperative | keyphrase | hybrid
+#       max_words: 8
+#       max_chars: 60
+#     api:
+#       model: gpt-4o-mini    # any LiteLLM model, e.g. anthropic/claude-3-5-haiku,
+#                             #   azure/<deployment>, ollama/llama3 (+ api_base)
+#       api_base: null        # for azure / ollama / vllm / openai-compatible
+#       api_key_env: null     # override which env var holds the key
+#       timeout: 10
+#       max_tokens: 24
 
 # ─── Additional mapping directories ────────────────────────────────────────
 mappings_dirs:

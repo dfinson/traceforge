@@ -124,6 +124,8 @@ events:
     kind: message.assistant
     payload:
       content: data.content
+      reasoning: data.reasoningText
+      tool_requests: data.toolRequests
 
   system.message:
     kind: message.system
@@ -205,16 +207,17 @@ events:
       success: data.success
 
   # ── External tools (MCP) ───────────────────────────────────────────────────
-  external.tool_requested:
+  external_tool.requested:
     kind: tool.call.started
     payload:
       tool_name: data.toolName
-
-  external.tool_completed:
+      arguments: data.arguments
+  external_tool.completed:
     kind: tool.call.completed
     payload:
       tool_name: data.toolName
       success: data.success
+      result: data.result.content
 
   # ── Agent orchestration ────────────────────────────────────────────────────
   subagent.started:

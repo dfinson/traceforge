@@ -1,0 +1,115 @@
+# Request titler: synthetic-VOLUME learning curve (find the knee).
+#
+# COMPANION to titler-request-dedicated.yaml. That experiment's scale_policy has
+# two parts: (1) a FLOOR (scale synth until request-title mass replaces the forgone
+# span mass) and (2) a CEILING ("keep doubling synthetic volume until the held-out
+# request coherence gain between successive doublings falls below the judge noise
+# floor"). THIS experiment is that CEILING probe, isolated: does scaling the
+# synthetic prompt->task-title corpus keep buying generalization to REAL messy user
+# prompts, or has coherence plateaued (more synthesis = wasted GPU)?
+#
+# WHY SYNTH-ONLY (the clean-isolation bet). Training is synthetic pairs ONLY; the
+# eval is the fixed 260 held-out CodePlane REAL prompts (t5-title-codeplane.parquet).
+# Synth and real are disjoint by construction -> zero train/eval leakage, and the
+# ONLY variable across budgets is synthetic coverage. Mixing the real anchor in
+# would confound "more synth" with "the anchor's fixed mass fraction shrinking",
+# and the codeplane-real anchor rows overlap the eval reals. Synth-only removes
+# both confounds. It measures a slightly different quantity than the dedicated
+# FLOOR run (no real anchor, no rationale task) -- deliberately, to answer the
+# volume question alone. The dedicated-head yaml owns the promote decision.
+#
+# WHY IT IS NOT FLAT-BY-CONSTRUCTION. A single synth source makes the trainer's
+# equal-per-source WeightedRandomSampler a no-op (one source, weight 1.0), so no
+# source-mass balancing flattens the curve. Budgets are NESTED subsets by a stable
+# content hash (2k subset 4k subset 8k subset 12k) -- a larger budget strictly ADDS
+# data. Hyperparameters are held CONSTANT (from-scratch google/t5-efficient-tiny,
+# epochs=12/bs=32/lr=3e-4); more data at fixed epochs = more gradient steps, the
+# honest "more data" regime.
+#
+# Companion script (NEW; orchestration only, no trainer/judge edits):
+#   research/scripts/_title_request_sweep.py
+#     - _load_synth(): synth pairs in stable md5(prompt\0gold) order (no seed).
+#     - nested subsample -> request-only train parquet (src=synth-request,
+#       prefix="title task from request: ", all split=train).
+#     - subprocess _title_t5_train train (GPU) -> per-budget model dir.
+#     - subprocess _title_judge (--per-source-cap 80 --concurrency 6) on the fixed
+#       260 CodePlane reals; coherence read straight from the scores jsonl.
+#     - sqlite checkpoint (data/interim/sweep/request-sweep.db); RESUMES on restart
+#       (skips budgets already 'done'). Footprint: GPU train, OMP_NUM_THREADS=2,
+#       four budgets run sequentially (one GPU), no process killing.
+
+experiment:
+  name: titler-request-volume-sweep
+  mlflow_experiment: titler-request-volume-sweep
+  display_name: "Titler - Request Head Synthetic-Volume Learning Curve"
+  description: |
+    Synth-only learning curve for the dedicated request head. Train from-scratch
+    google/t5-efficient-tiny on nested synthetic prompt->title budgets
+    {2000, 4000, 8000, 12000}, judge coherence on the SAME fixed 260 held-out
+    CodePlane real prompts at every budget, and read the knee. Answers the ceiling
+    half of titler-request-dedicated.yaml's scale_policy: is real-prompt coherence
+    still climbing with synthetic volume, or has it plateaued (synthesis exhausted
+    as a lever)?
+  tags:
+    component: titler
+    pillar: generalization
+    stage: train-and-eval
+    constraint: cpu-near-zero-footprint    # serve; training uses the RTX A500 GPU
+    parent: titler-request-dedicated
+    method: data-scaling-curve
+
+dataset:
+  train: synthetic prompt->title pairs ONLY (request-title-pairs.12k.json, origin=synth-distill)
+  eval: t5-title-codeplane.parquet   # 260 held-out CodePlane REAL prompts, all heldout
+  budgets: [2000, 4000, 8000, 12000] # nested subsets, stable md5(prompt\0gold) order
+  prefix: "title task from request: "
+  split: all synth rows are train; eval reals are a separate disjoint parquet (no leakage)
+  balancing: none (single source -> equal-per-source sampler is a no-op, weight 1.0)
+
+model:
+  base: google/t5-efficient-tiny
+  params: ~16M (4 enc / 4 dec)
+  init: from-scratch
+  recipe: { epochs: 12, batch_size: 32, lr: 3e-4, max_tgt: 48, device: cuda (RTX A500) }
+  held_constant_across_budgets: [base, epochs, batch_size, lr, max_tgt, eval_set]
+
+acceptance:
+  rule: >
+    DIAGNOSTIC, not a promote gate (the dedicated-head yaml owns promotion). Read
+    the coherence-vs-volume curve on the fixed 260 reals: if the marginal gain per
+    budget doubling has fallen below the judge noise floor (~2.5pt at n=80) by 12k,
+    synthetic volume is exhausted as a lever and more synthesis is wasted GPU. If
+    it is still climbing at 12k, generate more synth before the dedicated-floor run.
+  judge: blinded Sonnet A/B, per-source-cap 80, random_state=17 (same CodePlane protocol).
+
+# Recorded after the run by _title_request_sweep.py -> data/interim/sweep/request-sweep-curve.json
+results:
+  eval: 260 held-out CodePlane reals, n=80 judged per budget (random_state=17), blinded Sonnet A/B
+  curve:                      # coherence on the SAME reals; train loss for the overfit read
+    - { budget: 2000,  train_loss: 3.20, coherent: 0.263, gold_coherent: 0.925, h2h_model: 0.138 }
+    - { budget: 4000,  train_loss: 2.84, coherent: 0.300, gold_coherent: 0.900, h2h_model: 0.163 }
+    - { budget: 8000,  train_loss: 2.54, coherent: 0.300, gold_coherent: 0.913, h2h_model: 0.150 }
+    - { budget: 12000, train_loss: 2.38, coherent: 0.213, gold_coherent: 0.938, h2h_model: 0.138 }
+  knee: 4000                  # peak coherence 0.30; 4k->8k = +0pt, 8k->12k = -9pt
+  finding: >
+    NOT a plateau -- a REGRESSION. Train loss falls monotonically (3.20 -> 2.38,
+    lowest at 12k) while real-prompt coherence peaks at 4k (0.30) and then drops 9pt
+    at 12k, far outside the ~2.5pt noise floor. Classic overfitting: past ~4k the
+    model fits the synthetic gold STYLE ever better while drifting off the real
+    distribution. Synth gold != real gold, so synthetic VOLUME is not merely
+    exhausted as a lever for the synth-only recipe -- beyond ~4-8k it is actively
+    counterproductive. Peak synth-only coherence (0.30) trails the shipped request
+    head's 0.512 baseline and is nowhere near the ~0.90 gold ceiling; the model
+    never wins the blinded h2h vs gold (13-16% across all budgets).
+  implication: >
+    Kills the "just generate more synth" idea. The lever is NOT synth quantity; it
+    is the real-distribution anchor + the rationale comprehension signal (both absent
+    here by design). This VALIDATES titler-request-dedicated.yaml's FLOOR recipe
+    (keep the 256 CodePlane reals as anchor + request-rationale co-training, scale
+    synth only to the forgone-span FLOOR, not beyond). Do NOT spend GPU scaling synth
+    past the floor. Capacity vs data-anchor as the true ceiling is the dedicated-floor
+    run's job to separate, now that synth-volume-alone is ruled out.
+
+next:
+  - "Proceed to the dedicated-FLOOR run per titler-request-dedicated.yaml: real anchor + request-rationale, synth scaled only to the forgone-span floor (~1656), (src,task)-parity."
+  - "Do NOT extend the synth curve -- volume alone regresses; more synthesis is wasted GPU."

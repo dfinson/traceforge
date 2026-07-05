@@ -13,6 +13,8 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v6
+        with:
+          lfs: true
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
@@ -24,10 +26,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          lfs: true
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       - run: pip install hatchling build
       - run: python -m build
-      - run: pip install dist/*.whl
+      # tracemill now depends on tracemill-title-model, which is not on PyPI until
+      # its own release tag is pushed. Build it into dist/ and resolve it locally
+      # via --find-links so the base-wheel install works pre-publish (litellm,
+      # onnxruntime, etc. still come from PyPI).
+      - run: python -m build packages/tracemill-title-model --outdir dist
+      - run: pip install --find-links dist tracemill
       - run: python -c "import tracemill; print(tracemill.__name__)"

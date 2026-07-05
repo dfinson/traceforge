@@ -1,0 +1,129 @@
+# Context-grounded decoding for the titler: structural anti-hallucination gate.
+#
+# Companion scripts:
+#   research/scripts/_title_toc_metrics.py   (quality deltas, this file's numbers)
+#   research/scripts/_title_toc_e2e.py        (inline TOC tree render for eyeball)
+#   research/scripts/_title_pipebench.py      (live footprint)
+#
+# MLflow: _title_toc_metrics.py logs a served-path run (verb concentration,
+#   grounding, hallucinated-id) to this experiment via tracemill_research.mlflow_utils.
+#
+# PROBLEM (measured, not vibes). Scoring 979 titled segments produced by the live
+# pipeline over 5 held-out copilot-cli-native sessions, the tiny ORT titler emits
+# an identifier-shaped content word that the span's own distilled context never
+# mentions on 8.6% of titles (e.g. "_init_admissment", "github-mcp-server-ample",
+# "code-review-in-theory-code-enges"). These are hallucinations by definition: a
+# faithful title can only name identifiers present in its context.
+#
+# FIX (parameter-free, no source tags, no tuned thresholds). At candidate
+# selection, demote any beam whose identifier-shaped content words are absent
+# from the context below grounded siblings; "identifier-shaped" is a structural
+# surface property (snake/path separator, hyphenation, internal capital, digit,
+# dotted extension). Reorder-only never drops the last candidate, so coverage is
+# untouched. A pure reorder is capped by BEAM COLLAPSE — when every base beam
+# shares the same invented id there is no grounded sibling to promote — so on
+# THAT case alone (and only then) the pool is re-decoded at 2x width
+# (adaptive escalation). The grounded majority keeps base footprint.
+
+experiment:
+  name: titler-grounded-decoding
+  mlflow_experiment: titler-grounded-decoding-v1
+  display_name: "Titler — Context-Grounded Decoding (anti-hallucination)"
+  description: |
+    Inference-time only (no retrain): tracemill.title.inference grounds the beam
+    candidates against the span's distilled context. Env-gated for A/B:
+    TITLE_GROUND (default 1), TITLE_BEAMS (base width, default 5),
+    TITLE_BEAMS_MAX (collapse-escalation width, default 2x base).
+
+    DECISIVE FINDING — reorder-only grounding cuts structural hallucination
+    8.6% -> 5.9% (-31% rel) but is capped by beam collapse and slightly worsens
+    verb diversity (grounded survivors skew to generic "Investigate <ctx-word>").
+    Brute-force widening to 10 beams reaches 2.7% but costs ~2.5x titler compute
+    (400 ms/segment) and regresses sibling distinctness (near-dup 13.8% -> 16.2%).
+    ADAPTIVE escalation (base 5, re-decode to 10 ONLY on a full collapse) recovers
+    93% of the win — 3.1% hallucination (-64% rel) — for ~10% footprint overhead,
+    and holds sibling near-dup at the 13.8% baseline. Adaptive is shipped.
+
+    The residual ~+3pp verb-concentration that grounding introduces is NOT this
+    stage's job; it is the target of the domain-diverse retrain (track A). The
+    TITLE_GROUND gate stays so the final stacked model can be A/B-confirmed.
+  tags:
+    component: titler
+    pillar: faithfulness
+    stage: serve-decode
+    constraint: cpu-near-zero-footprint
+
+dataset:
+  source: labeling-corpus
+  source_note: 12 largest sharded copilot-cli-native sessions (5 distinct), capped 800 events each
+  titled_segments: 979
+  metric_definition: >
+    hallucinated-id = titled segment whose final title carries an
+    identifier-shaped content word (mirrored _ID_RE) absent from its context.
+
+conditions:
+  - id: off
+    decode: 5 beams, no grounding
+    role: baseline
+  - id: ground-5
+    decode: 5 beams, grounding reorder
+    role: partial — capped by beam collapse
+  - id: ground-10
+    decode: 10 beams, grounding reorder
+    role: REJECTED — 2.5x titler compute, regresses sibling distinctness
+  - id: ground-adaptive
+    decode: 5 beams + escalate to 10 on collapse, grounding reorder
+    role: SELECTED — shipped default
+
+results:
+  # CPU-only (CUDA_VISIBLE_DEVICES=-1). Quality on 979 titled segments.
+  off:
+    hallucinated_id_pct: 8.6
+    content_grounded_pct: 76.7
+    titled_coverage_pct: 98.0
+    verb_top1_pct: 42.2
+    verb_h_over_hmax: 0.58
+    near_dup_activity_pct: 13.8
+  ground-5:
+    hallucinated_id_pct: 5.9
+    content_grounded_pct: 76.4
+    verb_top1_pct: 45.5
+    near_dup_activity_pct: 13.8
+  ground-10:
+    hallucinated_id_pct: 2.7
+    content_grounded_pct: 78.9
+    verb_top1_pct: 45.7
+    near_dup_activity_pct: 16.2
+    ms_per_segment: 400          # ~2.5x base
+    peak_rss_mb: 620
+  ground-adaptive:
+    hallucinated_id_pct: 3.1     # -64% rel vs off
+    content_grounded_pct: 78.2
+    titled_coverage_pct: 98.0
+    verb_top1_pct: 45.5
+    near_dup_activity_pct: 13.8  # held at baseline
+    ms_per_segment: 176          # +10% vs base
+    peak_rss_mb: 601
+    cpu_pct_of_core: 98          # single core preserved
+    loop_max_stall_ms: 106
+
+acceptance:
+  rule: >
+    Grounding must reduce hallucinated identifiers without dropping coverage,
+    regressing sibling distinctness, or breaking the single-core footprint.
+    Adaptive escalation (base 5 -> 10 on collapse only) is the unique setting
+    that satisfies all four: -64% hallucination, coverage flat, near-dup at
+    baseline, +10% per-segment cost on one core. Shipped as default.
+
+mlflow:
+  log_params:
+    - condition
+    - title_beams
+    - title_beams_max
+    - title_ground
+  log_metrics:
+    - hallucinated_id_pct
+    - content_grounded_pct
+    - verb_top1_pct
+    - near_dup_activity_pct
+    - ms_per_segment

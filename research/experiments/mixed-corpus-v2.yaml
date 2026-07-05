@@ -1,0 +1,62 @@
+# Mixed corpus v2 — multi-source labeling manifest spec.
+#
+# Companion doc: research/docs/10-mixed-corpus-v2-plan.md.
+#
+# Every numeric value cites `source:` (research doc) or `calibration:`
+# (empirical tuning). The pipeline reads global runtime knobs (seed,
+# max_events_per_call cap) from labeling-runtime.yaml.
+
+schema_version: 2
+
+sources:
+  # ---------------------------------------------------------------------
+  # Source A: WSL Copilot CLI session-store re-ingested.
+  # ---------------------------------------------------------------------
+  - name: copilot-cli
+    subdir: copilot-cli
+    # No further sampling — take every parquet present. The v1 ingest
+    # already paid the cost and the supply (~349 sessions, of which
+    # ~13% are agent-mode) is small enough to use entirely. The
+    # session_type column on the labeled output lets downstream consumers
+    # filter agent vs utility.
+    take: all
+
+  # ---------------------------------------------------------------------
+  # Source B: nebius/SWE-agent-trajectories (HuggingFace dataset).
+  # ---------------------------------------------------------------------
+  - name: swe-agent-nebius
+    subdir: swe-agent-nebius
+    # Stratified sample of `target_size` sessions across event-count
+    # buckets. Buckets defined per enriched-event count (not raw step
+    # count) because that is what drives labeler cost and the single-call
+    # output cap.
+    target_size:
+      value: 600
+      source: "research/docs/10-mixed-corpus-v2-plan.md §Target sample sizes"
+    stratify_by: event_count
+    buckets:
+      - name: tiny
+        min_events: 1
+        max_events: 30
+        share: 0.20
+        rationale: "Short successful trajectories — pure exploration→submit. ~p25 by step count."
+      - name: small
+        min_events: 31
+        max_events: 75
+        share: 0.35
+        rationale: "Modal SWE-agent shape — ~25-step median per nebius/SWE-agent-trajectories card."
+      - name: medium
+        min_events: 76
+        max_events: 150
+        share: 0.30
+        rationale: "Multi-iteration runs with debug cycles — ~p75 by step count."
+      - name: large
+        min_events: 151
+        max_events: 200
+        share: 0.12
+        rationale: "Long runs that still fit single-call labeling cap."
+      - name: xlarge
+        min_events: 201
+        max_events: 220
+        share: 0.03
+        rationale: "At cap. Few sessions land here; keep representation low."

@@ -1,0 +1,167 @@
+# Runtime configuration for the labeling pipeline.
+#
+# Companion docs:
+#   research/docs/05-data-sizing.md
+#   research/docs/08-no-heuristics-policy.md
+#
+# Every numeric value here either cites a research-doc section in `source:`
+# or is marked `calibration:` for empirical tuning. No free-standing
+# constants.
+
+schema_version: 1
+
+# ---------------------------------------------------------------------------
+# Sampling — manifest builder reads this block.
+# ---------------------------------------------------------------------------
+sampling:
+  # Source SQLite session-store (Copilot CLI canonical persistence).
+  # Default points at a local copy of the WSL session-store.
+  session_store_path: data/raw/copilot-session-store.db
+
+  # Filter sessions by turn count. The 0–4 bucket dominates the corpus
+  # (noise / aborts / single prompts) and contributes very few rare-class
+  # observations; it is excluded by default. Bounds are calibrated against
+  # corpus distribution observed during the inventory probe (1,163 / 1,523
+  # sessions in the 0–4 bucket — see plan.md inventory step).
+  min_turns:
+    value: 5
+    calibration: labeling-pilot
+    rationale: "below 5 turns rare-class events (review, step) are too sparse to label."
+  max_turns:
+    value: 250
+    calibration: labeling-pilot
+    rationale: "kept liberal because turn count is a poor predictor of event count; the runner enforces the real cap on rendered events."
+
+  # Sample size — drives the manifest builder. The pipeline scales the
+  # actual sample to min(target_size, eligible_pool); the manifest records
+  # both numbers for honesty.
+  target_size:
+    value: 360
+    source: "research/docs/05-data-sizing.md §'Boundary classifier' (N_min = 350)"
+    calibration: labeling-pilot
+
+  # PRNG seed for reproducible session selection. Changing this re-shuffles
+  # the corpus; do not change between pilot and full run unless documented.
+  seed: 17
+
+# ---------------------------------------------------------------------------
+# LLM backend (Copilot Python SDK).
+# ---------------------------------------------------------------------------
+backend:
+  # Sonnet variant used as the labeler / red-teamer. The codeplane
+  # adapter pins this as the per-completion model. We follow that
+  # convention rather than reading from the user's default to stay
+  # reproducible.
+  model: claude-sonnet-4.5
+  source: "Copilot SDK ModelInfo cache; mirrors dfinson/codeplane SidecarLabeler model choice."
+
+  # Per-call wall clock cap. Sized for a single-shot completion at
+  # max_session_chars. Exceeding this aborts the call as failure;
+  # the runner records it and moves on (no fabricated label).
+  completion_timeout_s:
+    value: 480
+    calibration: labeling-pilot
+    rationale: "Sonnet streaming a full label set for ~250-event sessions runs ~3-4 minutes; 480s gives 2x cushion."
+
+  # Concurrency cap — number of CopilotClient processes alive at once.
+  # Each spawns a CLI server child process; running too many will OOM.
+  # Bound conservatively for now and recalibrate after the pilot.
+  max_concurrent_sessions:
+    value: 10
+    calibration: labeling-pilot
+    rationale: "each CopilotClient spawns one Node CLI server child process; 10 sustained ≈ 4 GB RSS."
+
+  # Retry policy on transient SDK errors (JsonRpcError / ProcessExitedError).
+  max_retries:
+    value: 2
+    rationale: "transient process-exit errors observed sporadically in codeplane; >2 wastes budget."
+
+# ---------------------------------------------------------------------------
+# Canonical-view rendering — the markdown the LLM sees.
+# ---------------------------------------------------------------------------
+canonical_view:
+  # Maximum characters per session in the canonical view. Above this we
+  # truncate from the middle (preserve start + end). 200_000 chars is
+  # well under Sonnet's 200k-token context, leaving room for the prompt
+  # template and the model's output.
+  max_session_chars:
+    value: 180000
+    source: "Sonnet 200k-token context with ~1 token / 4 chars in mixed code/text + 30% safety margin."
+    calibration: labeling-pilot
+  # Maximum events per single-call labeling. Sonnet's ~8k output-token cap
+  # (~32k chars) truncates the JSON for sessions with more than this many
+  # events. Sessions above this limit are skipped tonight; chunked
+  # labelling for long sessions is a follow-up.
+  max_events_per_call:
+    value: 220
+    calibration: labeling-pilot
+    rationale: "232-event session succeeded with retry; 253-event session truncated twice at ~31k chars. 220 leaves margin."
+  # Per-event payload preview length — keeps the view focused on
+  # boundary-relevant signal rather than full tool dumps.
+  event_payload_preview_chars:
+    value: 400
+    source: "Activity/step taxonomy §'tool_intent first sentence is most informative' — TextRank P7 (07-activity-step-taxonomy.md)"
+
+# ---------------------------------------------------------------------------
+# Combined labeling task — the prompt-binding YAML lives here so the
+# validator and prompt builder share one source of truth.
+# ---------------------------------------------------------------------------
+combined_labeling:
+  prompt_template_path: prompts/combined-labeling.md
+  validator:
+    require_phase_for_every_event: true
+    require_boundary_for_every_gap: true
+    allow_empty_phase_set: false
+    rationale: >
+      An event with no phase signal collapses the multi-label structure;
+      the labeler is required to commit to at least one of the five.
+    # Coverage floors — fraction of expected slots the labeller must fill.
+    # Below these we treat the labels as malformed (likely truncation or
+    # parsing failure) and re-prompt rather than train on them.
+    min_phase_label_coverage:
+      value: 0.95
+      calibration: labeling-pilot
+      rationale: "<95% phase coverage almost always means the model was truncated mid-array."
+    min_boundary_label_coverage:
+      value: 0.95
+      calibration: labeling-pilot
+      rationale: "same — boundary list must cover N-1 gaps; small slack for parsing edge cases."
+    # Strategic / tactical structure bounds. Coding sessions in the corpus
+    # typically run 1–4 strategic activities, each with 1–8 tactical steps.
+    # Numbers outside these bounds usually indicate over- or under-segmentation
+    # by the labeller.
+    min_activities:
+      value: 1
+      source: "research/docs/07-activity-step-taxonomy.md §Granularity (P1)"
+    max_activities:
+      value: 6
+      calibration: labeling-pilot
+      rationale: "long sessions in the corpus rarely exceed 4 strategic shifts; 6 leaves slack."
+    min_steps_per_activity:
+      value: 1
+      source: "research/docs/07-activity-step-taxonomy.md §Granularity (P1)"
+    max_steps_per_activity:
+      value: 12
+      calibration: labeling-pilot
+      rationale: "AMI-style topic granularity peaks ≈ 8 sub-topics per topic; 12 leaves slack."
+
+# ---------------------------------------------------------------------------
+# Red-team task.
+# ---------------------------------------------------------------------------
+redteam:
+  prompt_template_path: prompts/redteam-labeling.md
+  # Maximum red-team rounds per session. The first round is mandatory;
+  # subsequent rounds re-run on labels the red-team revised. We cap at 2
+  # to bound cost; a session that disagrees twice is flagged for inspection
+  # rather than retried indefinitely.
+  max_rounds:
+    value: 2
+    calibration: labeling-pilot
+    rationale: "two rounds suffice for ~95% convergence in classifier-chain literature (Read et al. 2009)."
+  # Acceptance threshold — fraction of events the red-team must accept
+  # for the labels to be considered final. Below this the session is
+  # flagged for inspection / dropped.
+  accept_fraction_min:
+    value: 0.85
+    source: "AMI corpus topic-level IAA expectations (07-activity-step-taxonomy.md §IAA targets)"
+    calibration: labeling-pilot

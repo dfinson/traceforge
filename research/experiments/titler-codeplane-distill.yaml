@@ -1,0 +1,85 @@
+# CodePlane trail-node gold harvest: rescue the request/step titler with real,
+# domain-diverse in-register intent gold.
+#
+# MOTIVATION. The leak-free SWE-bench_Verified eval (titler-request-dedicated.
+# yaml, shipped_head_leakfree_eval) put the shipped request head at 9% coherent
+# once the ~5.7x training leak is removed. Every synth lever failed: synth-only
+# volume REGRESSES real coherence past a 4k knee (titler-request-volume-sweep.
+# yaml), and diverse-12k synth + real anchor tops out at a clean-weak 0.39
+# (titler-request-dedicated.yaml results). The binding constraint is DATA: the
+# titler has almost no real, domain-diverse, in-register (work-context -> terse
+# imperative title) gold. The SWE corpus that dominated training is toxic --
+# its scaffolding titles repeat ~269x, so the model overfits that one shape.
+#
+# SOURCE. CodePlane (~/.codeplane/data.db) is a coding-agent trail store whose
+# async gpt-4o-mini sidecar enriches every node with intent / rationale /
+# outcome / purpose / semantic-kind / tags / title. Its `intent` field (1149
+# rows, verb-first, ~9 words) is the best in-register titler gold available --
+# NOT the half-populated `title` field (432 rows, often a deterministic
+# fallback). Leak-free vs the shipped head (which trained on codeplane-prompt /
+# synth, not these enriched nodes).
+#
+# METHOD (production pipeline, no ad-hoc extraction). ingest/codeplane.py
+# expands each trail node into canonical SessionEvents (agent_message narration
+# + one tool.call.completed per tool, carrying the node's files + snippet),
+# routes them through the real Enricher + ParquetSink, and stamps
+# metadata.step_id = node_id. The distillation context is then recomputed per
+# node from the enriched corpus via the SINGLE serve-side projection
+# tracemill.title.context.distilled_context -- so training context == serve
+# context by construction. The gold `intent` is never in that context
+# (distilled_context only mines report_intent calls, of which CodePlane has
+# none), so the target is leak-free by construction (verified: 0/365 intent
+# strings appear in their own context).
+#
+# ARTIFACTS.
+#   research/src/tracemill_research/ingest/codeplane.py   (prod ingester)
+#   research/scripts/ingest_codeplane.py                  (CLI runner + report)
+#   data/raw/codeplane/data.db                            (slim extract: trail_nodes + jobs; gitignored)
+#   data/interim/labeling-corpus/codeplane/<job>.parquet  (enriched corpus; gitignored)
+#   data/processed/codeplane-distill.parquet              (per-node gold table; gitignored)
+
+harvest:
+  db: "slim extract of ~/.codeplane/data.db (trail_nodes 1506 + jobs 320; live DB is 6.4GB, events blob table excluded)"
+  jobs_emitted: 62
+  nodes: 1506
+  events_emitted: 1281
+  repos: 15
+
+gold_fill:
+  intent: "1149/1506 (76.3%)  <- title gold"
+  rationale: "944/1506 (62.7%)"
+  outcome: "944/1506 (62.7%)"
+  purpose: "459/1506 (30.5%)  classes: orienting 156 / building 126 / verifying 123 / housekeeping 37 / recovering 17"
+  semantic_kind: "730/1506 (48.5%)  classes: verify 208 / insight 159 / summarize 157 / decide 103 / plan 71 / backtrack 32"
+
+# The usable distillation set requires BOTH a distilled context (the titler's
+# input) AND an intent (the target). 825/1149 intent nodes are semantic-only
+# (no agent_message, no tools) -- CodePlane titles those from transcript
+# preceding_context, which is the REQUEST-head task (summarize a transcript
+# window), not the span-titler task, and carries leak risk; excluded from the
+# clean span set.
+distill_pairs:
+  usable_ctx_plus_intent: 365
+  distinct_intents: "353 (96.7% unique)"
+  max_intent_repeat: "5  (vs SWE-agent 269x scaffolding toxicity -- this is the antidote)"
+  distinct_head_verbs: "81  (vs ~20 for organic copilot: add/confirm/fix/run/verify/read/create/review/...)"
+  repo_spread: 14
+  leak: "0/365 intent-in-context"
+
+verdict: >-
+  Clean, domain-diverse, leak-free in-register gold harvested via the prod
+  pipeline. 365 (work-context -> intent) span-title pairs at 96.7% uniqueness
+  and 81 head-verbs directly counter the toxic 269x-repeat SWE distribution
+  that caused the 9% floor. Auxiliary node-feature gold (semantic_kind 730 /
+  purpose 459) supports the cheap tiny classifiers in the split-the-job plan.
+  This is a data deliverable, not a model change: the harvested table is ready
+  to fold into a titler retrain (pending sign-off). The 825 semantic-only nodes
+  are a separate request-head opportunity, not folded here.
+
+next:
+  - Fold the 365 span pairs into the titler train mix (source-balanced) and
+    re-judge on the leak-free held-out set; measure clean coherence lift vs the
+    diverse-12k 0.39 floor.
+  - Train the cheap purpose / semantic-kind tiny classifiers on the aux gold
+    from node-feature rows (no distilled_context needed).
+  - Do NOT re-ingest labelled tracemill sessions; CodePlane is a new source.

@@ -6,7 +6,7 @@ import logging
 import sys
 
 from tracemill.sinks.base import StorageSink
-from tracemill.types import SessionEvent, TelemetrySpan, UsageRecord
+from tracemill.types import SessionEvent, TelemetrySpan, TitleUpdate, UsageRecord
 
 logger = logging.getLogger(__name__)
 
@@ -100,3 +100,13 @@ class ConsoleSink(StorageSink):
 
     async def on_usage(self, usage: UsageRecord) -> None:
         pass
+
+    async def on_title_update(self, update: TitleUpdate) -> None:
+        """Render a closed segment's title as an indented TOC line."""
+        color = (_GREEN if update.kind == "activity" else _DIM) if self._color else ""
+        reset = _RESET if self._color else ""
+        bold = _BOLD if self._color else ""
+        indent = "" if update.kind == "activity" else "  "
+        label = update.kind.upper()
+        line = f"{indent}{color}{bold}{label}{reset} {update.title}"
+        print(line, file=self._stream)

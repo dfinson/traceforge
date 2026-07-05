@@ -13,9 +13,13 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          lfs: true
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       - run: pip install build
       - run: python -m build
+      - name: Verify weights are real (not LFS pointers)
+        run: python scripts/verify_no_lfs_pointers.py dist --require .safetensors
       - uses: pypa/gh-action-pypi-publish@release/v1

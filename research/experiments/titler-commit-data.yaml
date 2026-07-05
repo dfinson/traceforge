@@ -1,0 +1,113 @@
+# Titler commit-data fold-in: can real permissive-licensed COMMIT SUBJECTS lift
+# the span titler (tiny 16M and/or small 80M) where thin organic agent gold and
+# synthetic data could not?
+#
+# MOTIVATION. The span titler's diagnosed bottleneck is ACTION-VERB / semantic
+# choice, not grammar or faithfulness (small-capacity A/B: +9pt coherence at
+# FLAT faithfulness). The one lever with positive evidence is real, in-register
+# gold; synthetic volume regressed (titler-request-volume-sweep). But clean-
+# license organic agent-step gold is thin (~2k rows). A clean-license data hunt
+# found the one large real one-line-summarization corpus: COMMIT SUBJECTS.
+# No public agent-step-title dataset exists, so commit subjects are the proxy.
+#
+# SOURCE. bigcode/commitpackft -- bigcode's *filtered* commit corpus (bot/merge/
+# opaque commits removed, Levenshtein-deduped upstream). One row per single-file
+# commit: old_contents / new_contents (the change) + `subject` (one-line
+# imperative title, verb-first ~5-8 words) + per-row SPDX `license`.
+#
+# IRON-RULE COMPLIANCE (no heuristics / no hand-tuned filters / no magic numbers):
+#   * The ONLY row filter is the per-row SPDX license -- a LEGAL constraint, not a
+#     quality heuristic. Rows outside PERMISSIVE_LICENSES (drop copyleft agpl/
+#     lgpl/gpl, `unknown`, empty) are excluded so the shipped model carries no
+#     copyleft/unclear-provenance training text. No content/keyword/length/verb
+#     filtering whatsoever -- the dataset's own upstream curation stands.
+#   * ALL languages ingested (no hand-selection). Cross-language syntax diversity
+#     guards against overfitting to one PL; the source-parity sampler (alpha=0)
+#     bounds the commit source to 1/n_sources mass regardless of raw volume, so
+#     "ingest everything" cannot swamp the organic signal.
+#
+# PIPELINE (prod, zero train/serve skew). scripts.ingest_commitpack ->
+# tracemill_research.ingest.commitpack: each commit becomes ONE canonical
+# tool.call.completed code-edit event (tool = create/delete/edit by which
+# contents are present; payload = touched file + UNIFIED DIFF of the change),
+# flows through the real Enricher + ParquetSink (schema byte-identical to the
+# copilot/swe/codeplane corpora), step_id = commit sha. The serve-side
+# tracemill.title.context.distilled_context is then recomputed from the enriched
+# rows -> the same `actions | files | symbols` slot string the titler consumes
+# live. Per-language distill shards checkpoint/resume the run.
+#
+# LEAK-FREE BY CONSTRUCTION. The commit `message` (whose first line IS the
+# `subject`) is NEVER emitted -- only the code diff + file path feed the context,
+# so the target cannot appear in its own input. Verified on a 200-row python
+# smoke: 0/200 subject-in-context. Every commit row is split == "train"; the
+# held-out eval set stays the REAL agent-step distribution (copilot / claude /
+# codeplane spans), so commits are auxiliary training signal and cannot enter
+# eval.
+#
+# FOLD-IN. scripts._title_commit_build appends the commit distill rows to the
+# current rescue mix (t5-title-codeplane-rescue.parquet) as src=commitpackft,
+# span prefix ("summarize agent step: "), task=title, tier=step, split=train.
+# Output: data/interim/t5-title-commit.parquet.
+
+source:
+  dataset: bigcode/commitpackft
+  access: per-language data/<lang>/data.jsonl via huggingface_hub (loader script
+    is rejected by datasets>=3; the jsonl data files are read directly)
+  row: "old_contents/new_contents -> subject (gold); license (per-row SPDX)"
+  permissive_licenses: [mit, apache-2.0, bsd-3-clause, bsd-2-clause,
+    bsd-2-clause-patent, isc, mpl-2.0, unlicense, cc0-1.0, 0bsd, zlib,
+    boost-1.0, epl-1.0, epl-2.0, artistic-2.0, ncsa, postgresql]
+  dropped: [agpl-3.0, lgpl-2.1, "gpl-*", unknown, empty]
+
+design:
+  base_dataset: t5-title-codeplane-rescue.parquet
+  new_source: 'commitpackft (span head, prefix "summarize agent step: ")'
+  split: all commit rows -> train (eval stays real agent-step heldout)
+  sampler: "(src,task)-parity alpha=0 -> commit source bounded to 1/n_sources mass"
+  models: [google/t5-efficient-tiny (16M, ship target), google/flan-t5-small (80M)]
+  train: 12 epochs, bs32, lr3e-4  # identical to the tiny/small baselines
+  judge: Sonnet SDK coherence + blinded h2h, SAME 150 rows (copilot-cli-native /
+    claude-cli / codeplane-node, cap 50, random_state=17) -- comparable to the
+    tiny 50% / small 59% baselines.
+
+hypothesis: >-
+  Real commit-subject verb->context supervision at scale injects the action-verb
+  knowledge the small-capacity result showed tiny lacks. If it transfers, tiny
+  rises above its 50% coherence ceiling at NO footprint cost (the footprint win
+  small couldn't deliver). Risk: commit register (code-modification verbs Add/
+  Fix/Remove) skews away from exploration/verification steps -- a MEASURED
+  outcome watched per-source, not pre-filtered around.
+
+status: CLOSED (negative). tiny run + Sonnet judge complete; small run NOT run.
+
+results:
+  corpus:
+    permissive_commits: 652266     # 271 languages, per-row SPDX-filtered
+    with_distilled_context: 627525 # 96.2% (after shard-glob reattach fix)
+    subject_in_context_leaks: 0    # verified: target never in its own input
+  tiny_16M_commit:                 # google/t5-efficient-tiny, budget-matched
+    train: {epochs: 12, bs: 32, lr: 3e-4, num_samples: 10979, final_train_loss: 2.28}
+    judge: {n: 150, coherent: 0.49, faithful: 1.32, specific: 1.48, fluent: 1.90}
+    h2h_vs_gold: {model: 0.27, tie: 0.15, gold: 0.58}
+    by_source_coherent: {copilot-cli-native: 0.40, codeplane-node: 0.32, claude-cli: 0.74}
+    gold_ceiling: {coherent: 0.70, faithful: 1.61}
+  baselines_same_150_rows:
+    tiny_control_16M: {coherent: 0.50, faithful: 1.36,
+      by_source: {copilot: 0.42, codeplane-node: 0.42, claude: 0.66}}
+    tiny_rescue_16M:  {coherent: 0.50, faithful: 1.30,
+      by_source: {copilot: 0.46, codeplane-node: 0.32, claude: 0.72}}
+    small_rescue_80M: {coherent: 0.59, faithful: 1.39,
+      by_source: {copilot: 0.64, codeplane-node: 0.44, claude: 0.70}}
+
+verdict: >-
+  NEGATIVE. 627k real commit subjects at source-parity mass leave the tiny 16M
+  model FLAT: 49% coherent vs 50% control/rescue (within judge noise), faithful
+  1.32 vs 1.36 (flat). Worse, the primary DEPLOY target regresses: copilot 40%
+  vs 42-46% baseline; codeplane-node flat/down (32%). The only nudge is claude
+  (66/72 -> 74%, within noise), the source already near-saturated. Commit register
+  did NOT inject transferable action-verb knowledge at 16M -- it confirms the
+  small-capacity finding that the tiny ceiling is CAPACITY-bound, not data-bound.
+  More real in-register gold is not the lever at 16M; capacity is (small +9pt),
+  and small was rejected on footprint. small-on-commit NOT run (no data signal to
+  justify it: tiny is where footprint permits ship, and data moved it 0pt).
+  Scores: data/interim/title-judge-scores-commit.jsonl.

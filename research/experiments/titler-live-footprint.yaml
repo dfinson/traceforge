@@ -1,0 +1,144 @@
+# In-situ (live pipeline) footprint of the titler stage, titling ON vs OFF.
+#
+# Companion script: research/scripts/_title_pipebench.py
+#
+# MLflow: _title_pipebench.py logs one run per mode (titling-on / titling-off)
+# with the footprint metrics to this experiment via tracemill_research.mlflow_utils.
+#
+# The architecture sweep (titler-architecture-sweep.yaml) measured the titler
+# MODEL in isolation. This measures the SHIPPED stage running inside the real
+# EventPipeline (phase + boundary + title) so the question "what does turning
+# titling on actually cost the host?" is answered with numbers, not hand-waving.
+# A real 3527-event Copilot session is reconstructed from the labelling corpus
+# (full enrichment preserved via metadata_json) and replayed twice; the delta is
+# the true cost of titling in situ.
+
+experiment:
+  name: titler-live-footprint
+  mlflow_experiment: titler-live-footprint-v1
+  display_name: "Titler — Live Pipeline Footprint (ON vs OFF)"
+  description: |
+    Replays one real multi-thousand-event session through the production
+    EventPipeline with the real phase + boundary models, once with
+    enable_title=False and once with the titler wired in, on CPU
+    (CUDA_VISIBLE_DEVICES=-1). Peak RSS via the Win32 PeakWorkingSetSize
+    counter (exact, no polling); CPU via process_time / wall.
+
+    DECISIVE FINDING — onnxruntime thread cap is the footprint lever. At the
+    titler's old default (intra_op_num_threads=2) the live process burned
+    ~272% CPU (≈2.7 cores) stacked on the phase model2vec core — a hard
+    "jet-engine / starvation" autofailure. Capping the LIVE titler to
+    intra_op=1 (TitleInferencer loads TitleModel.load(threads=1)) collapses
+    that to 98% of a SINGLE core with NO change to RAM or quality, and needs
+    no BLAS env vars (numpy was not the culprit; onnxruntime was). One thread
+    is therefore the shipped live default; the direct TitleModel.load() API
+    keeps threads=2 for offline/batch callers who want it.
+
+    Per-segment cost is ~250 ms (single-thread int8 beam search), run once per
+    closed activity/step — never per event. In back-to-back offline replay that
+    pins one core (titling = ~86% of wall); live, where events arrive paced by
+    the agent, the duty cycle is far lower.
+
+    KNOWN CHARACTERISTIC (not a footprint failure): because an activity is
+    titled synchronously at its closing boundary, the single push that closes
+    the largest activity blocks for up to ~3.6 s (p99.9). It does not raise
+    CPU/RAM; it briefly blocks the async event loop. Recommended follow-up:
+    offload SessionTitleStream.push to a worker thread (CPU stays 1 core since
+    ORT is capped) so the loop is never blocked.
+  tags:
+    component: titler
+    pillar: footprint
+    stage: serve-wiring
+    constraint: cpu-near-zero-footprint
+
+dataset:
+  source: labeling-corpus
+  source_note: research/data/interim/labeling-corpus/copilot-cli-native/f7440018-12f1-4af1-9ea2-adb0db703007.5.parquet
+  events: 3527
+  session_type: real organic copilot-cli-native session (reconstructed, full enrichment)
+
+conditions:
+  - id: off
+    pipeline: phase + boundary (enable_title=False)
+    role: baseline
+  - id: on-2t
+    pipeline: phase + boundary + title (intra_op=2)
+    role: REJECTED — 272% CPU (jet-engine autofailure)
+  - id: on-1t
+    pipeline: phase + boundary + title (intra_op=1)
+    role: SELECTED — shipped live default
+
+results:
+  # CPU-only (CUDA_VISIBLE_DEVICES=-1), RTX-A500 laptop host.
+  off:
+    cpu_pct_of_core: 92
+    peak_rss_mb: 399
+    push_p50_ms: 2.7
+    push_p95_ms: 8.4
+    wall_s: 15.0
+  on-2t:
+    cpu_pct_of_core: 272
+    peak_rss_mb: 542
+  on-1t:
+    cpu_pct_of_core: 98
+    peak_rss_mb: 532
+    titler_rss_delta_mb: 134   # vs off
+    push_p50_ms: 2.5
+    push_p95_ms: 8.4
+    push_p999_ms: 3600         # synchronous activity-close titling spike
+    ms_per_segment: 250
+    segments: 366
+    titler_pct_of_wall: 86
+
+acceptance:
+  rule: >
+    Live titler must stay within a single CPU core (near-zero footprint is a
+    hard ship gate). intra_op=1 is the unique cap that holds the line; ship it
+    as the live default. The ~3.6 s activity-close blocking spike is acceptable
+    for v1 but should be offloaded off the event loop next.
+
+# ---------------------------------------------------------------------------
+# SMALL-HEAD PROMOTION (2026-07-05): swap packaged span head tiny -> small.
+# The proven seq-KD flan-t5-small (faithful 1.56 vs tiny 1.43; see
+# titler-summarization-specialist.yaml distillation block) was benched ON THE
+# REAL SERVE PATH via _title_pipebench.py TITLE_SERVE_DIR, same 3527-event
+# session, intra_op=1, CPU-only. Confirms it clears the single-core gate before
+# packaging it as src/tracemill/title/data/. Host is a different laptop than the
+# original off/on-1t rows above (higher RSS baseline, faster per-seg), so read
+# the tiny_repro vs small_promoted DELTA, not absolutes.
+small_head_promotion:
+  host_note: re-measured off/tiny/small on one host for an apples-to-apples delta
+  off_baseline:
+    cpu_pct_of_core: 91
+    peak_rss_mb: 421
+  tiny_repro:            # current shipped 31MB t5-efficient-tiny, packaged default
+    cpu_pct_of_core: 98
+    peak_rss_mb: 712
+    ms_per_segment: 110
+    segments: 345
+    push_p999_ms: 1809
+  small_promoted:        # 90MB flan-t5-small seq-KD (onnx-distill-small), via TITLE_SERVE_DIR
+    cpu_pct_of_core: 99   # 98.8 -> still one core (intra_op=1 fixes parallelism)
+    peak_rss_mb: 636      # NOT worse than tiny; ORT arena dominates, model bytes barely move RSS
+    ms_per_segment: 205   # ~2x tiny; fired once per CLOSED segment, never per event
+    segments: 346
+    push_p999_ms: 3261    # close-spike grows but within documented ~3600 v1 envelope
+  package_footprint_mb: {tiny: 33.3, small: 92.2}  # committed (non-LFS) binary weight
+  verdict: >
+    SMALL CLEARS THE HARD GATE. CPU stays at one core (98.8%) because the live
+    titler loads TitleModel.load(threads=1); peak RSS is not worse than tiny
+    (636 vs 712 MB). The only real cost is per-segment latency (~2x, still
+    205 ms once per closed activity) and a larger synchronous activity-close
+    spike (~3.3 s, inside the known ~3.6 s v1 envelope; the to_thread offload
+    already recommended above is the fix). Packaged as the default span head;
+    24/24 titler tests pass on the packaged path incl. the ONNX integration test.
+
+mlflow:
+  log_params:
+    - condition
+    - intra_op_num_threads
+  log_metrics:
+    - cpu_pct_of_core
+    - peak_rss_mb
+    - ms_per_segment
+    - push_p999_ms

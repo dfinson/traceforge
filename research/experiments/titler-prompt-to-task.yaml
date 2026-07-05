@@ -1,0 +1,225 @@
+# Prompt -> task-title: a SECOND titling task folded into the served titler as a
+# learned T5 prefix, so one CPU-only model titles both distilled agent spans AND
+# raw natural-language user requests. No second model, no extra footprint.
+#
+# Companion scripts:
+#   research/scripts/_title_synth_requests.py  (generate synthetic request->title
+#                                               pairs + recover CodePlane reals ->
+#                                               request-title-pairs.json)
+#   research/scripts/_title_prompt_dataset.py  (fold request rows into the
+#                                               multitask parquet)
+#   research/scripts/_title_t5_train.py        (train / eval; per-row prefix routing,
+#                                               source whitelist + mass policy;
+#                                               TITLE_EXPERIMENT[_YAML] -> this file)
+#   research/scripts/_title_codeplane_test.py  (served-path OOD probe on raw prompts)
+#   research/scripts/_title_judge.py           (blinded LLM A/B coherence + h2h vs gold)
+#   research/scripts/_title_export.py          (torch -> no-past int8 ONNX -> promote to
+#                                               src/tracemill/title/data)
+#
+# MLflow: _title_t5_train.py (train + eval runs) logs params/metrics here via
+#   tracemill_research.mlflow_utils, selected by TITLE_EXPERIMENT.
+#
+# PROBLEM. The shipped titler maps a DISTILLED agent-trace span (files / actions /
+# narration) to a short activity/step title. A common adjacent need is titling the
+# raw USER REQUEST that opens a session ("...Save reverts to default, what's going
+# on?" -> "Settings save reverts to defaults"). Fed raw requests zero-shot, the
+# served titler floors: paired LLM-judge had it losing ~90% head-to-head to human
+# gold with ~12% coherence -- but that probe never trained on the input shape, so
+# it could not separate "wrong task for this model" from "never shown this input".
+#
+# DISAMBIGUATION (settled before this experiment). Warm-start the shipped 16M
+# titler, show it 223 request->title pairs for 16s / 84 steps, eval the IDENTICAL
+# held-out rows: ROUGE-1 0.249 -> 0.423 (matching the titler's own in-distribution
+# benchmark ~.407). Capacity was never the wall; the model had simply never seen
+# raw requests. Conclusion: this is a DATA/TRAINING gap, learnable cheaply.
+#
+# CHANGE (parameter-free, source-agnostic). Add a request task under a distinct T5
+# prefix ("title task from request: " vs the span "summarize agent step: ") and
+# co-train the ONE titler multitask. The request head's training data is SCALED past
+# the tiny real CodePlane well (~256 pairs) with synthetic (request, title) pairs the
+# blessed Sonnet labeler generates across the full crisp->incoherent style range and
+# many domains (1078 pairs) -- targeting the rambling/typo-ridden inputs the model is
+# measurably weakest on. Span sources train at natural frequency (TITLE_SRC_ALPHA=1),
+# swe-agent whitelisted out. Acceptance is two-sided: the span task must not regress
+# and the request task must clear its zero-shot floor.
+
+experiment:
+  name: titler-prompt-to-task
+  mlflow_experiment: titler-prompt-to-task-v1
+  display_name: "Titler - Prompt->Task-Title Multitask Head (one model, two prefixes)"
+  description: |
+    Fold a raw-request -> task-title task into the served google/t5-efficient-tiny
+    titler as a second learned T5 prefix, so a single CPU-only, torch-free model
+    titles both distilled agent spans (prefix "summarize agent step: ") and raw
+    user requests (prefix "title task from request: "). The served runtime is
+    already prefix-parameterizable (src/tracemill/title/inference.py: _T5Generator
+    takes a prefix), so exposing the request task is a serve-time prefix, not a new
+    model or runtime.
+
+    Motivated by a settled data-vs-capability probe: the shipped titler floored on
+    raw requests zero-shot (ROUGE-1 0.249, ~12% coherent by paired judge) but a
+    16-second warm-start on 223 request->title pairs lifted the SAME held-out rows
+    to ROUGE-1 0.423 -- in-distribution parity. The gap was never capacity; it was
+    that the model had never seen the input shape. This experiment makes the
+    request task a first-class, co-trained capability rather than a side probe.
+  tags:
+    component: titler
+    pillar: generalization
+    stage: train-and-serve
+    constraint: cpu-near-zero-footprint
+    parent: titler-domain-diverse-retrain
+
+dataset:
+  source: labeling-corpus span rows + request rows (real CodePlane + synthetic)
+  build: research/scripts/_title_prompt_dataset.py   (-> t5-title-multitask.parquet)
+  span_rows_from: t5-title-dataset.parquet           (built by _title_t5_train build)
+  request_rows_from: request-title-pairs.json        (built by _title_synth_requests.py)
+  request_provenance:
+    codeplane-real: 256   # human (prompt,title) pairs recovered from the job dump
+    synth-distill: 1078   # LLM-generated (Copilot-SDK Sonnet) request->title pairs
+    rationale: >
+      CodePlane (one product, ~270 jobs) is the only real request source and is
+      nearly dry; the corpus's own opening messages are dominated by a couple of
+      pasted operational rubrics, not diverse requests. The tiny titler's weakness
+      is the RAMBLING / typo-ridden / under-specified end of the request space, not
+      crisp commands. So the blessed Sonnet labeler is prompted to manufacture that
+      full incoherence spectrum across diverse domains and emit the clean imperative
+      title for each (messy input -> coherent title). Diversity is forced by the
+      prompt (per-batch rotating domain emphasis) -- no tuned per-style quotas; the
+      CodePlane reals are folded in as a real-distribution anchor.
+  task_prefixes:
+    span: "summarize agent step: "
+    request: "title task from request: "
+  split: session-grouped held-out by content hash, HELDOUT_FRAC=0.15 (parameter-free)
+  train_whitelist: [copilot-cli-native, claude-cli, codeplane-prompt, synth-request]  # TITLE_SOURCES; swe dropped
+  source_mass_policy: organic-parity                 # TITLE_BALANCE=organic-parity (dominant span source capped 0.5); promoted model
+  rows:
+    request_head: { train: 1119, heldout: 215, distinct_golds: 1306 }
+    span_copilot: { train: 1323, heldout: 211 }
+    span_claude:  { train: 333,  heldout: 66 }
+
+model:
+  base: google/t5-efficient-tiny
+  params: ~16M (4 enc / 4 dec)
+  multitask: per-row T5 prefix routes span vs request; one shared model
+  init: warm-start from the shipped span checkpoint (data/interim/t5-title-model)
+        so the validated span recipe is preserved while the request task is added;
+        span rows are re-exposed every epoch, so span does not drift
+  train: { epochs: 12, batch_size: 32, lr: 3e-4, device: cuda (RTX A500) }
+  serve: torch-free onnxruntime + tokenizers + numpy, single CPU core; request task
+         exposed by constructing the generator with the request prefix
+
+conditions:
+  - id: shipped-span-only
+    pool: copilot + claude (span only), request task ABSENT
+    role: baseline -- request task floors zero-shot (ROUGE-1 0.249 on request heldout)
+  - id: multitask-codeplane-only
+    pool: copilot + claude (span) + 256 CodePlane request rows, natural freq, swe dropped
+    role: prior fold-in -- request lifted to 0.348 but capped by the tiny real corpus
+  - id: multitask-synth-scaled
+    pool: copilot + claude (span) + 256 CodePlane + 1078 synthetic request rows
+    role: prior fold-in (TITLE_SRC_ALPHA=1, natural frequency) -- request 0.429, span at parity
+  - id: multitask-synth-scaled-parity
+    pool: same rows, source mass under organic-parity (dominant span source capped at 0.5)
+    role: SELECTED -- promoted to src/tracemill/title/data; request 0.459, span at-or-above
+          shipped on the noise-robust LLM judge (below)
+
+acceptance:
+  rule: >
+    Adding the request task as a co-trained prefix must (a) clear the request
+    zero-shot floor (request-heldout ROUGE-1 >> 0.249, toward the ~0.42 single-task
+    probe) and (b) NOT regress the span task (copilot/claude heldout ROUGE-1 at
+    parity with the domain-diverse span model). CPU single-core footprint unchanged
+    (same arch + int8 export). Two-sided; measured below.
+
+# PRIOR PROBE (single-task, warm-start, identical held-out rows) -- the evidence
+# that made this experiment worth running. Not the multitask result.
+prior_probe:
+  setup: warm-start shipped titler on 223 request->title pairs, 12 epochs / 16s
+  request_heldout_rouge1: { shipped_zero_shot: 0.249, fine_tuned: 0.423 }
+  verdict: data/training gap, not capability
+
+# MULTITASK RESULTS -- measured from the train+eval runs under this experiment.
+# Multitask model vs the shipped span-only model on the multitask heldout. ROUGE-1
+# stopword-stripped F1, beam=5.
+results:
+  # --- prior fold-in: CodePlane request rows only (256), capped by the tiny corpus ---
+  codeplane_only_foldin:
+    request_task_codeplane-prompt: { shipped_span_only: 0.283, multitask: 0.348 }   # +0.065
+    span_no_regression:
+      copilot-cli-native: { shipped: 0.259, multitask: 0.262 }
+      claude-cli:         { shipped: 0.332, multitask: 0.342 }
+    note: request lifted off the floor but the durable lever is MORE request pairs
+
+  # --- SELECTED: request head scaled with 1078 synthetic pairs (this run) ---
+  synth_scaled:
+    request_task_codeplane-prompt: 0.429   # n=35; REAL request heldout, +0.081 over codeplane-only
+                                           #   (0.348 -> 0.429), now at the single-task probe ceiling (0.423)
+    request_task_synth-request: 0.505      # n=180; held-out synthetic requests
+    request_tier_task_overall: 0.493       # n=215; whole request head
+    span_no_regression:
+      copilot-cli-native: { shipped: 0.259, synth_scaled: 0.262 }   # +0.003, parity
+      claude-cli:         { shipped: 0.332, synth_scaled: 0.325 }   # -0.007, within n=66 noise
+    acceptance: MET                        # real request head at probe ceiling; span at parity
+    train: { init: data/interim/t5-title-model, final_loss: 3.31, seconds: 244, epochs: 12 }
+    source_mass_fraction: { copilot-cli-native: 0.477, synth-request: 0.324, claude-cli: 0.120, codeplane-prompt: 0.080 }
+    qualitative: >
+      On the REAL CodePlane heldout (the hardest inputs -- rambling voice-memo
+      transcripts), titles are clearly more coherent than the codeplane-only model
+      ("Fix unarchive button on archived jobs", "Explain Recon repository structure",
+      "Audit tool displays across SDKs"). Two known tics persist on the messiest
+      inputs and are cheap SERVE-TIME fixes, not data gaps: typo-echo ("compoenent")
+      via input normalization, and single-word stutter ("input column for input
+      columns") via a stronger repeat penalty.
+    ship_path: >
+      export no-past -> int8 quantize -> promote to src/tracemill/title/data, and
+      expose the request prefix at serve time (_T5Generator already takes a prefix).
+
+  # --- SELECTED + PROMOTED: organic-parity source mass (TITLE_BALANCE=organic-parity) ---
+  # Same rows + synth as synth_scaled; only the source-mass policy differs (the dominant
+  # span source is capped at 0.5, the remainder split by natural frequency). Promoted to
+  # src/tracemill/title/data via research/scripts/_title_export.py (torch -> no-past ONNX
+  # -> int8 dynamic quant; opset 18; artifact sizes within ~15KB of the prior shipped model).
+  synth_scaled_parity:
+    request_task_codeplane-prompt: 0.459   # REAL request heldout, +0.030 over synth_scaled (0.429)
+    request_task_synth-request: 0.505      # held-out synthetic requests (unchanged)
+    span_rouge1:                           # ROUGE could not separate these at n=66 (variance)
+      copilot-cli-native: 0.263
+      claude-cli:         0.352            # +0.020 over shipped span-only, but n=66 -> see judge
+    # NOISE-ROBUST VERDICT (research/scripts/_title_judge.py): blinded A/B vs human gold on
+    # the IDENTICAL 146 span heldout rows (80 copilot + 80->66 claude), synth-scaled-parity
+    # model vs the shipped span-only model. The instrument ROUGE-at-n=66 could not be.
+    span_regression_judge:
+      shipped_span_only:        # data/interim/t5-title-model
+        coherent: { overall: 0.60, copilot: 0.55, claude: 0.67 }
+        h2h_model_vs_gold: { overall: "34/51", copilot: "35/54", claude: "32/48" }
+      synth_scaled_parity:      # data/interim/t5-title-multitask-parity-model (PROMOTED)
+        coherent: { overall: 0.64, copilot: 0.56, claude: 0.74 }
+        h2h_model_vs_gold: { overall: "38/52", copilot: "31/60", claude: "45/42" }
+      verdict: >
+        No span regression. Copilot (in-distribution) coherence flat (+1pt); the only
+        negatives (faithful -0.08, h2h gold-win 54->60) sit inside the judge's ~5pt / 0.1
+        noise band at n=80 -- watch, not block. Claude (OOD) gains materially: coherence
+        +7pt and the blinded head-to-head flips from -16 to +3 net. Overall coherence +4pt,
+        h2h +4pt. The synth/request capability is ADDITIVE on span, not a regression.
+    acceptance: MET                        # request at probe ceiling+; span at-or-above shipped by judge
+    train: { balance: organic-parity, init: data/interim/t5-title-model, seconds: 219, epochs: 12 }
+    source_mass_fraction: { copilot-cli-native: 0.500, synth-request: 0.309, claude-cli: 0.115, codeplane-prompt: 0.076 }
+    promote:
+      script: research/scripts/_title_export.py   # torch -> no-past ONNX -> int8 dynamic quant
+      artifact: src/tracemill/title/data/{encoder.onnx, decoder.onnx, tokenizer.json}
+      validation: tests/unit/test_title_inference.py + full unit suite green on the promoted model
+
+mlflow:
+  log_params:
+    - title_sources
+    - title_src_alpha
+    - base_model
+    - epochs
+    - dataset
+  log_metrics:
+    - rouge1_overall
+    - rouge1_codeplane-prompt
+    - rouge1_copilot-cli-native
+    - rouge1_claude-cli
+    - unique_pred_rate

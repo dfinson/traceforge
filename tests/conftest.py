@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import pytest
 
 from tracemill import CallbackSink, EventKind, SessionEvent, TelemetrySpan, UsageRecord
+from tracemill.types import TitleUpdate
 
 
 def make_event(
@@ -64,10 +65,12 @@ class RecordingSink:
         self.events: list[SessionEvent] = []
         self.spans: list[TelemetrySpan] = []
         self.usages: list[UsageRecord] = []
+        self.title_updates: list[TitleUpdate] = []
         self._sink = CallbackSink(
             on_event=self._record_event,
             on_span=self._record_span,
             on_usage=self._record_usage,
+            on_title_update=self._record_title_update,
         )
 
     @property
@@ -82,6 +85,9 @@ class RecordingSink:
 
     async def _record_usage(self, usage: UsageRecord) -> None:
         self.usages.append(usage)
+
+    async def _record_title_update(self, update: TitleUpdate) -> None:
+        self.title_updates.append(update)
 
 
 @pytest.fixture

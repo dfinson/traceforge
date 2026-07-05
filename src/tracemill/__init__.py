@@ -30,6 +30,7 @@ from tracemill.types import (
     IngestionMode,
     SessionEvent,
     TelemetrySpan,
+    TitleUpdate,
     UsageRecord,
     is_known_kind,
 )
@@ -57,6 +58,7 @@ __all__ = [
     "StorageSink",
     "TelemetrySpan",
     "EventTrace",
+    "TitleUpdate",
     "UsageRecord",
     "Visibility",
     "classify_cmd_command",

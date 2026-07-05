@@ -1,0 +1,75 @@
+# Mixed corpus v3 — golden labeling manifest.
+#
+# Companion docs:
+#   research/docs/11-mixed-corpus-v3.md  (selection rationale)
+#   research/docs/05-data-sizing.md      (N_sweet target)
+#
+# v3 supersedes v2 (mixed-corpus-v2.yaml) and the legacy `copilot-cli`
+# parquet directory. The v2 SQLite-backed Copilot CLI source captured only
+# turn metadata; the native JSONL session-state stream (copilot-cli-native)
+# captures full tool-call sequences and is the authoritative single-machine
+# Copilot CLI corpus.
+
+schema_version: 3
+
+# Total target — N_sweet from research/docs/05-data-sizing.md
+# (boundary classifier binding constraint).
+target_size:
+  value: 800
+  source: "research/docs/05-data-sizing.md §'Boundary classifier' (N_sweet)"
+
+sources:
+  # Native single-machine Copilot CLI sessions. Real human-driven coding,
+  # multi-prompt, includes multi-hour marathons. Small pool (52 sessions
+  # with >=5 tool calls and >=2 phase signals) — take all of them; they
+  # are the only real-world distribution-shift safety net for the corpus.
+  - name: copilot-cli-native
+    subdir: copilot-cli-native
+    # Selection: all sessions clearing the substantive-coding floor.
+    # The scorer rank is a tiebreaker only — every session that crosses
+    # the floor is in.
+    selection: floor
+    min_tool_events:
+      value: 5
+      calibration: corpus-v3-build
+      rationale: "below 5 tool events the session is a hook handler / abort, not coding."
+    min_phase_signals:
+      value: 2
+      source: "research/docs/01-activity-step-classifier.md (boundary requires phase variety)"
+    # Expected pool size after floor (from quality-scores.parquet, 2025-11-25
+    # measurement): 52 sessions. If the pool shifts, the manifest builder
+    # logs the delta but does not fail.
+    expected_pool:
+      value: 52
+      calibration: corpus-v3-build
+      rationale: "measured 2025-11-25 against 726 native sessions; 91% are zero-tool noise."
+
+  # SWE-agent Nebius corpus (HF dataset). Bench-style coding tasks, uniformly
+  # clean tool-call sequences. Used to pad to N_sweet=800 with quality-ranked
+  # selection.
+  - name: swe-agent-nebius
+    subdir: swe-agent-nebius
+    selection: top_quality
+    # The composite quality score in quality-scores.parquet is already
+    # rank-normalised per source; we take top-N. The N here is set so
+    # total(copilot-cli-native floor + swe-agent-nebius top) == target_size.
+    target_size:
+      value: 748
+      source: "800 (N_sweet) - 52 (copilot-cli-native floor pool)"
+      calibration: corpus-v3-build
+    # Minimum quality floor — even at top-N we refuse anything below this
+    # composite. 0.67 ≈ swe-agent p77; above this every session has >=20
+    # tool events and >=3 phase signals (verified 2025-11-25 against the
+    # quality-scores parquet — rank-normalised composite).
+    min_quality_score:
+      value: 0.67
+      calibration: corpus-v3-build
+      rationale: "swe-agent p77; selects clean coding sessions, drops bench failures and trivial passes."
+
+# ---------------------------------------------------------------------------
+# Quality scoring inputs — for the manifest builder. Composite ranks come
+# from `score_session_quality.py`. Do not duplicate the scoring config here.
+# ---------------------------------------------------------------------------
+quality_scores:
+  path: data/interim/quality-scores.parquet
+  source_script: research/scripts/score_session_quality.py

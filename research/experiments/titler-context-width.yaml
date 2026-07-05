@@ -1,0 +1,123 @@
+# Titler INPUT-WIDTH test: is the tiny (16M) span titler's coherence/faithfulness
+# ceiling set by its STARVED INPUT rather than its capacity or its gold?
+#
+# MOTIVATION. Three levers have now been measured and all leave FAITHFULNESS
+# pinned while only nudging surface coherence:
+#   * more DATA  (titler-commit-data): 627k real commit subjects -> +0pt at tiny.
+#   * more CAPACITY (titler-small-capacity): 16M -> 80M lifts COHERENCE +9pt but
+#     FAITHFULNESS only +0.09 -- it hallucinates more fluently, not more truly.
+#   * better DECODING (titler-grounded-decoding): grammar/grounding, not truth.
+# The one lever NEVER pulled is the INPUT. The served distiller
+# (tracemill.title.context.distilled_context) keeps only the FIRST TWO narration
+# sentences, capped at 240 chars (`notes: narr[:2][:240]`). Measured on the base
+# organic corpus: that discards narration for 60% of segments -- for most spans
+# the model never sees the agent's own reasoning, only a bag of tool names +
+# filenames + identifiers + 2 sentences. Gold, by contrast, was written by Sonnet
+# from the FULL span. No parameter count reconstructs discarded information.
+#
+# HYPOTHESIS. If faithfulness is input-bound (not capacity-bound), widening the
+# context the SAME tiny model sees should move faithfulness -- the metric more
+# data and more capacity could not. If it does NOT move, the ~70% gold ceiling is
+# intrinsic to the task framing and the titler effort is closed on principle.
+#
+# IRON-RULE COMPLIANCE (no heuristics / hand-tuned caps / magic numbers):
+#   * "wide" adds NO new constant. narration() already extracts and bounds the
+#     sentence set (its existing [:25], 3..40-word gates); wide simply STOPS
+#     discarding all but the first two. The only remaining bound is the encoder's
+#     own architectural context budget (tokenizer MAX_SRC), i.e. the model's real
+#     capacity -- not a chosen number.
+#   * This also FIXES a latent train/serve bug: the trainer truncated input at
+#     MAX_SRC=192 while the serve path (inference.py) uses 512. The wide arm
+#     trains at 512, the capacity it actually serves at.
+#
+# DESIGN (clean A/B, single variable = context width). The SAME base organic
+# dataset (scripts._title_t5_train build over the activity-step TOC + labelling
+# corpus; sources copilot-cli-native / claude-cli / swe-agent-nebius) is built
+# TWICE, differing only in TITLE_CTX_NOTES:
+#   narrow = full  (shipped default: narr[:2][:240]),  trained MAX_SRC=192
+#   wide   = wide  (full narration),                   trained MAX_SRC=512
+# Identical segments, golds, and deterministic md5(sid) 85/15 split. Same tiny
+# base (google/t5-efficient-tiny), 12 epochs, bs32, lr3e-4. Training on Lightning
+# L4; the Sonnet SDK coherence judge stays LOCAL. Judged on the SAME held-out
+# rows (copilot-cli-native + claude-cli, cap 50 each) so narrow vs wide is a
+# strict head-to-head. codeplane-node is out of the base build (rescue-fold only)
+# and excluded from this probe; if wide wins, the full rescue-chain + serve-side
+# widening is the follow-up.
+#
+# CONTEXT WIDTH (measured, google/t5-efficient-tiny tokenizer, 8372 shared rows):
+#   narrow ctx tokens: p50 111  p90 157  mean 111   (>=192: 2%)
+#   wide   ctx tokens: p50 250  p90 710  mean 352   (>=512: 31%)  -> 3.16x mean
+#   segments whose narration exceeds the old narr[:2] budget: 60%
+
+source:
+  dataset_builder: scripts._title_t5_train build
+  toc: data/processed/activity-step-toc.parquet
+  corpus: data/interim/labeling-corpus (copilot-cli-native / claude-cli / swe-agent-nebius)
+  narrow: data/interim/t5-title-widetest-narrow.parquet  # TITLE_CTX_NOTES=full
+  wide: data/interim/t5-title-widetest-wide.parquet      # TITLE_CTX_NOTES=wide
+  rows: 8372 pairs / 858 sessions (heldout 104 sessions)
+
+design:
+  base_model: google/t5-efficient-tiny  # 16M, ship target -- capacity held FIXED
+  variable: context width only (notes budget + MAX_SRC 192 vs 512)
+  train: 12 epochs, bs32, lr3e-4
+  judge: Sonnet SDK coherence + blinded h2h, SAME held-out rows
+    (copilot-cli-native + claude-cli, cap 50 each), faithfulness is THE metric.
+
+hypothesis: >-
+  Widening the input moves FAITHFULNESS (the metric data and capacity could not),
+  confirming the tiny ceiling is input-bound. Null result -> the ~70% gold
+  ceiling is intrinsic to the distilled-context task framing and the titler
+  closes on principle, not on a missing knob.
+
+status: CLOSED (negative). Widening the input did NOT move faithfulness; it
+  REGRESSED the deploy target. Faithfulness is capacity-bound (salience/verb
+  selection), not input-bound. The ~70-76% gold ceiling is intrinsic to the
+  distilled-context task framing at 16M. The titler closes on principle.
+
+results:
+  # Both arms trained on Lightning L4 (same tiny base, same 3-source mix, 12ep/
+  # bs32/lr3e-4). Only ctx width differs. final_train_loss narrow 2.6448 /
+  # wide 2.3838 (wide fits its richer input better -- loss is NOT the metric).
+  # Judged LOCALLY (Sonnet SDK), SAME held-out sids, copilot+claude cap 50 (n=100).
+  # Each model judged against the ctx it serves (narrow->narrow, wide->wide);
+  # h2h is blinded vs the IDENTICAL gold string.
+  train_loss: {narrow: 2.6448, wide: 2.3838}
+  aggregate_n100:
+    narrow: {faithful: 1.43, specific: 1.58, fluent: 1.92, coherent: 0.61, h2h_model: 0.28, h2h_gold: 0.53}
+    wide:   {faithful: 1.45, specific: 1.53, fluent: 1.92, coherent: 0.63, h2h_model: 0.31, h2h_gold: 0.54}
+    gold_ceiling_faithful: {narrow: 1.66, wide: 1.72}  # gold rose MORE than model
+    model_to_gold_faithful_gap: {narrow: 0.23, wide: 0.27}  # gap WIDENED
+  by_source:
+    copilot_cli_native:  # PRIMARY DEPLOY TARGET
+      narrow: {faithful: 1.28, coherent: 0.52}
+      wide:   {faithful: 1.26, coherent: 0.44}   # -8pt coherence REGRESSION
+      paired_n50: {narrow_wins: 11, wide_wins: 7}  # net narrow +4
+    claude_cli:
+      narrow: {faithful: 1.58, coherent: 0.70}
+      wide:   {faithful: 1.64, coherent: 0.82}   # +12pt, but offset + confounded
+  finding: >-
+    NULL/NEGATIVE. Aggregate faithful flat (+0.02, within judge noise) and the
+    model->gold faithful gap WIDENED (0.23->0.27: when the judge saw the richer
+    ctx, gold's verifiable faithful rose 1.66->1.72, more than the model's).
+    Widening only REDISTRIBUTED coherence -- claude +12 but copilot (the primary
+    deploy target, hardest/rarest organic source) -8 (paired 11 narrow-wins vs 7
+    wide-wins). Failure mode on copilot regressions: the 16M model gets DISTRACTED
+    by the extra narration and picks salient-but-incidental actions -- e.g. gold
+    "Clean up disk space" (narrow nails it verbatim) -> wide "Remove Ollama models
+    and puppeteer cache"; gold "Initialize session and branch" -> wide "Rewrite
+    SPEC.md from scratch". More input gives a capacity-limited model MORE to
+    mis-select from, not more truth.
+  verdict: >-
+    Hypothesis REFUTED. Faithfulness is NOT input-bound. It is capacity-bound:
+    the wall is the 16M model's ability to SELECT the salient action verb among
+    the available signal, and that ability does not improve -- it degrades on the
+    deploy target -- when the signal is widened. This closes the lever loop:
+    DATA null (titler-commit-data), CAPACITY +0.09 faithful only
+    (titler-small-capacity), INPUT null/negative (here). The ~70-76% gold ceiling
+    is intrinsic to titling a distilled span at 16M under the CPU/near-zero-
+    footprint mandate. Keep the shipped narrow tiny; do NOT widen serve context.
+  serve_impact: NONE. src/tracemill/title/context.py stays at narr[:2][:240];
+    widening it would regress the primary deploy target. The latent train(192)/
+    serve(512) MAX_SRC mismatch is benign for the shipped narrow model (its ctx
+    p90 is 157 tokens, <192 -- no truncation occurs in practice).

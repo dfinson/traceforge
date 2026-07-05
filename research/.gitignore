@@ -1,0 +1,27 @@
+# Data: raw downloads + intermediate outputs are large and re-derivable from manifest.yaml
+data/raw/
+data/interim/
+data/processed/
+
+# Model artifacts (logged to MLflow instead)
+*.pkl
+*.joblib
+
+# MLflow tracking store (local-only, kept out of git)
+mlruns/
+mlflow.db
+
+# Python build / env
+.venv/
+__pycache__/
+*.egg-info/
+dist/
+build/
+
+# Notebooks
+.ipynb_checkpoints/
+*.nbconvert.ipynb
+
+# Editor
+.vscode/
+.idea/

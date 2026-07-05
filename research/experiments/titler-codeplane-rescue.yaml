@@ -1,0 +1,61 @@
+# CodePlane-rescue A/B: can 365 real span pairs rescue the 16M tiny titler
+# before sizing up to `small`?  DECISIVE NEGATIVE RESULT.
+#
+# QUESTION. The CodePlane harvest (titler-codeplane-distill.yaml) yielded 365
+# never-trained, leak-free, 96.7%-unique (distilled_context -> intent) span
+# pairs -- the single untested data lever. Does folding them into the tiny
+# t5-efficient-tiny mix lift coherence, or is the ceiling capacity-bound?
+#
+# DESIGN. Clean A/B, identical config, differing ONLY by the 365 rows:
+#   control   = t5-title-rationale.parquet            (shipped rationale mix)
+#   treatment = t5-title-codeplane-rescue.parquet     (rationale + 365 span pairs)
+# Both: google/t5-efficient-tiny, 12 epochs, bs32, lr3e-4, GPU (RTX A500),
+# source-parity sampler (codeplane-node up-weighted to 1/6 title mass).
+# Judged on the SAME 150 held-out rows (copilot-cli-native / claude-cli /
+# codeplane-node, cap 50 each, random_state=17) with the Sonnet SDK coherence
+# rubric + blinded head-to-head vs gold.
+#
+# ARTIFACTS.
+#   research/scripts/_title_rescue_build.py               (dataset fold-in)
+#   data/interim/t5-title-codeplane-rescue.parquet        (gitignored)
+#   data/interim/t5-title-model-{control,rescue}/         (gitignored)
+#   data/interim/title-judge-scores-{control,rescue}.jsonl (gitignored)
+
+rouge_ab:  # fast proxy, whole 1329-row heldout
+  overall: "control 0.324 -> treatment 0.318 (flat)"
+  codeplane_node: "0.091 -> 0.124 (+36%)  <- learned token overlap on the new register"
+  copilot_cli_native: "0.260 -> 0.250"
+  claude_cli: "0.363 -> 0.356"
+  unique_pred_rate: "0.624 -> 0.682 (+0.058, less repetitive)"
+
+coherence_ab:  # Sonnet judge, n=150 shared rows -- THE decisive metric
+  coherent_overall: "control 50% -> treatment 50%  (FLAT; gold ceiling 71%)"
+  h2h_model_tie_gold: "control 31/11/59 -> treatment 27/13/60  (slightly worse)"
+  specific: "1.37 -> 1.52 (+0.15)"
+  faithful: "1.36 -> 1.30 (-0.06)"
+  fluent: "1.92 -> 1.87 (-0.05)"
+  by_source_coherent:
+    claude_cli: "66% -> 72%  (+6, within n=50 noise SE~7pp)"
+    copilot_cli_native: "42% -> 46%  (+4, noise)"
+    codeplane_node: "42% -> 32%  (-10; faithful 1.28 -> 1.04)"
+
+finding: >-
+  NO RESCUE. Folding 365 never-trained, leak-free CodePlane span pairs into the
+  16M tiny titler leaves coherence FLAT at 50% (gold 71%); blinded h2h vs gold
+  nudges worse. The +36% ROUGE on codeplane-node did NOT convert to coherence --
+  coherence there FELL 42->32 and faithfulness 1.28->1.04, a textbook ROUGE/
+  coherence divergence: the model absorbed token overlap, not coherent titling.
+  All per-source coherence deltas (+/-4-10 at n=50) sit within ~1.5 binomial SE.
+  This extends the prior law (titler-request-volume-sweep.yaml: synth volume is
+  not the lever) to REAL data: 365 real span pairs are not the lever either.
+
+verdict: >-
+  The tiny model's coherence ceiling is CAPACITY-bound, not data-bound. The last
+  data lever has been pulled and it did not move the number. Recommendation: size
+  up to `small` (the next-tiniest instruction-tuned generator per the CodePlane
+  study, flan-t5-small ~80M int8). The 365 span pairs + aux gold (semantic_kind
+  730, purpose 459) carry over to the larger model unchanged; re-run this exact
+  A/B harness at the new capacity to confirm the data helps once capacity is not
+  the binding constraint.
+
+decision_rule_applied: "flat coherence -> not data-bound -> go to small (as pre-registered)"

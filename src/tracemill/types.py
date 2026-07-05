@@ -15,12 +15,10 @@ from typing import Any, Final, Literal
 
 from pydantic import Field, field_validator
 
-from tracemill.governance.results import SessionMeta
-from tracemill.models import FrozenModel
-
-
 from tracemill.classify.core import Classification
 from tracemill.classify.workflow import Phase, Visibility
+from tracemill.governance.results import SessionMeta
+from tracemill.models import FrozenModel
 
 
 # ─── EventKind: Open String Registry ────────────────────────────────────────
@@ -218,6 +216,24 @@ class EventMetadata(FrozenModel):
     turn_id: str | None = None
     visibility: Visibility = Visibility.VISIBLE
     phases: frozenset[Phase] | None = None
+    phase: Phase | None = None  # session-aware workflow stage from the phase classifier
+    # Segment-opening boundary stamped live by the boundary classifier: set on the
+    # event that *opens* a new activity/step ("activity-boundary"/"step-boundary");
+    # None for events that continue the current segment. See tracemill.boundary.
+    boundary: str | None = None
+    # Stable structural ids assigned live the instant a segment opens (the id is
+    # the opening event's id). Every event in a segment carries its activity/step
+    # id immediately, decoupling "structure is known now" from "title arrives
+    # later": titles are published as append-only TitleUpdate records keyed by
+    # these ids once a segment closes. See tracemill.title.
+    activity_id: str | None = None
+    step_id: str | None = None
+    # Activity/step span titles. In the live path these stay None — the title
+    # arrives out-of-band as a TitleUpdate keyed by activity_id/step_id. They are
+    # the denormalized form a batch sink may materialize by folding TitleUpdates
+    # back onto events at replay. See tracemill.title.
+    activity_title: str | None = None
+    step_title: str | None = None
     classification: Classification | None = None
     tool_display: str | None = None
     motivation: ToolMotivation | None = None
@@ -270,3 +286,30 @@ class UsageRecord(FrozenModel):
     input_tokens: int = Field(ge=0)
     output_tokens: int = Field(ge=0)
     cost_usd: float | None = Field(default=None, ge=0)
+
+
+# ─── Title Update ────────────────────────────────────────────────────────────
+
+
+class TitleUpdate(FrozenModel):
+    """An append-only title for a session / activity / step segment.
+
+    Events stream out immediately carrying their ``activity_id``/``step_id``; a
+    faithful title needs the whole segment, so it is computed when the segment
+    closes and published separately as one of these, keyed to the segment by
+    ``segment_id``. Consumers materialize the event→segment→title join in their
+    read model — the event log itself is never mutated. ``version`` lets a title
+    be revised (e.g. a provisional title refined on close) idempotently: keep the
+    highest version per ``segment_id``.
+
+    The ``session`` kind labels the whole session from its opening request; it is
+    keyed by ``segment_id == session_id`` (the session is the outermost segment),
+    emitted live the instant the first substantive user message arrives.
+    """
+
+    session_id: str
+    segment_id: str
+    kind: Literal["session", "activity", "step"]
+    title: str
+    version: int = Field(default=1, ge=1)
+    parent_id: str | None = None  # a step's activity_id, so a flat stream can rebuild the tree

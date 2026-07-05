@@ -1,0 +1,115 @@
+# CPU-only abstractive titler — architecture (depth) sweep.
+#
+# Companion scripts: research/scripts/_title_t5_train.py (build/train/eval),
+# research/scripts/_title_judge.py (LLM-as-a-judge coherence metric),
+# research/scripts/_title_footprint.py (CPU latency / RAM probe).
+#
+# MLflow: _title_footprint.py logs a footprint run (RSS add, decode latency) to
+# this experiment via tracemill_research.mlflow_utils.
+#
+# Establishes that the abstractive titler's coherence ceiling was an
+# architecture-SHAPE problem, not a data/target/decoder problem. The default
+# google/t5-efficient-tiny (4enc/4dec) is sub-optimally shallow for the
+# slot-context -> short-title task. Holding the dataset and sampler fixed and
+# varying ONLY the pretrained checkpoint isolates depth as the lever (the
+# T5-efficient paper's "depth beats width" finding).
+
+experiment:
+  name: titler-architecture-sweep
+  mlflow_experiment: titler-architecture-sweep-v1
+  display_name: "Abstractive Titler — Depth Sweep"
+  description: |
+    Full fine-tune of the t5-efficient tiny family on the (distilled_context ->
+    gold title) pairs, varying network DEPTH at fixed width. Dataset (enriched
+    context + original gold, source-frequency balanced sampler) and decode are
+    held constant; the pretrained checkpoint is the only variable.
+
+    Finding: faithfulness (the coherence-gating sub-metric) rises tiny->nl6
+    (1.41 -> 1.53) then PLATEAUS (nl8 1.54, nl12 1.51). Blinded head-to-head vs
+    gold and copilot coherence PEAK at nl6 and regress with more depth, while
+    data-rich swe holds — the fingerprint of data starvation on the 955-row
+    copilot source. nl6 is the capacity sweet spot for the current data size and
+    is footprint-safe; it is adopted as the default base model. The asymmetric
+    deep-encoder/shallow-decoder shape (dl2) regressed copilot and is rejected.
+
+    Consequence: beyond nl6 the binding constraint shifts from capacity to DATA
+    (more organic copilot/Sonnet gold), not architecture or decoder.
+  tags:
+    component: titler
+    pillar: output-quality
+    stage: architecture-selection
+    constraint: cpu-near-zero-footprint
+
+dataset:
+  source: t5-title-dataset
+  source_note: research/data/interim/t5-title-dataset.parquet (enriched ctx + original gold)
+  pairs: 7508
+  split: session-grouped, deterministic by sid hash (heldout_frac 0.15)
+  sampler: source-frequency balanced (per-title inverse-freq detox evaluated + rejected)
+
+candidates:
+  - id: tiny
+    base_model: google/t5-efficient-tiny
+    params_m: 15.6
+    layers: 4enc/4dec
+    role: baseline (previously shipped)
+  - id: nl6
+    base_model: google/t5-efficient-tiny-nl6
+    params_m: 19.2
+    layers: 6enc/6dec
+    role: SELECTED — new default base model
+  - id: nl8
+    base_model: google/t5-efficient-tiny-nl8
+    params_m: 22.9
+    layers: 8enc/8dec
+    role: plateau (copilot overfit)
+  - id: nl12
+    base_model: google/t5-efficient-tiny-nl12
+    params_m: 30.3
+    layers: 12enc/12dec
+    role: plateau (copilot overfit)
+  - id: dl2
+    base_model: google/t5-efficient-tiny-dl2
+    params_m: 19.8
+    layers: 12enc/2dec
+    role: rejected (shallow decoder regresses copilot)
+  - id: t5-small
+    base_model: t5-small
+    params_m: 60.5
+    layers: 6enc/6dec (wide)
+    role: capacity reference — non-shippable footprint (2x latency / 3x decode RAM)
+
+metrics:
+  primary:
+    - method: llm_judge_coherent          # human-coherence proxy, NOT ROUGE
+    - method: llm_judge_faithful          # coherence-gating sub-metric
+    - method: head_to_head_vs_gold        # blinded within-call A/B
+  secondary:
+    - method: llm_judge_specific
+    - method: llm_judge_fluent
+    - method: per_source_breakdown        # copilot vs swe (overfit detector)
+  footprint:
+    - method: cpu_latency_p50_p90         # _title_footprint.py, 2 threads, beam5
+    - method: decode_rss_delta
+    - note: >
+        Near-zero CPU footprint is a hard ship gate. nl6 +23ms/+27MB vs baseline
+        is acceptable; t5-small +99ms/+196MB is not.
+
+acceptance:
+  rule: >
+    Adopt the smallest-footprint checkpoint that reaches gold head-to-head
+    PARITY and is balanced across sources. nl6 is the unique such point
+    (confirmed over two judge runs); deeper variants overfit the data-poor
+    copilot source.
+
+mlflow:
+  log_params:
+    - base_model
+    - params_m
+    - layers
+    - sampler
+  log_tags:
+    - candidate_id
+  log_artifacts:
+    - judge_scores
+    - footprint_probe

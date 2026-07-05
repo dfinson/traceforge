@@ -1,0 +1,99 @@
+# Titler capacity test: does sizing up 16M -> 80M break the tiny coherence
+# ceiling that the CodePlane rescue A/B (titler-codeplane-rescue.yaml) proved
+# was NOT data-bound?  POSITIVE RESULT: capacity is a real lever (+9pt).
+#
+# QUESTION. The rescue A/B showed the 365 real leak-free span pairs leave the
+# 16M t5-efficient-tiny FLAT at 50% coherent (both control and treatment) ->
+# ceiling is capacity-bound. Pre-registered follow-up: re-run the EXACT same
+# rescue-treatment training + judge harness at the next-tiniest instruction-
+# tuned generator (flan-t5-small, ~80M) and ask whether capacity moves the
+# number once data is no longer the binding constraint.
+#
+# COMPUTE. Migrated GPU training off the masked local RTX A500 (4GB) to
+# Lightning.ai: L4 (24GB) Studio in teamspace `sparse-code-retrieval-project`.
+# Training only on the cloud GPU; the Sonnet SDK coherence judge stays LOCAL
+# (needs Copilot auth). Launcher (session artifact, not committed):
+# files/lightning_titler.py -- zips research/{scripts,src,experiments} + the
+# rescue parquet, unzips on the studio, runs the UNMODIFIED production trainer
+# `python -m scripts._title_t5_train train`, tars the checkpoint back.
+#
+# DESIGN. Identical to the rescue A/B, differing ONLY by model capacity:
+#   dataset   = t5-title-codeplane-rescue.parquet   (rationale mix + 365 span pairs)
+#   base      = google/flan-t5-small (~80M)   vs   google/t5-efficient-tiny (~16M)
+#   both: 12 epochs, bs32, lr3e-4, (src,task)-parity sampler (alpha=0), same PREFIX.
+# Judged on the SAME 150 held-out rows (copilot-cli-native / claude-cli /
+# codeplane-node, cap 50 each, random_state=17) with the Sonnet SDK coherence
+# rubric + blinded head-to-head vs gold. Same gold ceiling (70-71%).
+#
+# ARTIFACTS.
+#   files/lightning_titler.py                             (Lightning launcher)
+#   data/interim/t5-title-model-small-rescue/             (gitignored, 80M ckpt)
+#   data/interim/title-judge-scores-small-rescue.jsonl    (gitignored)
+#   train final_train_loss 0.567 (12 ep, L4, ~19min) vs tiny rescue 2.17
+
+coherence_ab:  # Sonnet judge, n=150 shared rows -- THE decisive metric
+  coherent_overall: "tiny 50% -> SMALL 59%  (+9pt; gold ceiling 70%)"
+  h2h_model_tie_gold: "tiny-rescue 27/13/60 -> SMALL 38/13/49  (gold dominance collapses; near crossover)"
+  faithful: "1.30 -> 1.39 (+0.09; small yet coherence jumps +9 -> the gain is verb/semantic choice, not faithfulness)"
+  specific: "1.52 -> 1.63"
+  fluent: "1.87 -> 1.95"
+  by_source_coherent:  # /50 each
+    copilot_cli_native: "23 -> 32  (+9; the primary deploy target + hardest/rarest organic source)"
+    codeplane_node: "16 -> 22  (+6)"
+    claude_cli: "36 -> 35  (flat; already saturated at tiny)"
+
+finding: >-
+  CAPACITY IS THE LEVER. At 80M the exact rescue dataset + harness that was FLAT
+  at 16M lifts overall coherence 50% -> 59% (+9pt) and collapses gold's blinded
+  h2h dominance (gold 60% -> 49% wins; model 27% -> 38%, tie 13%). The lift
+  concentrates on copilot-cli-native (+9), the primary deploy target and the
+  rarest/hardest organic source; claude was already saturated (flat 35/50).
+  Faithfulness barely moved (1.30 -> 1.39) while coherence jumped +9 -> the
+  capacity buys better ACTION-VERB / semantic choice, the diagnosed bottleneck,
+  not just token faithfulness. This confirms the rescue-A/B verdict: the tiny
+  ceiling was capacity-bound. It does NOT yet isolate capacity-alone from
+  rescue-data-unlocking-at-capacity (tiny control==tiny rescue==50%, so the data
+  delta was null at 16M; a small-CONTROL run on the rationale-only mix would
+  split them).
+
+open_question: >-
+  RESOLVED (see serve_footprint below). flan-t5-small 80M int8 ONNX on the real
+  prod pipebench path (CPU, threads=1, same 3527-event copilot session) costs
+  ~1.85x per-title LATENCY (149 -> 276 ms/segment) and ~2x event-loop stall
+  (120 -> 235 ms), but RAM is FLAT (peak RSS 704 -> 651 MB, within run-to-run
+  noise) and it holds exactly ONE core (98% both) -- the torch proxy's feared
+  ~3x decode-RAM blowup does NOT materialize on the int8/ORT serve path. Static
+  artifact 31 MB (tiny) -> 90 MB (small). The +9pt coherence therefore buys ~2x
+  per-segment latency at a once-per-boundary call site, with NO RAM or core-count
+  regression -- not the "fan-storm / RAM starvation autofailure" the fp32/torch
+  numbers implied.
+
+serve_footprint:  # scripts._title_pipebench, real EventPipeline, CPU CUDA=-1, threads=1
+  harness: research/scripts/_title_pipebench.py (added TITLE_SERVE_DIR override)
+  session: copilot-cli-native f7440018-...5.parquet (3527 events, ~345 segments)
+  export: scripts._title_export -> no-past encoder/decoder + int8 QInt8 dynamic quant
+  tiny_16M_shipped:
+    static_onnx_mb: 31          # encoder 11 + decoder 20
+    per_segment_ms: 149
+    loop_max_stall_ms: 120
+    rss_peak_mb: 704
+    cpu_core_pct: 97.9
+  small_80M_int8:
+    static_onnx_mb: 90          # encoder 34 + decoder 56
+    per_segment_ms: 276
+    loop_max_stall_ms: 235
+    rss_peak_mb: 651
+    cpu_core_pct: 98.4
+  deltas: "per-segment 1.85x, loop-stall ~2x, RAM flat (noise), cores 1->1, artifact 2.9x"
+  verdict: >-
+    No hard-constraint violation: RAM flat, one core held. Cost is latency-only
+    (~2x) at a once-per-closed-segment call. A ship decision on small is now a
+    latency/coherence tradeoff (+9pt coherence vs 276ms/segment), NOT a footprint
+    autofailure. Commit-data (titler-commit-data.yaml) confirmed tiny is capacity-
+    bound (627k real commit subjects = +0pt), so small is the ONLY path to the
+    +9pt -- shelved per ship-what's-shipped directive, but de-risked on footprint.
+
+next:
+  - "DONE small serve footprint measured -> latency-only ~2x, RAM flat, one core"
+  - "OPTIONAL small-control (rationale-only, no 365) to isolate capacity vs data delta"
+  - "SHELVED: ship-decision on small (+9pt coherence vs ~2x per-segment latency)"

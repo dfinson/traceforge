@@ -1,0 +1,96 @@
+# Production activity/step (boundary) classifier — persisted causal contract.
+#
+# Companion to boundary-classifier-baselines.yaml (leave-session-out CV) and
+# docs/01-activity-step-classifier.md. Where the baselines experiment *measures*
+# generalisation and discards models, this experiment *fits the winning causal
+# contract on every labelled gap* and persists a single reusable bundle that
+# ships inside the core package (src/tracemill/boundary/data/boundary-model.joblib),
+# plus a qualitative end-to-end pass over unseen real-world Copilot sessions.
+
+experiment:
+  name: boundary-classifier-production
+  mlflow_experiment: boundary-classifier-production-v1
+  display_name: "Boundary Classifier — Persisted Causal Production Model"
+  description: |
+    Fit-on-all-labelled-gaps persistence of the activity/step boundary
+    classifier and its end-to-end validation. The shipped contract is
+    combined-seg: canonical symbolic features of the gap (current + successor
+    event, with change indicators), a frozen model2vec embedding of both
+    events' text, and the causal classical-segmentation detector outputs
+    (online BOCPD posterior + trailing multi-scale majority vote).
+
+    Every feature is causal: a gap after event t is scored once t+1 has
+    arrived, using only trailing state. The acausal position = seq / n feature
+    used by the earliest baselines is dropped (n is unknowable mid-stream);
+    leave-session-out F1_macro is unchanged by the drop (0.443 -> 0.445),
+    confirming the segmentation/semantic features already cover it.
+
+    Runs logged here:
+      * persist — resubstitution F1_macro (optimistic) + per-class predicted
+        counts for the fitted bundle;
+      * e2e — qualitative gap-label distribution and table-of-contents shape
+        over unseen real Copilot sessions (no ground truth; transfer check).
+  tags:
+    classifier: boundary
+    pillar: input-quality
+    research_doc: docs/01-activity-step-classifier.md
+    stage: production
+
+dataset:
+  source: boundary-labeled-gaps
+  source_note: research/data/processed/boundary-labels.parquet
+  classes: [noise, activity-boundary, step-boundary]
+
+model:
+  feature_set: combined-seg
+  estimator: LogisticRegression(class_weight=balanced, C=1.0, max_iter=2000)
+  bundle_path: src/tracemill/boundary/data/boundary-model.joblib
+  causal: true
+  dropped_features:
+    - name: position_in_session
+      reason: "seq / n is acausal — total session length n is unknown mid-stream."
+
+# Segmentation detectors fed as causal features (shared with the baselines and
+# the phase classifier). Identical params so the persisted bundle reproduces
+# training features exactly at serve time.
+segmentation:
+  windows: [3, 5, 10]
+  entropy_window: 10
+  bocpd_expected_run_length: 12
+  bocpd_alpha: 0.5
+  bocpd_r_max: 60
+
+e2e:
+  protocol: qualitative
+  corpus: unseen local Copilot CLI sessions (~/.copilot/session-state[-snapshots])
+  path: adapter (copilot.yaml) -> Enricher -> event_to_feature_row -> boundary.predict_session
+  reports:
+    - gap_label_distribution
+    - activities_per_session
+    - steps_per_session
+  note: >
+    Unlabelled, so this validates that the full production path runs on real
+    data and yields well-formed, sensibly-distributed segmentation. On
+    substantial sessions the distribution tracks the SWE-agent training prior
+    (~92% noise) and the table of contents lands in the 3-8 activities/session
+    target from docs/07; degenerate <10-event sessions over-segment, an
+    expected single-framework transfer artifact (see E4 in docs/01).
+
+metrics:
+  primary:
+    - method: f1_macro
+  secondary:
+    - method: per_class_predicted_counts
+    - method: gap_label_distribution
+    - method: toc_shape
+
+mlflow:
+  log_params:
+    - feature_set
+    - estimator
+    - causal
+    - n_train_examples
+    - n_train_sessions
+  log_artifacts:
+    - per_class_table
+    - e2e_summary

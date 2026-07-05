@@ -417,7 +417,13 @@ class TestPipelineIntegration:
         await pipeline.push(event)
 
         assert len(recorder.events) == 1
-        assert recorder.events[0] == event  # unchanged
+        # No enricher means no enrichment/pairing: id, kind and payload are
+        # carried through unchanged. Inference still stamps metadata by default.
+        emitted = recorder.events[0]
+        assert emitted.id == event.id
+        assert emitted.kind == event.kind
+        assert emitted.payload == event.payload
+        assert emitted.metadata.phase is not None
 
 
 # =============================================================================
@@ -596,9 +602,12 @@ class TestEdgeCases:
         with patch.object(enricher, "process", side_effect=RuntimeError("boom")):
             await pipeline.push(event)
 
-        # Event still reached the sink (raw, un-enriched)
+        # Event still reached the sink (raw, un-enriched; metadata stamped)
         assert len(recorder.events) == 1
-        assert recorder.events[0] == event
+        emitted = recorder.events[0]
+        assert emitted.id == event.id
+        assert emitted.kind == event.kind
+        assert emitted.payload == event.payload
 
 
 # =============================================================================

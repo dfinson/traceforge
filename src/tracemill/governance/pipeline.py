@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from tracemill.governance.assessor import DefaultAssessor
 from tracemill.governance.codec import MetaCodec
 from tracemill.governance.context import ContextBuilder
+from tracemill.governance.phase1 import Phase1
 from tracemill.governance.registry import SessionRegistry
 from tracemill.governance.shield import Shield
 from tracemill.governance.results import (
@@ -63,8 +64,6 @@ class GovernancePipeline:
         policy: "GatePolicy | None" = None,
     ) -> None:
         self._store = store
-        self._labeler = labeler
-        self._budget = budget_tracker
         self._rules = rules
         self._engine = engine
         self._thresholds = thresholds
@@ -72,6 +71,7 @@ class GovernancePipeline:
         self.policy: "GatePolicy | None" = policy
         self._registry = SessionRegistry(store)
         self._assessor = DefaultAssessor(labeler, rules, engine)
+        self._phase1 = Phase1(budget_tracker, labeler)
         self._shield = Shield(self._registry, lambda: self.policy, self._score_event)
         self._codec = MetaCodec()
         self._context = ContextBuilder(engine, project_root)
@@ -476,15 +476,7 @@ class GovernancePipeline:
         transient = state.clone_detached()
 
         # ── Phase 1 simulation (non-persisted) ──
-        phase = self._infer_phase(ctx)
-        if phase:
-            transient.update_phase_window(phase)
-        self._budget.increment(ctx, transient)
-        if self._labeler.has_ifc:
-            ifc_src_labels: set[str] = set()
-            self._labeler.check_ifc(ctx, ifc_src_labels, transient)
-        transient.record_event(None)
-        self._budget.check_pressure(transient)
+        self._phase1.apply(ctx, transient)
 
         # ── Phase 2/3 (side-effect-free) ──
         snapshot = transient.snapshot()
@@ -548,18 +540,7 @@ class GovernancePipeline:
         if not existing:
             # Phase 1 mutations (in-memory) — wrapped for crash recovery
             try:
-                phase = self._infer_phase(ctx)
-                if phase:
-                    state.update_phase_window(phase)
-
-                self._budget.increment(ctx, state)
-
-                if self._labeler.has_ifc:
-                    ifc_src_labels: set[str] = set()
-                    self._labeler.check_ifc(ctx, ifc_src_labels, state)
-
-                state.record_event(None)
-                self._budget.check_pressure(state)
+                self._phase1.apply(ctx, state)
             except Exception as phase1_exc:
                 import logging
 
@@ -811,31 +792,6 @@ class GovernancePipeline:
                     "UPDATE mcp_fingerprints SET last_seen = ? WHERE server = ? AND tool_name = ?",
                     (write.payload, write.server, write.tool_name),
                 )
-
-    def _infer_phase(self, ctx: "EnrichmentContext") -> str | None:
-        """Infer session phase from classification/event."""
-        from tracemill.governance.types import ToolCallEvent
-
-        cls = ctx.base_classification
-        # Network capability takes priority
-        if "network_outbound" in cls.capability:
-            return "network"
-        if cls.effect == "read_only":
-            return "exploration"
-        if cls.effect == "destructive":
-            return "destructive"
-        if cls.effect == "mutating":
-            tool_name = ""
-            if isinstance(ctx.event, ToolCallEvent):
-                tool_name = (ctx.event.tool_name or "").lower()
-            if "test" in tool_name or "verify" in tool_name or "check" in tool_name:
-                return "testing"
-            if "deploy" in tool_name or "publish" in tool_name:
-                return "deployment"
-            return "implementation"
-        if cls.effect == "informational":
-            return "exploration"
-        return "exploration"
 
     def _write_session_summary(self, session_id: str, snapshot: "SessionStateSnapshot") -> None:
         """Write session summary to session_summaries table (idempotent — won't overwrite existing)."""

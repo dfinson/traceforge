@@ -427,3 +427,57 @@ class TestGateThenObserveDurability:
         # ── And the writer's in-memory durable residency advanced exactly once —
         # not twice from inheriting the gate's already-incremented counter.
         assert pipeline.get_or_create_state(session_id).tool_call_count == 1
+
+    def test_two_gated_and_observed_calls_count_once_per_channel(self, pipeline, store):
+        """Two calls each flow through BOTH channels (gate then observe); the
+        durable observation counter must land on exactly 2 — one per observed
+        call — never 3+ from a shared residency letting the gate's increments
+        bleed into the writer's state.
+
+        This is the empirical double-count the two-map split fixes. With a single
+        shared residency that *promotes* the gate's ephemeral state to DB-backed
+        (the reverted design), the writer inherits the gate's already-incremented
+        counter and then increments again, so two real calls persisted a count of
+        3. A single-call test can't distinguish that regression on its own, so
+        this drives two full gate+observe cycles and asserts each channel counted
+        its own calls exactly once, on its own SessionState object.
+        """
+        session_id = "gate-then-observe-x2"
+
+        def gate_and_observe(command: str) -> None:
+            payload = {
+                "tool_name": "bash",
+                "tool_input": {"command": command},
+                "session_id": session_id,
+            }
+            trace, verdict = pipeline._score_and_gate_preflight(payload)
+            assert verdict.allowed
+            pipeline._enforce_postflight(
+                trace, session_id=trace.session_id, output={"result": "ok"}
+            )
+            event = _make_event(
+                tool_name="bash",
+                arguments={"command": command},
+                kind=EventKind.TOOL_CALL_COMPLETED,
+                session_id=session_id,
+            )
+            pipeline.observe_event(event)
+
+        gate_and_observe("ls")
+        gate_and_observe("pwd")
+
+        # Observation channel: the durably persisted count is exactly 2 (one per
+        # observed call). Under the reverted single-map/promotion design this
+        # over-counted to 3 because the writer inherited the gate's increments.
+        reloaded = SessionState.load_from_db(session_id, store.connection)
+        assert reloaded.tool_call_count == 2
+        durable = pipeline.get_or_create_state(session_id)
+        assert durable.tool_call_count == 2
+
+        # Gate channel counts independently on its OWN ephemeral state — a
+        # distinct object from the writer's durable one (the two-map invariant) —
+        # also landing on 2 without cross-channel bleed.
+        gate_state = pipeline._registry.get_gate(session_id)
+        assert gate_state is not None
+        assert gate_state.tool_call_count == 2
+        assert gate_state is not durable

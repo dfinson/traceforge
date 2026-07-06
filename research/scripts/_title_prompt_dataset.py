@@ -2,7 +2,7 @@
 
 CodePlane stores, per autonomous job, the initial user PROMPT and a short human
 ``title`` (prompt "...Save reverts to default, what's going on?" -> title
-"Settings save reverts to defaults"). That is the SAME titling task the tracemill
+"Settings save reverts to defaults"). That is the SAME titling task the traceforge
 titler already does, on a different INPUT shape: a raw natural-language request
 instead of a distilled agent-trace span. The shipped titler is a T5 with a learned
 task PREFIX, so this is a SECOND task on the SAME model, not a second model. Span
@@ -34,10 +34,10 @@ import json
 
 import pandas as pd
 
-from tracemill_research.paths import DATA_INTERIM
+from traceforge_research.paths import DATA_INTERIM
 
 # Task prefixes (T5 convention; learned during fine-tune). The span prefix MUST
-# match the served titler's prefix in src/tracemill/title/inference.py.
+# match the served titler's prefix in src/traceforge/title/inference.py.
 SPAN_PREFIX = "summarize agent step: "
 REQUEST_PREFIX = "title task from request: "
 # Shared with the span build (_title_t5_train.HELDOUT_FRAC) -- kept in sync by

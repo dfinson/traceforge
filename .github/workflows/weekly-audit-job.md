@@ -2,11 +2,11 @@
 
 ## Purpose
 
-Automated weekly job that detects breaking changes in upstream framework SDKs before they silently corrupt tracemill's event pipeline. Runs as a scheduled Copilot workflow (Sunday 02:00 UTC, autopilot mode).
+Automated weekly job that detects breaking changes in upstream framework SDKs before they silently corrupt traceforge's event pipeline. Runs as a scheduled Copilot workflow (Sunday 02:00 UTC, autopilot mode).
 
 ## Scope — Dynamic Discovery
 
-The audit dynamically discovers ALL `.yaml` files in `src/tracemill/mappings/` (excluding `__init__.py`). Each YAML's header comments declare:
+The audit dynamically discovers ALL `.yaml` files in `src/traceforge/mappings/` (excluding `__init__.py`). Each YAML's header comments declare:
 - `framework:` — the framework name
 - `framework_version:` — version constraint
 - Source repo and files (in comment block)
@@ -30,7 +30,7 @@ New frameworks added to the mappings folder are automatically picked up and audi
 ## Audit Process
 
 ### 0. Discovery
-- List all `*.yaml` files in `src/tracemill/mappings/`
+- List all `*.yaml` files in `src/traceforge/mappings/`
 - Parse each YAML's header comments to extract: source repo, source files, version constraint
 - If a YAML has no identifiable source repo in its comments, flag it for manual review
 
@@ -56,7 +56,7 @@ Each agent produces one of:
 
 > **Golden raw traces (#43):** Prefer real captured traces under
 > `tests/fixtures/raw_traces/<framework>/` over hand-written post-preprocessor
-> fixtures — the latter encode tracemill's assumptions and cannot catch drift.
+> fixtures — the latter encode traceforge's assumptions and cannot catch drift.
 > A 🔴 fix is not "done" until the framework's raw trace is re-captured and the
 > golden test reflects the new reality. See `scripts/capture_traces/README.md`.
 
@@ -81,13 +81,13 @@ After all fixes: create GitHub issues for visibility:
 
 - **Frequency**: Weekly (Sunday 02:00 UTC)
 - **Mode**: Autopilot (Copilot workflow, runs autonomously)
-- **Scope**: Dynamically discovers all `src/tracemill/mappings/*.yaml` files
+- **Scope**: Dynamically discovers all `src/traceforge/mappings/*.yaml` files
 - **Execution**: Parallel research agents, one per framework
 - **On findings**: Fixes applied directly, tests updated, committed, issues created
 
 ## Files Touched by This Job
 
-- `src/tracemill/mappings/*.yaml` — verified; updated on ⚠️/🔴 findings
-- `src/tracemill/preprocessors/*.py` — verified; updated if serialization shape changed
+- `src/traceforge/mappings/*.yaml` — verified; updated on ⚠️/🔴 findings
+- `src/traceforge/preprocessors/*.py` — verified; updated if serialization shape changed
 - `tests/integration/test_yaml_comprehensive_e2e.py` — updated with new/fixed test cases
 - This file (`docs/weekly-audit-job.md`) — updated if scope changes

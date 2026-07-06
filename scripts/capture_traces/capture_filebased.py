@@ -76,7 +76,7 @@ def _write_meta(
         "capture_method": capture_method,
         "source_path": source_path,
         "captured_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "tracemill_commit": _git_commit(),
+        "traceforge_commit": _git_commit(),
         "line_count": line_count,
         "notes": notes,
     }

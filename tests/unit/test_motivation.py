@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from tracemill.adapters.mapped_json import (
+from traceforge.adapters.mapped_json import (
     EventMapping,
     FrameworkMapping,
     MappedJsonAdapter,
     MotivationConfig,
     MotivationSource,
 )
-from tracemill.types import EventKind
+from traceforge.types import EventKind
 
 
 def _make_adapter(
@@ -321,7 +321,7 @@ class TestSourceWindow:
 
     def test_custom_window(self):
         """source_window configurable per-framework."""
-        from tracemill.adapters.mapped_json import MotivationConfig
+        from traceforge.adapters.mapped_json import MotivationConfig
 
         motivation = MotivationConfig(
             sources=[MotivationSource(events=["assistant.text"], field="content", role="intent")],

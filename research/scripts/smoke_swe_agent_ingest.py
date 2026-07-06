@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import sys
 
-from tracemill_research.ingest.swe_agent import (
+from traceforge_research.ingest.swe_agent import (
     SweAgentIngestConfig,
     default_output_dir,
     default_shard_dir,

@@ -59,7 +59,7 @@ must not add to this list.
 | Location | Value | Status |
 |---|---|---|
 | `docs/design-phase-tracker.md` | `WINDOW_SIZE=3`, `DEBOUNCE=2` | Moved to `PhaseTrackerConfig` (yaml-driven) — done |
-| `src/tracemill/sinks/parquet.py` | `_DEFAULT_MAX_BUFFERED_EVENTS`, `_DEFAULT_COMPRESSION`, `_DEFAULT_ROW_GROUP_SIZE` | Already constructor args; need a `ParquetSinkConfig` model with cited rationale — pending |
+| `src/traceforge/sinks/parquet.py` | `_DEFAULT_MAX_BUFFERED_EVENTS`, `_DEFAULT_COMPRESSION`, `_DEFAULT_ROW_GROUP_SIZE` | Already constructor args; need a `ParquetSinkConfig` model with cited rationale — pending |
 | `research/docs/05-data-sizing.md` | 100/400/600 phase, 350/800/1200 boundary | Cited (Riley 2020, Frenay & Verleysen 2014, Banko & Brill 2001) — OK |
 | `research/docs/06-pipeline-architecture.md` | `compression="zstd"`, `row_group_size=10_000` | Need citations for parquet defaults — pending |
 | `research/docs/07-activity-step-taxonomy.md` | granularity targets, IAA ranges | Cited or marked as pilot-calibration — OK |

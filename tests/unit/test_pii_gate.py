@@ -1,4 +1,4 @@
-"""Tests for tracemill.gates.pii — native regex PII detection gate.
+"""Tests for traceforge.gates.pii — native regex PII detection gate.
 
 No mocks — tests the actual regex patterns, validators, and gate logic.
 """
@@ -9,7 +9,7 @@ from types import MappingProxyType
 from unittest.mock import MagicMock
 
 
-from tracemill.gates.pii import (
+from traceforge.gates.pii import (
     PiiGateConfig,
     _iban_check,
     _luhn_check,
@@ -17,12 +17,12 @@ from tracemill.gates.pii import (
     pii_postflight_gate,
     _extract_text,
 )
-from tracemill.sdk.gate_types import (
+from traceforge.sdk.gate_types import (
     GateContext,
     PostflightAction,
     ToolCallResult,
 )
-from tracemill.trace import EMPTY_MAP
+from traceforge.trace import EMPTY_MAP
 
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -30,7 +30,7 @@ from tracemill.trace import EMPTY_MAP
 
 def _make_result(output: dict | None = None, error: str | None = None) -> ToolCallResult:
     """Create a minimal ToolCallResult for testing."""
-    from tracemill._generated import Mechanism, Effect, Capability, RiskBand, Recommendation
+    from traceforge._generated import Mechanism, Effect, Capability, RiskBand, Recommendation
 
     return ToolCallResult(
         tool="read_file",

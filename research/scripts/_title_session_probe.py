@@ -1,6 +1,6 @@
 """Zero-shot SESSION-NAMING probe for an arbitrary span titler.
 
-Session naming in tracemill is the REQUEST task: the session label is its opening
+Session naming in traceforge is the REQUEST task: the session label is its opening
 intent -- ``TitleInferencer.request_title(first_user_message)`` titles the first
 meaningful sentence of the user's prompt (see inferencer.py ``_maybe_session_title``).
 The serve single-model fallback reprefixes the span model to the request prefix
@@ -23,9 +23,9 @@ import os
 
 import pandas as pd
 
-from tracemill.title.hygiene import best_of
-from tracemill.title.inference import TitleModel
-from tracemill.title.inferencer import _REQUEST_PREFIX
+from traceforge.title.hygiene import best_of
+from traceforge.title.inference import TitleModel
+from traceforge.title.inferencer import _REQUEST_PREFIX
 
 
 def main() -> None:

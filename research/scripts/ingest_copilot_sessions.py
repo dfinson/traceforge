@@ -3,7 +3,7 @@
 Source: ``~/.copilot/session-state/<session_id>/events.jsonl`` — the actual
 event log the Copilot CLI writes for every session it runs. Each line is a
 ``{type, id, timestamp, data, parentId}`` event in the schema that
-``src/tracemill/mappings/copilot.yaml`` already covers.
+``src/traceforge/mappings/copilot.yaml`` already covers.
 
 This is the canonical wire-up:
 
@@ -27,12 +27,12 @@ import logging
 import os
 from pathlib import Path
 
-from tracemill.adapters.mapped_json import MappedJsonAdapter
-from tracemill.cli.runner import load_mapping_path
-from tracemill.enricher import Enricher
-from tracemill.pipeline import EventPipeline
-from tracemill.sinks.parquet import ParquetSink
-from tracemill_research.paths import DATA_INTERIM
+from traceforge.adapters.mapped_json import MappedJsonAdapter
+from traceforge.cli.runner import load_mapping_path
+from traceforge.enricher import Enricher
+from traceforge.pipeline import EventPipeline
+from traceforge.sinks.parquet import ParquetSink
+from traceforge_research.paths import DATA_INTERIM
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("ingest-copilot-sessions")

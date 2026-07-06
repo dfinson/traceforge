@@ -7,7 +7,7 @@ Pipeline: `research/scripts/{build_labeling_manifest,ingest_labeling_corpus,labe
 ## What we ran
 
 * Manifest: deterministic seeded selection, `min_turns=5`, `max_turns=250` → 349 sessions.
-* Ingest: tracemill enricher applied per session → `data/interim/labeling-corpus/<sid>.parquet`.
+* Ingest: traceforge enricher applied per session → `data/interim/labeling-corpus/<sid>.parquet`.
 * Labeling: Copilot-SDK + Sonnet 4.5, combined phase + boundary + TOC, red-team review pass.
 * Concurrency 4. Total wallclock ≈ 3h 10m for 349 sessions.
 

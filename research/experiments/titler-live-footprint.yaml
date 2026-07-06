@@ -3,7 +3,7 @@
 # Companion script: research/scripts/_title_pipebench.py
 #
 # MLflow: _title_pipebench.py logs one run per mode (titling-on / titling-off)
-# with the footprint metrics to this experiment via tracemill_research.mlflow_utils.
+# with the footprint metrics to this experiment via traceforge_research.mlflow_utils.
 #
 # The architecture sweep (titler-architecture-sweep.yaml) measured the titler
 # MODEL in isolation. This measures the SHIPPED stage running inside the real
@@ -103,7 +103,7 @@ acceptance:
 # titler-summarization-specialist.yaml distillation block) was benched ON THE
 # REAL SERVE PATH via _title_pipebench.py TITLE_SERVE_DIR, same 3527-event
 # session, intra_op=1, CPU-only. Confirms it clears the single-core gate before
-# packaging it as src/tracemill/title/data/. Host is a different laptop than the
+# packaging it as src/traceforge/title/data/. Host is a different laptop than the
 # original off/on-1t rows above (higher RSS baseline, faster per-seg), so read
 # the tiny_repro vs small_promoted DELTA, not absolutes.
 small_head_promotion:

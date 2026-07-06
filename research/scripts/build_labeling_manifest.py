@@ -21,8 +21,8 @@ from pathlib import Path
 
 import yaml
 
-from tracemill_research.config import load_labeling_runtime_config
-from tracemill_research.paths import DATA_INTERIM, RESEARCH_ROOT
+from traceforge_research.config import load_labeling_runtime_config
+from traceforge_research.paths import DATA_INTERIM, RESEARCH_ROOT
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("manifest")

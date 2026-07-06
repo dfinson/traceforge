@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from tracemill.classify.core import Classification
-from tracemill.governance.codec import MetaCodec
-from tracemill.governance.mcp_drift import MCPIntegrityAlert
-from tracemill.governance.results import (
+from traceforge.classify.core import Classification
+from traceforge.governance.codec import MetaCodec
+from traceforge.governance.mcp_drift import MCPIntegrityAlert
+from traceforge.governance.results import (
     Evidence,
     EvidencePointer,
     EscalationContext,

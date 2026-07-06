@@ -29,33 +29,33 @@ from pathlib import Path
 
 import yaml
 
-from tracemill_research.config import (
+from traceforge_research.config import (
     LabelingRuntimeConfig,
     load_labeling_runtime_config,
 )
-from tracemill_research.labeling.backends.copilot_sdk import (
+from traceforge_research.labeling.backends.copilot_sdk import (
     CompletionResult,
     CopilotSdkBackend,
 )
-from tracemill_research.labeling.canonical_view import (
+from traceforge_research.labeling.canonical_view import (
     CanonicalSessionView,
     load_session_view,
     render_markdown,
 )
-from tracemill_research.labeling.combined import (
+from traceforge_research.labeling.combined import (
     CombinedLabels,
     parse_combined,
     render_prompt,
     validate_combined,
 )
-from tracemill_research.labeling.redteam import (
+from traceforge_research.labeling.redteam import (
     CombinedReview,
     parse_review,
     passes_acceptance_threshold,
     render_redteam_prompt,
     resolve,
 )
-from tracemill_research.paths import DATA_INTERIM, DATA_PROCESSED, RESEARCH_ROOT
+from traceforge_research.paths import DATA_INTERIM, DATA_PROCESSED, RESEARCH_ROOT
 
 # Reuse the AttemptRecord / SessionOutcome dataclasses + system prompt from the
 # main runner so artifacts are wire-compatible.

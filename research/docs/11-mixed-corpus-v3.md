@@ -109,18 +109,18 @@ corpus source.
 
 ## Ingest pipeline
 
-Both sources flow through the **same canonical tracemill pipeline** —
+Both sources flow through the **same canonical traceforge pipeline** —
 no bespoke ingest paths. Anti-pattern (calling `enricher.process()` then
 `sink.on_event()` in a loop) is rejected on principle.
 
 ```python
-from tracemill.adapters.mapped_json import MappedJsonAdapter
-from tracemill.cli.runner import load_mapping_path
-from tracemill.enricher import Enricher
-from tracemill.pipeline import EventPipeline
-from tracemill.sinks.parquet import ParquetSink
+from traceforge.adapters.mapped_json import MappedJsonAdapter
+from traceforge.cli.runner import load_mapping_path
+from traceforge.enricher import Enricher
+from traceforge.pipeline import EventPipeline
+from traceforge.sinks.parquet import ParquetSink
 
-mapping_path = load_mapping_path("copilot")   # src/tracemill/mappings/copilot.yaml
+mapping_path = load_mapping_path("copilot")   # src/traceforge/mappings/copilot.yaml
 adapter = MappedJsonAdapter.from_yaml(str(mapping_path), session_id=sid)
 sink = ParquetSink(path=str(OUT_DIR / "{session_id}.parquet"))
 pipeline = EventPipeline(sinks=[sink], enricher=Enricher())
@@ -172,7 +172,7 @@ concatenates and re-sorts by the per-session monotonic `seq`.
 
 * **Window-segmentation** for the 31 oversized native sessions. Could yield
   100-400 additional labeled windows from the richest 8 marathons.
-* **Refactor `research/src/tracemill_research/ingest/swe_agent.py`** to use
+* **Refactor `research/src/traceforge_research/ingest/swe_agent.py`** to use
   `MappedJsonAdapter` + `EventPipeline` (currently calls `enricher.process()`
   directly). Existing 3,259 enriched parquets are schema-valid so no
   re-ingest needed — code-cleanup only.

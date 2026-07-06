@@ -1,8 +1,8 @@
 """End-to-end TOC + titles over real Claude-CLI sessions via the NATIVE pipeline.
 
-No bespoke adapter: ingest each Claude transcript through tracemill's packaged
+No bespoke adapter: ingest each Claude transcript through traceforge's packaged
 ``claude`` mapping (MappedJsonAdapter + Enricher), segment every gap with the
-causal boundary classifier (``tracemill.boundary``), then title each detected
+causal boundary classifier (``traceforge.boundary``), then title each detected
 activity/step window with the fine-tuned tiny seq2seq titler
 (``data/interim/t5-title-model``).
 
@@ -25,10 +25,10 @@ import os
 import sys
 from pathlib import Path
 
-from tracemill.boundary import load as load_boundary_model
-from tracemill.boundary import predict_session
-from tracemill.cli.runner import load_mapping_path
-from tracemill.phase.event_rows import event_to_feature_row
+from traceforge.boundary import load as load_boundary_model
+from traceforge.boundary import predict_session
+from traceforge.cli.runner import load_mapping_path
+from traceforge.phase.event_rows import event_to_feature_row
 
 # reuse the proven native enrich path from the boundary e2e harness
 from scripts.eval_boundary_pipeline_e2e import _enrich_session  # noqa: E402

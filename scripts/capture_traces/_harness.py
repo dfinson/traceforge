@@ -3,7 +3,7 @@
 A *raw trace* is the verbatim output a framework writes to disk (a session
 file / JSONL) or the verbatim serialization of its native event stream. Raw
 traces are NEVER hand-edited — they are the ground-truth input that golden e2e
-tests (tests/e2e/test_raw_traces.py) feed through the real tracemill pipeline.
+tests (tests/e2e/test_raw_traces.py) feed through the real traceforge pipeline.
 
 Each capture script lives next to this file as ``capture_<framework>.py`` and
 calls :func:`write_trace` to emit:
@@ -96,7 +96,7 @@ def write_trace(
     """Write a raw trace JSONL plus a sibling meta.yaml. Returns the JSONL path.
 
     ``lines`` are native framework event dicts — exactly what the framework
-    emits, with no tracemill-side normalization. They are serialized one per
+    emits, with no traceforge-side normalization. They are serialized one per
     line so the golden test can stream them through MappedJsonAdapter.
     """
     out_dir = FIXTURES_ROOT / framework
@@ -117,7 +117,7 @@ def write_trace(
         "framework_version": framework_version,
         "model": model,
         "captured_at": _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "tracemill_commit": _git_commit(),
+        "traceforge_commit": _git_commit(),
         "line_count": len(rows),
         "notes": notes,
     }

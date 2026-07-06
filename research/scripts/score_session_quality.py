@@ -39,7 +39,7 @@ from pathlib import Path
 
 import pyarrow.parquet as pq
 
-from tracemill_research.paths import DATA_INTERIM
+from traceforge_research.paths import DATA_INTERIM
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("quality-score")
@@ -49,7 +49,7 @@ CORPUS_DIR = DATA_INTERIM / "labeling-corpus"
 OUT_PATH = DATA_INTERIM / "quality-scores.parquet"
 
 # Vocab is the canonical enricher output. Verify with:
-#   grep -rh "effect=\|action=" src/tracemill/classify/ | sort -u
+#   grep -rh "effect=\|action=" src/traceforge/classify/ | sort -u
 MUTATION_EFFECTS = frozenset({"mutating", "destructive"})
 MUTATION_ACTION_PREFIXES = ("persist.", "modify.", "delete.")
 MUTATION_ACTION_LEAVES = frozenset({"write", "edit", "create", "delete", "modify", "patch"})

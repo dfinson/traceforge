@@ -39,15 +39,15 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from tracemill.phase.event_rows import event_to_feature_row
-from tracemill.pipeline import EventPipeline
-from tracemill.sinks.base import StorageSink
-from tracemill.title.context import distilled_context
-from tracemill.types import SessionEvent, TitleUpdate
+from traceforge.phase.event_rows import event_to_feature_row
+from traceforge.pipeline import EventPipeline
+from traceforge.sinks.base import StorageSink
+from traceforge.title.context import distilled_context
+from traceforge.types import SessionEvent, TitleUpdate
 
 from scripts._title_pipebench import load_events  # noqa: E402
-from tracemill_research.mlflow_utils import log_yaml_params, start_run  # noqa: E402
-from tracemill_research.paths import EXPERIMENTS_DIR  # noqa: E402
+from traceforge_research.mlflow_utils import log_yaml_params, start_run  # noqa: E402
+from traceforge_research.paths import EXPERIMENTS_DIR  # noqa: E402
 
 import mlflow  # noqa: E402
 
@@ -82,7 +82,7 @@ _STOP = {
     "those",
 }
 # identifier-shaped: snake/path separator, hyphenation, internal capital, digit,
-# or dotted extension. Mirrors tracemill.title.inference so the metric scores the
+# or dotted extension. Mirrors traceforge.title.inference so the metric scores the
 # exact failure the grounding gate targets (apples-to-apples deltas).
 _ID_RE = re.compile(r"[_/\\-]|[a-z][A-Z]|\d|\.[A-Za-z]")
 _WORD = re.compile(r"[A-Za-z0-9_./\\-]+")
@@ -186,7 +186,7 @@ async def _run(args: argparse.Namespace) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
-    from tracemill.title.inferencer import TitleInferencer
+    from traceforge.title.inferencer import TitleInferencer
 
     d = Path(args.dir)
     files = sorted(d.glob("*.*.parquet"), key=lambda f: f.stat().st_size, reverse=True)

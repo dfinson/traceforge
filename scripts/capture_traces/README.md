@@ -2,7 +2,7 @@
 
 Tracking: #43. Motivation: PR #42 showed the weekly audit catches upstream YAML
 drift that the unit suite misses, because the integration fixtures are
-hand-written **post-preprocessor** shapes — they encode tracemill's own
+hand-written **post-preprocessor** shapes — they encode traceforge's own
 assumptions, not real upstream output.
 
 This directory captures **real** framework output and commits it under

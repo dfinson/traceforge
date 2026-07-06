@@ -11,11 +11,11 @@ from pathlib import Path
 
 import pytest
 
-from tracemill import Enricher, EventKind, SessionEvent
-from tracemill.adapters.mapped_json import EventMapping, FrameworkMapping, MappedJsonAdapter
+from traceforge import Enricher, EventKind, SessionEvent
+from traceforge.adapters.mapped_json import EventMapping, FrameworkMapping, MappedJsonAdapter
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
-MAPPINGS_DIR = Path(__file__).resolve().parents[2] / "src" / "tracemill" / "mappings"
+MAPPINGS_DIR = Path(__file__).resolve().parents[2] / "src" / "traceforge" / "mappings"
 
 
 def _copilot_adapter(session_id: str = "test-session") -> MappedJsonAdapter:
@@ -124,7 +124,7 @@ class TestMappedJsonFullPipeline:
                 Path(__file__).resolve().parents[1]
                 / ".."
                 / "src"
-                / "tracemill"
+                / "traceforge"
                 / "mappings"
                 / "crewai.yaml"
             ),
@@ -224,7 +224,7 @@ class TestMappedJsonFullPipeline:
                 Path(__file__).resolve().parents[1]
                 / ".."
                 / "src"
-                / "tracemill"
+                / "traceforge"
                 / "mappings"
                 / "openhands.yaml"
             ),
@@ -294,7 +294,7 @@ class TestMappedJsonFullPipeline:
                 Path(__file__).resolve().parents[1]
                 / ".."
                 / "src"
-                / "tracemill"
+                / "traceforge"
                 / "mappings"
                 / "cline.yaml"
             ),
@@ -365,7 +365,7 @@ class TestMappedJsonFullPipeline:
                 Path(__file__).resolve().parents[1]
                 / ".."
                 / "src"
-                / "tracemill"
+                / "traceforge"
                 / "mappings"
                 / "aider.yaml"
             ),
@@ -450,7 +450,7 @@ class TestMappedJsonFullPipeline:
                 Path(__file__).resolve().parents[1]
                 / ".."
                 / "src"
-                / "tracemill"
+                / "traceforge"
                 / "mappings"
                 / "goose.yaml"
             ),
@@ -530,7 +530,7 @@ class TestCrossAdapterConsistency:
                 Path(__file__).resolve().parents[1]
                 / ".."
                 / "src"
-                / "tracemill"
+                / "traceforge"
                 / "mappings"
                 / "crewai.yaml"
             ),
@@ -832,7 +832,7 @@ class TestAdapterRobustness:
 
 MAPPING_FILES = [
     p
-    for p in (Path(__file__).resolve().parents[1] / ".." / "src" / "tracemill" / "mappings").glob(
+    for p in (Path(__file__).resolve().parents[1] / ".." / "src" / "traceforge" / "mappings").glob(
         "*.yaml"
     )
     if p.stem != "maf"

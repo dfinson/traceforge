@@ -12,7 +12,7 @@
 #   research/scripts/_title_judge.py          (paired LLM judge; settled the source-axis decision)
 #
 # MLflow: _title_t5_train.py (train + eval runs) and _title_judge.py (llm-judge
-#   run) log params/metrics to this experiment via tracemill_research.mlflow_utils.
+#   run) log params/metrics to this experiment via traceforge_research.mlflow_utils.
 #
 # PROBLEM. The shipped tiny-v2 titler was trained on copilot-cli-native +
 # swe-agent-nebius. swe-agent is a heavily SCAFFOLDED corpus (one title repeated
@@ -85,7 +85,7 @@ conditions:
     role: baseline (currently served before this change)
   - id: natural-pool
     pool: copilot-cli-native + claude-cli (natural freq), swe dropped
-    role: SELECTED — promoted to src/tracemill/title/data
+    role: SELECTED — promoted to src/traceforge/title/data
 
 results:
   # served-path quality (_title_toc_metrics, grounded-adaptive ON, CPU-only).
@@ -116,7 +116,7 @@ acceptance:
     to the new organic population. Met: in-dist copilot at parity (verb diversity
     flat, hallucination 3.4 -> 2.4, near-dup within noise), claude +13 coherent by
     paired judge. CPU single-core footprint unchanged (same arch + int8 export,
-    byte-identical artifact sizes). Promoted to src/tracemill/title/data.
+    byte-identical artifact sizes). Promoted to src/traceforge/title/data.
 
 mlflow:
   log_params:

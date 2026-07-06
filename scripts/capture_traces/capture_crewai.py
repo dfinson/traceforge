@@ -63,7 +63,7 @@ def _jsonable(value: Any, seen: set[int] | None = None) -> Any:
 
 
 def _native_event_dict(event: Any) -> dict[str, Any]:
-    """Serialize the native CrewAI event object without tracemill shaping."""
+    """Serialize the native CrewAI event object without traceforge shaping."""
     data = _jsonable(event)
     if not isinstance(data, dict):
         raise TypeError(f"expected event dict, got {type(data).__name__}")

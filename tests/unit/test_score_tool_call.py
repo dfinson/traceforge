@@ -8,13 +8,13 @@ from unittest.mock import patch
 
 import pytest
 
-from tracemill.classify.config import get_default_engine
-from tracemill.governance.budget import BudgetTracker
-from tracemill.governance.labeler import GovernanceLabeler
-from tracemill.governance.persistence import SystemStore
-from tracemill.governance.pipeline import GovernancePipeline
-from tracemill.governance.results import RecommendedAction
-from tracemill.trace import EventTrace
+from traceforge.classify.config import get_default_engine
+from traceforge.governance.budget import BudgetTracker
+from traceforge.governance.labeler import GovernanceLabeler
+from traceforge.governance.persistence import SystemStore
+from traceforge.governance.pipeline import GovernancePipeline
+from traceforge.governance.results import RecommendedAction
+from traceforge.trace import EventTrace
 
 
 @pytest.fixture
@@ -31,12 +31,12 @@ def engine():
 
 @pytest.fixture
 def rules():
-    from tracemill.governance.rules import parse_rules
+    from traceforge.governance.rules import parse_rules
 
     rules_path = (
         Path(__file__).parent.parent.parent
         / "src"
-        / "tracemill"
+        / "traceforge"
         / "classify"
         / "data"
         / "recommendation_rules.yaml"
@@ -416,7 +416,7 @@ class TestNonShellTools:
 class TestFailClosed:
     def test_classification_error_returns_escalate(self, pipeline):
         with patch(
-            "tracemill.classify.tools.normalize_tool_name", side_effect=RuntimeError("boom")
+            "traceforge.classify.tools.normalize_tool_name", side_effect=RuntimeError("boom")
         ):
             result = pipeline.score_tool_call(
                 {
@@ -499,7 +499,7 @@ class TestReadOnly:
             }
         )
         # Simulate observation arriving with a different key
-        from tracemill.governance.types import ToolCallEvent
+        from traceforge.governance.types import ToolCallEvent
 
         obs_event = ToolCallEvent(
             event_id="obs-001",
@@ -644,7 +644,7 @@ class TestFactory:
         assert isinstance(result, EventTrace)
 
     def test_with_governance_config(self):
-        from tracemill.config import BudgetConfig, GovernanceConfig
+        from traceforge.config import BudgetConfig, GovernanceConfig
 
         p = GovernancePipeline.create(
             GovernanceConfig(

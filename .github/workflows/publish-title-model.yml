@@ -1,13 +1,13 @@
 name: Publish title model
 
-# The titler weights are a separate distribution (`tracemill-title-model`) so the
-# core `tracemill` wheel stays code-only. They change rarely (only on a retrain),
+# The titler weights are a separate distribution (`traceforge-title-model`) so the
+# core `traceforge` wheel stays code-only. They change rarely (only on a retrain),
 # so they release on their own `title-model-v*` tag — independent of the code
 # `v*` tag handled by publish.yml.
 #
-# Primary: PyPI (trusted publishing). `tracemill` depends on it and resolves it
+# Primary: PyPI (trusted publishing). `traceforge` depends on it and resolves it
 # from there. Mirror: the same wheel is uploaded to the GitHub release so
-# `tracemill download-model --source gh` can fetch it when PyPI is unavailable.
+# `traceforge download-model --source gh` can fetch it when PyPI is unavailable.
 
 on:
   push:
@@ -28,7 +28,7 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install build
-      - run: python -m build packages/tracemill-title-model --outdir dist
+      - run: python -m build packages/traceforge-title-model --outdir dist
       - name: Verify weights are real (not LFS pointers)
         run: python scripts/verify_no_lfs_pointers.py dist --require .onnx
       - name: Publish to PyPI (primary)
@@ -43,4 +43,4 @@ jobs:
           dist/*.whl
           --repo "${{ github.repository }}"
           --title "${{ github.ref_name }}"
-          --notes "tracemill-title-model wheel — GitHub-release mirror of the PyPI package. Install: tracemill download-model --source gh"
+          --notes "traceforge-title-model wheel — GitHub-release mirror of the PyPI package. Install: traceforge download-model --source gh"

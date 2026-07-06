@@ -16,15 +16,15 @@ from unittest import mock
 
 import pytest
 
-from tracemill.classify.config import ClassificationEngine, ClassifyConfig
-from tracemill.classify.core import Classification
-from tracemill.governance.budget import BudgetThresholds, BudgetTracker
-from tracemill.governance.labeler import GovernanceLabeler
-from tracemill.governance.mcp_drift import MCPIntegrityScanner
-from tracemill.governance.persistence import SystemStore
-from tracemill.governance.pipeline import GovernancePipeline
-from tracemill.governance.state import SessionState
-from tracemill.governance.types import EnrichmentContext, ToolCallEvent
+from traceforge.classify.config import ClassificationEngine, ClassifyConfig
+from traceforge.classify.core import Classification
+from traceforge.governance.budget import BudgetThresholds, BudgetTracker
+from traceforge.governance.labeler import GovernanceLabeler
+from traceforge.governance.mcp_drift import MCPIntegrityScanner
+from traceforge.governance.persistence import SystemStore
+from traceforge.governance.pipeline import GovernancePipeline
+from traceforge.governance.state import SessionState
+from traceforge.governance.types import EnrichmentContext, ToolCallEvent
 
 
 @pytest.fixture

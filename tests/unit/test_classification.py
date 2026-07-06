@@ -6,7 +6,7 @@ from functools import partial
 
 import pytest
 
-from tracemill.classify.core import (
+from traceforge.classify.core import (
     Action,
     Classification,
     Effect,
@@ -15,16 +15,16 @@ from tracemill.classify.core import (
     Scope,
     aggregate_effect,
 )
-from tracemill.classify.coding import (
+from traceforge.classify.coding import (
     CodingAction,
     CodingMechanism,
     CodingRole,
     CodingScope,
 )
-from tracemill.classify import get_default_engine
-from tracemill.classify.registry import DimensionRegistry, get_default_registry
-from tracemill.classify.shell import classify_shell
-from tracemill.classify.tools import classify_tool
+from traceforge.classify import get_default_engine
+from traceforge.classify.registry import DimensionRegistry, get_default_registry
+from traceforge.classify.shell import classify_shell
+from traceforge.classify.tools import classify_tool
 
 
 ENGINE = get_default_engine()
@@ -444,7 +444,7 @@ class TestRedTeamRegressions:
 
     def test_mcp_filesystem_delete_valid_role(self):
         """MCP filesystem delete must get modifier.file_editor, not modifier.file_browser."""
-        from tracemill.classify.mcp import classify_mcp_tool
+        from traceforge.classify.mcp import classify_mcp_tool
         from functools import partial
 
         cm = partial(classify_mcp_tool, engine=ENGINE)
@@ -455,7 +455,7 @@ class TestRedTeamRegressions:
 
     def test_enum_values_in_tool_classifications_are_registered(self):
         """All values used in tool_classifications.yaml must be valid registered values."""
-        from tracemill.classify.registry import get_default_registry
+        from traceforge.classify.registry import get_default_registry
 
         reg = get_default_registry()
         for name, cls in ENGINE.tool_classifications.items():

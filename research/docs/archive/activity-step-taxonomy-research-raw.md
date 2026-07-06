@@ -6,13 +6,13 @@ I now have sufficient data from the codebase and confirmed literature searches t
 
 # Defensible Taxonomy for Hierarchical Session TOC: A Research Document
 
-*Prepared for tracemill / CodePlane session segmentation — June 2026*
+*Prepared for traceforge / CodePlane session segmentation — June 2026*
 
 ---
 
 ## 1. Codebase Context
 
-Before turning to external literature, the tracemill codebase itself is evidence. Three design documents are directly relevant and have already made commitments that constrain this problem:
+Before turning to external literature, the traceforge codebase itself is evidence. Three design documents are directly relevant and have already made commitments that constrain this problem:
 
 **`docs/design-phase-tracker.md` / `research/docs/archive/design-phase-tracker-v1-full.md`:** Distinguish between *per-event activity* (intrinsic purpose of one tool call: `investigation`, `implementation`, `verification`, `delivery`, `setup`, `communication`) and *session-level phase* (aggregate workflow stage: `exploration`, `implementation`, `verification`, `review`, `planning`). This is an exact analogue of the activity/step hierarchy you want to render, with activities already taxonomized via a 6-root dot-path system. The existing phase tracker uses debounced majority vote (window=3, debounce=2) on per-event activity signals.
 

@@ -8,6 +8,6 @@ demo_repo_sha: 6ea7b6aba6ae924654ddcae7edc37aa8a6db4588
 capture_method: file_copy
 source_path: "C:\\Users\\DAVIDF~1\\AppData\\Local\\Temp\\cli_aider\\demo-issue-tracker-api\\.aider.analytics.jsonl"
 captured_at: "2026-06-28T09:43:16Z"
-tracemill_commit: 13f4d3d
+traceforge_commit: 13f4d3d
 line_count: 8
 notes: Real demo repo session; harvested verbatim from aider analytics JSONL.

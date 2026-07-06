@@ -3,7 +3,7 @@
 import pytest
 from functools import partial
 
-from tracemill.classify import classify_shell, get_default_engine
+from traceforge.classify import classify_shell, get_default_engine
 
 
 ENGINE = get_default_engine()

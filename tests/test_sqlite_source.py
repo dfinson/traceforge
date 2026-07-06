@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from tracemill.sources.sqlite import SqliteSource
+from traceforge.sources.sqlite import SqliteSource
 
 
 @pytest.fixture

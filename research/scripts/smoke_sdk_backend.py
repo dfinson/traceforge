@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 
-from tracemill_research.config import load_labeling_runtime_config
-from tracemill_research.labeling.backends.copilot_sdk import CopilotSdkBackend
+from traceforge_research.config import load_labeling_runtime_config
+from traceforge_research.labeling.backends.copilot_sdk import CopilotSdkBackend
 
 
 PROMPT = (

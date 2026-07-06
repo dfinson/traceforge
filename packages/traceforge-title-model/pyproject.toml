@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "traceforge-title-model"
+version = "0.2.0"
+description = "Pretrained int8 ONNX titler weights for traceforge (activity/step span head)"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "David Finson", email = "davidfinson@microsoft.com" }]
+requires-python = ">=3.11,<3.14"
+keywords = ["traceforge", "onnx", "titler", "model-weights"]
+# No legacy license classifier: `license = "MIT"` emits a PEP 639 License-Expression.
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+# Pure data distribution: no runtime imports of its own. The onnxruntime /
+# tokenizers stack that *reads* these files ships as a traceforge dependency.
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/dfinson/traceforge"
+Repository = "https://github.com/dfinson/traceforge"
+Issues = "https://github.com/dfinson/traceforge/issues"
+Release = "https://github.com/dfinson/traceforge/releases"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/traceforge_title_model"]
+# ONNX weights are the whole point of this package; force-include them even if a
+# future .gitignore ever excludes *.onnx from VCS-based file selection.
+artifacts = [
+    "src/traceforge_title_model/data/span/*.onnx",
+    "src/traceforge_title_model/data/span/*.json",
+]
+
+[tool.hatch.build.targets.sdist]
+# Keep the sdist as the reproducible source of truth for the wheel.
+include = ["src/traceforge_title_model", "README.md"]

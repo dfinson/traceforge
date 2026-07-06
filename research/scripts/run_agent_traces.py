@@ -14,7 +14,7 @@ For each (repo, issue):
      the production pipeline (``ingest_copilot_sessions._process_session``) into
      the ``copilot-cli-native`` corpus.
 
-This doubles as a live end-to-end test of tracemill's ingestion: the traces are
+This doubles as a live end-to-end test of traceforge's ingestion: the traces are
 produced by the real agent and flow through the real adapter + enricher.
 
 IMPORTANT: only the freshly produced sessions are ingested (by session_id), never
@@ -50,8 +50,8 @@ from scripts.ingest_copilot_sessions import (
     OUT_DIR as CORPUS_OUT_DIR,
     _process_session,
 )
-from tracemill.cli.runner import load_mapping_path
-from tracemill_research.paths import DATA_INTERIM
+from traceforge.cli.runner import load_mapping_path
+from traceforge_research.paths import DATA_INTERIM
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("run-agent-traces")

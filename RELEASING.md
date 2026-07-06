@@ -1,4 +1,4 @@
-# Releasing tracemill
+# Releasing traceforge
 
 This repo publishes **two** independent distributions to PyPI. This document is
 the operational runbook and go/no-go checklist for cutting a release.
@@ -12,34 +12,34 @@ the operational runbook and go/no-go checklist for cutting a release.
 
 | Distribution | Source | Contents | Publish workflow | Tag |
 |---|---|---|---|---|
-| `tracemill` | root `pyproject.toml` | code + small data (classify/mappings/gates YAML, phase/boundary/title heads, `potion-base-8M` `.safetensors`) | `.github/workflows/publish.yml` | `v*` |
-| `tracemill-title-model` | `packages/tracemill-title-model` | pure-data ONNX span titler (`encoder.onnx`, `decoder.onnx`, `tokenizer.json`) | `.github/workflows/publish-title-model.yml` | `title-model-v*` |
+| `traceforge` | root `pyproject.toml` | code + small data (classify/mappings/gates YAML, phase/boundary/title heads, `potion-base-8M` `.safetensors`) | `.github/workflows/publish.yml` | `v*` |
+| `traceforge-title-model` | `packages/traceforge-title-model` | pure-data ONNX span titler (`encoder.onnx`, `decoder.onnx`, `tokenizer.json`) | `.github/workflows/publish-title-model.yml` | `title-model-v*` |
 
-`tracemill` depends on `tracemill-title-model>=0.2`. The titler weights are a
+`traceforge` depends on `traceforge-title-model>=0.2`. The titler weights are a
 separate distribution so the core wheel stays code-first and the ~95 MB model
 only re-releases when it is retrained (rarely), on its own tag.
 
-Both weight classes (`.safetensors` in `tracemill`, `.onnx` in
-`tracemill-title-model`) are tracked with **Git LFS** — see [§4](#4-git-lfs--weight-integrity).
+Both weight classes (`.safetensors` in `traceforge`, `.onnx` in
+`traceforge-title-model`) are tracked with **Git LFS** — see [§4](#4-git-lfs--weight-integrity).
 
 ## 2. Versioning strategy
 
 - **Scheme:** [SemVer](https://semver.org/). Both distributions are pre-1.0
   (`0.MINOR.PATCH`); while `0.x`, a **MINOR** bump may carry breaking changes and
   a **PATCH** bump is reserved for backwards-compatible fixes. Cut `1.0.0` once the
-  public API (SDK `Pipeline`/`GatePolicy`/`Verdict`, the `tracemill` CLI surface,
+  public API (SDK `Pipeline`/`GatePolicy`/`Verdict`, the `traceforge` CLI surface,
   and the YAML config schema) is committed to stability.
-- **Initial versions:** `tracemill` `0.1.0`; `tracemill-title-model` `0.2.0`
+- **Initial versions:** `traceforge` `0.1.0`; `traceforge-title-model` `0.2.0`
   (already ahead — it iterated during model development).
 - **Independent lifecycles:** the two versions move independently. A code-only
-  release bumps `tracemill` and reuses the existing model. A retrain bumps
-  `tracemill-title-model` and, if the new weights require it, widens the
-  `tracemill` dependency floor.
+  release bumps `traceforge` and reuses the existing model. A retrain bumps
+  `traceforge-title-model` and, if the new weights require it, widens the
+  `traceforge` dependency floor.
 - **Single source of truth:** each version lives only in its own
   `pyproject.toml`. The CLI reports it via `importlib.metadata`
-  (`click.version_option(package_name="tracemill")`) — never hard-code a version
+  (`click.version_option(package_name="traceforge")`) — never hard-code a version
   string elsewhere.
-- **Model dependency pin:** `tracemill` requires `tracemill-title-model>=0.2`.
+- **Model dependency pin:** `traceforge` requires `traceforge-title-model>=0.2`.
   The model is a pure-data package with a stable three-file head contract
   (`encoder.onnx`/`decoder.onnx`/`tokenizer.json`), so a compatible retrain is
   drop-in. If a future retrain changes that on-disk contract, raise the floor
@@ -47,14 +47,14 @@ Both weight classes (`.safetensors` in `tracemill`, `.onnx` in
 
 ## 3. Release order (critical)
 
-Because `tracemill` depends on `tracemill-title-model`, a fresh model release
+Because `traceforge` depends on `traceforge-title-model`, a fresh model release
 must land on PyPI **before** the code release that requires it:
 
 1. (Only if the model changed) tag `title-model-vX.Y.Z` → wait for
    `Publish title model` to finish and the version to be visible on PyPI.
-2. Tag `vA.B.C` → `Publish` builds and uploads `tracemill`.
+2. Tag `vA.B.C` → `Publish` builds and uploads `traceforge`.
 
-If the model is unchanged, step 1 is skipped and `tracemill` resolves the
+If the model is unchanged, step 1 is skipped and `traceforge` resolves the
 already-published model.
 
 ## 4. Git LFS & weight integrity
@@ -89,8 +89,8 @@ One-time PyPI setup (per distribution, done in the PyPI project's
 | Field | Value |
 |---|---|
 | Owner | `dfinson` |
-| Repository | `tracemill` |
-| Workflow (tracemill) | `publish.yml` |
+| Repository | `traceforge` |
+| Workflow (traceforge) | `publish.yml` |
 | Workflow (title-model) | `publish-title-model.yml` |
 | Environment | `pypi` |
 
@@ -105,7 +105,7 @@ the upload step:
 ```bash
 # Build both distributions
 uv build --sdist --wheel --out-dir dist
-uv build packages/tracemill-title-model --out-dir dist
+uv build packages/traceforge-title-model --out-dir dist
 
 # Integrity gate — must exit 0
 uv run --no-project python scripts/verify_no_lfs_pointers.py dist \
@@ -115,9 +115,9 @@ uv run --no-project python scripts/verify_no_lfs_pointers.py dist \
 uv run --no-project --with twine twine check dist/*
 ```
 
-Expected: the tracemill wheel carries the classify/mappings/gates YAML, the
+Expected: the traceforge wheel carries the classify/mappings/gates YAML, the
 phase/boundary/title heads, `py.typed`, and the `potion-base-8M` `.safetensors`;
-the title-model wheel carries the ONNX triad; the tracemill **sdist** stays lean
+the title-model wheel carries the ONNX triad; the traceforge **sdist** stays lean
 (~29 MB — it deliberately excludes `packages/`, `tests/`, and `research/`, so it
 never bundles the titler weights and never approaches PyPI's 100 MiB per-file cap).
 
@@ -133,14 +133,14 @@ never bundles the titler weights and never approaches PyPI's 100 MiB per-file ca
 
 **Packaging readiness (verified by this PR):**
 
-- [x] `tracemill` metadata complete: name, version, description, readme, license
+- [x] `traceforge` metadata complete: name, version, description, readme, license
       (SPDX `MIT` → `License-Expression`), authors, requires-python
       (`>=3.11,<3.14`), classifiers (Dev Status 4-Beta, Python 3.11/3.12/3.13,
       Typing :: Typed), keywords, `project.urls`.
-- [x] `tracemill-title-model` metadata complete (authors, classifiers, urls).
+- [x] `traceforge-title-model` metadata complete (authors, classifiers, urls).
 - [x] Dependencies verified **torch-free / CPU-only** — no `torch`, `nvidia-*`,
       `cuda`, or `onnxruntime-gpu` in the resolved graph.
-- [x] `tracemill` CLI entry point (`tracemill = "tracemill.cli:main"`) resolves.
+- [x] `traceforge` CLI entry point (`traceforge = "traceforge.cli:main"`) resolves.
 - [x] Package **data ships in the wheel** (all classify/mappings/gates YAML,
       schema, phase/boundary/title heads, `potion-base-8M` weights).
 - [x] `py.typed` shipped (PEP 561).
@@ -156,9 +156,9 @@ never bundles the titler weights and never approaches PyPI's 100 MiB per-file ca
 1. [ ] Final `main` is green (Test on 3.11/3.12/3.13, Lint).
 2. [ ] Bump versions if needed; update this checklist.
 3. [ ] (If model changed) push `title-model-vX.Y.Z`; confirm on PyPI + GH release mirror.
-4. [ ] Push `vA.B.C`; confirm `Publish` succeeds and `pip install tracemill` pulls
+4. [ ] Push `vA.B.C`; confirm `Publish` succeeds and `pip install traceforge` pulls
        the model automatically.
-5. [ ] Smoke test in a clean env: `pip install tracemill && tracemill --version`.
+5. [ ] Smoke test in a clean env: `pip install traceforge && traceforge --version`.
 
 ## 8. Fallback: GitHub-release model mirror
 
@@ -167,7 +167,7 @@ under the `title-model-v*` tag. If PyPI is unavailable, users repair/fetch the
 weights with:
 
 ```bash
-tracemill download-model --source gh
+traceforge download-model --source gh
 ```
 
 The mirror URL that `download-model` targets is exactly the asset the workflow

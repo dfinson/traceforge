@@ -4,6 +4,6 @@ source_repo: openai/openai-agents-python
 framework_version: 0.3.3
 model: gpt-5
 captured_at: "2026-06-28T10:50:32Z"
-tracemill_commit: 74a706d
+traceforge_commit: 74a706d
 line_count: 27
 notes: Real OpenAI Agents SDK session; coding task on demo-issue-tracker-api.

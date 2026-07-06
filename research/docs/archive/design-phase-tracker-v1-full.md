@@ -2,7 +2,7 @@
 
 ## Problem Statement
 
-tracemill classifies every tool call event with per-event labels describing the
+traceforge classifies every tool call event with per-event labels describing the
 *intrinsic purpose* of that tool call (e.g., a `view` call is always "retrieval"
 regardless of context). However, there is no facility for determining the \*session-level
 workflow phase\* — the aggregate stage the agent is operating in at any point in time.
@@ -57,8 +57,8 @@ from typing import Any
 
 from pydantic import Field
 
-from tracemill.classify.workflow import Phase
-from tracemill.models import FrozenModel
+from traceforge.classify.workflow import Phase
+from traceforge.models import FrozenModel
 
 
 @dataclass(frozen=True)
@@ -2008,7 +2008,7 @@ Given: `E E E I I I E I I` (threshold=3):
 ### Module Location
 
 ```javascript
-src/tracemill/tracking/
+src/traceforge/tracking/
     __init__.py
     phase_tracker.py    # PhaseTracker class
     models.py           # PhaseBlock, PhaseTimeline, PhaseSummary, etc.
@@ -2105,7 +2105,7 @@ events.
 | Consumer | Usage |
 | --- | --- |
 | **Configured sinks** | Closed `PhaseBlock` emitted on each boundary commit; `PhaseSummary` emitted on session finalize. Same sink interface as pipeline events (OTLP, file, webhook). |
-| `tracemill summary` CLI | Display phase breakdown table and timeline when summarizing a session |
+| `traceforge summary` CLI | Display phase breakdown table and timeline when summarizing a session |
 | `format_session_summary()` | Include phase distribution percentages and notable transitions |
 | Timeline visualization (future) | Export `PhaseTimeline` as JSON for frontend rendering |
 | Phase-attributed cost reporting (future) | When `SpendAnalyzer` exists, map token/cost to phase blocks by timestamp overlap |
@@ -2121,7 +2121,7 @@ events.
    execution. `snapshot()` and `finalize()` return frozen objects.
 2. **System database (always):** Closed phase blocks are written to the system
    SQLite database on every boundary commit and finalize. This is not opt-in —
-   the system DB is tracemill's authoritative store. Phase data is queryable
+   the system DB is traceforge's authoritative store. Phase data is queryable
    immediately after each transition without re-processing.
 3. **Sinks (always):** Phase data is emitted to sinks on the same
    boundary/finalize path. Phase blocks are data like any other pipeline data —
@@ -2573,11 +2573,11 @@ summing cost per phase. Different axis (intent vs mechanism), different granular
 
 ---
 
-## Open: Project Rename (tracemill → traceforge)
+## Open: Project Rename (traceforge → traceforge)
 
-**Proposal**: Rename the project from `tracemill` to `traceforge`.
+**Proposal**: Rename the project from `traceforge` to `traceforge`.
 
-| Dimension | tracemill | traceforge |
+| Dimension | traceforge | traceforge |
 | --- | --- | --- |
 | Metaphor | Mill — uniform grinding/processing | Forge — shaping raw material into refined output |
 | Fit to pipeline | Streaming, repetitive processing | Enrichment, classification, attribution |
@@ -2588,12 +2588,12 @@ summing cost per phase. Different axis (intent vs mechanism), different granular
 the pipeline does — raw telemetry events are heated (parsed), hammered (classified,
 phase-attributed), and shaped into actionable insights. The project has no published
 package and no external consumers, so rename cost is mechanical only (repo name,
-`src/tracemill/` → `src/traceforge/`, pyproject.toml, imports, docs).
+`src/traceforge/` → `src/traceforge/`, pyproject.toml, imports, docs).
 
 **Scope of rename**:
 
-- GitHub repo: `dfinson/tracemill` → `dfinson/traceforge` (GitHub auto-redirects)
-- Package: `src/tracemill/` → `src/traceforge/`, all `from tracemill.` imports
+- GitHub repo: `dfinson/traceforge` → `dfinson/traceforge` (GitHub auto-redirects)
+- Package: `src/traceforge/` → `src/traceforge/`, all `from traceforge.` imports
 - pyproject.toml `name` and `[tool.pytest]` paths
 - Docs references
 - This design doc
@@ -2629,7 +2629,7 @@ Graphectory (Intelligent-CAT-Lab, 2025) classifies agentic tool calls into 4 pha
 Their work is validated on 213K+ trajectories across SWE-agent, OpenHands, and
 mini-swe-agent. Comparison with our taxonomy:
 
-| Graphectory Phase | tracemill Phase | Notes |
+| Graphectory Phase | traceforge Phase | Notes |
 | --- | --- | --- |
 | `localization` | `exploration` | Same concept: reading/searching to understand the problem. Graphectory includes tests-before-patch here. |
 | `patch` | `implementation` | Same concept: actively modifying code. |
@@ -2660,7 +2660,7 @@ mini-swe-agent. Comparison with our taxonomy:
 
 ### Problem with the Current Approach
 
-The existing `_detect_phases()` in `src/tracemill/enricher.py` assigns phases via a
+The existing `_detect_phases()` in `src/traceforge/enricher.py` assigns phases via a
 hand-coded voting algorithm over classification dimensions (mechanism, effect, action,
 role). This system has a fundamental limitation: **it never sees what the agent said**.
 

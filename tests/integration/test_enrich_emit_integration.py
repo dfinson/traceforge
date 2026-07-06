@@ -17,14 +17,14 @@ previously-orphaned governance types are actually consumed:
 import asyncio
 from datetime import datetime, timezone
 
-from tracemill.cli.factory import create_default_pipeline
-from tracemill.governance.envelope import ContextGapEvent, EnrichedEvent
-from tracemill.governance.observer import AgentContext, create_observer
-from tracemill.governance.persistence import SystemStore
-from tracemill.governance.results import SessionMeta
-from tracemill.pipeline import EventPipeline
-from tracemill.sinks.base import StorageSink
-from tracemill.types import EventKind, EventMetadata, SessionEvent
+from traceforge.cli.factory import create_default_pipeline
+from traceforge.governance.envelope import ContextGapEvent, EnrichedEvent
+from traceforge.governance.observer import AgentContext, create_observer
+from traceforge.governance.persistence import SystemStore
+from traceforge.governance.results import SessionMeta
+from traceforge.pipeline import EventPipeline
+from traceforge.sinks.base import StorageSink
+from traceforge.types import EventKind, EventMetadata, SessionEvent
 
 
 class CapturingSink(StorageSink):

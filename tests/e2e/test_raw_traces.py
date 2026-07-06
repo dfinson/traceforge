@@ -1,14 +1,14 @@
 """Golden e2e tests over REAL captured framework traces.
 
 Unlike the hand-written fixtures elsewhere in the suite (which encode
-tracemill's own post-preprocessor assumptions), these tests feed *verbatim*
+traceforge's own post-preprocessor assumptions), these tests feed *verbatim*
 native framework output — captured by ``scripts/capture_traces/`` — through the
 real MappedJsonAdapter (preprocessor + YAML mapping). This is the layer that
 catches upstream drift: if a framework changes its on-disk/native shape, the
 captured trace changes and these assertions move with reality.
 
 A fixture directory ``tests/fixtures/raw_traces/<framework>/`` is matched to the
-mapping ``src/tracemill/mappings/<framework>.yaml`` by name. Add new frameworks
+mapping ``src/traceforge/mappings/<framework>.yaml`` by name. Add new frameworks
 by committing a captured trace; the discovery test picks it up automatically.
 """
 
@@ -18,12 +18,12 @@ from pathlib import Path
 
 import pytest
 
-from tracemill.adapters.mapped_json import MappedJsonAdapter
-from tracemill.types import EventKind
+from traceforge.adapters.mapped_json import MappedJsonAdapter
+from traceforge.types import EventKind
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TRACES_ROOT = REPO_ROOT / "tests" / "fixtures" / "raw_traces"
-MAPPINGS_DIR = REPO_ROOT / "src" / "tracemill" / "mappings"
+MAPPINGS_DIR = REPO_ROOT / "src" / "traceforge" / "mappings"
 
 
 def _discover() -> list[str]:

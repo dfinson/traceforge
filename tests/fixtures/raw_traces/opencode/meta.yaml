@@ -7,6 +7,6 @@ capture_method: "sqlite_event_table"
 source_path: "C:\\Users\\davidfinson\\.local\\share\\opencode\\opencode.db"
 session_id: "ses_0f26b3ee2ffe31ZjnzcRkv769m"
 captured_at: "2026-06-28T10:54:53Z"
-tracemill_commit: "74a706d"
+traceforge_commit: "74a706d"
 line_count: 107
 notes: "Real demo repo session; harvested from native opencode.db event rows with data parsed from JSON strings into nested objects."

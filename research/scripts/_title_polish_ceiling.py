@@ -29,9 +29,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from tracemill.title.hygiene import clean_title
-from tracemill_research.config import load_labeling_runtime_config
-from tracemill_research.labeling.backends.copilot_sdk import CopilotSdkBackend
+from traceforge.title.hygiene import clean_title
+from traceforge_research.config import load_labeling_runtime_config
+from traceforge_research.labeling.backends.copilot_sdk import CopilotSdkBackend
 
 INTERIM = Path(__file__).resolve().parents[1] / "data" / "interim"
 ROWS = INTERIM / "preds-session-kd-small.parquet"  # 91 rows: sid,tier,src,gold,ctx

@@ -2,14 +2,14 @@
 
 from functools import partial
 
-from tracemill.classify import get_default_engine
-from tracemill.classify.mcp import (
+from traceforge.classify import get_default_engine
+from traceforge.classify.mcp import (
     _infer_from_verb,
     _normalize_mcp_suffix,
     classify_mcp_tool,
     extract_mcp_namespace,
 )
-from tracemill.classify.tools import classify_tool
+from traceforge.classify.tools import classify_tool
 
 
 ENGINE = get_default_engine()
@@ -491,7 +491,7 @@ class TestMcpCustomOverrides:
     """Custom user classifications override MCP profiles."""
 
     def test_custom_overrides_mcp(self):
-        from tracemill.classify.core import Classification
+        from traceforge.classify.core import Classification
 
         custom = {"list_repos": Classification(mechanism="custom.thing", effect="read_only")}
         cls = classify_tool("mcp__github__list_repos", custom)

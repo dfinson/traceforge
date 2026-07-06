@@ -32,7 +32,7 @@ hundreds.** Insufficient for boundary classifier alone.
 
 | Tag | Source | Format | Expected agent sessions | Notes |
 | --- | ------ | ------ | ----------------------: | ----- |
-| `copilot-cli` | WSL `~/.copilot/session-store.db` re-mined | sqlite → tracemill ingest | ~150 | Already have adapter; widen the manifest filter to "any tool event" not "min turns" |
+| `copilot-cli` | WSL `~/.copilot/session-store.db` re-mined | sqlite → traceforge ingest | ~150 | Already have adapter; widen the manifest filter to "any tool event" not "min turns" |
 | `swe-agent-nebius` | [`nebius/SWE-agent-trajectories`](https://huggingface.co/datasets/nebius/SWE-agent-trajectories) on HF | 12-shard parquet, JSON `trajectory` per row | 600 sampled from resolved subset | Apache 2.0 / CC-BY-4.0; 13,389 resolved runs available; avg 31 steps |
 
 Deliberately scoped to two sources for v2. A third (SWE-smith mini-agent,
@@ -43,7 +43,7 @@ Aider chat logs) is queued for v3 if v2 doesn't hit the targets.
 * **Real coding-agent trajectories**: agent attempts to solve a real GitHub
   issue end-to-end with shell + edit tools. The "trajectory" field is a JSON
   list of role-tagged events (ai: reasoning + actions, user: observations)
-  that maps cleanly onto tracemill's event schema.
+  that maps cleanly onto traceforge's event schema.
 * **Volume**: 13,389 *resolved* runs available; we sample 600. Failed runs
   (66,647) are excluded for v2 — they contain useful exploration/verification
   patterns but their distribution is skewed by the agent giving up.
@@ -113,7 +113,7 @@ Add a **`source`** column everywhere a row carries a `session_id`:
 
 ## Adapter contract
 
-Each per-source ingest produces a parquet matching the tracemill enricher
+Each per-source ingest produces a parquet matching the traceforge enricher
 output schema (one row per event, sorted by `seq`). Required columns:
 
 * `event_id` (str, uuid)
@@ -126,12 +126,12 @@ output schema (one row per event, sorted by `seq`). Required columns:
 
 The two adapters:
 
-1. **`copilot-cli`** — already lives in `tracemill_research/ingest/copilot.py`.
+1. **`copilot-cli`** — already lives in `traceforge_research/ingest/copilot.py`.
    Only change: drop the `min_turns` floor at the manifest layer; keep all
    sessions where the enricher emits ≥1 non-message event.
 2. **`swe-agent-nebius`** — new module at
-   `tracemill_research/ingest/swe_agent.py`. Takes a HuggingFace parquet
-   shard, walks each row's `trajectory` JSON, emits one tracemill event per
+   `traceforge_research/ingest/swe_agent.py`. Takes a HuggingFace parquet
+   shard, walks each row's `trajectory` JSON, emits one traceforge event per
    trajectory entry. Tool-name extraction follows SWE-agent's action format
    (commands like `open`, `goto`, `edit`, `bash`).
 

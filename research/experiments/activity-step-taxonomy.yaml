@@ -68,7 +68,7 @@ step_boundary:
 
   # S2 — tool-group transitions. The mapping below comes from
   # AutoDev (Fu et al. 2024) tool taxonomy crossed with the canonical
-  # action labels emitted by the tracemill enricher.
+  # action labels emitted by the traceforge enricher.
   tool_groups:
     investigation: [read_file, search_file, grep, list_dir, web_search, web_fetch]
     modification:  [edit_file, write_file, create_file, delete_file, rename, patch]

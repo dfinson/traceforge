@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from tracemill import EventPipeline, SessionEvent, StorageSink, TelemetrySpan, UsageRecord
+from traceforge import EventPipeline, SessionEvent, StorageSink, TelemetrySpan, UsageRecord
 from tests.conftest import RecordingSink, make_event, make_span, make_usage
 
 
@@ -184,8 +184,8 @@ class TestPipelineSessionEviction:
 
         from tests.unit.test_title_inferencer import _FakeTitle
 
-        from tracemill.title import TitleInferencer
-        from tracemill.types import EventMetadata, SessionEvent
+        from traceforge.title import TitleInferencer
+        from traceforge.types import EventMetadata, SessionEvent
 
         def _sev(session_id: str) -> SessionEvent:
             return SessionEvent(
@@ -226,8 +226,8 @@ class TestPipelineSessionEviction:
 
         from tests.unit.test_title_inferencer import _FakeTitle
 
-        from tracemill.title import TitleInferencer
-        from tracemill.types import EventMetadata, SessionEvent
+        from traceforge.title import TitleInferencer
+        from traceforge.types import EventMetadata, SessionEvent
 
         def _umsg(session_id: str, text: str) -> SessionEvent:
             return SessionEvent(
@@ -316,7 +316,7 @@ class TestPipelineSessionEviction:
     async def test_events_emit_live_and_titles_arrive_as_updates(self):
         from tests.unit.test_title_inferencer import _FakeTitle, _event
 
-        from tracemill.title import TitleInferencer
+        from traceforge.title import TitleInferencer
 
         recorder = RecordingSink()
         pipeline = EventPipeline(
@@ -362,7 +362,7 @@ class TestPipelineSessionEviction:
         # arrives later as a second session update, awaited at flush.
         from tests.unit.test_title_inferencer import _FakeTitle, _msg
 
-        from tracemill.title import TitleInferencer
+        from traceforge.title import TitleInferencer
 
         def heuristic(text: str) -> str:
             return "Heuristic title"
@@ -399,7 +399,7 @@ class TestPipelineSessionEviction:
         # heuristic standing — no second session update is published.
         from tests.unit.test_title_inferencer import _FakeTitle, _msg
 
-        from tracemill.title import TitleInferencer
+        from traceforge.title import TitleInferencer
 
         def heuristic(text: str) -> str:
             return "Heuristic title"
@@ -428,7 +428,7 @@ class TestPipelineSessionEviction:
 
         from tests.unit.test_title_inferencer import _FakeTitle, _event, _msg
 
-        from tracemill.title import TitleInferencer
+        from traceforge.title import TitleInferencer
 
         release = threading.Event()
 
@@ -551,7 +551,7 @@ class TestPipelineErrorLogging:
     async def test_failing_sink_logs_error_with_traceback(self, caplog):
         pipeline = EventPipeline(sinks=[FailingSink()])
         event = make_event()
-        with caplog.at_level(logging.ERROR, logger="tracemill.pipeline"):
+        with caplog.at_level(logging.ERROR, logger="traceforge.pipeline"):
             await pipeline.push(event)
         assert len(caplog.records) == 1
         record = caplog.records[0]
@@ -564,16 +564,16 @@ class TestPipelineInferencerDefaults:
     """Phase + boundary inference are wired in by default; flags opt out."""
 
     def test_both_enabled_by_default(self):
-        from tracemill.boundary import BoundaryInferencer
-        from tracemill.phase import PhaseInferencer
+        from traceforge.boundary import BoundaryInferencer
+        from traceforge.phase import PhaseInferencer
 
         pipeline = EventPipeline(sinks=[])
         assert isinstance(pipeline._phase_inferencer, PhaseInferencer)
         assert isinstance(pipeline._boundary_inferencer, BoundaryInferencer)
 
     def test_flags_disable_each_independently(self):
-        from tracemill.boundary import BoundaryInferencer
-        from tracemill.phase import PhaseInferencer
+        from traceforge.boundary import BoundaryInferencer
+        from traceforge.phase import PhaseInferencer
 
         no_phase = EventPipeline(sinks=[], enable_phase=False)
         assert no_phase._phase_inferencer is None
@@ -588,7 +588,7 @@ class TestPipelineInferencerDefaults:
         assert neither._boundary_inferencer is None
 
     def test_explicit_inferencer_overrides_flag(self):
-        from tracemill.phase import PhaseInferencer
+        from traceforge.phase import PhaseInferencer
 
         explicit = PhaseInferencer()
         pipeline = EventPipeline(sinks=[], phase_inferencer=explicit, enable_phase=False)

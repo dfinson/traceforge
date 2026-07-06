@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 
-from tracemill.title.context import distilled_context
+from traceforge.title.context import distilled_context
 
 
 def _row(kind="tool.call", tool_name=None, payload=None, binaries=(), structure=()):

@@ -11,8 +11,8 @@ import importlib.util
 
 import pytest
 
-from tracemill.title._resolve import span_dir as _span_dir
-from tracemill.title.hygiene import best_of, clean_title, norm_key, pick_distinct
+from traceforge.title._resolve import span_dir as _span_dir
+from traceforge.title.hygiene import best_of, clean_title, norm_key, pick_distinct
 
 _HAS_ORT = importlib.util.find_spec("onnxruntime") is not None
 _HAS_TOK = importlib.util.find_spec("tokenizers") is not None
@@ -44,7 +44,7 @@ def test_pick_distinct_avoids_parent_restatement():
 
 
 def test_ground_order_demotes_ungrounded_identifiers():
-    from tracemill.title.inference import _ground_order, _is_grounded
+    from traceforge.title.inference import _ground_order, _is_grounded
 
     ctx = "intent: fix retry | actions: edit | files: http_client.py | symbols: request_with_retry"
     # invents an identifier the context never names -> ungrounded
@@ -59,7 +59,7 @@ def test_ground_order_demotes_ungrounded_identifiers():
 
 
 def test_ground_order_keeps_all_when_every_beam_hallucinates():
-    from tracemill.title.inference import _ground_order
+    from traceforge.title.inference import _ground_order
 
     ctx = "intent: do work | files: a.py"
     cands = ["Update zzz_made_up", "Edit other-invented-thing"]
@@ -69,7 +69,7 @@ def test_ground_order_keeps_all_when_every_beam_hallucinates():
 
 @pytest.mark.skipif(not _SERVEABLE, reason="title extra / model artifacts absent")
 def test_model_titles_a_distilled_context():
-    from tracemill.title import TitleModel
+    from traceforge.title import TitleModel
 
     model = TitleModel.load()
     ctx = (

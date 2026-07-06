@@ -37,8 +37,8 @@ import sys
 
 import pandas as pd
 
-from tracemill_research.config import load_labeling_runtime_config
-from tracemill_research.labeling.backends.copilot_sdk import CopilotSdkBackend
+from traceforge_research.config import load_labeling_runtime_config
+from traceforge_research.labeling.backends.copilot_sdk import CopilotSdkBackend
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 

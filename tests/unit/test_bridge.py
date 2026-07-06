@@ -6,17 +6,17 @@ from pathlib import Path
 import pytest
 
 
-from tracemill.classify.coding import CodingMechanism
-from tracemill.classify.config import get_default_engine
-from tracemill.classify.core import Classification, Mechanism
-from tracemill.governance.budget import BudgetTracker
-from tracemill.governance.labeler import GovernanceLabeler
-from tracemill.governance.persistence import SystemStore
-from tracemill.governance.pipeline import GovernancePipeline, SessionMeta
-from tracemill.governance.results import RecommendedAction
-from tracemill.governance.rules import parse_rules
-from tracemill.governance.state import SessionState
-from tracemill.types import EventKind, EventMetadata, SessionEvent
+from traceforge.classify.coding import CodingMechanism
+from traceforge.classify.config import get_default_engine
+from traceforge.classify.core import Classification, Mechanism
+from traceforge.governance.budget import BudgetTracker
+from traceforge.governance.labeler import GovernanceLabeler
+from traceforge.governance.persistence import SystemStore
+from traceforge.governance.pipeline import GovernancePipeline, SessionMeta
+from traceforge.governance.results import RecommendedAction
+from traceforge.governance.rules import parse_rules
+from traceforge.governance.state import SessionState
+from traceforge.types import EventKind, EventMetadata, SessionEvent
 
 
 @pytest.fixture
@@ -36,7 +36,7 @@ def rules():
     rules_path = (
         Path(__file__).parent.parent.parent
         / "src"
-        / "tracemill"
+        / "traceforge"
         / "classify"
         / "data"
         / "recommendation_rules.yaml"
@@ -102,7 +102,7 @@ class TestBridgeBasic:
         assert ctx.base_classification is cls
 
     def test_missing_classification_defaults_to_unknown(self, pipeline):
-        from tracemill.classify.core import Mechanism
+        from traceforge.classify.core import Mechanism
 
         event = _make_event(tool_name="something_custom", classification=None)
         ctx = pipeline.context_from_session_event(event)

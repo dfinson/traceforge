@@ -26,13 +26,13 @@ import logging
 from collections import Counter
 from pathlib import Path
 
-from tracemill.adapters.mapped_json import MappedJsonAdapter
-from tracemill.cli.runner import load_mapping_path
-from tracemill.enricher import Enricher
-from tracemill.phase import PhaseInferencer
-from tracemill.pipeline import EventPipeline
-from tracemill.sinks.base import StorageSink
-from tracemill.types import EventKind, SessionEvent
+from traceforge.adapters.mapped_json import MappedJsonAdapter
+from traceforge.cli.runner import load_mapping_path
+from traceforge.enricher import Enricher
+from traceforge.phase import PhaseInferencer
+from traceforge.pipeline import EventPipeline
+from traceforge.sinks.base import StorageSink
+from traceforge.types import EventKind, SessionEvent
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("eval-phase-pipeline-e2e")

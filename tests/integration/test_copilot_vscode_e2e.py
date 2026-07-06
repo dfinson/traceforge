@@ -11,10 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from tracemill.adapters.mapped_json import MappedJsonAdapter
-from tracemill.types import EventKind
+from traceforge.adapters.mapped_json import MappedJsonAdapter
+from traceforge.types import EventKind
 
-MAPPINGS_DIR = Path(__file__).resolve().parent.parent.parent / "src" / "tracemill" / "mappings"
+MAPPINGS_DIR = Path(__file__).resolve().parent.parent.parent / "src" / "traceforge" / "mappings"
 
 
 @pytest.fixture

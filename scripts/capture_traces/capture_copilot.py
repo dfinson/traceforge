@@ -1,9 +1,9 @@
 """Capture a REAL Copilot CLI raw trace on the vendored demo repo.
 
-Copilot CLI is the primary platform tracemill must support. It writes a clean,
+Copilot CLI is the primary platform traceforge must support. It writes a clean,
 high-fidelity event stream to ``~/.copilot/session-state/<session-id>/events.jsonl``
 — one ``{type, data, id, timestamp, parentId}`` object per line. That file is
-exactly what ``src/tracemill/mappings/copilot.yaml`` ingests, so the committed
+exactly what ``src/traceforge/mappings/copilot.yaml`` ingests, so the committed
 fixture is those native event rows verbatim.
 
 A real headless session (``copilot -p ... --allow-all``) is run against a

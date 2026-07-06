@@ -1,5 +1,5 @@
 [project]
-name = "tracemill-research"
+name = "traceforge-research"
 version = "0.1.0"
 description = "Phase-tracker research: data prep, enrichment, feature engineering, model training"
 requires-python = ">=3.11"
@@ -14,8 +14,8 @@ dependencies = [
     # Data sources
     "datasets>=3.0",
     "huggingface-hub>=0.25",
-    # Tracemill itself (editable, from parent repo)
-    "tracemill",
+    # Traceforge itself (editable, from parent repo)
+    "traceforge",
     # Misc
     "pydantic>=2",
     "pyyaml",
@@ -34,7 +34,7 @@ embeddings = [
 notebook = ["jupyterlab", "matplotlib", "seaborn"]
 
 [tool.uv.sources]
-tracemill = { path = "..", editable = true }
+traceforge = { path = "..", editable = true }
 
 [build-system]
 requires = ["hatchling"]
@@ -47,4 +47,4 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/tracemill_research"]
+packages = ["src/traceforge_research"]

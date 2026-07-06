@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import sys
 
-from tracemill_research.ingest.codeplane import (
+from traceforge_research.ingest.codeplane import (
     CodeplaneIngestConfig,
     default_db_path,
     default_distill_out,

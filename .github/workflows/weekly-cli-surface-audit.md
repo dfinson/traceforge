@@ -2,15 +2,15 @@
 
 ## Purpose
 
-Automated weekly Copilot workflow that verifies tracemill's CLI classification YAML files remain accurate and complete against the latest stable releases of AWS CLI, Azure CLI, and Google Cloud CLI. Detects new subcommands, removed verbs, and misclassified effects before they cause silent classification drift.
+Automated weekly Copilot workflow that verifies traceforge's CLI classification YAML files remain accurate and complete against the latest stable releases of AWS CLI, Azure CLI, and Google Cloud CLI. Detects new subcommands, removed verbs, and misclassified effects before they cause silent classification drift.
 
 ## Scope
 
 All CLI-related classification data:
-- `src/tracemill/classify/data/shell_rules.yaml` — service-group routing rules
-- `src/tracemill/classify/data/effect_overrides.yaml` — verb-to-effect mappings
-- `src/tracemill/classify/data/binary_info.yaml` — binary metadata
-- `src/tracemill/classify/data/risk.yaml` — flag modifiers
+- `src/traceforge/classify/data/shell_rules.yaml` — service-group routing rules
+- `src/traceforge/classify/data/effect_overrides.yaml` — verb-to-effect mappings
+- `src/traceforge/classify/data/binary_info.yaml` — binary metadata
+- `src/traceforge/classify/data/risk.yaml` — flag modifiers
 
 ## Breakable Surfaces
 
@@ -108,12 +108,12 @@ Audit the CLI classification YAML files against latest stable CLI releases.
 2. For each CLI (aws, az, gcloud), research the latest stable release and fetch the
    current verb/subcommand taxonomy from official documentation.
 
-3. Compare against the verb_prefix_effects in `src/tracemill/classify/data/effect_overrides.yaml`:
+3. Compare against the verb_prefix_effects in `src/traceforge/classify/data/effect_overrides.yaml`:
    - Identify verbs in the official CLI that are NOT in our mappings
    - Identify verbs in our mappings that no longer exist
    - Identify verbs with incorrect effect classification
 
-4. Compare service-group subcmds in `src/tracemill/classify/data/shell_rules.yaml`:
+4. Compare service-group subcmds in `src/traceforge/classify/data/shell_rules.yaml`:
    - Identify new top-level services not listed in any rule's subcmds
    - Identify deprecated services still listed
 

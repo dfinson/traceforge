@@ -13,7 +13,7 @@ feature whose lift is per-framework labeled data, not a real signal.
 
 We constrain features to three sources, each genuinely portable:
 
-1. **Canonical fields** populated by tracemill's enricher (already
+1. **Canonical fields** populated by traceforge's enricher (already
    per-framework via the tool registry — done once, used everywhere).
 2. **Generic text** of the event payload, embedded with a static, framework-
    agnostic featurizer.
@@ -40,7 +40,7 @@ Per event, concatenated:
 ### Block 1: Canonical classification one-hots (~20d)
 
 Mechanism, Effect, Scope, Role, Action one-hots from
-`SessionEvent.metadata.classification`. These come from tracemill's per-host
+`SessionEvent.metadata.classification`. These come from traceforge's per-host
 tool registry — every framework's `view` resolves to the same enums. Portable
 by construction.
 
@@ -130,7 +130,7 @@ already produces. No new fields, no new mappings, no new rules.
 - **Output regex patterns.** Not portable.
 - **Per-host token counts.** Different frameworks tokenize stdout differently.
 - **Anything requiring new parser fields.** Constraint: features must work
-  with what tracemill's existing parsers already produce.
+  with what traceforge's existing parsers already produce.
 
 ## Implementation order
 

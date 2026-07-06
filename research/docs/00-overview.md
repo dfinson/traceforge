@@ -2,7 +2,7 @@
 
 ## What we're working on
 
-Two related but distinct ML problems sit underneath tracemill:
+Two related but distinct ML problems sit underneath traceforge:
 
 1. **Phase tracker (shipping in core).** Given the per-event activity stream
    produced by `Enricher`, segment a session into phase blocks (planning,
@@ -16,7 +16,7 @@ Two related but distinct ML problems sit underneath tracemill:
    This is the supervised problem we have ground-truth labels for (514 sessions,
    22,116 turns). The classifier's output, if it works cross-framework, is what
    would let us replace the deterministic phase segmentation with a learned one
-   in a future tracemill version.
+   in a future traceforge version.
 
 This document is the entry point for problem #2.
 
@@ -41,7 +41,7 @@ do not generalize to Copilot, Aider, OpenHands, etc.
 We considered four directions and landed on a hybrid:
 
 - **Canonical features** (`Mechanism / Effect / Scope / Role / Phase / Action`,
-  one-hot) are portable by construction — they come from tracemill's per-host
+  one-hot) are portable by construction — they come from traceforge's per-host
   tool registry. These provide the ~0.533 baseline.
 - **Static text embeddings via model2vec** of the event payload text replace
   the regex feature. model2vec is a token lookup table distilled from a
@@ -65,10 +65,10 @@ transfer-evaluation plan that validates it is in
    First experiment to run.
 2. **Does it transfer?** Train on SWE-agent + OpenHands, test on Copilot and
    SWE-smith. Eval matrix in 04.
-3. **Labels weren't generated against canonical tracemill output.** The
+3. **Labels weren't generated against canonical traceforge output.** The
    514/1102 LLM-labeled sessions were annotated from raw turn text, before
-   tracemill existed. See
-   [`02-data-inventory.md`](02-data-inventory.md#the-post-tracemill-canonicalization-problem)
+   traceforge existed. See
+   [`02-data-inventory.md`](02-data-inventory.md#the-post-traceforge-canonicalization-problem)
    for why this matters and the planned response: re-label a Copilot
    subset *after* enrichment, with canonical fields visible to the
    annotator.
@@ -81,7 +81,7 @@ transfer-evaluation plan that validates it is in
    `metadata.phases` produces today.
 5. **Copilot corpus utilization.** 50k local sessions, no labels. The
    plan is:
-   (a) ingest via tracemill replay + enricher → parquet (see
+   (a) ingest via traceforge replay + enricher → parquet (see
    [`06-pipeline-architecture.md`](06-pipeline-architecture.md));
    (b) label a subset using the SDK-driven labeling framework (see
    [`05-data-sizing.md`](05-data-sizing.md) for sizing); then

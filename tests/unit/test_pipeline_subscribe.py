@@ -13,8 +13,8 @@ import threading
 
 import pytest
 
-from tracemill import CallbackSink, EventKind, EventPipeline, SessionEvent, StorageSink
-from tracemill.sinks.callback import as_async_event_callback
+from traceforge import CallbackSink, EventKind, EventPipeline, SessionEvent, StorageSink
+from traceforge.sinks.callback import as_async_event_callback
 from tests.conftest import RecordingSink, make_event
 
 

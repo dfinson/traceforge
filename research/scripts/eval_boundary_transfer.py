@@ -18,14 +18,14 @@ import numpy as np
 from sklearn.model_selection import GroupKFold
 
 from scripts.train_boundary_baselines import _load_seg_params, _logreg_factory
-from tracemill.boundary.inference import (
+from traceforge.boundary.inference import (
     BOUNDARY_CLASSES,
     DEFAULT_FEATURE_SET,
     fit_boundary_model,
     predict_examples,
 )
-from tracemill_research.training.evaluate import multiclass_report
-from tracemill_research.training.features import load_boundary_examples
+from traceforge_research.training.evaluate import multiclass_report
+from traceforge_research.training.features import load_boundary_examples
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("boundary-transfer")

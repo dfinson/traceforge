@@ -8,7 +8,7 @@
 #     FAITHFULNESS only +0.09 -- it hallucinates more fluently, not more truly.
 #   * better DECODING (titler-grounded-decoding): grammar/grounding, not truth.
 # The one lever NEVER pulled is the INPUT. The served distiller
-# (tracemill.title.context.distilled_context) keeps only the FIRST TWO narration
+# (traceforge.title.context.distilled_context) keeps only the FIRST TWO narration
 # sentences, capped at 240 chars (`notes: narr[:2][:240]`). Measured on the base
 # organic corpus: that discards narration for 60% of segments -- for most spans
 # the model never sees the agent's own reasoning, only a bag of tool names +
@@ -117,7 +117,7 @@ results:
     (titler-small-capacity), INPUT null/negative (here). The ~70-76% gold ceiling
     is intrinsic to titling a distilled span at 16M under the CPU/near-zero-
     footprint mandate. Keep the shipped narrow tiny; do NOT widen serve context.
-  serve_impact: NONE. src/tracemill/title/context.py stays at narr[:2][:240];
+  serve_impact: NONE. src/traceforge/title/context.py stays at narr[:2][:240];
     widening it would regress the primary deploy target. The latent train(192)/
     serve(512) MAX_SRC mismatch is benign for the shipped narrow model (its ctx
     p90 is 157 tokens, <192 -- no truncation occurs in practice).

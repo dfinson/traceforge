@@ -24,7 +24,7 @@ MODEL = os.environ.get("CAPTURE_MODEL", "gpt-5")
 
 
 def _native_dict(obj: Any) -> dict[str, Any]:
-    """Serialize the native smolagents step object without tracemill shaping."""
+    """Serialize the native smolagents step object without traceforge shaping."""
     if dataclasses.is_dataclass(obj):
         data = dataclasses.asdict(obj)
     elif hasattr(obj, "model_dump"):

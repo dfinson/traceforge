@@ -60,7 +60,7 @@ intervention:
   relabeled_source: copilot-cli-native
   relabeled_sessions: 20
   held_fixed:
-    - featuriser (tracemill.phase.features, combined-seg-nbrcentroid)
+    - featuriser (traceforge.phase.features, combined-seg-nbrcentroid)
     - swe-agent-nebius labels (729 sessions)
     - content_only training scope (plumbing inherits at inference)
     - leave-session-out GroupKFold split

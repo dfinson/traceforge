@@ -53,7 +53,7 @@ import sys
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 
-from tracemill_research.paths import DATA_INTERIM  # noqa: E402
+from traceforge_research.paths import DATA_INTERIM  # noqa: E402
 
 CODEPLANE_RAW = DATA_INTERIM / "codeplane-jobs-raw.jsonl"
 OUT = DATA_INTERIM / "request-title-pairs.json"
@@ -232,8 +232,8 @@ async def _gen_one(backend, sem, n: int, seed: str, emphasis: str) -> list[dict]
 
 
 async def generate(batches: int, per_batch: int, concurrency: int) -> list[dict]:
-    from tracemill_research.config import load_labeling_runtime_config
-    from tracemill_research.labeling.backends.copilot_sdk import CopilotSdkBackend
+    from traceforge_research.config import load_labeling_runtime_config
+    from traceforge_research.labeling.backends.copilot_sdk import CopilotSdkBackend
 
     cfg = load_labeling_runtime_config()
     backend = CopilotSdkBackend(cfg.backend)
@@ -259,8 +259,8 @@ def _log_mlflow(reals: list[dict], synth: list[dict], merged: list[dict], batche
     try:
         import mlflow
 
-        from tracemill_research.mlflow_utils import log_yaml_params, start_run
-        from tracemill_research.paths import EXPERIMENTS_DIR
+        from traceforge_research.mlflow_utils import log_yaml_params, start_run
+        from traceforge_research.paths import EXPERIMENTS_DIR
     except Exception:
         return
     yaml = EXPERIMENTS_DIR / "titler-prompt-to-task.yaml"

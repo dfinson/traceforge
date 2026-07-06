@@ -1,4 +1,4 @@
-"""Tests for tracemill.config — models, loader, and mapping resolver."""
+"""Tests for traceforge.config — models, loader, and mapping resolver."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from tracemill.config import (
+from traceforge.config import (
     FileWatchSourceConfig,
     FilePollSourceConfig,
     HttpPollSourceConfig,
@@ -22,7 +22,7 @@ from tracemill.config import (
     SDKConfig,
     SSESourceConfig,
     SqliteSinkConfig,
-    TracemillConfig,
+    TraceforgeConfig,
     get_config,
     list_available_mappings,
     load_config,
@@ -147,9 +147,9 @@ class TestPipelineConfig:
         assert isinstance(cfg.sinks[0], JsonlSinkConfig)
 
 
-class TestTracemillConfig:
+class TestTraceforgeConfig:
     def test_defaults(self):
-        cfg = TracemillConfig()
+        cfg = TraceforgeConfig()
         assert cfg.log_level == "INFO"
         assert cfg.pipelines == []
         assert cfg.sdk.batch_size == 64
@@ -162,11 +162,11 @@ class TestTracemillConfig:
             sinks=[SqliteSinkConfig(path="/b")],
         )
         with pytest.raises(ValidationError, match="duplicate pipeline names"):
-            TracemillConfig(pipelines=[pipeline, pipeline])
+            TraceforgeConfig(pipelines=[pipeline, pipeline])
 
     def test_extra_fields_rejected(self):
         with pytest.raises(ValidationError):
-            TracemillConfig.model_validate({"unknown_field": "value"})
+            TraceforgeConfig.model_validate({"unknown_field": "value"})
 
 
 # ─── Loader Tests ────────────────────────────────────────────────────────────
@@ -182,7 +182,7 @@ class TestLoader:
     def test_load_defaults(self):
         cfg = load_config()
         assert cfg.log_level == "INFO"
-        assert isinstance(cfg, TracemillConfig)
+        assert isinstance(cfg, TraceforgeConfig)
 
     def test_explicit_overrides(self):
         cfg = load_config(log_level="DEBUG")
@@ -196,26 +196,26 @@ class TestLoader:
     def test_load_from_yaml_file(self, tmp_path):
         config_file = tmp_path / "test-config.yaml"
         config_file.write_text(yaml.dump({"log_level": "WARNING", "sdk": {"batch_size": 128}}))
-        os.environ["TRACEMILL_CONFIG"] = str(config_file)
+        os.environ["TRACEFORGE_CONFIG"] = str(config_file)
         try:
             cfg = load_config()
             assert cfg.log_level == "WARNING"
             assert cfg.sdk.batch_size == 128
         finally:
-            del os.environ["TRACEMILL_CONFIG"]
+            del os.environ["TRACEFORGE_CONFIG"]
 
     def test_env_var_overrides(self, monkeypatch):
-        monkeypatch.setenv("TRACEMILL_LOG_LEVEL", "ERROR")
+        monkeypatch.setenv("TRACEFORGE_LOG_LEVEL", "ERROR")
         cfg = load_config()
         assert cfg.log_level == "ERROR"
 
     def test_nested_env_var_overrides(self, monkeypatch):
-        monkeypatch.setenv("TRACEMILL_SDK__BATCH_SIZE", "256")
+        monkeypatch.setenv("TRACEFORGE_SDK__BATCH_SIZE", "256")
         cfg = load_config()
         assert cfg.sdk.batch_size == 256
 
     def test_explicit_overrides_beat_env(self, monkeypatch):
-        monkeypatch.setenv("TRACEMILL_LOG_LEVEL", "ERROR")
+        monkeypatch.setenv("TRACEFORGE_LOG_LEVEL", "ERROR")
         cfg = load_config(log_level="DEBUG")
         assert cfg.log_level == "DEBUG"
 

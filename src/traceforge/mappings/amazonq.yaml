@@ -1,0 +1,56 @@
+# Amazon Q Developer — YAML mapping for traceforge
+#
+# Amazon Q Developer stores conversations in SQLite:
+#   ~/.local/share/amazon-q/data.sqlite3 (Linux)
+#   ~/Library/Application Support/amazon-q/data.sqlite3 (macOS)
+#
+# The conversations table has a JSON `value` column with the full message
+# history. The "amazonq" preprocessor extracts and flattens messages and
+# tool calls into per-block events with a "block_type" discriminator.
+#
+# Tool calls use the Anthropic-style content block format:
+#   - type: "tool_use" → tool invocation (name + input)
+#   - type: "tool_result" → tool output (content + is_error)
+#
+# Source: Amazon Q Developer CLI / VS Code extension
+# Storage: SQLite with JSON blob per conversation
+
+framework: amazonq
+framework_version: "1.x"
+ingestion_mode: poll
+type_field: block_type
+default_kind: raw
+preprocessor: amazonq
+
+motivation:
+  sources:
+    - events: ["message.assistant"]
+      field: content
+      role: intent
+
+events:
+  # ── Tool calls ─────────────────────────────────────────────────────────────
+  tool.call:
+    kind: tool.call.started
+    payload:
+      tool_call_id: tool_call_id
+      tool_name: tool_name
+      arguments: arguments
+
+  tool.result:
+    kind: tool.call.completed
+    payload:
+      tool_call_id: tool_call_id
+      is_error: is_error
+      result: output
+
+  # ── Messages ───────────────────────────────────────────────────────────────
+  message.user:
+    kind: message.user
+    payload:
+      content: content
+
+  message.assistant:
+    kind: message.assistant
+    payload:
+      content: content

@@ -1,16 +1,16 @@
-# tracemill research
+# traceforge research
 
-This directory holds the ML/data work that supports tracemill's classification,
+This directory holds the ML/data work that supports traceforge's classification,
 segmentation, and observability features. It is **not** part of the published
 package — research code lives in its own uv project, has its own dependencies,
 and writes experiment artifacts to MLflow.
 
 ## Why a separate project
 
-The main `src/tracemill/` package is a streaming pipeline with strict
+The main `src/traceforge/` package is a streaming pipeline with strict
 dependency hygiene (stdlib + pydantic, no ML, no external models at runtime).
 The research project pulls in scikit-learn, pandas, sentence-transformers,
-mlflow, datasets, etc. — none of which we want runtime tracemill to depend on.
+mlflow, datasets, etc. — none of which we want runtime traceforge to depend on.
 Anything that proves out here either (a) ships back into core as small,
 deterministic, dependency-free code, or (b) stays research-only.
 
@@ -24,7 +24,7 @@ research/
     raw/                     # gitignored; copied / fetched data
     interim/                 # gitignored; cleaned / aligned intermediates
     processed/               # gitignored; feature matrices, splits
-  src/tracemill_research/
+  src/traceforge_research/
     paths.py                 # path constants — import this, never hardcode
     manifest.py              # Source dataclass, loader, sha256
     config.py                # pydantic loaders for experiments/*.yaml
@@ -77,7 +77,7 @@ etc.). Reference only — not actively maintained.
 ```powershell
 cd research
 uv venv --python 3.12
-uv sync --no-install-project   # installs deps + editable tracemill from parent
+uv sync --no-install-project   # installs deps + editable traceforge from parent
 ```
 
 MLflow UI:
@@ -98,9 +98,9 @@ uv run python scripts\inventory.py
   `RESEARCH_ROOT`, `DATA_RAW`, etc.
 - **Data via `manifest.yaml`.** Every dataset has a `source_id`, `path`,
   `sha256`, and description. Resolve via
-  `tracemill_research.manifest.get_path(source_id)`.
+  `traceforge_research.manifest.get_path(source_id)`.
 - **Experiments are reproducible.** One yaml under `experiments/` per run.
   MLflow logs the rest.
-- **Frozen / immutable outputs.** Same convention as core tracemill.
+- **Frozen / immutable outputs.** Same convention as core traceforge.
 - **No copy-paste from archive.** When promoting historical material into an
   active doc, rewrite it. The archive is a read-only record.

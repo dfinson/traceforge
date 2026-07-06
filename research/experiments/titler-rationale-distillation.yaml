@@ -228,7 +228,7 @@ results:
       for span prefixes. Forks 2 (need-weighted mass) and 3 (curriculum anneal) are
       deferred -- they aim to recover both heads in ONE model, which is an optimization
       of, not a blocker for, the shipped capability.
-    serve_artifact: src/tracemill/title/data-request/   # int8 ONNX of the from-scratch request model (~33MB, committed like the span data/)
+    serve_artifact: src/traceforge/title/data-request/   # int8 ONNX of the from-scratch request model (~33MB, committed like the span data/)
     routing: >
       TitleInferencer loads the packaged data-request/ model under the request prefix
       ("title task from request: ") ONLY on the fully-packaged default path; absent the

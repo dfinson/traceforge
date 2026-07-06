@@ -6,7 +6,7 @@
 
 ## 1. Problem
 
-A canonicalized tracemill session is a stream of classified events. We want a
+A canonicalized traceforge session is a stream of classified events. We want a
 **two-tier table of contents** over that stream:
 
 - **Tier 1 — Activity.** A coarse declared sub-goal (3–8 per session) that a
@@ -77,7 +77,7 @@ Within an activity, a turn opens a new step if **any** of:
 
 Tool-group membership is **entirely YAML-driven**. The default groupings
 (below) are seeded from the AutoDev tool taxonomy (Fu et al. 2024) and the
-canonical mechanism / effect / action labels emitted by the tracemill
+canonical mechanism / effect / action labels emitted by the traceforge
 enricher. They are not magic numbers — they are an editable mapping.
 
 ```yaml

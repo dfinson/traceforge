@@ -16,16 +16,16 @@ import threading
 
 import pytest
 
-from tracemill.governance.pipeline import GovernancePipeline
-from tracemill.sdk.gate_policy import GatePolicy
-from tracemill.sdk.gate_types import (
+from traceforge.governance.pipeline import GovernancePipeline
+from traceforge.sdk.gate_policy import GatePolicy
+from traceforge.sdk.gate_types import (
     GateContext,
     PostflightAction,
     PostflightVerdict,
     ToolCallRequest,
     ToolCallResult,
 )
-from tracemill.sdk.verdict import Verdict
+from traceforge.sdk.verdict import Verdict
 
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -229,7 +229,7 @@ class TestGateServer:
     """GateServer uses the pipeline's policy chain."""
 
     def test_server_deny(self):
-        from tracemill.gate.server import GateServer
+        from traceforge.gate.server import GateServer
 
         pipeline = _make_pipeline(preflight=_deny_all)
         server = GateServer(pipeline)
@@ -244,7 +244,7 @@ class TestGateServer:
         assert "blocked by test policy" in result["reason"]
 
     def test_server_allow(self):
-        from tracemill.gate.server import GateServer
+        from traceforge.gate.server import GateServer
 
         pipeline = _make_pipeline(preflight=_allow_all)
         server = GateServer(pipeline)
@@ -258,7 +258,7 @@ class TestGateServer:
         assert result["decision"] == "allow"
 
     def test_server_no_policy_allows(self):
-        from tracemill.gate.server import GateServer
+        from traceforge.gate.server import GateServer
 
         pipeline = GovernancePipeline.create()
         server = GateServer(pipeline)

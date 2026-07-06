@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from tracemill.formatting import (
+from traceforge.formatting import (
     Density,
     format_budget_summary,
     format_event,
     format_session_summary,
     format_trace,
 )
-from tracemill.types import EventMetadata, SessionEvent
+from traceforge.types import EventMetadata, SessionEvent
 from tests.conftest import make_event
 
 
@@ -53,8 +53,8 @@ class TestFormatTraceDensity:
     """Test format_trace at all density levels."""
 
     def _make_trace(self, **kwargs):
-        from tracemill.trace import EventTrace
-        from tracemill._generated import EventKind
+        from traceforge.trace import EventTrace
+        from traceforge._generated import EventKind
 
         defaults = {
             "id": "trace-001",
@@ -76,7 +76,7 @@ class TestFormatTraceDensity:
         assert "\n" not in result
 
     def test_minimal_with_risk_and_effect(self):
-        from tracemill._generated import Effect, RiskBand
+        from traceforge._generated import Effect, RiskBand
 
         trace = self._make_trace(effect=Effect.destructive, risk_band=RiskBand.danger)
         result = format_trace(trace, Density.MINIMAL)
@@ -84,14 +84,14 @@ class TestFormatTraceDensity:
         assert "destructive" in result.lower()
 
     def test_standard_includes_mechanism(self):
-        from tracemill._generated import Mechanism
+        from traceforge._generated import Mechanism
 
         trace = self._make_trace(mechanism=Mechanism.process_shell)
         result = format_trace(trace, Density.STANDARD)
         assert "mechanism=process.shell" in result
 
     def test_standard_includes_effect_risk_action(self):
-        from tracemill._generated import Effect, Mechanism, RiskBand, Recommendation
+        from traceforge._generated import Effect, Mechanism, RiskBand, Recommendation
 
         trace = self._make_trace(
             mechanism=Mechanism.process_shell,
@@ -105,7 +105,7 @@ class TestFormatTraceDensity:
         assert "action=deny" in result
 
     def test_verbose_includes_all_fields(self):
-        from tracemill._generated import Effect, RiskBand, Mechanism, Recommendation, Scope
+        from traceforge._generated import Effect, RiskBand, Mechanism, Recommendation, Scope
 
         trace = self._make_trace(
             mechanism=Mechanism.process_shell,
@@ -204,7 +204,7 @@ class TestFormatEventDensityEdgeCases:
         """Cover lines 46-47 and 57-59: classification with risk_band and effect."""
         from unittest.mock import MagicMock
 
-        from tracemill.classify.core import Classification
+        from traceforge.classify.core import Classification
 
         cls_obj = Classification(mechanism="process.shell", effect="destructive")
         event = make_event(metadata=EventMetadata(classification=cls_obj))

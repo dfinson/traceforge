@@ -229,7 +229,7 @@ def surface_feats(
 
 
 def main():
-    from tracemill.phase.features import embed_texts
+    from traceforge.phase.features import embed_texts
 
     toc = pd.read_parquet(TOC)
     toc = toc[toc.session_type == "agent"]

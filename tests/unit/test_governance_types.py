@@ -9,8 +9,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from tracemill.classify.core import Classification
-from tracemill.governance.types import (
+from traceforge.classify.core import Classification
+from traceforge.governance.types import (
     CommandAnalysis,
     EnrichmentContext,
     PipeSegment,

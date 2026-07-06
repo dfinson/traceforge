@@ -14,16 +14,16 @@ from datetime import datetime, timezone
 
 import pytest
 
-from tracemill.classify.config import ClassificationEngine, ClassifyConfig
-from tracemill.classify.core import Classification
-from tracemill.governance.assessor import DefaultAssessor
-from tracemill.governance.labeler import GovernanceResult
-from tracemill.governance.risk_wrapper import RiskModifiers
-from tracemill.governance.rules import Predicate
-from tracemill.governance.rules import RecommendedAction as RuleAction
-from tracemill.governance.rules import Rule
-from tracemill.governance.state import BudgetSnapshot, SessionStateSnapshot
-from tracemill.governance.types import EnrichmentContext, ToolCallEvent
+from traceforge.classify.config import ClassificationEngine, ClassifyConfig
+from traceforge.classify.core import Classification
+from traceforge.governance.assessor import DefaultAssessor
+from traceforge.governance.labeler import GovernanceResult
+from traceforge.governance.risk_wrapper import RiskModifiers
+from traceforge.governance.rules import Predicate
+from traceforge.governance.rules import RecommendedAction as RuleAction
+from traceforge.governance.rules import Rule
+from traceforge.governance.state import BudgetSnapshot, SessionStateSnapshot
+from traceforge.governance.types import EnrichmentContext, ToolCallEvent
 
 _MECHANISM = "shell.execute"
 _SUMMARY = (

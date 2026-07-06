@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tracemill.parsers.copilot import CopilotPreParser
+from traceforge.parsers.copilot import CopilotPreParser
 
 
 class TestParseTurn:
@@ -176,7 +176,7 @@ class TestFlush:
     """Tests for flush() on incremental parsing."""
 
     def test_flush_emits_held_back_event(self) -> None:
-        from tracemill.parsers.aider import AiderPreParser
+        from traceforge.parsers.aider import AiderPreParser
 
         parser = AiderPreParser()
         text = "# aider chat started at 2026-01-01 00:00:00\n\n#### hello\n"
@@ -190,7 +190,7 @@ class TestFlush:
         assert "user_message" in types
 
     def test_flush_idempotent(self) -> None:
-        from tracemill.parsers.aider import AiderPreParser
+        from traceforge.parsers.aider import AiderPreParser
 
         parser = AiderPreParser()
         text = "# aider chat started at 2026-01-01 00:00:00\n"

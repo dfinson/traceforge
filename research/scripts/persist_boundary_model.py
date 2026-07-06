@@ -3,7 +3,7 @@
 Unlike ``train_boundary_baselines`` (leave-session-out CV, models discarded),
 this fits the winning **causal** contract (``combined-seg``) on every labelled
 gap and writes a single reusable bundle to the packaged production location
-(``src/tracemill/boundary/data/boundary-model.joblib``) so it loads in core.
+(``src/traceforge/boundary/data/boundary-model.joblib``) so it loads in core.
 
 Run:  python -m scripts.persist_boundary_model
 """
@@ -19,8 +19,8 @@ from sklearn.metrics import f1_score, precision_recall_curve
 from sklearn.model_selection import GroupKFold
 
 from scripts.train_boundary_baselines import _load_seg_params, _logreg_factory
-from tracemill.boundary.decode import DecodeParams
-from tracemill.boundary.inference import (
+from traceforge.boundary.decode import DecodeParams
+from traceforge.boundary.inference import (
     BOUNDARY_CLASSES,
     DEFAULT_FEATURE_SET,
     PACKAGED_MODEL_PATH,
@@ -30,9 +30,9 @@ from tracemill.boundary.inference import (
     predict_scores,
     save,
 )
-from tracemill_research.mlflow_utils import log_yaml_params, start_run
-from tracemill_research.paths import EXPERIMENTS_DIR
-from tracemill_research.training.features import load_boundary_examples
+from traceforge_research.mlflow_utils import log_yaml_params, start_run
+from traceforge_research.paths import EXPERIMENTS_DIR
+from traceforge_research.training.features import load_boundary_examples
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("persist-boundary")
@@ -141,7 +141,7 @@ def main() -> int:
     predicted_counts = {c: int((y_pred == c).sum()) for c in BOUNDARY_CLASSES}
 
     # Decoded counts (the production path): threshold + causal refractory.
-    from tracemill.boundary.inference import decode_examples
+    from traceforge.boundary.inference import decode_examples
 
     by_session: dict[str, list] = defaultdict(list)
     for e in examples:

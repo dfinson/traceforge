@@ -28,14 +28,14 @@ from scripts.train_phase_baselines import (
     _load_seg_params,
     _logreg_factory,
 )
-from tracemill_research.paths import DATA_PROCESSED
-from tracemill_research.training.evaluate import multilabel_report
-from tracemill_research.training.features import (
+from traceforge_research.paths import DATA_PROCESSED
+from traceforge_research.training.evaluate import multilabel_report
+from traceforge_research.training.features import (
     PHASES,
     _load_session_events,
     load_phase_examples,
 )
-from tracemill_research.training.inference import (
+from traceforge_research.training.inference import (
     DEFAULT_FEATURE_SET,
     fit_phase_model,
     predict_session,

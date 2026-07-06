@@ -30,7 +30,7 @@ jobs:
           import yaml
           from pathlib import Path
 
-          data_dir = Path('src/tracemill/classify/data')
+          data_dir = Path('src/traceforge/classify/data')
           errors = []
 
           for f in sorted(data_dir.glob('*.yaml')):
@@ -56,8 +56,8 @@ jobs:
         run: |
           python -c "
           import sys
-          from tracemill.classify.coding import CodingRole, CodingScope, CodingAction
-          from tracemill.classify.config import load_config
+          from traceforge.classify.coding import CodingRole, CodingScope, CodingAction
+          from traceforge.classify.config import load_config
 
           config = load_config()
           errors = []
@@ -94,8 +94,8 @@ jobs:
       - name: Run classification engine smoke test
         run: |
           python -c "
-          from tracemill.classify import get_default_engine, classify_shell, classify_tool
-          from tracemill.classify.mcp import classify_mcp_tool
+          from traceforge.classify import get_default_engine, classify_shell, classify_tool
+          from traceforge.classify.mcp import classify_mcp_tool
           from functools import partial
 
           engine = get_default_engine()
@@ -124,7 +124,7 @@ jobs:
         if: always()
         run: |
           python -c "
-          from tracemill.classify import get_default_engine
+          from traceforge.classify import get_default_engine
           engine = get_default_engine()
           print('## Tool Surface Summary')
           print(f'- **Binaries**: {len(engine.binary_info)}')

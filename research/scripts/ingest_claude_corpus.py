@@ -1,6 +1,6 @@
 """Bridge: Claude Code transcripts → canonical labeling-corpus parquet.
 
-The Copilot ingest (:mod:`tracemill_research.ingest.copilot`) reads from a
+The Copilot ingest (:mod:`traceforge_research.ingest.copilot`) reads from a
 Copilot SQLite session-store and is therefore Copilot-only. Claude Code writes
 plain JSONL transcripts, so this script runs the *same* downstream pipeline the
 Copilot ingest uses — ``MappedJsonAdapter`` (the bundled ``claude`` mapping) →
@@ -40,13 +40,13 @@ os.environ.pop("ANTHROPIC_BASE_URL", None)
 import pyarrow.parquet as pq
 import yaml
 
-from tracemill.adapters.mapped_json import MappedJsonAdapter
-from tracemill.cli.runner import load_mapping_path
-from tracemill.enricher import Enricher
-from tracemill.pipeline import EventPipeline
-from tracemill.sinks.parquet import ParquetSink
+from traceforge.adapters.mapped_json import MappedJsonAdapter
+from traceforge.cli.runner import load_mapping_path
+from traceforge.enricher import Enricher
+from traceforge.pipeline import EventPipeline
+from traceforge.sinks.parquet import ParquetSink
 
-from tracemill_research.paths import DATA_INTERIM
+from traceforge_research.paths import DATA_INTERIM
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("ingest-claude-corpus")

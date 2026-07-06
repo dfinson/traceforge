@@ -14,10 +14,10 @@
 #   research/scripts/_title_codeplane_test.py  (served-path OOD probe on raw prompts)
 #   research/scripts/_title_judge.py           (blinded LLM A/B coherence + h2h vs gold)
 #   research/scripts/_title_export.py          (torch -> no-past int8 ONNX -> promote to
-#                                               src/tracemill/title/data)
+#                                               src/traceforge/title/data)
 #
 # MLflow: _title_t5_train.py (train + eval runs) logs params/metrics here via
-#   tracemill_research.mlflow_utils, selected by TITLE_EXPERIMENT.
+#   traceforge_research.mlflow_utils, selected by TITLE_EXPERIMENT.
 #
 # PROBLEM. The shipped titler maps a DISTILLED agent-trace span (files / actions /
 # narration) to a short activity/step title. A common adjacent need is titling the
@@ -52,7 +52,7 @@ experiment:
     titler as a second learned T5 prefix, so a single CPU-only, torch-free model
     titles both distilled agent spans (prefix "summarize agent step: ") and raw
     user requests (prefix "title task from request: "). The served runtime is
-    already prefix-parameterizable (src/tracemill/title/inference.py: _T5Generator
+    already prefix-parameterizable (src/traceforge/title/inference.py: _T5Generator
     takes a prefix), so exposing the request task is a serve-time prefix, not a new
     model or runtime.
 
@@ -121,7 +121,7 @@ conditions:
     role: prior fold-in (TITLE_SRC_ALPHA=1, natural frequency) -- request 0.429, span at parity
   - id: multitask-synth-scaled-parity
     pool: same rows, source mass under organic-parity (dominant span source capped at 0.5)
-    role: SELECTED -- promoted to src/tracemill/title/data; request 0.459, span at-or-above
+    role: SELECTED -- promoted to src/traceforge/title/data; request 0.459, span at-or-above
           shipped on the noise-robust LLM judge (below)
 
 acceptance:
@@ -172,13 +172,13 @@ results:
       via input normalization, and single-word stutter ("input column for input
       columns") via a stronger repeat penalty.
     ship_path: >
-      export no-past -> int8 quantize -> promote to src/tracemill/title/data, and
+      export no-past -> int8 quantize -> promote to src/traceforge/title/data, and
       expose the request prefix at serve time (_T5Generator already takes a prefix).
 
   # --- SELECTED + PROMOTED: organic-parity source mass (TITLE_BALANCE=organic-parity) ---
   # Same rows + synth as synth_scaled; only the source-mass policy differs (the dominant
   # span source is capped at 0.5, the remainder split by natural frequency). Promoted to
-  # src/tracemill/title/data via research/scripts/_title_export.py (torch -> no-past ONNX
+  # src/traceforge/title/data via research/scripts/_title_export.py (torch -> no-past ONNX
   # -> int8 dynamic quant; opset 18; artifact sizes within ~15KB of the prior shipped model).
   synth_scaled_parity:
     request_task_codeplane-prompt: 0.459   # REAL request heldout, +0.030 over synth_scaled (0.429)
@@ -207,7 +207,7 @@ results:
     source_mass_fraction: { copilot-cli-native: 0.500, synth-request: 0.309, claude-cli: 0.115, codeplane-prompt: 0.076 }
     promote:
       script: research/scripts/_title_export.py   # torch -> no-past ONNX -> int8 dynamic quant
-      artifact: src/tracemill/title/data/{encoder.onnx, decoder.onnx, tokenizer.json}
+      artifact: src/traceforge/title/data/{encoder.onnx, decoder.onnx, tokenizer.json}
       validation: tests/unit/test_title_inference.py + full unit suite green on the promoted model
 
 mlflow:

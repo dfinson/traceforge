@@ -1,8 +1,8 @@
-# tracemill
+# traceforge
 
 A pluggable event observation pipeline for AI agent sessions.
 
-Mills raw agent traces into structured, classified, risk-scored, and governance-assessed output. Framework-agnostic -- adding support for a new agent framework requires only a YAML mapping file.
+Forges raw agent traces into structured, classified, risk-scored, and governance-assessed output. Framework-agnostic -- adding support for a new agent framework requires only a YAML mapping file.
 
 ## What it does
 
@@ -21,17 +21,17 @@ Source → [Parser] → Adapter → Enricher → Pipeline → Sink(s)
 ## Install
 
 ```bash
-pip install tracemill      # or: uv add tracemill
+pip install traceforge      # or: uv add traceforge
 ```
 
 Everything ships with a single install — no extras. The activity/step titler model
-weights (~90 MB int8 ONNX) live in a separate `tracemill-title-model` package that
-`tracemill` depends on, so `pip install tracemill` pulls them automatically. The
+weights (~90 MB int8 ONNX) live in a separate `traceforge-title-model` package that
+`traceforge` depends on, so `pip install traceforge` pulls them automatically. The
 weights are hosted on PyPI (primary) and mirrored on this repo's `title-model-v*`
 GitHub releases; if PyPI is ever unavailable, fetch the mirror:
 
 ```bash
-tracemill download-model --source gh
+traceforge download-model --source gh
 ```
 
 ### Session naming
@@ -43,7 +43,7 @@ network). You can opt into an LLM API for more polished abstractive titles via
 openai-compatible) or a local runtime (Ollama, vLLM):
 
 ```yaml
-# tracemill.yaml
+# traceforge.yaml
 title:
   session_naming:
     strategy: api            # heuristic (default) | api
@@ -64,7 +64,7 @@ silently falls back to the heuristic, so a missing key never errors or blocks.
 ## Quick start
 
 ```yaml
-# tracemill.yaml
+# traceforge.yaml
 pipelines:
   - name: copilot-local
     source:
@@ -80,7 +80,7 @@ pipelines:
 ```
 
 ```bash
-tracemill watch  # run a config-driven pipeline from tracemill.yaml
+traceforge watch  # run a config-driven pipeline from traceforge.yaml
 ```
 
 No Python code required. Configure sources, pick a mapping, choose your sinks.
@@ -210,12 +210,12 @@ metadata under `governance`):
   (`allow` / `warn` / `escalate` / `deny` / `transform`) plus the matched reason and evidence
 
 It is observation-first: by default the engine *recommends* and the consumer decides. For
-consumers that want tracemill to decide, the SDK ships an opt-in gate layer
+consumers that want traceforge to decide, the SDK ships an opt-in gate layer
 (`GatePolicy` -> `Verdict`) with preflight/postflight hooks and ready-made adapters for
 CrewAI, LangChain, and the Microsoft Agent Framework.
 
 ```python
-from tracemill.governance.pipeline import GovernancePipeline
+from traceforge.governance.pipeline import GovernancePipeline
 
 gov = GovernancePipeline.create()          # zero-config, or pass GovernanceConfig
 meta = gov.score_tool_call_event(event)     # -> SessionMeta
@@ -224,8 +224,8 @@ if rec and rec.recommended_action.value in ("deny", "escalate"):
     alert(event, rec.reason_code)
 ```
 
-The `tracemill` CLI exposes the same engine: `tracemill score` runs a preflight scoring
-HTTP server, `tracemill gate` applies a gate policy, and `tracemill watch` runs a full
+The `traceforge` CLI exposes the same engine: `traceforge score` runs a preflight scoring
+HTTP server, `traceforge gate` applies a gate policy, and `traceforge watch` runs a full
 config-driven pipeline.
 
 ## Storage sinks
@@ -254,24 +254,24 @@ sinks:
 
 ## Configuration
 
-Hierarchical config with precedence: constructor > env vars > `TRACEMILL_CONFIG` > `./tracemill.yaml` > `~/.tracemill/config.yaml` > defaults.
+Hierarchical config with precedence: constructor > env vars > `TRACEFORGE_CONFIG` > `./traceforge.yaml` > `~/.traceforge/config.yaml` > defaults.
 
-On first use, `~/.tracemill/` is auto-created with a default config template and a `mappings/` directory for user custom mappings.
+On first use, `~/.traceforge/` is auto-created with a default config template and a `mappings/` directory for user custom mappings.
 
-Environment variable overrides: `TRACEMILL_LOG_LEVEL=DEBUG`, `TRACEMILL_SDK__BATCH_SIZE=128` (double underscore for nesting).
+Environment variable overrides: `TRACEFORGE_LOG_LEVEL=DEBUG`, `TRACEFORGE_SDK__BATCH_SIZE=128` (double underscore for nesting).
 
 ## Consumers
 
-tracemill is a library, not a standalone application. Known consumers:
+traceforge is a library, not a standalone application. Known consumers:
 
-| Project | How it uses tracemill |
+| Project | How it uses traceforge |
 | --- | --- |
 | [memrelay](https://github.com/dfinson/memrelay) | Feeds events into Graphiti for persistent memory |
 | [CodePlane](https://github.com/dfinson/codeplane) | Full agent control plane with UI, analytics, SSE |
 
 ## Origin
 
-tracemill was extracted from [CodePlane](https://github.com/dfinson/codeplane)'s event processing internals. The pipeline, enricher, and classification logic all originate from CodePlane -- tracemill packages them as a standalone, reusable library.
+traceforge was extracted from [CodePlane](https://github.com/dfinson/codeplane)'s event processing internals. The pipeline, enricher, and classification logic all originate from CodePlane -- traceforge packages them as a standalone, reusable library.
 
 See [SPEC.md](SPEC.md) for the full architecture specification.
 
@@ -289,7 +289,7 @@ See [SPEC.md](SPEC.md) for the full architecture specification.
 
 🚧 **Under development** -- not yet published to PyPI.
 
-The pipeline is feature-complete: sources, adapters, enricher, classification, risk scoring, live phase/boundary/title structuring, the governance/assessment engine, all 8 storage sinks, and the `tracemill` CLI all ship. Remaining work is narrow: opt-in telemetry self-metrics ([#48](https://github.com/dfinson/tracemill/issues/48)), an optional EventBus `subscribe()` convenience ([#47](https://github.com/dfinson/tracemill/issues/47)), and the PyPI release. See [SPEC.md](SPEC.md) for the full roadmap.
+The pipeline is feature-complete: sources, adapters, enricher, classification, risk scoring, live phase/boundary/title structuring, the governance/assessment engine, all 8 storage sinks, and the `traceforge` CLI all ship. Remaining work is narrow: opt-in telemetry self-metrics ([#48](https://github.com/dfinson/traceforge/issues/48)), an optional EventBus `subscribe()` convenience ([#47](https://github.com/dfinson/traceforge/issues/47)), and the PyPI release. See [SPEC.md](SPEC.md) for the full roadmap.
 
 ## License
 

@@ -2,12 +2,12 @@
 
 ## Problem Statement
 
-tracemill classifies every tool call event with per-event labels describing the
+traceforge classifies every tool call event with per-event labels describing the
 *intrinsic purpose* of that call (a `view` is `retrieval` regardless of context).
 There is currently no facility for determining the *session-level workflow phase* —
 the aggregate stage the agent is operating in at any point in time. This document
 specifies a `PhaseTracker` module that produces a streaming session timeline of
-phase blocks plus cumulative summary statistics, so that `tracemill summary` can
+phase blocks plus cumulative summary statistics, so that `traceforge summary` can
 answer "when did the agent transition from exploration to implementation?" and
 "what fraction of the session was implementation vs verification?".
 
@@ -214,11 +214,11 @@ canonical one and records the alternatives in `metadata.activity_alternates`
 ## Per-Event Phase Classifier: Labeling & Inference Contract
 
 The `metadata.phase` field is produced by a trained per-event classifier
-(`tracemill.phase.inference.PhaseInferencer`, feature set
+(`traceforge.phase.inference.PhaseInferencer`, feature set
 `combined-seg-nbrcentroid`), not by rules. There is **no deterministic
 fallback** — the model is the only phase producer, and its ML dependencies
 (scikit-learn / scipy / joblib / model2vec) live in **core**, not an extra.
-The featuriser (`tracemill.phase.features`) is shared verbatim by training and
+The featuriser (`traceforge.phase.features`) is shared verbatim by training and
 runtime. Every feature is **causal** (segmentation BOCPD, trailing centroids,
 windowed majority/entropy — no `position_in_session`, no future window), so a
 phase depends only on an event's own prefix and can be computed the instant the
@@ -229,7 +229,7 @@ event arrives.
 The pipeline stamps `metadata.phase` **live, as each event flows through**, and
 emits it to sinks immediately — it does *not* buffer the session and stamp at
 `SESSION_ENDED`. A per-session `SessionPhaseStream`
-(`tracemill.phase.inferencer`) carries the causal feature state forward online
+(`traceforge.phase.inferencer`) carries the causal feature state forward online
 (`IncrementalSegmentation` keeps the BOCPD run-length posterior + last `r_max`
 categories; `IncrementalNeighbor` keeps the trailing embedding buffer), so each
 content-bearing event is classified in O(`r_max`) the moment it arrives and
@@ -293,7 +293,7 @@ embed as empty strings and skew toward the prior.
 ### Module Location
 
 ```text
-src/tracemill/tracking/
+src/traceforge/tracking/
     __init__.py
     phase_tracker.py    # PhaseTracker class
     models.py           # PhaseBlock, PhaseTimeline, PhaseSummary, PhaseStats, PhaseTransition
@@ -393,7 +393,7 @@ this is the right time to fix it because phase now has a real meaning.
 | Consumer | Usage |
 | --- | --- |
 | Configured sinks | `PhaseBlock` emitted on each boundary commit; `PhaseSummary` emitted on session finalize. Same sink interface as enriched events. |
-| `tracemill summary` CLI | Phase breakdown table and timeline. |
+| `traceforge summary` CLI | Phase breakdown table and timeline. |
 | `format_session_summary()` | Phase distribution percentages and notable transitions. |
 | Future: timeline visualization | Export `PhaseTimeline` as JSON for frontend rendering. |
 | Future: phase-attributed cost | When `SpendAnalyzer` exists, map token/cost to blocks via timestamp overlap. (Token cost attribution design is parked in the v1 archive — see below.) |

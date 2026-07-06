@@ -23,7 +23,7 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from tracemill_research.paths import DATA_INTERIM, DATA_PROCESSED
+from traceforge_research.paths import DATA_INTERIM, DATA_PROCESSED
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("training-tables")

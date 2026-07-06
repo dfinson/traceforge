@@ -18,10 +18,10 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from tracemill import boundary
-from tracemill.boundary import BoundaryInferencer, predict_session
-from tracemill.boundary.decode import DecodeParams
-from tracemill.types import EventMetadata, SessionEvent
+from traceforge import boundary
+from traceforge.boundary import BoundaryInferencer, predict_session
+from traceforge.boundary.decode import DecodeParams
+from traceforge.types import EventMetadata, SessionEvent
 
 CLASSES = ("activity-boundary", "noise", "step-boundary")
 
@@ -54,7 +54,7 @@ def _install_fake_scores(monkeypatch, score_map: dict[str, dict[str, float]]) ->
             rows.append([s.get(c, 0.0) for c in model.classes])
         return np.asarray(rows, dtype=float)
 
-    monkeypatch.setattr("tracemill.boundary.inference.predict_scores", fake)
+    monkeypatch.setattr("traceforge.boundary.inference.predict_scores", fake)
 
 
 def test_stamps_opening_boundary_on_successor(monkeypatch):
@@ -138,7 +138,7 @@ def test_stream_matches_batch_real_model():
     if model.decode_params is None:
         pytest.skip("bundle has no decode params")
 
-    from tracemill.phase.event_rows import event_to_feature_row
+    from traceforge.phase.event_rows import event_to_feature_row
 
     evs = _real_session(60)
     rows = {}
@@ -162,7 +162,7 @@ def test_stream_matches_batch_real_model():
 
 
 async def test_pipeline_stamps_boundary_live(monkeypatch, recording_sink):
-    from tracemill import EventPipeline
+    from traceforge import EventPipeline
 
     _install_fake_scores(
         monkeypatch,

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from tracemill_research.config import load_taxonomy_config
-from tracemill_research.labeling.activity_step import build_activity_step_task
+from traceforge_research.config import load_taxonomy_config
+from traceforge_research.labeling.activity_step import build_activity_step_task
 
 
 def test_taxonomy_yaml_loads() -> None:

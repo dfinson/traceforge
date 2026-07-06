@@ -33,8 +33,8 @@ import mlflow  # noqa: E402
 from scripts._title_compose import CORPUS, SRC_DIR, TOC  # noqa: E402
 from scripts._title_object import STOP, toks  # noqa: E402
 from scripts._title_t5 import distilled_context  # noqa: E402
-from tracemill_research.mlflow_utils import log_yaml_params, start_run  # noqa: E402
-from tracemill_research.paths import EXPERIMENTS_DIR  # noqa: E402
+from traceforge_research.mlflow_utils import log_yaml_params, start_run  # noqa: E402
+from traceforge_research.paths import EXPERIMENTS_DIR  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATASET = os.environ.get(

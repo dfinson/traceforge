@@ -30,7 +30,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _harness import package_version, write_trace  # noqa: E402
 
-FRAMEWORK = "REPLACE_ME"  # must match src/tracemill/mappings/<framework>.yaml
+FRAMEWORK = "REPLACE_ME"  # must match src/traceforge/mappings/<framework>.yaml
 SOURCE_REPO = "owner/repo"
 PACKAGE = "pip-distribution-name"
 MODEL = os.environ.get("CAPTURE_MODEL", "gpt-5")
@@ -43,8 +43,8 @@ def capture() -> list[dict]:
 
     The dicts must be the framework's REAL serialization (e.g. via
     ``model_dump()`` / ``to_jsonable_python()`` / ``.dict()``) — exactly the
-    shape tracemill's preprocessor for this framework expects. Do NOT
-    pre-normalize to tracemill's internal shape.
+    shape traceforge's preprocessor for this framework expects. Do NOT
+    pre-normalize to traceforge's internal shape.
     """
     raise NotImplementedError("fill in the scenario for this framework")
 

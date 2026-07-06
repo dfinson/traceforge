@@ -1,4 +1,4 @@
-"""Tests for tracemill core types."""
+"""Tests for traceforge core types."""
 
 from __future__ import annotations
 
@@ -7,20 +7,20 @@ from datetime import datetime, timezone
 
 import pytest
 
-from tracemill import EventKind, EventMetadata, SessionEvent, TelemetrySpan, UsageRecord
+from traceforge import EventKind, EventMetadata, SessionEvent, TelemetrySpan, UsageRecord
 from tests.conftest import make_event, make_span, make_usage
 
 
 class TestEventKind:
     def test_known_kinds_are_strings(self):
-        from tracemill.types import KNOWN_KINDS
+        from traceforge.types import KNOWN_KINDS
 
         for kind in KNOWN_KINDS:
             assert isinstance(kind, str)
 
     def test_expected_canonical_kinds(self):
         """Verify core canonical kinds are present."""
-        from tracemill.types import KNOWN_KINDS
+        from traceforge.types import KNOWN_KINDS
 
         required = {
             "message.user",
@@ -40,7 +40,7 @@ class TestEventKind:
         assert EventKind.MESSAGE_USER == "message.user"
 
     def test_is_known_kind(self):
-        from tracemill.types import is_known_kind
+        from traceforge.types import is_known_kind
 
         assert is_known_kind("message.user")
         assert is_known_kind("tool.call.started")

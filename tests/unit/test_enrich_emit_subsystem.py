@@ -21,20 +21,20 @@ from datetime import datetime, timezone
 
 import pytest
 
-from tracemill.governance.emitter import EnrichedEmitter, _GapAccumulator
-from tracemill.governance.envelope import ContextGapEvent, EnrichedEvent
-from tracemill.governance.observer import (
+from traceforge.governance.emitter import EnrichedEmitter, _GapAccumulator
+from traceforge.governance.envelope import ContextGapEvent, EnrichedEvent
+from traceforge.governance.observer import (
     AgentContext,
     GovernanceObserver,
-    TracemillObserver,
+    TraceforgeObserver,
     create_observer,
 )
-from tracemill.governance.persistence import SystemStore
-from tracemill.governance.results import SessionMeta
-from tracemill.sinks.base import StorageSink
-from tracemill.sinks.jsonl import JsonlSink
-from tracemill.sinks.sqlite_output import SqliteOutputSink
-from tracemill.types import EventKind, EventMetadata, SessionEvent
+from traceforge.governance.persistence import SystemStore
+from traceforge.governance.results import SessionMeta
+from traceforge.sinks.base import StorageSink
+from traceforge.sinks.jsonl import JsonlSink
+from traceforge.sinks.sqlite_output import SqliteOutputSink
+from traceforge.types import EventKind, EventMetadata, SessionEvent
 
 
 # ─── helpers ─────────────────────────────────────────────────────────────────
@@ -339,14 +339,14 @@ class TestSinkGapPersistence:
 
 class TestGovernanceObserver:
     def _pipeline(self):
-        from tracemill.cli.factory import create_default_pipeline
+        from traceforge.cli.factory import create_default_pipeline
 
         return create_default_pipeline(SystemStore(":memory:"))
 
     def test_concrete_impl_satisfies_runtime_protocol(self):
         gov = self._pipeline()
         observer, _emitter = create_observer(gov, [])
-        assert isinstance(observer, TracemillObserver)
+        assert isinstance(observer, TraceforgeObserver)
         assert isinstance(observer, GovernanceObserver)
 
     def test_requires_session_before_tool_hooks(self):
@@ -435,7 +435,7 @@ class TestRecordDropPersistence:
         db = str(tmp_path / "gov.db")
         gov = None
 
-        from tracemill.cli.factory import create_default_pipeline
+        from traceforge.cli.factory import create_default_pipeline
 
         store = SystemStore(db)
         gov = create_default_pipeline(store)

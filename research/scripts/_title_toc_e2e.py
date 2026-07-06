@@ -2,9 +2,9 @@
 
 Unlike :mod:`scripts._title_claude_e2e` (which drives the research torch/T5 model
 through a bespoke ``_assemble``), this harness exercises exactly what ships: the
-live :class:`tracemill.pipeline.EventPipeline` with the real phase + boundary
-models and the torch-free ORT :class:`tracemill.title.TitleInferencer`, emitting
-append-only :class:`tracemill.types.TitleUpdate` records. A collecting sink then
+live :class:`traceforge.pipeline.EventPipeline` with the real phase + boundary
+models and the torch-free ORT :class:`traceforge.title.TitleInferencer`, emitting
+append-only :class:`traceforge.types.TitleUpdate` records. A collecting sink then
 reassembles the tree purely from each event's live ``activity_id``/``step_id``
 and the titles published for those segment ids -- i.e. the human read is of the
 *production* structuring, not a parallel re-implementation.
@@ -27,9 +27,9 @@ import asyncio
 import sys
 from pathlib import Path
 
-from tracemill.pipeline import EventPipeline
-from tracemill.sinks.base import StorageSink
-from tracemill.types import SessionEvent, TitleUpdate
+from traceforge.pipeline import EventPipeline
+from traceforge.sinks.base import StorageSink
+from traceforge.types import SessionEvent, TitleUpdate
 
 # reuse the corpus loader that clears prior structuring so the models run fresh
 from scripts._title_pipebench import load_events  # noqa: E402
@@ -137,7 +137,7 @@ async def _run(args: argparse.Namespace) -> int:
     except Exception:
         pass
 
-    from tracemill.title.inferencer import TitleInferencer
+    from traceforge.title.inferencer import TitleInferencer
 
     files = sorted(Path(args.dir).glob("*.parquet"))
     if args.files:

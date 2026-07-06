@@ -9,7 +9,7 @@ install hint instead of failing later inside onnxruntime.
 
 from __future__ import annotations
 
-from tracemill.title import _resolve
+from traceforge.title import _resolve
 
 
 def _write_triad(d, *, encoder=b"\x00" * 2_000_000, decoder=b"\x00" * 2_000_000):

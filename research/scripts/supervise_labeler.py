@@ -55,7 +55,7 @@ def main() -> int:
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUNBUFFERED"] = "1"
-    # Make tracemill_research importable in the child regardless of the parent
+    # Make traceforge_research importable in the child regardless of the parent
     # shell's PYTHONPATH (detached supervisors don't inherit it).
     src = str(RESEARCH / "src")
     existing = env.get("PYTHONPATH")

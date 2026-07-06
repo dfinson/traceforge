@@ -1,7 +1,7 @@
 """Harvest permissive-licensed commit subjects from bigcode/commitpackft.
 
 Runs the production-pipeline ingester
-(:mod:`tracemill_research.ingest.commitpack`): every permissive-licensed commit
+(:mod:`traceforge_research.ingest.commitpack`): every permissive-licensed commit
 is projected through the real ``Enricher`` + ``ParquetSink`` as one code-edit
 step, and its serve-side ``distilled_context`` is recomputed, so the commit
 ``subject`` (one-line imperative title) joins the titler corpus with byte-
@@ -25,7 +25,7 @@ import argparse
 import logging
 import sys
 
-from tracemill_research.ingest.commitpack import (
+from traceforge_research.ingest.commitpack import (
     CommitpackIngestConfig,
     default_distill_out,
     default_distill_shard_dir,

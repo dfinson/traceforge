@@ -1,8 +1,8 @@
-# Tracemill Governance Extensions — Design Spec
+# Traceforge Governance Extensions — Design Spec
 
 Informed by audit of [Microsoft agent-governance-toolkit](https://github.com/microsoft/agent-governance-toolkit). All designs extend the existing classification substrate (7-dim taxonomy, tree-sitter AST, phase detection, taint analysis) rather than adding parallel systems.
 
-Tracemill classifies and labels. It never gates, blocks, or modifies execution. Downstream consumers act on the labels. All "deny"/"escalate"/"transform" values are **classification labels** — recommendations that tracemill emits but never enforces.
+Traceforge classifies and labels. It never gates, blocks, or modifies execution. Downstream consumers act on the labels. All "deny"/"escalate"/"transform" values are **classification labels** — recommendations that traceforge emits but never enforces.
 
 ---
 
@@ -55,7 +55,7 @@ Sink Emission:
   -> emit to sinks (file, SQLite, webhook)
 ```
 
-**Integration:** Governance runs inside `Enricher._classify()` after base classification, before sink emission. Phase 2 returns `GovernanceResult` (Classification + RiskModifiers) — Phase 3 consumes both plus `ctx.command_analysis`. `TracemillObserver` (section 9) is the external host-facing protocol — it delegates to Enricher internally.
+**Integration:** Governance runs inside `Enricher._classify()` after base classification, before sink emission. Phase 2 returns `GovernanceResult` (Classification + RiskModifiers) — Phase 3 consumes both plus `ctx.command_analysis`. `TraceforgeObserver` (section 9) is the external host-facing protocol — it delegates to Enricher internally.
 
 **Base event contract:** All events inherit from `SessionEvent`:
 
@@ -506,7 +506,7 @@ recommendation_rules:
     recommend: warn
 ```
 
-All `recommend` values are **classification labels**. Tracemill emits them exactly as it emits `effect: destructive` — as metadata. Whether anything acts on it is entirely downstream.
+All `recommend` values are **classification labels**. Traceforge emits them exactly as it emits `effect: destructive` — as metadata. Whether anything acts on it is entirely downstream.
 
 ---
 
@@ -594,7 +594,7 @@ class DimensionBudget:
 **Optional thresholds** (omit entire section for passive counting):
 
 ```yaml
-# tracemill.yaml
+# traceforge.yaml
 enrichment:
   budget:
     max_tool_calls: 500
@@ -738,7 +738,7 @@ MCP profiles carry a `clearance` level (stored in `mcp_profiles`). Violations su
 
 **Lineage model for IFC detection:**
 
-IFC checks require knowing what data a tool is receiving. Tracemill tracks this via a **taint ledger** in session state:
+IFC checks require knowing what data a tool is receiving. Traceforge tracks this via a **taint ledger** in session state:
 
 ```python
 @dataclass(frozen=True)
@@ -772,7 +772,7 @@ When lineage cannot be established (adapter doesn't provide sufficient context, 
 
 ## 7. Transform Suggestion
 
-**Advisory only.** Tracemill computes what a safe alternative would look like; it never applies it. Downstream consumers (IDE plugins, agent frameworks) decide independently.
+**Advisory only.** Traceforge computes what a safe alternative would look like; it never applies it. Downstream consumers (IDE plugins, agent frameworks) decide independently.
 
 ```python
 @dataclass(frozen=True)
@@ -857,7 +857,7 @@ Suspicious transitions:
 
 ## 9. Observer Protocol
 
-Where hosts call tracemill for classification. Not enforcement — observation.
+Where hosts call traceforge for classification. Not enforcement — observation.
 
 ```python
 @dataclass(frozen=True)
@@ -868,7 +868,7 @@ class AgentContext:
     project_root: str | None = None
 
 @runtime_checkable
-class TracemillObserver(Protocol):
+class TraceforgeObserver(Protocol):
     async def on_pre_tool_call(self, tool_name: str, args: dict) -> SessionMeta:
         """Primary classification point.""" ...
     async def on_post_tool_call(self, tool_name: str, result: dict) -> SessionMeta:
@@ -949,17 +949,17 @@ class ToolResultEvent(SessionEvent):
     pre_call_event_id: str           # Explicit back-reference
 ```
 
-**Event creation responsibility:** The **adapter** (framework-specific integration layer) is responsible for constructing BOTH `ToolCallEvent` (pre-call) and `ToolResultEvent` (post-call). The adapter generates `event_id`, `span_id`, `source_event_key`, timestamps, and serializes tool args/results to canonical JSON strings (immutable). `TracemillObserver` delegates to the adapter for event construction, then submits to the enricher queue. Phase 1 uses `event.source_event_key` for idempotency checks — no separate key derivation step needed.
+**Event creation responsibility:** The **adapter** (framework-specific integration layer) is responsible for constructing BOTH `ToolCallEvent` (pre-call) and `ToolResultEvent` (post-call). The adapter generates `event_id`, `span_id`, `source_event_key`, timestamps, and serializes tool args/results to canonical JSON strings (immutable). `TraceforgeObserver` delegates to the adapter for event construction, then submits to the enricher queue. Phase 1 uses `event.source_event_key` for idempotency checks — no separate key derivation step needed.
 
 **Lifecycle events (session\_start/end):** Handled in Phase 1 early branch (see pipeline diagram). Phase 1 initializes/finalizes session state. Phase 2/3 are SKIPPED entirely. SessionMeta is returned with `classification=None`, `risk_assessment=None`, `recommendation=None`, `evidence=None`. Budget snapshot is always populated (zero at session\_start, final at session\_end).
 
-**Async boundary:** `TracemillObserver` methods are async because they await the enricher's processing queue. The enricher actor processes events sequentially (single-threaded loop with `asyncio.Queue`). Observer `await`s until the actor completes processing and returns `SessionMeta`. No impedance mismatch — both are async, actor serializes internally.
+**Async boundary:** `TraceforgeObserver` methods are async because they await the enricher's processing queue. The enricher actor processes events sequentially (single-threaded loop with `asyncio.Queue`). Observer `await`s until the actor completes processing and returns `SessionMeta`. No impedance mismatch — both are async, actor serializes internally.
 
 ---
 
 ## 10. Escalation Context
 
-Rich metadata emitted when recommendation is `escalate` or `deny`. Only possible because tracemill already classified the action across 7 dimensions.
+Rich metadata emitted when recommendation is `escalate` or `deny`. Only possible because traceforge already classified the action across 7 dimensions.
 
 ```python
 @dataclass(frozen=True)
@@ -979,7 +979,7 @@ class EscalationContext:
     timestamp: datetime
 ```
 
-Reference resolver protocol (for downstream — not tracemill core):
+Reference resolver protocol (for downstream — not traceforge core):
 
 ```python
 @runtime_checkable
@@ -987,7 +987,7 @@ class EscalationResolver(Protocol):
     async def resolve(self, context: EscalationContext) -> Literal["allow", "deny", "suspend"]
 ```
 
-Tracemill emits `EscalationContext` as part of `Evidence`. It does NOT call resolvers itself.
+Traceforge emits `EscalationContext` as part of `Evidence`. It does NOT call resolvers itself.
 
 ---
 
@@ -1025,7 +1025,7 @@ class Evidence:
     escalation: EscalationContext | None = None
 ```
 
-Emitted for `warn`, `escalate`, and `deny` recommendations. (Since tracemill never enforces, evidence IS the primary deliverable for security-relevant events.) Downstream SIEMs can query by dimension (`effect=destructive AND scope=host`).
+Emitted for `warn`, `escalate`, and `deny` recommendations. (Since traceforge never enforces, evidence IS the primary deliverable for security-relevant events.) Downstream SIEMs can query by dimension (`effect=destructive AND scope=host`).
 
 ---
 
@@ -1076,7 +1076,7 @@ Each classified event carries:
 | `id` | Auto UUID4 | Yes | Unique event identity |
 | `session_id` | Source stream | Yes | Session correlation |
 | `timestamp` | Source (UTC enforced) | Yes | When the action occurred |
-| `observed_at` | Tracemill ingestion | Yes | When tracemill received it |
+| `observed_at` | Traceforge ingestion | Yes | When traceforge received it |
 | `turn_id` | Adapter extracts from framework | Optional | Conversation turn correlation |
 | `sequence` | Monotonic counter | Yes | Ordering guarantee |
 | `agent_model` | Framework payload | Optional | Which LLM produced this |
@@ -1109,7 +1109,7 @@ Motivation tracking is session-stateful in the enricher — on `tool.call.starte
 │                          │ persist every event           │
 │  ┌───────────────────────▼─────────────────────────┐   │
 │  │  SystemStore (SQLite — source of truth)          │   │
-│  │  ~/.tracemill/system.db                          │   │
+│  │  ~/.traceforge/system.db                          │   │
 │  │                                                  │   │
 │  │  session_state      — per-event write-through    │   │
 │  │  mcp_profiles       — cross-session              │   │
@@ -1182,7 +1182,7 @@ PRAGMA journal_mode = WAL;
 PRAGMA busy_timeout = 5000;
 PRAGMA synchronous = NORMAL;
 
--- Schema managed by Alembic (src/tracemill/migrations/)
+-- Schema managed by Alembic (src/traceforge/migrations/)
 
 CREATE TABLE session_state (
     session_id TEXT PRIMARY KEY,
@@ -1280,7 +1280,7 @@ CREATE TABLE session_summaries (
 
 **Startup lifecycle:**
 
-1. Open/create `~/.tracemill/system.db`
+1. Open/create `~/.traceforge/system.db`
 2. Apply pragmas (WAL, busy\_timeout)
 3. Run Alembic migrations (see below)
 4. For each active session: load `session_state` row → hydrate in-memory SessionState
@@ -1294,7 +1294,7 @@ CREATE TABLE session_summaries (
 
 **Crash recovery:** SQLite WAL guarantees — last committed transaction is the recovery point. In-memory cache is rebuilt from `session_state` on restart. At most one event's enrichment is lost (the one being processed at crash time). `last_sequence` ensures the source re-delivers it.
 
-**Schema migrations:** Managed by Alembic (already a project dependency). Migration scripts live in `src/tracemill/migrations/`. On startup, `alembic.command.upgrade(config, "head")` runs automatically. Downgrades supported for rollback. Schema version tracked in Alembic's `alembic_version` table (replaces `schema_meta`).
+**Schema migrations:** Managed by Alembic (already a project dependency). Migration scripts live in `src/traceforge/migrations/`. On startup, `alembic.command.upgrade(config, "head")` runs automatically. Downgrades supported for rollback. Schema version tracked in Alembic's `alembic_version` table (replaces `schema_meta`).
 
 **SQLite write failure handling:** If a write-through fails:
 
@@ -1307,14 +1307,14 @@ CREATE TABLE session_summaries (
 
 ```yaml
 system:
-  store_path: ~/.tracemill/system.db
+  store_path: ~/.traceforge/system.db
   retention_days: 90
   queue_capacity: 1000        # per-session backpressure limit
 ```
 
 ---
 
-## Tracemill Advantages Over AGT
+## Traceforge Advantages Over AGT
 
 | Feature | Why AGT Can't |  |
 | --- | --- | --- |
@@ -1331,4 +1331,4 @@ system:
 - Multi-language SDKs — Python-native
 - Cedar/Rego policy — YAML predicates are simpler for this domain
 - Agent mesh/hypervisor — orchestration is out of scope
-- Enforcement/gating — tracemill classifies, it doesn't gate
+- Enforcement/gating — traceforge classifies, it doesn't gate

@@ -3,7 +3,7 @@
 The stream is a *streaming enrichment*: every event is stamped with its live
 ``activity_id``/``step_id`` and emitted immediately (never buffered), and a
 closed activity's titles are returned out-of-band as append-only
-:class:`~tracemill.types.TitleUpdate` records keyed by those ids.
+:class:`~traceforge.types.TitleUpdate` records keyed by those ids.
 
 Two layers, mirroring the boundary-stream tests:
 
@@ -23,9 +23,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from tracemill.title import SessionTitleStream, TitleInferencer
-from tracemill.title._resolve import span_dir as _span_dir
-from tracemill.types import EventMetadata, SessionEvent
+from traceforge.title import SessionTitleStream, TitleInferencer
+from traceforge.title._resolve import span_dir as _span_dir
+from traceforge.types import EventMetadata, SessionEvent
 
 
 def _event(i, tool="edit", boundary=None, payload=None, kind="tool.call", metadata=True):

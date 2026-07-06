@@ -1,0 +1,88 @@
+# Google Antigravity — YAML mapping for traceforge
+#
+# Native source: the Antigravity Python SDK's ``agent.conversation.history`` —
+# a ``list[google.antigravity.types.Step]`` dumped verbatim per line with
+# ``model_dump(mode="json")`` by scripts/capture_traces/capture_antigravity.py
+# (or synthesize_antigravity_fixture.py for the shape fixture).
+#
+# Each Step's identity is a compound of ``type`` (StepType) + ``source``
+# (StepSource), so there is no single native type_field. The ``antigravity``
+# preprocessor synthesizes a flat ``event_type`` discriminator and fans a
+# TOOL_CALL step out into one ``tool_call`` event per entry in ``tool_calls``.
+#
+# Antigravity has no Windows IDE; the SDK runs under WSL/Docker (the manylinux
+# localharness binary needs glibc >= 2.36). Tool *results* are consumed inside
+# the Go localharness and never surface on a history Step, so this mapping emits
+# tool calls but no tool-result event.
+
+framework: antigravity
+framework_version: "google-antigravity-sdk"
+ingestion_mode: file_watch
+type_field: event_type
+preprocessor: antigravity
+default_kind: raw
+
+motivation:
+  sources:
+    - events: ["assistant_message"]
+      field: content
+      role: intent
+    - events: ["thinking"]
+      field: content
+      role: reasoning
+  targets: ["tool.call.started"]
+
+events:
+  # ── Messages ───────────────────────────────────────────────────────────────
+  user_message:
+    kind: message.user
+    payload:
+      content: content
+      step_index: step_index
+      source: source
+
+  assistant_message:
+    kind: message.assistant
+    payload:
+      content: content
+      step_index: step_index
+      source: source
+
+  system_message:
+    kind: message.system
+    payload:
+      content: content
+      step_index: step_index
+
+  # ── Reasoning ────────────────────────────────────────────────────────────
+  thinking:
+    kind: reasoning.started
+    payload:
+      content: content
+      step_index: step_index
+
+  # ── Tool invocations (fanned out from Step.tool_calls[]) ─────────────────────
+  # The SDK history records the CALL (name + args); builtin tool output is fed
+  # back to the model inside the Go localharness and is not a history field.
+  tool_call:
+    kind: tool.call.started
+    payload:
+      tool_name: tool_name
+      args: args
+      tool_call_id: tool_call_id
+      path: path
+      step_index: step_index
+
+  # ── Context compaction marker ────────────────────────────────────────────────
+  compaction:
+    kind: session.info
+    payload:
+      step_index: step_index
+
+  # ── Terminal finish step (carries structured_output) ─────────────────────────
+  finish:
+    kind: task.completed
+    payload:
+      content: content
+      structured_output: structured_output
+      step_index: step_index

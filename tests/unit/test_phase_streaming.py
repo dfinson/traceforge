@@ -8,7 +8,7 @@ import random
 
 import pytest
 
-from tracemill.phase.segmentation import (
+from traceforge.phase.segmentation import (
     IncrementalSegmentation,
     SegmentationParams,
     session_segmentation_features,

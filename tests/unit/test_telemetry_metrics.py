@@ -18,8 +18,8 @@ import time
 
 import pytest
 
-from tracemill import EventPipeline, SessionEvent, StorageSink
-from tracemill.telemetry import MetricsSnapshot, PipelineMetrics, SinkMetrics
+from traceforge import EventPipeline, SessionEvent, StorageSink
+from traceforge.telemetry import MetricsSnapshot, PipelineMetrics, SinkMetrics
 from tests.conftest import RecordingSink, make_event
 
 
@@ -252,7 +252,7 @@ class TestFlushLogging:
         pipeline.subscribe(lambda e: None)
         await pipeline.push(make_event())
 
-        with caplog.at_level(logging.DEBUG, logger="tracemill.pipeline"):
+        with caplog.at_level(logging.DEBUG, logger="traceforge.pipeline"):
             await pipeline.flush()
 
         assert any("self-metrics" in r.getMessage() for r in caplog.records)
@@ -262,7 +262,7 @@ class TestFlushLogging:
         pipeline.subscribe(lambda e: None)
         await pipeline.push(make_event())
 
-        with caplog.at_level(logging.DEBUG, logger="tracemill.pipeline"):
+        with caplog.at_level(logging.DEBUG, logger="traceforge.pipeline"):
             await pipeline.flush()
 
         assert not any("self-metrics" in r.getMessage() for r in caplog.records)

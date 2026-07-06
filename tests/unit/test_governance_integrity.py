@@ -19,17 +19,17 @@ from pathlib import Path
 
 import pytest
 
-from tracemill.classify.config import get_default_engine
-from tracemill.classify.core import Classification
-from tracemill.cli.factory import create_default_pipeline
-from tracemill.config import GovernanceConfig
-from tracemill.governance.budget import BudgetTracker
-from tracemill.governance.integrity import IntegrityVerifier, IntegrityWrite
-from tracemill.governance.labeler import GovernanceLabeler
-from tracemill.governance.persistence import SystemStore
-from tracemill.governance.pipeline import GovernancePipeline
-from tracemill.governance.rules import parse_rules
-from tracemill.governance.types import EnrichmentContext, ToolCallEvent
+from traceforge.classify.config import get_default_engine
+from traceforge.classify.core import Classification
+from traceforge.cli.factory import create_default_pipeline
+from traceforge.config import GovernanceConfig
+from traceforge.governance.budget import BudgetTracker
+from traceforge.governance.integrity import IntegrityVerifier, IntegrityWrite
+from traceforge.governance.labeler import GovernanceLabeler
+from traceforge.governance.persistence import SystemStore
+from traceforge.governance.pipeline import GovernancePipeline
+from traceforge.governance.rules import parse_rules
+from traceforge.governance.types import EnrichmentContext, ToolCallEvent
 
 REPO = "acme/widgets"
 _TS = "2024-01-01T00:00:00+00:00"
@@ -47,7 +47,7 @@ def rules():
     rules_path = (
         Path(__file__).parent.parent.parent
         / "src"
-        / "tracemill"
+        / "traceforge"
         / "classify"
         / "data"
         / "recommendation_rules.yaml"
@@ -322,7 +322,7 @@ class TestDefaultInjection:
         assert "integrity_unverified" not in meta_drift.risk_assessment.factors
 
     def test_watch_style_pipeline_is_live_without_project_root(self, store):
-        # The way `tracemill watch`/`score`/`replay` build the pipeline: the factory is
+        # The way `traceforge watch`/`score`/`replay` build the pipeline: the factory is
         # called with NO project_root. This is exactly the path that was dead before this
         # fix — every real CLI entry omits project_root, so a construction-time-gated
         # verifier was None there. A per-event verifier makes it live regardless.

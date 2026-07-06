@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check framework SDK compatibility with tracemill adapters.
+"""Check framework SDK compatibility with traceforge adapters.
 
 Validates that the installed version of a framework SDK still exposes the
 types/functions our adapters depend on. Exits non-zero on breakage.
@@ -132,7 +132,7 @@ def check_maf() -> list[str]:
     """Verify MAF OTel adapter can parse a representative span."""
     errors: list[str] = []
     try:
-        from tracemill.adapters.otel import OtelSpanAdapter
+        from traceforge.adapters.otel import OtelSpanAdapter
 
         adapter = OtelSpanAdapter(ingestion_mode="stream", session_id="compat-test")
         span = {
@@ -156,7 +156,7 @@ def check_aider() -> list[str]:
     """Verify AiderPreParser can parse aider's format and produce valid events."""
     errors: list[str] = []
     try:
-        from tracemill.parsers.aider import AiderPreParser
+        from traceforge.parsers.aider import AiderPreParser
 
         parser = AiderPreParser()
         sample = (
@@ -196,13 +196,13 @@ def check_aider() -> list[str]:
 
         # Validate end-to-end through MappedJsonAdapter
         import json
-        from tracemill.adapters.mapped_json import MappedJsonAdapter
+        from traceforge.adapters.mapped_json import MappedJsonAdapter
         from pathlib import Path
 
         yaml_path = (
             Path(__file__).resolve().parent.parent
             / "src"
-            / "tracemill"
+            / "traceforge"
             / "mappings"
             / "aider_markdown.yaml"
         )
@@ -230,7 +230,7 @@ def _validate_mapping_with_sample(framework: str, sample_event: dict) -> list[st
     yaml_path = (
         Path(__file__).resolve().parent.parent
         / "src"
-        / "tracemill"
+        / "traceforge"
         / "mappings"
         / f"{framework}.yaml"
     )
@@ -239,7 +239,7 @@ def _validate_mapping_with_sample(framework: str, sample_event: dict) -> list[st
         return errors
 
     try:
-        from tracemill.adapters.mapped_json import MappedJsonAdapter
+        from traceforge.adapters.mapped_json import MappedJsonAdapter
 
         adapter = MappedJsonAdapter.from_yaml(str(yaml_path), session_id="compat-test")
         line = json.dumps(sample_event)

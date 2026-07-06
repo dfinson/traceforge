@@ -1,0 +1,251 @@
+# Canonical tool name aliases — maps variant names to their canonical form.
+#
+# Each entry maps an exact tool_name string (as it appears in tool_call events)
+# to a canonical tool identity. Sources are attributed per-harness.
+#
+# Add entries here to teach traceforge about your custom tool names.
+
+canonical_tools:
+  # ─── Shell execution ───────────────────────────────────────────────────────
+  # Canonical: "shell" (dialect detected from command content, not tool name)
+  #
+  shell: shell                     # OpenAI Codex CLI (Responses API native)
+  bash: shell                      # GitHub Copilot, SWE-agent, Cline (native models)
+  powershell: shell                # GitHub Copilot (Windows)
+  Bash: shell                      # Claude Code, OpenAI Codex RS (hook name)
+  PowerShell: shell                # Claude Code (Windows)
+  execute_command: shell           # Cline (GENERIC model), Roo Code
+  run_terminal_command: shell      # Continue, Cursor
+  run_command: shell               # Windsurf
+  executeCommand: shell            # Amazon Q Developer
+  execute_bash: shell              # OpenHands
+  sh: shell                        # Unix shell alias
+  zsh: shell                       # Zsh alias
+  cmd: shell                       # Windows cmd.exe
+
+  # ─── File read ─────────────────────────────────────────────────────────────
+  # Canonical: "view" (read file contents without modification)
+  #
+  view: view                       # GitHub Copilot
+  Read: view                       # Claude Code
+  read_file: view                  # Cline, Roo Code, Continue, Cursor, LangChain
+  read_file_range: view            # Continue
+  fsRead: view                     # Amazon Q Developer
+  view_code_item: view             # Windsurf
+  read_currently_open_file: view   # Continue
+  NotebookRead: view               # Claude Code (notebooks)
+  LS: view                         # Claude Code (list directory)
+  ls: view                         # Continue
+  list_dir: view                   # Cursor, Windsurf, Roo Code
+  list_files: view                 # Cline, Roo Code
+  fsList: view                     # Amazon Q Developer
+
+  # ─── File write (edit existing) ────────────────────────────────────────────
+  # Canonical: "edit" (modify existing file content)
+  #
+  edit: edit                       # GitHub Copilot, Roo Code (native models)
+  Edit: edit                       # Claude Code
+  MultiEdit: edit                  # Claude Code
+  multi_edit: edit                 # Continue
+  edit_file: edit                  # Cursor, Roo Code
+  edit_existing_file: edit         # Continue
+  single_find_and_replace: edit    # Continue
+  replace_in_file: edit            # Cline
+  replace_file_contents: edit      # Windsurf
+  edit_code: edit                  # Windsurf
+  search_replace: edit             # Roo Code
+  search_and_replace: edit         # Sweep
+  fsSearchAndReplace: edit         # Amazon Q Developer
+  str_replace_editor: edit         # OpenHands, SWE-agent
+  apply_patch: edit                # OpenAI Codex RS, Cline
+  apply_diff: edit                 # Roo Code
+  NotebookEdit: edit               # Claude Code (notebooks)
+
+  # ─── File write (create new) ───────────────────────────────────────────────
+  # Canonical: "create" (create new file)
+  #
+  create: create                   # GitHub Copilot
+  Write: create                    # Claude Code
+  create_file: create              # Cursor, Cline
+  create_new_file: create          # Continue
+  write_to_file: create            # Cline, Roo Code
+  write_code: create               # Windsurf
+  write_file: create               # LangChain
+  fsWrite: create                  # Amazon Q Developer
+  fsAppend: create                 # Amazon Q Developer
+
+  # ─── Content search (grep-like) ────────────────────────────────────────────
+  # Canonical: "grep" (search file contents by pattern)
+  #
+  grep: grep                       # GitHub Copilot
+  Grep: grep                       # Claude Code
+  grep_search: grep                # Continue, Cursor
+  search_files: grep               # Cline, Roo Code
+  search_code_snippet: grep        # Windsurf
+  search_file: grep                # SWE-agent
+  search_dir: grep                 # SWE-agent
+  rg: grep                         # ripgrep CLI binary name
+  ripgrep: grep                    # ripgrep full name
+  GrepTool: grep                   # Anthropic internal tooling
+
+  # ─── File pattern search (glob-like) ───────────────────────────────────────
+  # Canonical: "glob" (find files by name/path pattern)
+  #
+  glob: glob                       # GitHub Copilot
+  Glob: glob                       # Claude Code
+  file_glob_search: glob           # Continue
+  find_by_name: glob               # Cursor, Windsurf
+  find_file: glob                  # SWE-agent
+  GlobTool: glob                   # Anthropic internal tooling
+
+  # ─── Semantic codebase search ──────────────────────────────────────────────
+  # Canonical: "codebase_search" (AI-powered semantic search, NOT pattern grep)
+  #
+  codebase_search: codebase_search  # Cursor, Roo Code
+  codebase: codebase_search         # Continue
+  list_code_definition_names: codebase_search  # Cline
+
+  # ─── Git operations ────────────────────────────────────────────────────────
+  # These are only relevant for harnesses with dedicated git tools (rare).
+  # Most agents shell out to git via their shell tool.
+  #
+  git_commit: git_commit
+  git_push: git_push
+  git_diff: git_diff
+  git_status: git_status
+  git_add: git_add
+  git_log: git_log
+  git_pull: git_pull
+  git_merge: git_merge
+  git_rebase: git_rebase
+  git_checkout: git_checkout
+  git_branch: git_branch
+  view_diff: git_diff              # Continue
+
+  # ─── Internal / bookkeeping ────────────────────────────────────────────────
+  # Canonical: "report_intent" (agent intent declaration, not user-facing)
+  #
+  report_intent: report_intent     # GitHub Copilot
+  think: think                     # Internal reasoning step
+  plan_mode_respond: think         # Cline
+  act_mode_respond: think          # Cline
+  switch_mode: think               # Roo Code
+  update_todo_list: state_write    # Roo Code
+  attempt_completion: report_intent  # Cline (task complete signal)
+  finish: report_intent            # OpenHands, SWE-agent (submit)
+  submit: report_intent            # SWE-agent
+
+  # ─── User interaction ──────────────────────────────────────────────────────
+  # Canonical: "ask_user" (prompt user for input)
+  #
+  ask_user: ask_user               # GitHub Copilot
+  ask_followup_question: ask_user  # Cline, Roo Code
+
+  # ─── Web fetch / browse ────────────────────────────────────────────────────
+  #
+  WebFetch: web_fetch              # Claude Code
+  web_fetch: web_fetch             # Cline, Roo Code
+  fetch_url: web_fetch             # generic
+  fetch_url_content: web_fetch     # Continue
+  read_url: web_fetch              # Windsurf
+  WebSearch: web_search            # Claude Code, OpenAI Codex
+  web_search: web_search           # Cline, Roo Code
+  search_web: web_search           # Continue
+  browser_action: web_browse       # Cline
+  browser: web_browse              # OpenHands
+  view_web_page: web_browse        # Windsurf
+
+  # ─── Agent delegation / sub-tasks ──────────────────────────────────────────
+  # Canonical: "task" (spawn sub-agent or delegate work)
+  #
+  Task: task                       # Claude Code
+  task: task                       # GitHub Copilot
+  spawn_agent: task                # OpenAI Codex RS
+  new_task: task                   # Cline
+  subagent: task                   # Cline, Roo Code
+
+  # ─── Delete file ───────────────────────────────────────────────────────────
+  # Canonical: "delete_file"
+  #
+  delete_file: delete_file         # Cursor, Windsurf, Cline
+
+
+# ─── Verb inference ──────────────────────────────────────────────────────────
+# For unknown tools: extract verb prefix from tool name → infer effect + action.
+# Example: "find_users" → verb "find" → (read_only, retrieve)
+# This is a HEURISTIC fallback, not an alias system.
+
+verb_inference:
+  # Read-only verbs → retrieve actions
+  get: { effect: read_only, action: retrieve }
+  list: { effect: read_only, action: retrieve }
+  read: { effect: read_only, action: retrieve }
+  search: { effect: read_only, action: retrieve }
+  query: { effect: read_only, action: retrieve }
+  describe: { effect: read_only, action: analyze }
+  fetch: { effect: read_only, action: retrieve }
+  browse: { effect: read_only, action: retrieve }
+  find: { effect: read_only, action: retrieve }
+  show: { effect: read_only, action: retrieve }
+  inspect: { effect: read_only, action: analyze }
+  check: { effect: read_only, action: validate }
+  scan: { effect: read_only, action: validate }
+  view: { effect: read_only, action: retrieve }
+
+  # Mutating verbs → persist/modify/generate actions
+  create: { effect: mutating, action: generate }
+  update: { effect: mutating, action: modify }
+  write: { effect: mutating, action: persist }
+  set: { effect: mutating, action: persist }
+  add: { effect: mutating, action: persist }
+  append: { effect: mutating, action: persist }
+  apply: { effect: mutating, action: execute }
+  run: { effect: mutating, action: execute }
+  execute: { effect: mutating, action: execute }
+  start: { effect: mutating, action: execute }
+  trigger: { effect: mutating, action: execute }
+  deploy: { effect: mutating, action: deliver }
+  publish: { effect: mutating, action: deliver }
+  push: { effect: mutating, action: deliver }
+  send: { effect: mutating, action: deliver }
+  post: { effect: mutating, action: deliver }
+  submit: { effect: mutating, action: deliver }
+  upload: { effect: mutating, action: deliver }
+  fork: { effect: mutating, action: generate }
+  star: { effect: mutating, action: persist }
+  assign: { effect: mutating, action: modify }
+  merge: { effect: mutating, action: modify }
+  approve: { effect: mutating, action: modify }
+  dismiss: { effect: mutating, action: modify }
+  resolve: { effect: mutating, action: modify }
+  configure: { effect: mutating, action: configure }
+  install: { effect: mutating, action: configure }
+  scale: { effect: mutating, action: configure }
+  build: { effect: mutating, action: transform }
+  pull: { effect: mutating, action: retrieve }
+  navigate: { effect: mutating, action: execute }
+  click: { effect: mutating, action: execute }
+  type: { effect: mutating, action: execute }
+  fill: { effect: mutating, action: execute }
+  select: { effect: mutating, action: execute }
+  hover: { effect: mutating, action: execute }
+  press: { effect: mutating, action: execute }
+  drag: { effect: mutating, action: execute }
+  move: { effect: mutating, action: modify }
+  edit: { effect: mutating, action: modify }
+  replace: { effect: mutating, action: modify }
+  rename: { effect: mutating, action: modify }
+  restore: { effect: mutating, action: modify }
+  archive: { effect: mutating, action: modify }
+  manage: { effect: mutating, action: modify }
+
+  # Destructive verbs
+  delete: { effect: destructive, action: remove }
+  destroy: { effect: destructive, action: remove }
+  drop: { effect: destructive, action: remove }
+  remove: { effect: destructive, action: remove }
+  clear: { effect: destructive, action: remove }
+  unstar: { effect: mutating, action: modify }
+  stop: { effect: mutating, action: execute }
+  cancel: { effect: mutating, action: execute }
+  terminate: { effect: destructive, action: remove }

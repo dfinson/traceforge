@@ -4,7 +4,7 @@
 # docs/01-activity-step-classifier.md. Where the baselines experiment *measures*
 # generalisation and discards models, this experiment *fits the winning causal
 # contract on every labelled gap* and persists a single reusable bundle that
-# ships inside the core package (src/tracemill/boundary/data/boundary-model.joblib),
+# ships inside the core package (src/traceforge/boundary/data/boundary-model.joblib),
 # plus a qualitative end-to-end pass over unseen real-world Copilot sessions.
 
 experiment:
@@ -44,7 +44,7 @@ dataset:
 model:
   feature_set: combined-seg
   estimator: LogisticRegression(class_weight=balanced, C=1.0, max_iter=2000)
-  bundle_path: src/tracemill/boundary/data/boundary-model.joblib
+  bundle_path: src/traceforge/boundary/data/boundary-model.joblib
   causal: true
   dropped_features:
     - name: position_in_session

@@ -30,7 +30,7 @@ import logging
 import sys
 from collections import OrderedDict
 
-from tracemill_research.paths import DATA_PROCESSED
+from traceforge_research.paths import DATA_PROCESSED
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("stitch-windows")

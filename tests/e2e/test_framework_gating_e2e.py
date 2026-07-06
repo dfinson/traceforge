@@ -1,4 +1,4 @@
-"""End-to-end tests: real framework SDKs + tracemill gating pipeline.
+"""End-to-end tests: real framework SDKs + traceforge gating pipeline.
 
 Each test exercises the FULL flow:
   1. Create a real GovernancePipeline with a GatePolicy
@@ -15,16 +15,16 @@ import time
 
 import pytest
 
-from tracemill.governance.pipeline import GovernancePipeline
-from tracemill.sdk.gate_policy import GatePolicy
-from tracemill.sdk.gate_types import (
+from traceforge.governance.pipeline import GovernancePipeline
+from traceforge.sdk.gate_policy import GatePolicy
+from traceforge.sdk.gate_types import (
     GateContext,
     PostflightAction,
     PostflightVerdict,
     ToolCallRequest,
     ToolCallResult,
 )
-from tracemill.sdk.verdict import Verdict
+from traceforge.sdk.verdict import Verdict
 
 
 # ─── Shared gate functions ────────────────────────────────────────────────────
@@ -694,7 +694,7 @@ class TestPiiGateE2E:
 
     def test_credit_card_suppressed(self):
         """Credit card numbers in tool output trigger SUPPRESS (critical entity)."""
-        from tracemill.gates.pii import pii_postflight_gate
+        from traceforge.gates.pii import pii_postflight_gate
         from langchain_core.tools import StructuredTool
 
         def payment_tool(customer_id: str) -> str:
@@ -718,7 +718,7 @@ class TestPiiGateE2E:
 
     def test_ssn_suppressed(self):
         """SSN in tool output triggers SUPPRESS (critical entity)."""
-        from tracemill.gates.pii import pii_postflight_gate
+        from traceforge.gates.pii import pii_postflight_gate
         from langchain_core.tools import StructuredTool
 
         def lookup_tool(name: str) -> str:
@@ -741,7 +741,7 @@ class TestPiiGateE2E:
 
     def test_clean_output_passes_through(self):
         """Output without PII passes through unchanged."""
-        from tracemill.gates.pii import pii_postflight_gate
+        from traceforge.gates.pii import pii_postflight_gate
         from langchain_core.tools import StructuredTool
 
         def safe_tool(x: str) -> str:
@@ -775,7 +775,7 @@ class TestScoreAPIE2E:
         import json
         from http.client import HTTPConnection
 
-        from tracemill.cli.score import ScoreServer
+        from traceforge.cli.score import ScoreServer
 
         pipeline = make_pipeline(preflight=allow_all_gate)
         server = ScoreServer(pipeline, listen="127.0.0.1:0")
@@ -812,7 +812,7 @@ class TestScoreAPIE2E:
         import json
         from http.client import HTTPConnection
 
-        from tracemill.cli.score import ScoreServer
+        from traceforge.cli.score import ScoreServer
 
         pipeline = make_pipeline(preflight=allow_all_gate)
         server = ScoreServer(pipeline, listen="127.0.0.1:19877")

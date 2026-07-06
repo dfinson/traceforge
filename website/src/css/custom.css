@@ -1,0 +1,108 @@
+/**
+ * TraceForge brand theme.
+ * Palette extracted from the official logo:
+ *   brand black #00020C · page bg #05070F · surface #0E1220
+ *   blue #256EF3 · purple #7359AE · coral #EF686B · orange #FF9921 (primary / "Forge")
+ *   headings #FFFFFF · body #E6E9F2
+ *   signature gradient: #256EF3 -> #7359AE -> #EF686B -> #FF9921
+ */
+
+/* ---- brand tokens (both themes) ---- */
+:root {
+  --tf-black: #00020c;
+  --tf-bg: #05070f;
+  --tf-surface: #0e1220;
+  --tf-blue: #256ef3;
+  --tf-purple: #7359ae;
+  --tf-coral: #ef686b;
+  --tf-orange: #ff9921;
+  --tf-body: #e6e9f2;
+  --tf-gradient: linear-gradient(90deg, #256ef3 0%, #7359ae 36%, #ef686b 66%, #ff9921 100%);
+
+  /* orange primary ramp (derived from #FF9921) */
+  --ifm-color-primary: #ff9921;
+  --ifm-color-primary-dark: #ff8a02;
+  --ifm-color-primary-darker: #f68300;
+  --ifm-color-primary-darkest: #cb6c00;
+  --ifm-color-primary-light: #ffa740;
+  --ifm-color-primary-lighter: #ffae52;
+  --ifm-color-primary-lightest: #ffc078;
+
+  --ifm-code-font-size: 92%;
+  --ifm-font-family-base: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial,
+    sans-serif;
+  --docusaurus-highlighted-code-line-bg: rgba(255, 153, 33, 0.14);
+}
+
+/* ---- dark theme (default) ---- */
+[data-theme='dark'] {
+  --ifm-color-primary: #ff9921;
+  --ifm-color-primary-dark: #ff8a02;
+  --ifm-color-primary-darker: #f68300;
+  --ifm-color-primary-darkest: #cb6c00;
+  --ifm-color-primary-light: #ffa740;
+  --ifm-color-primary-lighter: #ffae52;
+  --ifm-color-primary-lightest: #ffc078;
+
+  --ifm-background-color: #05070f;
+  --ifm-background-surface-color: #0e1220;
+  --ifm-navbar-background-color: rgba(0, 2, 12, 0.92);
+  --ifm-footer-background-color: #00020c;
+
+  --ifm-color-content: #e6e9f2;
+  --ifm-color-content-secondary: #aab2c8;
+  --ifm-heading-color: #ffffff;
+
+  --ifm-card-background-color: #0e1220;
+  --ifm-toc-border-color: #1b2133;
+  --ifm-hr-background-color: #1b2133;
+  --ifm-table-border-color: #1b2133;
+  --ifm-table-stripe-background: rgba(255, 255, 255, 0.02);
+  --ifm-blockquote-color: #aab2c8;
+  --ifm-blockquote-border-color: var(--tf-orange);
+
+  --docusaurus-highlighted-code-line-bg: rgba(255, 153, 33, 0.18);
+}
+
+/* ---- light theme (kept usable via the toggle) ---- */
+[data-theme='light'] {
+  --ifm-background-color: #ffffff;
+  --ifm-heading-color: #0b1020;
+  --ifm-blockquote-border-color: var(--tf-orange);
+}
+
+[data-theme='dark'] .navbar {
+  border-bottom: 1px solid #12182a;
+  backdrop-filter: saturate(1.2) blur(8px);
+}
+
+[data-theme='dark'] .footer {
+  border-top: 1px solid #12182a;
+}
+
+/* Utility: signature gradient text (hero H1, accents). */
+.text-gradient {
+  background: var(--tf-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Section accent under headings on doc pages. */
+[data-theme='dark'] .markdown h2 {
+  border-bottom: 1px solid #161d30;
+  padding-bottom: 0.3rem;
+}
+
+.menu__link--active,
+.navbar__link--active,
+.table-of-contents__link--active {
+  color: var(--tf-orange) !important;
+}
+
+/* Subtle orange focus ring for buttons/links. */
+.button--primary {
+  --ifm-button-color: #1a1200;
+  font-weight: 600;
+}

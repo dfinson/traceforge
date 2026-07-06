@@ -24,3 +24,8 @@ run-golden*.ps1
 agent-targets.txt
 
 commit_msg.txt
+
+# Docusaurus site (website/ is an independent Node subproject)
+website/node_modules/
+website/build/
+website/.docusaurus/

@@ -734,7 +734,7 @@ PATH_LABEL_RULES = [
 ]
 ```
 
-MCP profiles carry `clearance` level (stored in `mcp_fingerprints`). Violations surface as `ifc_violation` in the structure dimension.
+MCP profiles carry a `clearance` level (stored in `mcp_profiles`). Violations surface as `ifc_violation` in the structure dimension.
 
 **Lineage model for IFC detection:**
 
@@ -764,7 +764,7 @@ When lineage cannot be established (adapter doesn't provide sufficient context, 
 **Taint ledger lifecycle:**
 
 - **Retention:** Bounded to last 200 entries per session. Oldest entries pruned on insert (FIFO). Sufficient for multi-step tool chains within a session — taint rarely propagates beyond \~20 events.
-- **Persistence:** Serialized as `pii_taints_json` in `session_state` table (see Session Memory schema). Survives restarts.
+- **Persistence:** Stored as rows in the normalized `taint_entries` table — one row per entry, with an `ordinal` column that preserves append order so the bounded ledger survives a reload (see Session Memory schema). Survives restarts.
 - **Matching algorithm:** Taint propagates when a subsequent event's tool args contain a **payload pointer** (JSONPath) that references a prior tainted output. Matching is by `(event_id, payload_pointer)` tuple equality — stable across serialization/restart. If event N's output field path appears in event M's input args referencing that output, taint flows. No content-hash or token-overlap heuristics (too fragile).
 - **Ambiguous lineage:** When pointer matching is inconclusive (adapter doesn't provide JSONPath, or content was transformed), taint is NOT propagated — conservative approach avoids false positives.
 
@@ -1104,7 +1104,7 @@ Motivation tracking is session-stateful in the enricher — on `tool.call.starte
 │                                                         │
 │  ┌─────────────────────────────────────────────────┐   │
 │  │  SessionState (in-memory write-through cache)    │   │
-│  │  budget, drift_window, last_messages, pii_taints │   │
+│  │  budget, drift_window, last_messages, taints     │   │
 │  └──────────────────────┬──────────────────────────┘   │
 │                          │ persist every event           │
 │  ┌───────────────────────▼─────────────────────────┐   │
@@ -1112,7 +1112,7 @@ Motivation tracking is session-stateful in the enricher — on `tool.call.starte
 │  │  ~/.tracemill/system.db                          │   │
 │  │                                                  │   │
 │  │  session_state      — per-event write-through    │   │
-│  │  mcp_fingerprints   — cross-session              │   │
+│  │  mcp_profiles       — cross-session              │   │
 │  │  drift_baselines    — cross-session              │   │
 │  │  content_hashes     — cross-session              │   │
 │  │  session_summaries  — cross-session              │   │
@@ -1186,31 +1186,64 @@ PRAGMA synchronous = NORMAL;
 
 CREATE TABLE session_state (
     session_id TEXT PRIMARY KEY,
-    budget_json TEXT NOT NULL DEFAULT '{"version":1,"total_tool_calls":0,"total_tokens":0,"elapsed_seconds":0.0,"pressure":false}',
-    phase_window_json TEXT NOT NULL DEFAULT '[]',
+    total_tool_calls INTEGER NOT NULL DEFAULT 0,     -- atomic budget scalar
+    total_tokens INTEGER NOT NULL DEFAULT 0,         -- atomic budget scalar
+    elapsed_seconds REAL NOT NULL DEFAULT 0.0,       -- atomic budget scalar
+    pressure INTEGER NOT NULL DEFAULT 0,             -- 0/1 budget-pressure flag
+    phase_window_json TEXT NOT NULL DEFAULT '[]',    -- bounded recent-phase window (activity segmentation)
     last_assistant_json TEXT,       -- nullable: None until first assistant message
     last_user_json TEXT,            -- nullable: None until first user message
-    pii_taints_json TEXT,           -- nullable: None if no PII detected
     event_count INTEGER NOT NULL DEFAULT 0,
     dropped_events INTEGER NOT NULL DEFAULT 0,
     last_sequence INTEGER,          -- source cursor for resume (nullable on fresh session)
     last_event_id TEXT,             -- nullable on fresh session
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL DEFAULT ''
 );
 
-CREATE TABLE mcp_fingerprints (
+-- Normalized MCP tool profiles. Scalar fingerprint per (server, tool); the
+-- many-valued role / capability / scope attributes live in
+-- mcp_profile_attributes (1NF), one row per value — never JSON arrays.
+CREATE TABLE mcp_profiles (
     server TEXT NOT NULL,
     tool_name TEXT NOT NULL,
     description_hash TEXT NOT NULL,
     schema_hash TEXT NOT NULL,
     registered_effect TEXT,
-    registered_role TEXT,            -- JSON array
-    registered_capabilities TEXT,    -- JSON array
-    registered_scope TEXT,           -- JSON array
     clearance TEXT,                  -- IFC clearance level for this tool
     first_seen TEXT NOT NULL,
     last_seen TEXT NOT NULL,
     PRIMARY KEY (server, tool_name)
+);
+
+CREATE TABLE mcp_profile_attributes (
+    server TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    attr_type TEXT NOT NULL,         -- 'role' | 'capability' | 'scope'
+    attr_value TEXT NOT NULL,
+    PRIMARY KEY (server, tool_name, attr_type, attr_value)
+);
+
+-- Normalized budget counters. One row per (session, dimension, key); the
+-- atomic budget scalars are columns on session_state above.
+CREATE TABLE budget_counters (
+    session_id TEXT NOT NULL,
+    dimension TEXT NOT NULL,
+    key TEXT NOT NULL,
+    count INTEGER NOT NULL,
+    PRIMARY KEY (session_id, dimension, key)
+);
+
+-- Normalized taint ledger. One row per entry; ordinal preserves append order
+-- so the bounded ring-buffer survives a reload.
+CREATE TABLE taint_entries (
+    session_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL,
+    event_id TEXT NOT NULL,
+    source_event_key TEXT NOT NULL,
+    clearance TEXT NOT NULL,
+    source TEXT NOT NULL,
+    payload_pointer TEXT NOT NULL,
+    PRIMARY KEY (session_id, ordinal)
 );
 
 CREATE TABLE drift_baselines (

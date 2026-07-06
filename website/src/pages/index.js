@@ -29,8 +29,8 @@ const FEATURES = [
     body: 'JSONL, SQLite, Parquet, S3, OTLP, webhook, console, and callback sinks — all configurable from YAML with error isolation.',
   },
   {
-    title: 'Pure observation',
-    body: 'Observes and enriches, never modifies agent behavior. Immutable domain objects and defensive parsing throughout.',
+    title: 'Observation-first',
+    body: 'Observes, enriches, and recommends by default — never touching agent behavior. Enforcement is a separate, opt-in gate layer you switch on when you want it.',
   },
 ];
 

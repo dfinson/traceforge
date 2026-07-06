@@ -3,8 +3,9 @@
 Thanks for your interest in improving TraceForge! This guide covers local setup, the test and lint
 workflow, how to add support for a new agent framework, and our commit/PR conventions.
 
-TraceForge is a **docs-and-code** project with a strict scope discipline: it *observes and enriches*
-agent traces and never modifies agent behavior. Please keep changes aligned with the
+TraceForge is a **docs-and-code** project with a strict scope discipline: by default it
+*observes and enriches* agent traces without modifying agent behavior, and any enforcement is a
+separate, opt-in layer. Please keep changes aligned with the
 [design principles](#design-principles) below.
 
 ## Prerequisites
@@ -128,8 +129,8 @@ The authoritative technical spec is [`SPEC.md`](SPEC.md).
 
 Keep contributions consistent with these:
 
-- **Pure observation** — observe and enrich, never modify agent behavior. Enforcement is strictly
-  opt-in (a registered `GatePolicy`).
+- **Observation-first** — observe, enrich, and recommend by default, never touching agent
+  behavior. Enforcement is strictly opt-in (a registered `GatePolicy`).
 - **Framework-agnostic** — new framework support should be a new YAML file wherever possible.
 - **Defensive parsing** — malformed input is logged and skipped, never crashes the pipeline.
 - **Immutable domain objects** — events and outputs are frozen.

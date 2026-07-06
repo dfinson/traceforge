@@ -13,9 +13,11 @@ AI-agent traces into structured, classified, risk-scored, and governance-assesse
 output**. It is the observation-to-storage layer between "an agent did something" and
 "that knowledge lives somewhere useful" — and it works across any agent framework.
 
-TraceForge is **pure observation**: it watches, parses, enriches, classifies, and scores
-agent events without ever modifying agent behavior. Adding support for a new framework
-requires only a **YAML mapping file** — no Python code.
+TraceForge is **observation-first**: by default it watches, parses, enriches, classifies, and
+scores agent events without modifying agent behavior. For consumers that want it to *act*, an
+opt-in gate layer can turn recommendations into enforced verdicts — but nothing is enforced
+unless you register a gate policy. Adding support for a new framework requires only a **YAML
+mapping file** — no Python code.
 
 > **Observe. Understand. Control.**
 
@@ -56,7 +58,7 @@ Raw records flow left to right, gaining structure at every stage:
 
 ## Design principles
 
-- **Pure observation** — observes and enriches, never modifies agent behavior.
+- **Observation-first** — observes, enriches, and recommends by default; enforcement is strictly opt-in (a registered gate policy).
 - **Framework-agnostic** — new framework support = new YAML file.
 - **CPU-only, torch-free** — live phase/boundary/title structuring runs on packaged
   scikit-learn + ONNX models. No GPU, no `torch`, no `transformers` at runtime.

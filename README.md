@@ -111,7 +111,7 @@ The authoritative technical spec remains in [`SPEC.md`](SPEC.md).
 
 ## Design principles
 
-- **Pure observation** — observes and enriches, never modifies agent behavior (enforcement is strictly opt-in).
+- **Observation-first** — observes, enriches, and recommends by default; enforcement is strictly opt-in (a registered gate policy).
 - **Framework-agnostic** — new framework support = new YAML file.
 - **Defensive parsing** — malformed input is logged and skipped, never crashes.
 - **Immutable domain objects** — events are frozen models.

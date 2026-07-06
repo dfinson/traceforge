@@ -194,11 +194,16 @@ class DefaultAssessor:
                 risk_score=risk.score,
                 risk_factors=risk.factors,
                 mitre_techniques=risk.mitre,
+                rule_id=rule_match.rule_id,
+                matched_predicates=self._serialize_predicates(rule_match.matched_predicates),
                 pointers=(
                     EvidencePointer(
                         event_id=ctx.event.event_id,
                         rule_id=rule_match.rule_id,
                         detector="rule_engine",
+                        payload_pointer=self._serialize_triggering_values(
+                            result.classification, risk, rule_match.matched_predicates
+                        ),
                     ),
                 ),
                 escalation=escalation,
@@ -327,6 +332,11 @@ class DefaultAssessor:
             tool_args_summary=tool_args_summary,
             session_id=ctx.event.session_id,
             timestamp=ctx.event.timestamp,
+            event_id=ctx.event.event_id,
+            classification_summary=self._summarize_classification(result.classification),
+            risk_factors=risk.factors,
+            session_event_count=snapshot.event_count if snapshot else 0,
+            recent_phase_window=snapshot.phase_window if snapshot else (),
         )
 
     def _sanitize_args(self, raw_args: str, max_len: int = 500) -> str:
@@ -350,3 +360,82 @@ class DefaultAssessor:
         if len(sanitized) > max_len:
             sanitized = sanitized[:max_len] + "..."
         return sanitized
+
+    # ── #24 / #25 serialization helpers ──
+
+    @staticmethod
+    def _summarize_classification(classification) -> str:
+        """Concise, deterministic human-readable summary of a classification.
+
+        Renders ``mechanism[/effect]`` followed by the salient set dimensions
+        (capability, action, scope) sorted for stability. Empty dimensions are
+        omitted; a ``None`` classification yields an empty string.
+        """
+        if classification is None:
+            return ""
+        head = classification.mechanism or "unknown"
+        if classification.effect:
+            head = f"{head}/{classification.effect}"
+        parts: list[str] = []
+        if classification.capability:
+            parts.append("caps=" + ",".join(sorted(classification.capability)))
+        if classification.action:
+            parts.append("actions=" + ",".join(sorted(classification.action)))
+        if classification.scope:
+            parts.append("scope=" + ",".join(sorted(classification.scope)))
+        return f"{head} ({'; '.join(parts)})" if parts else head
+
+    @staticmethod
+    def _format_predicate(pred) -> str:
+        """Render one matched rule predicate as a compact, deterministic string."""
+        if pred.dim == "risk_score":
+            threshold = pred.threshold if pred.threshold is not None else 0
+            return f"risk_score {pred.operator} {threshold}"
+        if pred.operator == "exact":
+            return f"{pred.dim} == {pred.target}"
+        return f"{pred.dim} {pred.operator} [{','.join(sorted(pred.targets))}]"
+
+    def _serialize_predicates(self, predicates) -> tuple[str, ...]:
+        """Serialize the rule predicates that matched this event (rule requirements)."""
+        return tuple(self._format_predicate(p) for p in predicates)
+
+    @staticmethod
+    def _classification_dim_value(classification, dim: str) -> str | None:
+        """Concrete value of ``dim`` on ``classification`` (None when absent/empty)."""
+        if classification is None:
+            return None
+        if dim == "mechanism":
+            return classification.mechanism or None
+        if dim == "effect":
+            return classification.effect
+        set_value = {
+            "scope": classification.scope,
+            "role": classification.role,
+            "action": classification.action,
+            "capability": classification.capability,
+            "structure": classification.structure,
+        }.get(dim)
+        if set_value:
+            return "[" + ",".join(sorted(set_value)) + "]"
+        return None
+
+    def _serialize_triggering_values(self, classification, risk, predicates) -> str:
+        """Compact, sanitized serialization of the values that triggered the match.
+
+        For each matched predicate we record the *actual* value the rule engine
+        evaluated — the classification dimension value, or the concrete risk score
+        for ``risk_score`` predicates. Keys are sorted for determinism and the
+        rendered string is passed through :meth:`_sanitize_args` so the same
+        secret-redaction discipline applies, even though classification labels are
+        derived tokens rather than raw event payloads.
+        """
+        values: dict[str, str] = {}
+        for pred in predicates:
+            if pred.dim == "risk_score":
+                values["risk_score"] = str(risk.score)
+                continue
+            actual = self._classification_dim_value(classification, pred.dim)
+            if actual is not None:
+                values[pred.dim] = actual
+        rendered = "; ".join(f"{dim}={values[dim]}" for dim in sorted(values))
+        return self._sanitize_args(rendered)

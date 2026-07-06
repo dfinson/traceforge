@@ -149,6 +149,11 @@ class MetaCodec:
             timestamp=datetime.fromisoformat(data["timestamp"])
             if data.get("timestamp")
             else datetime.now(timezone.utc),
+            event_id=data.get("event_id", ""),
+            classification_summary=data.get("classification_summary", ""),
+            risk_factors=tuple(data.get("risk_factors", ())),
+            session_event_count=data.get("session_event_count", 0),
+            recent_phase_window=tuple(data.get("recent_phase_window", ())),
         )
 
     def serialize_meta(self, meta: SessionMeta) -> dict:
@@ -227,6 +232,8 @@ class MetaCodec:
                 "risk_score": meta.evidence.risk_score,
                 "risk_factors": list(meta.evidence.risk_factors),
                 "mitre_techniques": list(meta.evidence.mitre_techniques),
+                "rule_id": meta.evidence.rule_id,
+                "matched_predicates": list(meta.evidence.matched_predicates),
                 "pointers": pointers_data,
             }
             if meta.evidence.escalation:
@@ -243,6 +250,11 @@ class MetaCodec:
                     "tool_args_summary": esc.tool_args_summary,
                     "session_id": esc.session_id,
                     "timestamp": esc.timestamp.isoformat(),
+                    "event_id": esc.event_id,
+                    "classification_summary": esc.classification_summary,
+                    "risk_factors": list(esc.risk_factors),
+                    "session_event_count": esc.session_event_count,
+                    "recent_phase_window": list(esc.recent_phase_window),
                 }
         mcp_alerts_data = []
         if meta.mcp_alerts:
@@ -369,6 +381,8 @@ class MetaCodec:
                 mitre_techniques=tuple(evidence_data.get("mitre_techniques", ())),
                 pointers=pointers,
                 escalation=self.deserialize_escalation(evidence_data.get("escalation")),
+                rule_id=evidence_data.get("rule_id", ""),
+                matched_predicates=tuple(evidence_data.get("matched_predicates", ())),
             )
 
         from tracemill.governance.mcp_drift import MCPIntegrityAlert

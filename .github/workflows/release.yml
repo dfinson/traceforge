@@ -1,0 +1,85 @@
+name: Release
+
+# Build and publish TraceForge's two distributable packages to PyPI using PyPI
+# Trusted Publishing (OIDC) -- no long-lived API token is stored in repo secrets.
+#
+#   * traceforge              -- the root library (src/traceforge)
+#   * traceforge-title-model  -- the pretrained int8 ONNX titler weights
+#                                (packages/traceforge-title-model)
+#
+# The research package (traceforge_research) is intentionally NOT a PyPI artifact
+# and is never published here.
+#
+# A single `v*` tag (e.g. v1.2.3) releases BOTH packages via the matrix below.
+# Their versions bump independently, so `skip-existing: true` lets a tag
+# re-publish only the package whose version actually changed and tolerates the
+# unchanged one already being on PyPI.
+#
+# Reviewer note: this repo currently also ships publish.yml (traceforge on `v*`)
+# and publish-title-model.yml (title-model on `title-model-v*`). release.yml is
+# the unified single-tag alternative -- see the PR description for the overlap
+# decision that needs to be made before this is merged.
+
+on:
+  push:
+    tags: ["v*"]        # release tag, e.g. v1.2.3
+  workflow_dispatch: {} # manual run (targets production PyPI)
+
+jobs:
+  release:
+    name: Build & publish ${{ matrix.package.name }}
+    runs-on: ubuntu-latest
+
+    # One matrix leg per distributable package. fail-fast is off so a failure
+    # (or a skip) on one package never cancels the other -- they carry separate
+    # versions and release independently.
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - name: traceforge
+            dir: "."
+            # The model2vec potion-base-8M embedder weights ride in the root wheel.
+            weight_suffix: ".safetensors"
+          - name: traceforge-title-model
+            dir: "packages/traceforge-title-model"
+            # The int8 ONNX encoder/decoder titler weights ship in this package.
+            weight_suffix: ".onnx"
+
+    # Trusted Publishing mints a short-lived OIDC token instead of using a stored
+    # API token. The `pypi` environment is the trust anchor registered on both
+    # PyPI projects (and can double as a manual release-approval gate).
+    environment: pypi
+    permissions:
+      id-token: write   # required: mint the OIDC token PyPI verifies (no secret)
+      contents: read    # required: checkout only
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Model weights (*.onnx, *.safetensors) are tracked via Git LFS. Without
+          # lfs: true the working tree holds ~133-byte pointer files and the build
+          # would silently ship broken packages. The verify step below is the
+          # backstop that fails loudly if a pointer ever sneaks through.
+          lfs: true
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - uses: astral-sh/setup-uv@v7
+
+      - name: Build ${{ matrix.package.name }} (sdist + wheel)
+        run: uv build "${{ matrix.package.dir }}" --out-dir dist
+
+      - name: Verify weights are real binaries (not Git LFS pointers)
+        run: python scripts/verify_no_lfs_pointers.py dist --require ${{ matrix.package.weight_suffix }}
+
+      - name: Publish ${{ matrix.package.name }} to PyPI (Trusted Publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          # A `v*` tag triggers both matrix legs, but usually only one package's
+          # version changed. skip-existing lets the unchanged package's already
+          # published version be skipped instead of failing the run.
+          skip-existing: true

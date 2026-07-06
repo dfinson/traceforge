@@ -13,8 +13,10 @@ from tracemill.governance.budget import BudgetTracker
 from tracemill.governance.labeler import GovernanceLabeler
 from tracemill.governance.persistence import SystemStore
 from tracemill.governance.pipeline import GovernancePipeline, SessionMeta
+from tracemill.governance.registry import SessionRegistry
 from tracemill.governance.results import RecommendedAction
 from tracemill.governance.rules import parse_rules
+from tracemill.governance.state import SessionState
 from tracemill.types import EventKind, EventMetadata, SessionEvent
 
 
@@ -369,3 +371,54 @@ class TestScoreDoesNotSuppressObservation:
             f"score:{event.id}",
             event.id,
         }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Gate-before-observe: the writer must never inherit a DB-less state (durability)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestGateBeforeObserveDurability:
+    """Regression (F2): a gate-first ``ensure`` must not leave the observation
+    writer holding an ephemeral, DB-less state.
+
+    ``SessionRegistry.ensure`` (the gate channel) deliberately creates a
+    thread-safe, ``_db=None`` state so it never touches SQLite cross-thread. In
+    the gate-before-observe model the gate touches a session first, so its
+    ephemeral state lands in the shared residency map. If the observation writer
+    then received that same DB-less instance, every ``persist`` /
+    ``persist_no_commit`` would silently no-op and session state would never reach
+    disk. ``get_or_create`` now promotes such a resident to a durable, DB-backed
+    state, carrying the gate's in-memory enforcement log forward.
+    """
+
+    def test_writer_state_is_db_backed_after_gate_ensure(self, store):
+        registry = SessionRegistry(store)
+        sid = "gate-first-session"
+        gate_state = registry.ensure(sid)
+        assert gate_state.is_db_backed() is False
+        writer_state = registry.get_or_create(sid)
+        assert writer_state.is_db_backed() is True
+
+    def test_writer_persistence_survives_gate_first_creation(self, store):
+        # The teeth of F2: with the pre-fix registry the writer inherits the gate's
+        # DB-less state, persist() no-ops, and the reload sees nothing.
+        registry = SessionRegistry(store)
+        sid = "gate-first-durable"
+        registry.ensure(sid)  # gate channel creates the ephemeral state first
+        writer_state = registry.get_or_create(sid)
+        writer_state.increment_budget(effect="write")
+        writer_state.persist()
+        reloaded = SessionState.load_from_db(sid, store.connection)
+        assert reloaded.tool_call_count == 1
+
+    def test_promotion_preserves_enforcement_log(self, store):
+        registry = SessionRegistry(store)
+        sid = "gate-first-log"
+        gate_state = registry.ensure(sid)
+        gate_state.record_denial("deny:policy")
+        gate_state.record_allow("tool-call-42")
+        writer_state = registry.get_or_create(sid)
+        assert writer_state.denied_count == 1
+        assert "tool-call-42" in writer_state.prior_tool_call_ids()
+        assert writer_state.prior_verdicts() == ("deny:policy",)

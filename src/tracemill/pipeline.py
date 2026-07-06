@@ -4,16 +4,24 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Iterable
 from typing import TYPE_CHECKING
 
 from tracemill.enricher import Enricher
 from tracemill.sinks.base import StorageSink
+from tracemill.sinks.callback import (
+    CallbackSink,
+    EventCallback,
+    KindFilter,
+    as_async_event_callback,
+)
 from tracemill.types import EventMetadata, SessionEvent, TelemetrySpan, TitleUpdate, UsageRecord
 
 if TYPE_CHECKING:
     from tracemill.governance.results import SessionMeta
+    from tracemill.telemetry import PipelineMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +32,20 @@ logger = logging.getLogger(__name__)
 #: does not grow unbounded. Generous enough that realistic concurrent workloads
 #: never evict an active session; pass ``max_sessions=None`` to disable.
 _DEFAULT_MAX_SESSIONS = 4096
+
+
+def _sink_label(index: int, sink: StorageSink) -> str:
+    """Stable, human-readable per-sink metrics label (class name + position).
+
+    The index disambiguates two sinks of the same class (``"JsonlSink#0"`` vs
+    ``"JsonlSink#1"``) so their write timings never merge.
+    """
+    return f"{type(sink).__name__}#{index}"
+
+
+def _sink_labels_for(sinks: list[StorageSink]) -> list[str]:
+    """Per-sink metrics labels aligned by position with ``sinks``."""
+    return [_sink_label(i, sink) for i, sink in enumerate(sinks)]
 
 
 class EventPipeline:
@@ -82,6 +104,7 @@ class EventPipeline:
         enable_title: bool = False,
         max_sessions: int | None = _DEFAULT_MAX_SESSIONS,
         governance=None,
+        metrics: PipelineMetrics | None = None,
     ) -> None:
         self._sinks = list(sinks)
         self._enricher = enricher
@@ -137,6 +160,76 @@ class EventPipeline:
         # (unbounded, reclaimed only at :meth:`flush`).
         self._session_order: OrderedDict[str, None] = OrderedDict()
         self._max_sessions = max_sessions
+
+        # Opt-in self-metrics (SPEC §14 / #48). When ``None`` (the default) the
+        # hot path never times or allocates for metrics: every instrumentation
+        # site is guarded on ``self._metrics is not None``, and ``_sink_labels``
+        # stays ``None`` so :meth:`_fanout` takes its original, unwrapped path.
+        # Sink labels are precomputed once (bounded by sink count) only when
+        # metrics are enabled, so per-event fan-out pays nothing when they are off.
+        self._metrics = metrics
+        self._sink_labels: list[str] | None = (
+            _sink_labels_for(self._sinks) if metrics is not None else None
+        )
+
+    @property
+    def metrics(self) -> PipelineMetrics | None:
+        """The attached :class:`~tracemill.telemetry.PipelineMetrics`, or ``None``.
+
+        Metrics update live; read a stable summary with ``pipeline.metrics.snapshot()``
+        (e.g. after :meth:`flush` / :meth:`close`).
+        """
+        return self._metrics
+
+    def subscribe(
+        self,
+        on_event: EventCallback,
+        *,
+        kind: KindFilter = None,
+        to_thread: bool = False,
+    ) -> CallbackSink:
+        """Register a lightweight event subscriber (SPEC §15 / #47).
+
+        One-line sugar over the sink model: wraps ``on_event`` in a
+        :class:`~tracemill.sinks.callback.CallbackSink` and appends it, so the
+        subscriber joins the pipeline's existing error-isolated fan-out — a
+        failing subscriber never blocks other sinks or the pipeline. This *is* the
+        publish/subscribe story: no sink subclassing, no flush/close lifecycle, no
+        persistence contract.
+
+        ``on_event`` may be async *or* a plain sync callable (adapted via
+        :func:`~tracemill.sinks.callback.as_async_event_callback`); pass
+        ``to_thread=True`` to run a blocking sync callback off the event loop.
+        ``kind`` optionally filters which events reach this subscriber — an exact
+        kind, a ``"prefix.*"`` wildcard (e.g. ``"tool.*"``), an iterable of those,
+        or a predicate over the event — checked before dispatch.
+
+        Returns the created :class:`CallbackSink`, which doubles as the handle for
+        :meth:`unsubscribe`.
+        """
+        sink = CallbackSink(
+            on_event=as_async_event_callback(on_event, kind=kind, to_thread=to_thread)
+        )
+        self._sinks.append(sink)
+        if self._sink_labels is not None:
+            self._sink_labels.append(_sink_label(len(self._sinks) - 1, sink))
+        return sink
+
+    def unsubscribe(self, sink: StorageSink) -> bool:
+        """Remove a previously :meth:`subscribe`-d (or otherwise added) sink.
+
+        Returns ``True`` if the sink was present and removed, ``False`` otherwise.
+        Safe to call between pushes (the pipeline is single-threaded); an in-flight
+        fan-out already holds its coroutines, so removal only affects later pushes.
+        """
+        try:
+            self._sinks.remove(sink)
+        except ValueError:
+            return False
+        if self._sink_labels is not None:
+            # Positions shifted; recompute so labels stay index-aligned with sinks.
+            self._sink_labels = _sink_labels_for(self._sinks)
+        return True
 
     def _session_lock(self, session_id: str) -> asyncio.Lock:
         lock = self._session_locks.get(session_id)
@@ -272,6 +365,10 @@ class EventPipeline:
 
     async def _push_locked(self, event: SessionEvent) -> None:
         if self._enricher is not None:
+            metrics = self._metrics
+            # Time the enrichment step only when metrics are on: the conditional
+            # never calls the clock on the disabled path (it binds ``0.0``).
+            start = time.perf_counter() if metrics is not None else 0.0
             try:
                 enriched = self._enricher.process(event)
             except Exception as exc:
@@ -282,8 +379,12 @@ class EventPipeline:
                     exc_info=True,
                 )
                 enriched = event
+            if metrics is not None:
+                metrics.record_enrichment(time.perf_counter() - start)
 
             if enriched is None:
+                if metrics is not None:
+                    metrics.record_drop()
                 return
             if isinstance(enriched, list):
                 for e in enriched:
@@ -529,13 +630,27 @@ class EventPipeline:
             for update in updates:
                 await self._push_title_update(update)
 
-    async def _fanout(self, coros: Iterable[Awaitable], action: str) -> None:
+    async def _fanout(
+        self,
+        coros: Iterable[Awaitable],
+        action: str,
+        labels: list[str] | None = None,
+    ) -> None:
         """Await sink coroutines concurrently, error-isolated.
 
         One failing sink is logged (with ``action`` naming the operation) and
         skipped; it never blocks the others. The result order matches
         ``self._sinks``, so the logged index identifies the failing sink.
+
+        When self-metrics are enabled and ``labels`` (one per sink, aligned with
+        ``coros``) is supplied, each sink call is wrapped to record its per-sink
+        write time and failure count. When metrics are off — or no labels are
+        passed — this is a strict no-op over the original behaviour: ``coros`` is
+        awaited exactly as before, with no wrapping and no clock.
         """
+        metrics = self._metrics
+        if metrics is not None and labels is not None:
+            coros = [self._timed_write(label, coro) for label, coro in zip(labels, coros)]
         results = await asyncio.gather(*coros, return_exceptions=True)
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
@@ -546,6 +661,25 @@ class EventPipeline:
                     result,
                     exc_info=(type(result), result, result.__traceback__),
                 )
+
+    async def _timed_write(self, label: str, coro: Awaitable) -> None:
+        """Await one sink call, recording its wall time and failure into metrics.
+
+        Only reached on the metrics-enabled path. Re-raises so :meth:`_fanout`'s
+        error isolation still logs and contains the failure exactly as it would
+        for an unwrapped sink call.
+        """
+        metrics = self._metrics
+        if metrics is None:  # defensive; unreachable via _fanout's guard
+            await coro
+            return
+        start = time.perf_counter()
+        try:
+            await coro
+        except BaseException:
+            metrics.record_sink_write(label, time.perf_counter() - start, failed=True)
+            raise
+        metrics.record_sink_write(label, time.perf_counter() - start, failed=False)
 
     async def _push_title_update(self, update: TitleUpdate) -> None:
         """Fan-out an append-only title update to all sinks. Error-isolated."""
@@ -609,6 +743,9 @@ class EventPipeline:
 
         await self._fanout((sink.flush() for sink in self._sinks), "flush")
 
+        if self._metrics is not None:
+            logger.debug("EventPipeline self-metrics at flush: %s", self._metrics.snapshot())
+
     async def _push_to_sinks(self, event: SessionEvent) -> None:
         """Push event to sinks, stamping governance first if a stage is wired in.
 
@@ -628,14 +765,22 @@ class EventPipeline:
         wired, or produces no meta for this event kind, the bare event goes to
         ``on_event`` exactly as before.
         """
+        if self._metrics is not None:
+            self._metrics.record_event()
         if self._governance is None:
-            await self._fanout((sink.on_event(event) for sink in self._sinks), f"event {event.id}")
+            await self._fanout(
+                (sink.on_event(event) for sink in self._sinks),
+                f"event {event.id}",
+                self._sink_labels,
+            )
             return
 
         stamped, meta = self._annotate_governance(event)
         if meta is None:
             await self._fanout(
-                (sink.on_event(stamped) for sink in self._sinks), f"event {stamped.id}"
+                (sink.on_event(stamped) for sink in self._sinks),
+                f"event {stamped.id}",
+                self._sink_labels,
             )
             return
 
@@ -645,6 +790,7 @@ class EventPipeline:
         await self._fanout(
             (sink.on_enriched_event(enriched) for sink in self._sinks),
             f"enriched event {stamped.id}",
+            self._sink_labels,
         )
 
     def _annotate_governance(

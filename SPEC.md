@@ -913,24 +913,37 @@ No separate `tracemill init` command needed.
 
 ## §14 — Telemetry / OTEL
 
-🚧 **Partial** — span export is implemented; the `telemetry/` package (self-metrics) is still an empty stub.
+✅ **Implemented** — both export *and* self-observability are delivered, with **no telemetry SDK dependency** on either side.
 
 **Done:**
 - `OtelSink` (`OtelExporterSink`) exports events / spans / usage / title-updates to an OpenTelemetry collector via **OTLP/HTTP JSON**. It is intentionally hand-rolled with **no `opentelemetry-sdk` dependency** (simplified OTLP JSON, not protobuf) to stay lightweight — this is a settled design decision, not a gap.
 - Span generation from tool-call pairs (enricher pairing + `TelemetrySpan` + `OtelExporterSink._event_to_span`).
-
-**Planned (tracked by #48):**
-- Pipeline-level **self-metrics** (events/sec, enrichment latency, sink write time): opt-in and near-zero-footprint by default, surfaced through a metrics hook on `EventPipeline` rather than a global registry. Must not pull in a heavyweight metrics framework as a hard dependency.
+- Pipeline-level **self-metrics** (`tracemill.telemetry`): `PipelineMetrics` is an opt-in, in-process accumulator attached via `EventPipeline(..., metrics=PipelineMetrics())`. It records throughput (events/sec), enrichment latency, per-sink write time, and dropped / failed-sink counts, read back as an immutable `MetricsSnapshot` (surfaced on `flush()` / `close()`, and logged at DEBUG on flush).
+  - **Disabled path is a true no-op.** Without a `metrics=` instance the hot path makes **no timing calls and no metrics allocations** — every instrumentation site is guarded on `metrics is not None`, and the sink fan-out takes its original unwrapped path. This is enforced by a test that spies on `time.perf_counter` and asserts zero calls on the disabled path.
+  - **No metrics-framework dependency.** Deliberately **no `opentelemetry-sdk`** and **no `prometheus`** — no background threads, no parallel transport, no unbounded accumulation (state is bounded: scalar counters plus one entry per sink). This mirrors the hand-rolled OTLP decision above: tracemill's self-observability is a plain accumulator, not a vendored SDK.
 
 ---
 
 ## §15 — EventBus
 
-✅ **Effectively delivered** via the sink model — no separate bus module is needed.
+✅ **Delivered** via the sink model plus a subscribe convenience — no separate bus module is needed.
 
-An in-process consumer can react to events without implementing a full sink today: `StorageSink` makes only `on_event` abstract (`flush`/`close`/`on_span`/`on_usage`/`on_title_update` are default no-ops), and `CallbackSink` lets a consumer subscribe with a single async callback. `EventPipeline`'s error-isolated fan-out is the publish side. `EventPipeline(sinks=[CallbackSink(on_event=handler)])` **is** the pub/sub pattern — no flush/close lifecycle, no persistence contract.
+An in-process consumer can react to events without implementing a full sink: `StorageSink` makes only `on_event` abstract (`flush`/`close`/`on_span`/`on_usage`/`on_title_update` are default no-ops), and `CallbackSink` lets a consumer subscribe with a single callback. `EventPipeline`'s error-isolated fan-out is the publish side, so one failing subscriber never blocks the others or the pipeline.
 
-**Remaining (tracked by #47, low priority):** optional ergonomics only — a one-line `EventPipeline.subscribe(on_event=...)` sugar and a sync-callback adapter. No message broker / cross-process transport — that is the wrong tier for an embedded library; external egress is handled by the `OtelExporterSink` (OpenTelemetry is the boundary contract).
+**The official lightweight pub/sub API is `EventPipeline.subscribe`:**
+
+```python
+pipeline.subscribe(on_event, *, kind=None, to_thread=False) -> CallbackSink
+pipeline.unsubscribe(sink) -> bool
+```
+
+- `subscribe` wraps `on_event` in a `CallbackSink` and appends it to the fan-out; it returns that sink, which doubles as the handle for `unsubscribe`.
+- `on_event` may be **async or a plain sync callable** — the one genuinely new capability. Sync callbacks run inline on the event loop by default (right for append-to-list / put-on-queue consumers); pass `to_thread=True` to run a blocking callback via `asyncio.to_thread` so it never stalls the loop. (Adapter: `tracemill.sinks.callback.as_async_event_callback`.)
+- `kind` is an optional per-subscriber filter checked **before** dispatch: an exact kind, a `"prefix.*"` wildcard (e.g. `"tool.*"`), an iterable of those, or a predicate over the event.
+
+`EventPipeline(sinks=[CallbackSink(on_event=handler)])` remains equivalent for construction-time wiring; `subscribe` is the ergonomic path for adding/removing consumers on a live pipeline — no sink subclassing, no flush/close lifecycle, no persistence contract.
+
+**Out of scope by design:** no message broker / cross-process transport — that is the wrong tier for an embedded library; external egress is handled by the `OtelExporterSink` (OpenTelemetry is the boundary contract).
 
 ---
 
@@ -1311,6 +1324,8 @@ tracemill/
 | Risk scoring | ✅ Complete | Structural + flags + injection + taint + context. MITRE mappings. |
 | EventPipeline | ✅ Complete | Fan-out, error isolation, enricher integration |
 | Storage sinks (8) | ✅ Complete | Callback, Console, Jsonl, Sqlite, S3, Parquet, OtelExporter, Webhook |
+| Telemetry self-metrics | ✅ Complete | `tracemill.telemetry.PipelineMetrics`: opt-in `EventPipeline(metrics=...)` accumulator — throughput, enrichment latency, per-sink write time, dropped / failed-sink counts, immutable `MetricsSnapshot`. Disabled path is a true no-op (no timers/allocs on the hot path); no `opentelemetry-sdk` / `prometheus` dep. §14. Closed #48 |
+| EventBus subscribe / pub-sub | ✅ Complete | `EventPipeline.subscribe(on_event, *, kind=None, to_thread=False)` + `unsubscribe()` over the error-isolated fan-out; sync-or-async callbacks, optional per-subscriber `kind` filter. §15. Closed #47 |
 | CLI | ✅ Complete | `cli/` (Click): watch, replay, score, gate, detect, config, status, init, download-model |
 | Gate module | ✅ Complete | Sync scoring path + PII gate + registry (`gate/`, `gates/`) |
 | Live structuring (phase / boundary / title) | ✅ Complete | Packaged CPU-only ONNX models: PhaseInferencer + BoundaryInferencer default-on, TitleInferencer opt-in (emits `TitleUpdate`) |
@@ -1324,9 +1339,7 @@ tracemill/
 
 | Item | Priority | Dependencies | Notes |
 |------|----------|--------------|-------|
-| **Telemetry self-metrics** | Medium | None | OTLP span export is done (`OtelExporterSink`, §14). Remaining is opt-in pipeline self-metrics (events/sec, enrichment latency, sink write time), near-zero footprint, no `opentelemetry-sdk` dep. Tracked by #48. |
 | **PyPI release** | Medium | None | Publish `tracemill` + `tracemill-title-model` to PyPI. Packaging and CI publish workflow are already in place. |
-| **EventBus sugar** | Low | None | Pub/sub is already delivered via `CallbackSink` + `EventPipeline` fan-out (§15). Remaining is optional only: a `subscribe()` convenience + sync-callback adapter. Tracked by #47. |
 
 > **Delivered since this table was first written:** the live structuring subsystem
 > (`phase/` + `boundary/` + `title/`, formerly PR #35) and the full governance epic
@@ -1336,10 +1349,8 @@ tracemill/
 ### Implementation Order (Recommended)
 
 `
-1. Telemetry self-metrics (#48)   → opt-in observability of tracemill itself
-2. PyPI release                   → publish tracemill + tracemill-title-model
-3. EventBus sugar (#47)           → optional subscribe() convenience
-4. Close governance epic issues (#9–#27) → tracker hygiene; work already delivered
+1. PyPI release                   → publish tracemill + tracemill-title-model
+2. Close governance epic issues (#9–#27) → tracker hygiene; work already delivered
 `
 
 ---

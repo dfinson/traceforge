@@ -234,10 +234,6 @@ _DETECTORS: tuple[_Detector, ...] = (
     ),
 )
 
-# Backward-compatible views derived from the detector table.
-_CREDENTIAL_CATEGORIES = frozenset(d.category for d in _DETECTORS if d.is_credential)
-PII_PATTERNS: dict[PIICategory, re.Pattern[str]] = {d.category: d.pattern for d in _DETECTORS}
-
 
 class PIIScanner:
     """Stateless PII/credential scanner. Adds capability labels."""

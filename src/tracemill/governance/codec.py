@@ -374,26 +374,20 @@ class MetaCodec:
         from tracemill.governance.mcp_drift import MCPIntegrityAlert
 
         mcp_alerts_raw = data.get("mcp_alerts", ())
-        mcp_alerts: tuple = ()
-        if mcp_alerts_raw:
-            alerts_list = []
-            for a in mcp_alerts_raw:
-                if isinstance(a, dict):
-                    alerts_list.append(
-                        MCPIntegrityAlert(
-                            tool_name=a.get("tool_name", ""),
-                            server=a.get("server", ""),
-                            alert_type=a.get("alert_type", "schema_change"),
-                            previous=a.get("previous", ""),
-                            current=a.get("current", ""),
-                            severity=a.get("severity", "info"),
-                            timestamp=datetime.fromisoformat(a["timestamp"])
-                            if a.get("timestamp")
-                            else datetime.now(timezone.utc),
-                        )
-                    )
-                # Legacy string alerts: skip (can't reconstruct typed object)
-            mcp_alerts = tuple(alerts_list)
+        mcp_alerts: tuple = tuple(
+            MCPIntegrityAlert(
+                tool_name=a.get("tool_name", ""),
+                server=a.get("server", ""),
+                alert_type=a.get("alert_type", "schema_change"),
+                previous=a.get("previous", ""),
+                current=a.get("current", ""),
+                severity=a.get("severity", "info"),
+                timestamp=datetime.fromisoformat(a["timestamp"])
+                if a.get("timestamp")
+                else datetime.now(timezone.utc),
+            )
+            for a in mcp_alerts_raw
+        )
 
         return SessionMeta(
             classification=cls,

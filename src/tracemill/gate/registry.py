@@ -1,6 +1,6 @@
 """Gate endpoint registry — maps session_id → socket path in system.db.
 
-The gate_endpoints table is now managed by Alembic as part of the unified
+The gate_endpoints table is managed by Alembic as part of the unified
 system schema. This module provides convenience functions that operate
 on a standalone connection for lightweight lookups (the gate client doesn't
 always have access to a full SystemStore instance).
@@ -24,26 +24,12 @@ def _system_db_path() -> str:
     return str(Path.home() / ".tracemill" / "system.db")
 
 
-def _ensure_table(conn: sqlite3.Connection) -> None:
-    """Ensure gate_endpoints table exists (backward compat for pre-migration DBs)."""
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS gate_endpoints (
-            session_id TEXT PRIMARY KEY,
-            sock_path TEXT NOT NULL,
-            pid INTEGER NOT NULL,
-            registered_at TEXT NOT NULL DEFAULT (datetime('now'))
-        )
-    """)
-    conn.commit()
-
-
 def register_session(session_id: str, sock_path: str, *, db_path: str | None = None) -> None:
     """Register a session_id → sock_path mapping."""
     db = db_path or _system_db_path()
     Path(db).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db)
     try:
-        _ensure_table(conn)
         conn.execute(
             "INSERT OR REPLACE INTO gate_endpoints (session_id, sock_path, pid) VALUES (?, ?, ?)",
             (session_id, sock_path, os.getpid()),
@@ -60,7 +46,6 @@ def lookup_session(session_id: str, *, db_path: str | None = None) -> str | None
         return None
     conn = sqlite3.connect(db)
     try:
-        _ensure_table(conn)
         row = conn.execute(
             "SELECT sock_path, pid FROM gate_endpoints WHERE session_id = ?",
             (session_id,),
@@ -85,7 +70,6 @@ def unregister_session(session_id: str, *, db_path: str | None = None) -> None:
         return
     conn = sqlite3.connect(db)
     try:
-        _ensure_table(conn)
         conn.execute("DELETE FROM gate_endpoints WHERE session_id = ?", (session_id,))
         conn.commit()
     finally:
@@ -99,7 +83,6 @@ def unregister_pid(*, db_path: str | None = None) -> None:
         return
     conn = sqlite3.connect(db)
     try:
-        _ensure_table(conn)
         conn.execute("DELETE FROM gate_endpoints WHERE pid = ?", (os.getpid(),))
         conn.commit()
     finally:

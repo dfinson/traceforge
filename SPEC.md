@@ -1115,14 +1115,14 @@ tracemill/
 │   │   ├── features.py
 │   │   ├── event_rows.py
 │   │   ├── segmentation.py
-│   │   └── data/                # Packaged ONNX phase model
+│   │   └── data/                # Packaged phase model: sklearn head (phase-model.joblib) + frozen model2vec embedder (potion-base-8M/)
 │   ├── boundary/                # Live ML activity/step segmentation (default-on)
 │   │   ├── __init__.py
 │   │   ├── inferencer.py        # BoundaryInferencer (stamps metadata.boundary)
 │   │   ├── inference.py
 │   │   ├── features.py
 │   │   ├── decode.py
-│   │   └── data/                # Packaged ONNX boundary model
+│   │   └── data/                # Packaged boundary model (boundary-model.joblib, sklearn)
 │   ├── title/                   # Segment + session titling (segment titling opt-in)
 │   │   ├── __init__.py
 │   │   ├── inferencer.py        # TitleInferencer (emits async TitleUpdate)
@@ -1137,7 +1137,7 @@ tracemill/
 │   │   ├── __init__.py
 │   │   ├── models.py
 │   │   └── phase_tracker.py     # PhaseTracker
-│   ├── governance/              # Governance / assessment engine (26 modules)
+│   ├── governance/              # Governance / assessment engine (27 modules)
 │   │   ├── __init__.py          # Public API re-exports
 │   │   ├── pipeline.py          # GovernancePipeline — composition root / facade (delegates)
 │   │   ├── monitor.py           # SessionMonitor — single writer (observe / process / lifecycle)
@@ -1162,6 +1162,7 @@ tracemill/
 │   │   ├── budget.py            # BudgetTracker
 │   │   ├── canonical.py         # Canonical event hashing
 │   │   ├── envelope.py          # EnrichedEvent, ContextGapEvent
+│   │   ├── emitter.py           # EnrichedEmitter (async audit emission + backpressure)
 │   │   ├── observer.py          # TracemillObserver adapter
 │   │   └── persistence.py       # SystemStore (SQLite persistence)
 │   ├── sdk/                     # Pipeline + gating SDK
@@ -1222,7 +1223,11 @@ tracemill/
 │   │   ├── test_otel_adapter.py
 │   │   ├── test_pipeline.py
 │   │   ├── test_risk.py
-│   │   └── test_types.py
+│   │   ├── test_types.py
+│   │   ├── test_governance_*.py     # governance-engine suite (pipeline, labeler, pii, ifc, integrity, drift, persistence, state, codec, escalation, …)
+│   │   ├── test_phase_streaming.py  # phase classifier (+ test_phase_tracker.py)
+│   │   ├── test_boundary_*.py       # boundary decoder (decode, features, streaming)
+│   │   └── test_title_*.py          # titler (context, heuristics, inference, inferencer, naming, resolve)
 │   ├── integration/
 │   │   ├── __init__.py
 │   │   ├── test_aider_contract.py
@@ -1231,6 +1236,13 @@ tracemill/
 │   │   ├── test_pipeline_e2e.py
 │   │   ├── test_yaml_comprehensive_e2e.py
 │   │   └── test_yaml_e2e_real_data.py
+│   ├── e2e/                         # End-to-end governance / observation flows
+│   │   ├── __init__.py
+│   │   ├── test_observation_pipeline_e2e.py
+│   │   ├── test_motivation_pipeline_e2e.py
+│   │   ├── test_framework_gating_e2e.py
+│   │   ├── test_real_agent_flows_e2e.py
+│   │   └── test_raw_traces.py
 │   ├── test_config.py
 │   ├── test_copilot_preparser.py
 │   └── test_sqlite_source.py
@@ -1273,7 +1285,7 @@ tracemill/
 
 ### Unit Tests (`tests/unit/`)
 
-13 test modules covering:
+55 test modules covering:
 - Type construction and validation (`test_types.py`)
 - Adapter parsing logic (`test_adapters.py`, `test_mapped_json.py`, `test_otel_adapter.py`)
 - Parser output (`test_aider_preparser.py`)
@@ -1282,15 +1294,29 @@ tracemill/
 - Enricher pairing/flush logic (`test_enricher.py`)
 - Risk scoring (`test_risk.py`)
 - Pipeline fan-out and error isolation (`test_pipeline.py`)
+- Governance engine (`test_governance_*` — pipeline, single-writer, labeler, PII, IFC, integrity, drift, persistence + normalized schema, state, codec, escalation/evidence, migrations)
+- Live structuring (`test_phase_streaming.py`, `test_phase_tracker.py`, `test_boundary_*`, `test_title_*`)
 
 ### Integration Tests (`tests/integration/`)
 
-6 test modules covering:
+11 test modules covering:
 - End-to-end pipeline flow (`test_pipeline_e2e.py`)
 - YAML mapping validation against real framework data (`test_yaml_e2e_real_data.py`, `test_yaml_comprehensive_e2e.py`)
 - New mapping contract tests (`test_new_mappings.py`)
 - Aider parser contract (`test_aider_contract.py`)
-- OpenCode mapping (`test_opencode_e2e.py`)
+- Framework mappings (`test_opencode_e2e.py`, `test_antigravity_e2e.py`, `test_copilot_vscode_e2e.py`)
+- Observe → enrich → emit integration (`test_enrich_emit_integration.py`)
+- Motivation tracking (`test_motivation_e2e.py`)
+- End-to-end governance pipeline (`test_governance_e2e.py`)
+
+### End-to-End Tests (`tests/e2e/`)
+
+5 test modules exercising full observe → enrich → structure → emit flows against recorded agent traces:
+- Observation pipeline (`test_observation_pipeline_e2e.py`)
+- Motivation pipeline (`test_motivation_pipeline_e2e.py`)
+- Framework gating (`test_framework_gating_e2e.py`)
+- Real agent flows (`test_real_agent_flows_e2e.py`)
+- Raw trace ingestion (`test_raw_traces.py`)
 
 ### Top-Level Tests
 
@@ -1319,7 +1345,7 @@ tracemill/
 | YAML mapping system | ✅ Complete | 22 bundled mappings, resolver, user override support |
 | Preprocessor registry + 14 preprocessors | ✅ Complete | claude, cline, goose, openhands, pydantic_ai, smolagents, amazonq, antigravity, codex, continue_dev, copilot_vscode, maf_transcript, openai_agents, opencode |
 | Parser system + 2 parsers | ✅ Complete | CopilotPreParser, AiderPreParser (tree-sitter based) |
-| Enricher | ✅ Complete | Tool pairing, duration, classification dispatch, risk, visibility, phase |
+| Enricher | ✅ Complete | Tool pairing, duration, classification dispatch, risk, visibility, phase signals |
 | Classification engine | ✅ Complete | Multi-dimensional taxonomy, shell AST (bash/PS/cmd), MCP profiles, tool lookup |
 | Risk scoring | ✅ Complete | Structural + flags + injection + taint + context. MITRE mappings. |
 | EventPipeline | ✅ Complete | Fan-out, error isolation, enricher integration |
@@ -1328,12 +1354,12 @@ tracemill/
 | EventBus subscribe / pub-sub | ✅ Complete | `EventPipeline.subscribe(on_event, *, kind=None, to_thread=False)` + `unsubscribe()` over the error-isolated fan-out; sync-or-async callbacks, optional per-subscriber `kind` filter. §15. Closed #47 |
 | CLI | ✅ Complete | `cli/` (Click): watch, replay, score, gate, detect, config, status, init, download-model |
 | Gate module | ✅ Complete | Sync scoring path + PII gate + registry (`gate/`, `gates/`) |
-| Live structuring (phase / boundary / title) | ✅ Complete | Packaged CPU-only ONNX models: PhaseInferencer + BoundaryInferencer default-on, TitleInferencer opt-in (emits `TitleUpdate`) |
-| Governance / assessment engine | ✅ Complete | `governance/` monitor + shield object model (SOLID): `SessionMonitor` (single writer), `Scorer` (read-only preview), `SessionRegistry`, `Assessor`, `Shield`, one-counter `SessionState`, `GovernancePipeline` facade; plus labeler, rules, PII, IFC, integrity, drift, budget, observer, persistence. Epic #7 (#9–#27) delivered. See §22 |
+| Live structuring (phase / boundary / title) | ✅ Complete | CPU-only, torch-free. Phase + boundary sklearn heads (joblib) over a frozen model2vec embedder, default-on, stamp `metadata.phase` / `metadata.boundary` live; T5 titler (int8 split-ONNX, opt-in) emits out-of-band `TitleUpdate`. Titler weights ship in the separate `tracemill-title-model` package. See §23 |
+| Governance / assessment engine | ✅ Complete | `governance/` monitor + shield object model (SOLID): `SessionMonitor` (single writer), `Scorer` (read-only preview), `SessionRegistry`, `Assessor`, `Shield`, one-counter `SessionState`, `GovernancePipeline` facade; plus labeler, rules, PII, IFC, integrity, drift, budget, observer, emitter, persistence. Epic #7 (stories #9–#27) fully delivered and closed. See §22 |
 | Configuration system | ✅ Complete | Hierarchical loading, env overrides, discriminated unions, bootstrap |
 | Classify data files (10 YAMLs) | ✅ Complete | Binary info, verb/shell/effect rules, MCP profiles, tool classifications, risk config, governance recommendation rules |
 | CI/CD | ✅ Complete | Lint, test matrix, publish, weekly audits |
-| Test suite | ✅ Complete | 1763 tests across unit/integration/top-level |
+| Test suite | ✅ Complete | 2242 passing / 4 skipped across 74 test modules (unit / integration / e2e / top-level) |
 
 ### ⬜ Planned (Not Yet Implemented)
 
@@ -1342,15 +1368,15 @@ tracemill/
 | **PyPI release** | Medium | None | Publish `tracemill` + `tracemill-title-model` to PyPI. Packaging and CI publish workflow are already in place. |
 
 > **Delivered since this table was first written:** the live structuring subsystem
-> (`phase/` + `boundary/` + `title/`, formerly PR #35) and the full governance epic
-> (#7, stories #9–#27) are both merged and shipping. Issues #9–#27 remain open only as
-> tracker hygiene and should be closed.
+> (`phase/` + `boundary/` + `title/`, formerly PR #35, now specified in §23) and the
+> governance epic (#7, stories #9–#27) are merged and shipping. All stories — including
+> end-to-end governance **integration tests (#27)** — are delivered and closed; the epic
+> (#7) closes with this documentation reconciliation (#49).
 
 ### Implementation Order (Recommended)
 
 `
-1. PyPI release                   → publish tracemill + tracemill-title-model
-2. Close governance epic issues (#9–#27) → tracker hygiene; work already delivered
+1. PyPI release → publish tracemill + tracemill-title-model
 `
 
 ---
@@ -1903,7 +1929,144 @@ src/tracemill/
 
 ---
 
-## §23 — Success Criteria
+## §23 — Live Structuring (Phase, Boundary & Title)
+
+Three CPU-only, torch-free models run at the `EventPipeline` layer and turn a flat event stream into
+navigable structure **live**, as events arrive. Phase and boundary inference **stamp event metadata in
+place**; titling runs **out-of-band**. All inference is **causal** — each decision uses only the events
+seen so far, never look-ahead and never an end-of-session batch pass — so structure is available
+mid-session and survives `SESSION_ENDED` / `SESSION_PAUSED`.
+
+| Model | Module | Output | Default |
+|-------|--------|--------|---------|
+| Phase classifier | `tracemill.phase` | `metadata.phase` (per event) | on (`enable_phase`) |
+| Boundary decoder | `tracemill.boundary` | `metadata.boundary` + `activity_id` / `step_id` | on (`enable_boundary`) |
+| Titler | `tracemill.title` | `TitleUpdate` records (out-of-band) | off (`enable_title`) |
+
+### 23.1 — Shared foundations
+
+- **Frozen embedder.** Both the phase and boundary models embed event text with a frozen
+  [model2vec](https://github.com/MinishLab/model2vec) static embedder, `minishlab/potion-base-8M`
+  (256-dimensional). The weights are vendored under `phase/data/potion-base-8M/`; embedding is a pure
+  lookup with **zero network access** and no torch. Input text is truncated to `MAX_TEXT_CHARS = 2000`.
+- **Shared featuriser.** `tracemill.phase.features` builds the symbolic + embedded design matrix for
+  **both** models, so there is no train/serve skew and no second feature implementation to drift.
+- **Causal segmentation primitives.** A categorical **Bayesian Online Changepoint Detection** (BOCPD;
+  Adams & MacKay 2007 — a Dirichlet-multinomial predictive with a constant hazard) plus trailing neighbor
+  centroids and windowed majority / entropy features give both models a run-length signal computed online.
+- **CPU-only / torch-free guarantee.** The only runtime dependencies are `model2vec`, `scikit-learn`,
+  `scipy`, `joblib`, `onnxruntime`, `tokenizers`, and `numpy`. **`torch` and `transformers` are never
+  imported at runtime.** These ML dependencies are part of the **core** package (not an optional extra)
+  and are imported lazily, so an unused subsystem costs nothing.
+
+### 23.2 — Phase classifier (`src/tracemill/phase/`)
+
+Stamps `metadata.phase` with the session-aware workflow stage.
+
+- **Classes.** `planning`, `implementation`, `verification`, `exploration` (a legacy `review` class is
+  folded into `verification`).
+- **Model.** A scikit-learn head (LogisticRegression / HistGradientBoosting) over a design matrix that
+  concatenates a `DictVectorizer` of symbolic features with the 256-d frozen embedding. The shipped
+  feature set is `combined-seg-nbrcentroid`, which reaches a leave-session-out macro-F1 of **0.931**
+  (within 0.0004 of the look-ahead upper bound while remaining fully causal).
+- **Symbolic features.** `kind`, `tool_name`, `mechanism`, `effect`, `shell_dialect`, `scope`, `role`,
+  `action`, `capability`, `structure`, and `phase_signals`.
+- **Segmentation.** `SegmentationParams` exposes the window sizes, `entropy_window`, and the BOCPD
+  hyper-parameters (`bocpd_expected_run_length`, `bocpd_alpha`, `bocpd_r_max`).
+- **Live streaming.** `SessionPhaseStream` produces the identical result event-for-event as a batch pass.
+  Content-bearing events are classified; low-signal "plumbing" events inherit the prevailing phase (marked
+  `inherited: true`); only leading plumbing (before any classifiable event) is briefly held. The
+  production stamp is the argmax class.
+- **Single producer.** The trained classifier is the **only** phase producer; there is no deterministic
+  fallback (a missing model bundle raises rather than silently degrading). The deterministic
+  `tracemill.tracking.PhaseTracker` is a **research feature signal, not part of the live path.**
+- **Model resolution.** Explicit argument → `$TRACEMILL_PHASE_MODEL` → the packaged
+  `phase/data/phase-model.joblib`.
+
+### 23.3 — Boundary decoder (`src/tracemill/boundary/`)
+
+Stamps `metadata.boundary` live, yielding an activity / step table of contents.
+
+- **Classes.** A single-label per-**gap** classifier over `noise`, `activity-boundary`, `step-boundary`.
+- **Features.** Feature set `combined-seg`, built by the **shared** `tracemill.phase.features` over the
+  gap between event *t* and its successor *t+1* (symbolic change indicators for both events + their
+  model2vec embeddings + the causal BOCPD / majority-vote signals).
+- **Causality.** The gap after event *t* is decided only once *t+1* arrives; the boundary is stamped on
+  the **successor** — the event that *opens* the new segment. Continuation events carry `boundary = None`.
+- **Streaming decode.** `StreamingBoundaryDecoder` / `DecodeParams` apply a learned per-class threshold
+  *t_c* (the F1-optimal precision/recall point) and a per-class refractory **minimum gap** *g_c* (learned
+  from gold segment spacing) — a streamable form of non-maximum suppression. Coarser boundaries win ties
+  (activity before step). Decoding is O(1) per gap; with no `decode_params` it falls back to argmax.
+- **Model.** Packaged `boundary/data/boundary-model.joblib`.
+
+### 23.4 — Titler (`src/tracemill/title/`)
+
+Produces human-readable activity / step titles, emitted **out-of-band**.
+
+- **Model.** A tiny `flan-t5-small` distilled via **sequence-level knowledge distillation** (seq-KD) from
+  an LLM teacher, then exported to **int8 split-ONNX**: `encoder.onnx` + `decoder.onnx` + `tokenizer.json`
+  (~96 MB total). It is served CPU-only through `onnxruntime` + `tokenizers` + `numpy` — **no torch, no
+  transformers** (resident set ~250 MB versus ~1 GB for a torch runtime). ONNX Runtime is pinned to a
+  single thread (`CPUExecutionProvider`).
+- **Decoding.** Single-pass beam search (`num_beams = 5`, `max_new_tokens = 32`,
+  `no_repeat_ngram_size = 2`, `repetition_penalty = 1.3`, `length_penalty = 0.8`) under the task prefix
+  `"summarize agent step: "`, guarded by a grounding gate (`TITLE_GROUND`, default on) with adaptive beam
+  escalation.
+- **Inputs.** The "distilled context" slots produced by `title/context.py::distilled_context`: `intent`,
+  `actions`, `files` (minus a corpus-learned boilerplate set frozen into
+  `title/data/boilerplate_files.json`), `symbols`, and `notes`. The same projection is used at training
+  and serving time, so there is no skew.
+- **Cadence.** Titling runs once per **segment** (never per event) and the model is lazily loaded on the
+  first segment close.
+- **Out-of-band contract.** `SessionTitleStream` stamps each event's `activity_id` / `step_id` live and
+  releases the event immediately. When a segment closes it publishes an **append-only** `TitleUpdate`
+  keyed by `segment_id` (`kind ∈ {session, activity, step}`; a `step` carries its activity's id as
+  `parent_id`). `TitleUpdate.version` lets a provisional title be revised idempotently — consumers keep the
+  highest version per `segment_id`. **Emitted events are never mutated:** in the live path
+  `metadata.activity_title` / `step_title` stay `None`; a batch sink may materialize them by folding
+  `TitleUpdate`s back onto events at replay.
+- **Sink contract.** `Sink.on_title_update` (in `sinks/base.py`) defaults to a one-time warning rather
+  than a silent drop — titles are primary output. All in-repo sinks override it.
+
+### 23.5 — Session naming (separate from span titles)
+
+Naming the **session** as a whole is a distinct subsystem — deliberately **not** the span titler (a
+distilled request-head was measured at ~9% coherent and dropped).
+
+- **Default: heuristic.** A zero-dependency extractive cascade (`title/heuristics.py`, exposed via
+  `title/naming.py::HeuristicProvider`) — free, offline, immediate, and non-blocking. It emits a
+  `kind = "session"` `TitleUpdate` (keyed by `segment_id == session_id`) the instant the first substantive
+  user message arrives.
+- **Opt-in: API refiner.** A LiteLLM-backed tier (`ApiProvider` / `_WithFallback` /
+  `build_session_titler_split`) engages only when the strategy is `api` **and** an API key is present in
+  the environment (the key is **never** read from config). It runs off the hot path on a worker thread and
+  emits a later, refined `kind = "session"` `TitleUpdate` (`refine_title` / `take_session_refinement`).
+
+### 23.6 — Live-stamping & enablement contract
+
+- `enable_phase` — default **on**; stamps `metadata.phase` live.
+- `enable_boundary` — default **on**; stamps `metadata.boundary` (and assigns `activity_id` / `step_id`)
+  live.
+- `enable_title` — default **off** (opt-in); emits `TitleUpdate` records out-of-band.
+- Live structuring runs at the `EventPipeline` layer, alongside — not inside — the enricher (which owns
+  classification and risk). Structuring is the pipeline's observation plane and feeds sinks directly
+  (including `on_title_update`).
+
+### 23.7 — Packaging
+
+The base `tracemill` wheel is **model-free only for the titler.** Its build force-includes the small model
+artifacts — `phase/data/*.joblib`, `phase/data/potion-base-8M/*`, `boundary/data/*.joblib`, and
+`title/data/*.json` — so the **phase and boundary sklearn heads and the frozen model2vec embedder ship in
+the base wheel.** Only the large T5 titler weights are split out, into a separate distribution
+**`tracemill-title-model`** (`encoder.onnx` / `decoder.onnx` / `tokenizer.json`). That distribution is a
+**hard runtime dependency** (`tracemill-title-model >= 0.2` in `[project.dependencies]`), **not** an
+optional extra. `title/_resolve.py::span_dir()` resolves the weights as: installed `tracemill_title_model`
+package → in-tree `title/data/` dev fallback → raise with an install hint. Git-LFS pointer stubs are
+rejected via a minimum-byte-size guard, so a partial checkout fails loudly instead of loading a stub.
+
+---
+
+## §24 — Success Criteria
 
 The library is "done" when:
 

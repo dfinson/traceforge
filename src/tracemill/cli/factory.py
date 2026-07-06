@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -20,6 +21,14 @@ def create_default_pipeline(
     """Create a GovernancePipeline with all default components.
 
     This is the standard way to instantiate a pipeline for CLI and Score API use.
+
+    When ``project_root`` is not supplied it defaults to the resolved absolute current
+    working directory. The CLI entry points (``watch``/``score``/``replay``) run *inside*
+    the target repository and share a persistent ``~/.tracemill/system.db``; without a
+    real key both :class:`IntegrityVerifier` and :class:`DriftDetector` would namespace
+    their per-file baselines under the literal ``"unknown"``, colliding every repository
+    the user runs against on relative tool-call paths (e.g. two repos both writing
+    ``src/main.py``). Defaulting to the cwd gives each repository its own namespace.
     """
     from tracemill.classify.config import get_default_engine
     from tracemill.governance.budget import BudgetTracker
@@ -34,6 +43,13 @@ def create_default_pipeline(
     rules = parse_rules(rules_path)
 
     engine = get_default_engine()
+
+    # watch/score/replay pass no project_root but share the persistent
+    # ~/.tracemill/system.db; default the repo key to the resolved cwd so integrity and
+    # drift namespace per-repo, never the colliding "unknown" bucket (see docstring).
+    if project_root is None:
+        project_root = os.path.abspath(os.getcwd())
+
     # Content integrity is live by default on this primary CLI/Score path. The repo
     # key mirrors drift.py's ``project_root or "unknown"`` idiom so runtime contexts
     # and the constructed verifier agree on the namespace.

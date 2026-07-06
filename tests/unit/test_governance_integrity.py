@@ -13,6 +13,7 @@ writer attribution, and — critically — a preflight simulation that never rec
 
 import hashlib
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -256,8 +257,11 @@ class TestDefaultInjection:
     way — with NO hand-injected verifier — record the baseline on a first write and flag
     a mismatched re-write with the +10 integrity bonus. Integrity is on by default at
     both composition roots (`create_default_pipeline` and `GovernancePipeline.create`/
-    `from_config`) and opt-out via `integrity_verification: false`. The repo key falls
-    back to ``"unknown"`` (matching drift.py) when no project_root is configured."""
+    `from_config`) and opt-out via `integrity_verification: false`. `GovernancePipeline.
+    create`/`from_config` fall back to a repo key of ``"unknown"`` (matching drift.py)
+    when no project_root is configured, whereas the CLI factory `create_default_pipeline`
+    defaults the key to the resolved cwd so per-repo baselines in the shared persistent
+    store never collide."""
 
     def test_default_factory_wires_integrity_live(self, store):
         # cli/factory.py path (CLI + Score API). No manual IntegrityVerifier.
@@ -282,6 +286,44 @@ class TestDefaultInjection:
         assert meta_drift.risk_assessment.score - meta0.risk_assessment.score == 10
         # Drift re-baselines (deferred) to what was actually written.
         assert store.get_content_hash(REPO, "src/a.py") == _sha(b"v2")
+
+    def test_cli_factory_keys_baseline_by_cwd_not_unknown(self, store, monkeypatch, tmp_path):
+        """The CLI builds its pipeline with NO explicit project_root — exactly
+        ``create_default_pipeline(store)`` as in watch/score/replay — against the shared,
+        persistent ``~/.tracemill/system.db``. That store used to namespace every repo's
+        per-file baseline under the literal ``"unknown"``, so two different repositories
+        both writing the relative path ``src/main.py`` collided and produced false
+        integrity signals. The factory now defaults the repo key to the resolved cwd, so
+        each repository gets its own, non-colliding namespace."""
+        repo_a = tmp_path / "repo_a"
+        repo_b = tmp_path / "repo_b"
+        repo_a.mkdir()
+        repo_b.mkdir()
+
+        # ── Repo A: run the CLI-style factory from inside repo_a, no project_root ──
+        monkeypatch.chdir(repo_a)
+        key_a = os.path.abspath(os.getcwd())
+        pipeline_a = create_default_pipeline(store)
+        pipeline_a.process_event(
+            _ctx(_write_event("src/main.py", "content-A", session_id="A", event_id="a1", key="ka"))
+        )
+
+        # ── Repo B: SAME relative path, DIFFERENT content, from inside repo_b ──
+        monkeypatch.chdir(repo_b)
+        key_b = os.path.abspath(os.getcwd())
+        pipeline_b = create_default_pipeline(store)
+        pipeline_b.process_event(
+            _ctx(_write_event("src/main.py", "content-B", session_id="B", event_id="b1", key="kb"))
+        )
+
+        assert key_a != key_b  # distinct repos → distinct keys, no "unknown" collision
+        assert "unknown" not in (key_a, key_b)
+
+        # Each repo's baseline is namespaced by its own cwd (its real identity) …
+        assert store.get_content_hash(key_a, "src/main.py") == _sha(b"content-A")
+        assert store.get_content_hash(key_b, "src/main.py") == _sha(b"content-B")
+        # … and nothing landed in the colliding "unknown" bucket that caused the bug.
+        assert store.get_content_hash("unknown", "src/main.py") is None
 
     def test_zero_config_pipeline_wires_integrity_live(self):
         # GovernancePipeline.create() with default config (the from_config root, which

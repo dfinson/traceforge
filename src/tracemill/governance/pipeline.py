@@ -133,6 +133,7 @@ class GovernancePipeline:
         from tracemill.classify.config import get_default_engine
         from tracemill.config.models import GovernanceConfig
         from tracemill.governance.budget import BudgetThresholds, BudgetTracker
+        from tracemill.governance.integrity import IntegrityVerifier
         from tracemill.governance.labeler import GovernanceLabeler
         from tracemill.governance.persistence import SystemStore
         from tracemill.governance.rules import parse_rules
@@ -167,9 +168,17 @@ class GovernancePipeline:
 
             pii_scanner = PIIScanner()
 
+        # Content-integrity verification is live when a project_root (the repo key) is
+        # configured; otherwise degrade gracefully to no verifier (no-op).
+        integrity_verifier = (
+            IntegrityVerifier(store, config.project_root) if config.project_root else None
+        )
+
         instance = cls(
             store=store,
-            labeler=GovernanceLabeler(pii_scanner=pii_scanner),
+            labeler=GovernanceLabeler(
+                pii_scanner=pii_scanner, integrity_verifier=integrity_verifier
+            ),
             budget_tracker=BudgetTracker(thresholds=thresholds),
             rules=rules,
             engine=engine,

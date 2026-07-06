@@ -23,6 +23,7 @@ def create_default_pipeline(
     """
     from tracemill.classify.config import get_default_engine
     from tracemill.governance.budget import BudgetTracker
+    from tracemill.governance.integrity import IntegrityVerifier
     from tracemill.governance.labeler import GovernanceLabeler
     from tracemill.governance.rules import parse_rules
 
@@ -33,7 +34,10 @@ def create_default_pipeline(
     rules = parse_rules(rules_path)
 
     engine = get_default_engine()
-    labeler = GovernanceLabeler()
+    # Content-integrity verification is live when a project_root (the repo key) is
+    # configured; otherwise degrade gracefully to no verifier (no-op).
+    integrity_verifier = IntegrityVerifier(store, project_root) if project_root else None
+    labeler = GovernanceLabeler(integrity_verifier=integrity_verifier)
     tracker = BudgetTracker()
 
     return GovernancePipeline(

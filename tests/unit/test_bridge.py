@@ -13,7 +13,6 @@ from tracemill.governance.budget import BudgetTracker
 from tracemill.governance.labeler import GovernanceLabeler
 from tracemill.governance.persistence import SystemStore
 from tracemill.governance.pipeline import GovernancePipeline, SessionMeta
-from tracemill.governance.registry import SessionRegistry
 from tracemill.governance.results import RecommendedAction
 from tracemill.governance.rules import parse_rules
 from tracemill.governance.state import SessionState
@@ -374,51 +373,111 @@ class TestScoreDoesNotSuppressObservation:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Gate-before-observe: the writer must never inherit a DB-less state (durability)
+# Gate-before-observe durability (F2): the writer must persist even when the
+# Shield created the session's ephemeral (_db=None) gate state first.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestGateBeforeObserveDurability:
-    """Regression (F2): a gate-first ``ensure`` must not leave the observation
-    writer holding an ephemeral, DB-less state.
+class TestGateThenObserveDurability:
+    """Regression for F2: the observation writer must durably persist even when
+    the Shield gated the same session first.
 
-    ``SessionRegistry.ensure`` (the gate channel) deliberately creates a
-    thread-safe, ``_db=None`` state so it never touches SQLite cross-thread. In
-    the gate-before-observe model the gate touches a session first, so its
-    ephemeral state lands in the shared residency map. If the observation writer
-    then received that same DB-less instance, every ``persist`` /
-    ``persist_no_commit`` would silently no-op and session state would never reach
-    disk. ``get_or_create`` now promotes such a resident to a durable, DB-backed
-    state, carrying the gate's in-memory enforcement log forward.
+    The Shield's gate channel creates ephemeral ``SessionState(_db=None)`` for a
+    session — deliberately, so enforcement never does cross-thread sqlite. Before
+    the fix the ``SessionRegistry`` shared one residency map, so the
+    ``SessionMonitor``'s ``get_or_create`` was handed that same ``_db=None``
+    state; its ``persist_no_commit`` then silently no-op'd (it early-returns when
+    ``_db is None``) and the observed Phase-1 mutation never reached the DB. The
+    registry now keeps the gate (ephemeral) and observation (DB-backed)
+    residencies separate, so the writer always operates on a persistable state.
     """
 
-    def test_writer_state_is_db_backed_after_gate_ensure(self, store):
-        registry = SessionRegistry(store)
-        sid = "gate-first-session"
-        gate_state = registry.ensure(sid)
-        assert gate_state.is_db_backed() is False
-        writer_state = registry.get_or_create(sid)
-        assert writer_state.is_db_backed() is True
+    def test_gate_then_observe_persists_durably(self, pipeline, store):
+        session_id = "gate-then-observe"
 
-    def test_writer_persistence_survives_gate_first_creation(self, store):
-        # The teeth of F2: with the pre-fix registry the writer inherits the gate's
-        # DB-less state, persist() no-ops, and the reload sees nothing.
-        registry = SessionRegistry(store)
-        sid = "gate-first-durable"
-        registry.ensure(sid)  # gate channel creates the ephemeral state first
-        writer_state = registry.get_or_create(sid)
-        writer_state.increment_budget(effect="write")
-        writer_state.persist()
-        reloaded = SessionState.load_from_db(sid, store.connection)
+        # ── Gate first (Shield path): creates the ephemeral _db=None gate state,
+        # then advances the gate-channel counter at postflight.
+        payload = {
+            "tool_name": "bash",
+            "tool_input": {"command": "ls"},
+            "session_id": session_id,
+        }
+        trace, verdict = pipeline._score_and_gate_preflight(payload)
+        assert verdict.allowed
+        # Guard the assumption that both channels key on the same session id.
+        assert trace.session_id == session_id
+        pipeline._enforce_postflight(trace, session_id=trace.session_id, output={"result": "ok"})
+
+        # ── Observe the same session (SessionMonitor path — the single writer).
+        event = _make_event(
+            tool_name="bash",
+            arguments={"command": "ls"},
+            kind=EventKind.TOOL_CALL_COMPLETED,
+            session_id=session_id,
+        )
+        pipeline.observe_event(event)
+
+        # ── The observation must be DURABLE: a fresh read straight from the DB
+        # must reflect the advanced counter. Without the fix the writer mutated
+        # the gate's _db=None state, persist_no_commit no-op'd, no session_state
+        # row was written, and this reload returns 0.
+        reloaded = SessionState.load_from_db(session_id, store.connection)
         assert reloaded.tool_call_count == 1
 
-    def test_promotion_preserves_enforcement_log(self, store):
-        registry = SessionRegistry(store)
-        sid = "gate-first-log"
-        gate_state = registry.ensure(sid)
-        gate_state.record_denial("deny:policy")
-        gate_state.record_allow("tool-call-42")
-        writer_state = registry.get_or_create(sid)
-        assert writer_state.denied_count == 1
-        assert "tool-call-42" in writer_state.prior_tool_call_ids()
-        assert writer_state.prior_verdicts() == ("deny:policy",)
+        # ── And the writer's in-memory durable residency advanced exactly once —
+        # not twice from inheriting the gate's already-incremented counter.
+        assert pipeline.get_or_create_state(session_id).tool_call_count == 1
+
+    def test_two_gated_and_observed_calls_count_once_per_channel(self, pipeline, store):
+        """Two calls each flow through BOTH channels (gate then observe); the
+        durable observation counter must land on exactly 2 — one per observed
+        call — never 3+ from a shared residency letting the gate's increments
+        bleed into the writer's state.
+
+        This is the empirical double-count the two-map split fixes. With a single
+        shared residency that *promotes* the gate's ephemeral state to DB-backed
+        (the reverted design), the writer inherits the gate's already-incremented
+        counter and then increments again, so two real calls persisted a count of
+        3. A single-call test can't distinguish that regression on its own, so
+        this drives two full gate+observe cycles and asserts each channel counted
+        its own calls exactly once, on its own SessionState object.
+        """
+        session_id = "gate-then-observe-x2"
+
+        def gate_and_observe(command: str) -> None:
+            payload = {
+                "tool_name": "bash",
+                "tool_input": {"command": command},
+                "session_id": session_id,
+            }
+            trace, verdict = pipeline._score_and_gate_preflight(payload)
+            assert verdict.allowed
+            pipeline._enforce_postflight(
+                trace, session_id=trace.session_id, output={"result": "ok"}
+            )
+            event = _make_event(
+                tool_name="bash",
+                arguments={"command": command},
+                kind=EventKind.TOOL_CALL_COMPLETED,
+                session_id=session_id,
+            )
+            pipeline.observe_event(event)
+
+        gate_and_observe("ls")
+        gate_and_observe("pwd")
+
+        # Observation channel: the durably persisted count is exactly 2 (one per
+        # observed call). Under the reverted single-map/promotion design this
+        # over-counted to 3 because the writer inherited the gate's increments.
+        reloaded = SessionState.load_from_db(session_id, store.connection)
+        assert reloaded.tool_call_count == 2
+        durable = pipeline.get_or_create_state(session_id)
+        assert durable.tool_call_count == 2
+
+        # Gate channel counts independently on its OWN ephemeral state — a
+        # distinct object from the writer's durable one (the two-map invariant) —
+        # also landing on 2 without cross-channel bleed.
+        gate_state = pipeline._registry.get_gate(session_id)
+        assert gate_state is not None
+        assert gate_state.tool_call_count == 2
+        assert gate_state is not durable

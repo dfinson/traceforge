@@ -179,8 +179,9 @@ class Scorer:
         session_id = ctx.event.session_id
 
         # Use cached state if available; otherwise start fresh (thread-safe,
-        # avoids cross-thread sqlite3 access for unknown sessions)
-        state = self._registry.get(session_id)
+        # avoids cross-thread sqlite3 access for unknown sessions). Prefers the
+        # durable observation state so the preview reflects accumulated budgets.
+        state = self._registry.preview_state(session_id)
         if state is None:
             state = SessionState(session_id=session_id)
 

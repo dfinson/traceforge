@@ -251,7 +251,7 @@ class Shield:
         """
         from tracemill.sdk.gate_types import GateContext
 
-        state = self._registry.get(session_id)
+        state = self._registry.get_gate(session_id)
         if state is None:
             return GateContext(session_id=session_id, tool_call_count=0, denied_count=0)
 

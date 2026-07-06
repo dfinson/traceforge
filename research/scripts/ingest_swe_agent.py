@@ -16,13 +16,13 @@ import json
 import logging
 import sys
 
-from tracemill_research.config import load_labeling_runtime_config
-from tracemill_research.ingest.swe_agent import (
+from traceforge_research.config import load_labeling_runtime_config
+from traceforge_research.ingest.swe_agent import (
     SweAgentIngestConfig,
     default_output_dir,
     run_sync,
 )
-from tracemill_research.paths import DATA_RAW, EXPERIMENTS_DIR
+from traceforge_research.paths import DATA_RAW, EXPERIMENTS_DIR
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("ingest-swe-agent-full")

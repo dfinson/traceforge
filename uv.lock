@@ -3918,7 +3918,7 @@ wheels = [
 ]
 
 [[package]]
-name = "tracemill"
+name = "traceforge"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
@@ -3937,7 +3937,7 @@ dependencies = [
     { name = "scipy" },
     { name = "sqlalchemy" },
     { name = "tokenizers" },
-    { name = "tracemill-title-model" },
+    { name = "traceforge-title-model" },
     { name = "tree-sitter" },
     { name = "tree-sitter-bash" },
     { name = "tree-sitter-markdown" },
@@ -3990,7 +3990,7 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.11" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "tokenizers", specifier = ">=0.15" },
-    { name = "tracemill-title-model", editable = "packages/tracemill-title-model" },
+    { name = "traceforge-title-model", editable = "packages/traceforge-title-model" },
     { name = "tree-sitter", specifier = ">=0.24" },
     { name = "tree-sitter-bash", specifier = ">=0.24" },
     { name = "tree-sitter-markdown", specifier = ">=0.5" },
@@ -4014,9 +4014,9 @@ dev = [
 ]
 
 [[package]]
-name = "tracemill-title-model"
+name = "traceforge-title-model"
 version = "0.2.0"
-source = { editable = "packages/tracemill-title-model" }
+source = { editable = "packages/traceforge-title-model" }
 
 [[package]]
 name = "tree-sitter"

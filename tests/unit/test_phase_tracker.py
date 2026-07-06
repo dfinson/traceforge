@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from tracemill.config.models import PhaseTrackerConfig
-from tracemill.tracking import PhaseTracker, resolve_phase_root
+from traceforge.config.models import PhaseTrackerConfig
+from traceforge.tracking import PhaseTracker, resolve_phase_root
 
 T0 = datetime(2024, 1, 1, 12, 0, 0)
 

@@ -2,7 +2,7 @@
 
 import pytest
 
-from tracemill.governance.persistence import SystemStore
+from traceforge.governance.persistence import SystemStore
 
 
 @pytest.fixture

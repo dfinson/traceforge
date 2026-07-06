@@ -10,19 +10,19 @@ reference point.
 ~/.copilot/session-state/<uuid>/events.jsonl    # raw event stream
             │
             ▼
-  tracemill.sources.replay.ReplaySource         # streams events
+  traceforge.sources.replay.ReplaySource         # streams events
             │
             ▼
-  tracemill.enricher.Enricher                   # adds classification, activity, phase, motivation
+  traceforge.enricher.Enricher                   # adds classification, activity, phase, motivation
             │
             ▼
-  tracemill.sinks.parquet.ParquetSink           # buffers in memory, flushes per session
+  traceforge.sinks.parquet.ParquetSink           # buffers in memory, flushes per session
             │
             ▼
   research/data/interim/copilot/<session_id>.parquet
             │
             ▼
-  tracemill_research.ingest.copilot.load_dataset()
+  traceforge_research.ingest.copilot.load_dataset()
             │
             ▼
   pyarrow.dataset → feature pipeline → MLflow run
@@ -37,7 +37,7 @@ We keep both. They serve different purposes.
 
 | Format | Role | When |
 | --- | --- | --- |
-| **JSONL** | Streaming sink, raw audit trail | Default for live tracemill runs. Append-only. Easy to inspect. No schema enforcement. |
+| **JSONL** | Streaming sink, raw audit trail | Default for live traceforge runs. Append-only. Easy to inspect. No schema enforcement. |
 | **Parquet** | Analytics sink, ML input | Per-session file emitted at session close. Schema-enforced. Column-oriented. ~5–10× smaller than JSONL on disk. |
 
 JSONL fits how events arrive: one at a time, append-friendly, tolerant of
@@ -46,7 +46,7 @@ many sessions, schema validation, fast filter pushdown.
 
 **Reasons to keep JSONL as the default:**
 
-- Already wired into tracemill (`JsonlSink`).
+- Already wired into traceforge (`JsonlSink`).
 - Streaming-natural: one line per event, append, no row-group buffering.
 - Inspectable with `head`, `jq`, `grep`.
 - No new dependency.
@@ -74,7 +74,7 @@ many sessions, schema validation, fast filter pushdown.
 
 ## ParquetSink design
 
-Lives in `src/tracemill/sinks/parquet.py`. `pyarrow>=15` is a core
+Lives in `src/traceforge/sinks/parquet.py`. `pyarrow>=15` is a core
 dependency — the canonical analytics format is parquet, so the sink is not
 gated behind an extras flag.
 
@@ -148,7 +148,7 @@ without backfilling old files (parquet evolution is per-file).
 
 ## Research-side ingest
 
-`research/src/tracemill_research/ingest/copilot.py`:
+`research/src/traceforge_research/ingest/copilot.py`:
 
 ```python
 def enrich_session(

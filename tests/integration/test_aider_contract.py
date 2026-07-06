@@ -20,11 +20,11 @@ from pathlib import Path
 import pytest
 import yaml
 
-from tracemill.adapters.mapped_json import MappedJsonAdapter
-from tracemill.parsers.aider import AiderPreParser
+from traceforge.adapters.mapped_json import MappedJsonAdapter
+from traceforge.parsers.aider import AiderPreParser
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures"
-MAPPINGS_DIR = Path(__file__).resolve().parent.parent.parent / "src" / "tracemill" / "mappings"
+MAPPINGS_DIR = Path(__file__).resolve().parent.parent.parent / "src" / "traceforge" / "mappings"
 
 
 # ─── 1. Golden fixture test ──────────────────────────────────────────────────

@@ -21,7 +21,7 @@ from __future__ import annotations
 import pandas as pd
 import pyarrow.parquet as pq
 
-from tracemill_research.paths import DATA_INTERIM, DATA_PROCESSED
+from traceforge_research.paths import DATA_INTERIM, DATA_PROCESSED
 
 SPAN_PREFIX = "summarize agent step: "
 

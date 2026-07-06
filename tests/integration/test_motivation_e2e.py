@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from tracemill.adapters.mapped_json import MappedJsonAdapter
+from traceforge.adapters.mapped_json import MappedJsonAdapter
 
-MAPPINGS_DIR = Path(__file__).resolve().parents[2] / "src" / "tracemill" / "mappings"
+MAPPINGS_DIR = Path(__file__).resolve().parents[2] / "src" / "traceforge" / "mappings"
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 

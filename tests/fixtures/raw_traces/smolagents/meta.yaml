@@ -4,6 +4,6 @@ source_repo: huggingface/smolagents
 framework_version: 1.26.0
 model: gpt-5
 captured_at: "2026-06-28T09:27:14Z"
-tracemill_commit: 13f4d3d
+traceforge_commit: 13f4d3d
 line_count: 14
 notes: Real OpenAI session; coding task on demo-issue-tracker-api.

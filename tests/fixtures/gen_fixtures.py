@@ -294,9 +294,9 @@ with open("tests/fixtures/claude_session.jsonl", "w") as f:
 # --- Verify via MappedJsonAdapter ---
 from pathlib import Path  # noqa: E402
 
-from tracemill.adapters.mapped_json import MappedJsonAdapter  # noqa: E402
+from traceforge.adapters.mapped_json import MappedJsonAdapter  # noqa: E402
 
-mappings_dir = Path(__file__).resolve().parent.parent.parent / "src" / "tracemill" / "mappings"
+mappings_dir = Path(__file__).resolve().parent.parent.parent / "src" / "traceforge" / "mappings"
 
 print("Verifying copilot fixture...")
 adapter = MappedJsonAdapter.from_yaml(str(mappings_dir / "copilot.yaml"), session_id="verify")

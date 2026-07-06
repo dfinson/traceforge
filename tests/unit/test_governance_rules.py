@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from tracemill.classify.core import Classification
-from tracemill.classify.risk import RiskAssessment
-from tracemill.governance.rules import (
+from traceforge.classify.core import Classification
+from traceforge.classify.risk import RiskAssessment
+from traceforge.governance.rules import (
     RecommendedAction,
     TransformTemplate,
     evaluate_rules,
@@ -196,7 +196,7 @@ class TestRecommendationRulesYAML:
         rules_path = (
             Path(__file__).parent.parent.parent
             / "src"
-            / "tracemill"
+            / "traceforge"
             / "classify"
             / "data"
             / "recommendation_rules.yaml"
@@ -210,7 +210,7 @@ class TestRecommendationRulesYAML:
         rules_path = (
             Path(__file__).parent.parent.parent
             / "src"
-            / "tracemill"
+            / "traceforge"
             / "classify"
             / "data"
             / "recommendation_rules.yaml"

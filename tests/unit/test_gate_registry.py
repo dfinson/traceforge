@@ -13,13 +13,13 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from tracemill.gate.registry import (
+from traceforge.gate.registry import (
     lookup_session,
     register_session,
     unregister_pid,
     unregister_session,
 )
-from tracemill.governance.persistence import SystemStore
+from traceforge.governance.persistence import SystemStore
 
 
 def _migrated_db(tmp_path: Path) -> str:

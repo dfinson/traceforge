@@ -4,6 +4,6 @@ source_repo: crewAIInc/crewAI
 framework_version: 1.6.1
 model: gpt-5
 captured_at: "2026-06-28T09:29:53Z"
-tracemill_commit: 13f4d3d
+traceforge_commit: 13f4d3d
 line_count: 41
 notes: Real OpenAI session; coding task on demo-issue-tracker-api.

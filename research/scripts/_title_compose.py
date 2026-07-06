@@ -372,7 +372,7 @@ def clean_obj(s):
 
 
 def main():
-    from tracemill.phase.features import embed_texts
+    from traceforge.phase.features import embed_texts
 
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")

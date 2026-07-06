@@ -50,7 +50,7 @@ without one of:
 
 1. **Hand-label.** A few hundred Copilot sessions, by us. Slow, scalable
    only as far as patience allows.
-2. **Self-label via tracemill enricher.** Run the enricher to produce
+2. **Self-label via traceforge enricher.** Run the enricher to produce
    per-event activity, then derive boundary labels from activity transitions.
    Noisy; biases the eval toward whatever the enricher already does.
 3. **Use the trained classifier as a weak labeler.** Bootstrap: train on

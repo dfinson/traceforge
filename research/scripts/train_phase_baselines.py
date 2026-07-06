@@ -31,21 +31,21 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.preprocessing import MultiLabelBinarizer
 
-from tracemill_research.mlflow_utils import log_yaml_params, start_run
-from tracemill_research.paths import DATA_PROCESSED, EXPERIMENTS_DIR
-from tracemill_research.training.evaluate import (
+from traceforge_research.mlflow_utils import log_yaml_params, start_run
+from traceforge_research.paths import DATA_PROCESSED, EXPERIMENTS_DIR
+from traceforge_research.training.evaluate import (
     multilabel_report,
     oof_predictions,
     precompute_embeddings,
 )
-from tracemill_research.training.features import (
+from traceforge_research.training.features import (
     PHASES,
     REVIEW_MODIFIER,
     REVIEW_REMAPS_TO,
     NeighborParams,
     load_phase_examples,
 )
-from tracemill_research.training.segmentation import SegmentationParams
+from traceforge_research.training.segmentation import SegmentationParams
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("train-phase")

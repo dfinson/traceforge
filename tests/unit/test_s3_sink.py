@@ -18,7 +18,7 @@ class TestS3SinkImportError:
         with patch.dict(sys.modules, {"boto3": None}):
             # Need to reimport the module to trigger the check
             # Instead, test the _require_boto3 helper directly
-            from tracemill.sinks.s3 import _require_boto3
+            from traceforge.sinks.s3 import _require_boto3
 
             with patch.dict(sys.modules, {"boto3": None}):
                 # Temporarily remove boto3 from available modules
@@ -36,7 +36,7 @@ class TestS3SinkBuffering:
 
     @pytest.fixture
     def mock_boto3(self):
-        with patch("tracemill.sinks.s3._require_boto3") as mock_req:
+        with patch("traceforge.sinks.s3._require_boto3") as mock_req:
             mock_client = MagicMock()
             mock_boto3_mod = MagicMock()
             mock_boto3_mod.client.return_value = mock_client
@@ -45,10 +45,10 @@ class TestS3SinkBuffering:
 
     @pytest.fixture
     def sink(self, mock_boto3):
-        from tracemill.sinks.s3 import S3Sink
+        from traceforge.sinks.s3 import S3Sink
 
         mock_boto3_mod, _ = mock_boto3
-        with patch("tracemill.sinks.s3._require_boto3", return_value=mock_boto3_mod):
+        with patch("traceforge.sinks.s3._require_boto3", return_value=mock_boto3_mod):
             return S3Sink(
                 bucket="test-bucket",
                 prefix="traces/",
@@ -101,9 +101,9 @@ class TestS3SinkObjectKey:
     """Test S3 object key format."""
 
     def test_key_format(self):
-        from tracemill.sinks.s3 import S3Sink
+        from traceforge.sinks.s3 import S3Sink
 
-        with patch("tracemill.sinks.s3._require_boto3") as mock_req:
+        with patch("traceforge.sinks.s3._require_boto3") as mock_req:
             mock_req.return_value = MagicMock()
             sink = S3Sink(bucket="b", prefix="traces/")
 
@@ -115,9 +115,9 @@ class TestS3SinkObjectKey:
         assert len(parts) == 4  # prefix/session/date/filename
 
     def test_key_no_prefix(self):
-        from tracemill.sinks.s3 import S3Sink
+        from traceforge.sinks.s3 import S3Sink
 
-        with patch("tracemill.sinks.s3._require_boto3") as mock_req:
+        with patch("traceforge.sinks.s3._require_boto3") as mock_req:
             mock_req.return_value = MagicMock()
             sink = S3Sink(bucket="b", prefix="")
 
@@ -129,9 +129,9 @@ class TestS3SinkPayload:
     """Test that uploaded payload is valid JSONL."""
 
     async def test_upload_body_is_valid_jsonl(self):
-        from tracemill.sinks.s3 import S3Sink
+        from traceforge.sinks.s3 import S3Sink
 
-        with patch("tracemill.sinks.s3._require_boto3") as mock_req:
+        with patch("traceforge.sinks.s3._require_boto3") as mock_req:
             mock_boto3_mod = MagicMock()
             mock_req.return_value = mock_boto3_mod
             sink = S3Sink(bucket="b", prefix="p/", buffer_size=2)
@@ -156,9 +156,9 @@ class TestS3SinkPayload:
             assert "timestamp" in obj
 
     async def test_on_span_buffered(self):
-        from tracemill.sinks.s3 import S3Sink
+        from traceforge.sinks.s3 import S3Sink
 
-        with patch("tracemill.sinks.s3._require_boto3") as mock_req:
+        with patch("traceforge.sinks.s3._require_boto3") as mock_req:
             mock_req.return_value = MagicMock()
             sink = S3Sink(bucket="b", buffer_size=100)
 
@@ -168,9 +168,9 @@ class TestS3SinkPayload:
         assert sink._buffer[0]["type"] == "span"
 
     async def test_on_usage_buffered(self):
-        from tracemill.sinks.s3 import S3Sink
+        from traceforge.sinks.s3 import S3Sink
 
-        with patch("tracemill.sinks.s3._require_boto3") as mock_req:
+        with patch("traceforge.sinks.s3._require_boto3") as mock_req:
             mock_req.return_value = MagicMock()
             sink = S3Sink(bucket="b", buffer_size=100)
 
@@ -184,13 +184,13 @@ class TestS3SinkLazyClient:
     """Test lazy client creation with region/endpoint."""
 
     async def test_get_client_with_region_and_endpoint(self):
-        from tracemill.sinks.s3 import S3Sink
+        from traceforge.sinks.s3 import S3Sink
 
         mock_boto3_mod = MagicMock()
         mock_client = MagicMock()
         mock_boto3_mod.client.return_value = mock_client
 
-        with patch("tracemill.sinks.s3._require_boto3", return_value=mock_boto3_mod):
+        with patch("traceforge.sinks.s3._require_boto3", return_value=mock_boto3_mod):
             sink = S3Sink(
                 bucket="b",
                 region="eu-west-1",
@@ -211,13 +211,13 @@ class TestS3SinkLazyClient:
         )
 
     async def test_get_client_no_region_no_endpoint(self):
-        from tracemill.sinks.s3 import S3Sink
+        from traceforge.sinks.s3 import S3Sink
 
         mock_boto3_mod = MagicMock()
         mock_client = MagicMock()
         mock_boto3_mod.client.return_value = mock_client
 
-        with patch("tracemill.sinks.s3._require_boto3", return_value=mock_boto3_mod):
+        with patch("traceforge.sinks.s3._require_boto3", return_value=mock_boto3_mod):
             sink = S3Sink(bucket="b", buffer_size=1)
 
         sink._buffer = [{"test": "data"}]
@@ -227,13 +227,13 @@ class TestS3SinkLazyClient:
         mock_boto3_mod.client.assert_called_once_with("s3")
 
     async def test_get_client_cached(self):
-        from tracemill.sinks.s3 import S3Sink
+        from traceforge.sinks.s3 import S3Sink
 
         mock_boto3_mod = MagicMock()
         mock_client = MagicMock()
         mock_boto3_mod.client.return_value = mock_client
 
-        with patch("tracemill.sinks.s3._require_boto3", return_value=mock_boto3_mod):
+        with patch("traceforge.sinks.s3._require_boto3", return_value=mock_boto3_mod):
             sink = S3Sink(bucket="b", buffer_size=1)
 
         sink._buffer = [{"a": 1}]
@@ -252,13 +252,13 @@ class TestS3SinkTimeFlush:
     async def test_time_based_flush(self):
         import time
 
-        from tracemill.sinks.s3 import S3Sink
+        from traceforge.sinks.s3 import S3Sink
 
         mock_boto3_mod = MagicMock()
         mock_client = MagicMock()
         mock_boto3_mod.client.return_value = mock_client
 
-        with patch("tracemill.sinks.s3._require_boto3", return_value=mock_boto3_mod):
+        with patch("traceforge.sinks.s3._require_boto3", return_value=mock_boto3_mod):
             sink = S3Sink(bucket="b", buffer_size=1000, flush_interval=0.0)
 
         sink._client = mock_client
@@ -275,14 +275,14 @@ class TestS3SinkErrorHandling:
     """Test error handling on S3 upload failure."""
 
     async def test_upload_failure_logs_error_clears_buffer(self):
-        from tracemill.sinks.s3 import S3Sink
+        from traceforge.sinks.s3 import S3Sink
 
         mock_boto3_mod = MagicMock()
         mock_client = MagicMock()
         mock_client.put_object.side_effect = Exception("Network error")
         mock_boto3_mod.client.return_value = mock_client
 
-        with patch("tracemill.sinks.s3._require_boto3", return_value=mock_boto3_mod):
+        with patch("traceforge.sinks.s3._require_boto3", return_value=mock_boto3_mod):
             sink = S3Sink(bucket="b", buffer_size=1)
 
         sink._client = mock_client
@@ -292,13 +292,13 @@ class TestS3SinkErrorHandling:
         assert len(sink._buffer) == 0
 
     async def test_flush_unknown_session_uses_fallback(self):
-        from tracemill.sinks.s3 import S3Sink
+        from traceforge.sinks.s3 import S3Sink
 
         mock_boto3_mod = MagicMock()
         mock_client = MagicMock()
         mock_boto3_mod.client.return_value = mock_client
 
-        with patch("tracemill.sinks.s3._require_boto3", return_value=mock_boto3_mod):
+        with patch("traceforge.sinks.s3._require_boto3", return_value=mock_boto3_mod):
             sink = S3Sink(bucket="b", buffer_size=100)
 
         sink._client = mock_client
@@ -314,7 +314,7 @@ class TestS3SinkRequireBoto3Success:
     """Test _require_boto3 when boto3 IS available."""
 
     def test_returns_boto3_module(self):
-        from tracemill.sinks.s3 import _require_boto3
+        from traceforge.sinks.s3 import _require_boto3
 
         # Since boto3 isn't installed, we patch it
         fake_boto3 = MagicMock()
@@ -330,13 +330,13 @@ class TestS3SinkSpanUsageAutoFlush:
     """Test that span/usage can trigger auto-flush when buffer is full."""
 
     async def test_span_triggers_flush_at_threshold(self):
-        from tracemill.sinks.s3 import S3Sink
+        from traceforge.sinks.s3 import S3Sink
 
         mock_boto3_mod = MagicMock()
         mock_client = MagicMock()
         mock_boto3_mod.client.return_value = mock_client
 
-        with patch("tracemill.sinks.s3._require_boto3", return_value=mock_boto3_mod):
+        with patch("traceforge.sinks.s3._require_boto3", return_value=mock_boto3_mod):
             sink = S3Sink(bucket="b", buffer_size=2, flush_interval=9999)
 
         sink._client = mock_client
@@ -347,13 +347,13 @@ class TestS3SinkSpanUsageAutoFlush:
         mock_client.put_object.assert_called_once()
 
     async def test_usage_triggers_flush_at_threshold(self):
-        from tracemill.sinks.s3 import S3Sink
+        from traceforge.sinks.s3 import S3Sink
 
         mock_boto3_mod = MagicMock()
         mock_client = MagicMock()
         mock_boto3_mod.client.return_value = mock_client
 
-        with patch("tracemill.sinks.s3._require_boto3", return_value=mock_boto3_mod):
+        with patch("traceforge.sinks.s3._require_boto3", return_value=mock_boto3_mod):
             sink = S3Sink(bucket="b", buffer_size=2, flush_interval=9999)
 
         sink._client = mock_client
@@ -368,9 +368,9 @@ class TestS3SinkSessionIdSanitization:
     """Test that session_id is sanitized in object keys."""
 
     def test_path_traversal_sanitized(self):
-        from tracemill.sinks.s3 import S3Sink
+        from traceforge.sinks.s3 import S3Sink
 
-        with patch("tracemill.sinks.s3._require_boto3") as mock_req:
+        with patch("traceforge.sinks.s3._require_boto3") as mock_req:
             mock_req.return_value = MagicMock()
             sink = S3Sink(bucket="b", prefix="")
 
@@ -383,9 +383,9 @@ class TestS3SinkSessionIdSanitization:
         assert first_segment == "______etc_passwd"
 
     def test_unicode_sanitized(self):
-        from tracemill.sinks.s3 import S3Sink
+        from traceforge.sinks.s3 import S3Sink
 
-        with patch("tracemill.sinks.s3._require_boto3") as mock_req:
+        with patch("traceforge.sinks.s3._require_boto3") as mock_req:
             mock_req.return_value = MagicMock()
             sink = S3Sink(bucket="b", prefix="")
 
@@ -396,9 +396,9 @@ class TestS3SinkSessionIdSanitization:
         assert "é" not in key
 
     def test_long_session_id_truncated(self):
-        from tracemill.sinks.s3 import S3Sink
+        from traceforge.sinks.s3 import S3Sink
 
-        with patch("tracemill.sinks.s3._require_boto3") as mock_req:
+        with patch("traceforge.sinks.s3._require_boto3") as mock_req:
             mock_req.return_value = MagicMock()
             sink = S3Sink(bucket="b", prefix="")
 
@@ -413,13 +413,13 @@ class TestS3SinkMixedContent:
     """Test buffer with mixed event types."""
 
     async def test_mixed_events_spans_usage_in_one_flush(self):
-        from tracemill.sinks.s3 import S3Sink
+        from traceforge.sinks.s3 import S3Sink
 
         mock_boto3_mod = MagicMock()
         mock_client = MagicMock()
         mock_boto3_mod.client.return_value = mock_client
 
-        with patch("tracemill.sinks.s3._require_boto3", return_value=mock_boto3_mod):
+        with patch("traceforge.sinks.s3._require_boto3", return_value=mock_boto3_mod):
             sink = S3Sink(bucket="b", buffer_size=100, flush_interval=9999)
 
         sink._client = mock_client
@@ -446,13 +446,13 @@ class TestS3SinkIdempotency:
     """Test double-close and double-flush are safe."""
 
     async def test_double_close_is_safe(self):
-        from tracemill.sinks.s3 import S3Sink
+        from traceforge.sinks.s3 import S3Sink
 
         mock_boto3_mod = MagicMock()
         mock_client = MagicMock()
         mock_boto3_mod.client.return_value = mock_client
 
-        with patch("tracemill.sinks.s3._require_boto3", return_value=mock_boto3_mod):
+        with patch("traceforge.sinks.s3._require_boto3", return_value=mock_boto3_mod):
             sink = S3Sink(bucket="b", buffer_size=100)
 
         sink._client = mock_client
@@ -465,13 +465,13 @@ class TestS3SinkIdempotency:
         mock_client.put_object.assert_called_once()
 
     async def test_double_flush_is_safe(self):
-        from tracemill.sinks.s3 import S3Sink
+        from traceforge.sinks.s3 import S3Sink
 
         mock_boto3_mod = MagicMock()
         mock_client = MagicMock()
         mock_boto3_mod.client.return_value = mock_client
 
-        with patch("tracemill.sinks.s3._require_boto3", return_value=mock_boto3_mod):
+        with patch("traceforge.sinks.s3._require_boto3", return_value=mock_boto3_mod):
             sink = S3Sink(bucket="b", buffer_size=100)
 
         sink._client = mock_client

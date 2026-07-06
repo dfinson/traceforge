@@ -2,9 +2,9 @@
 
 Runs the production pipeline (adapter → SessionEvent → Enricher) to get enriched
 events exactly as the training corpus was built, projects each event onto the
-shared feature-row schema (:func:`tracemill.phase.event_rows.event_to_feature_row`),
+shared feature-row schema (:func:`traceforge.phase.event_rows.event_to_feature_row`),
 then labels every gap with the persisted **causal** boundary classifier
-(``tracemill.boundary``).
+(``traceforge.boundary``).
 
 These local sessions are unlabelled, so this is a **qualitative** e2e: it proves
 the full path runs on real data and produces well-formed, sensibly-distributed
@@ -22,15 +22,15 @@ import logging
 from collections import Counter
 from pathlib import Path
 
-from tracemill.adapters.mapped_json import MappedJsonAdapter
-from tracemill.boundary import load as load_boundary_model
-from tracemill.boundary import predict_session
-from tracemill.cli.runner import load_mapping_path
-from tracemill.enricher import Enricher
-from tracemill.phase.event_rows import event_to_feature_row
-from tracemill.pipeline import EventPipeline
-from tracemill.sinks.base import StorageSink
-from tracemill.types import SessionEvent
+from traceforge.adapters.mapped_json import MappedJsonAdapter
+from traceforge.boundary import load as load_boundary_model
+from traceforge.boundary import predict_session
+from traceforge.cli.runner import load_mapping_path
+from traceforge.enricher import Enricher
+from traceforge.phase.event_rows import event_to_feature_row
+from traceforge.pipeline import EventPipeline
+from traceforge.sinks.base import StorageSink
+from traceforge.types import SessionEvent
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("eval-boundary-pipeline-e2e")

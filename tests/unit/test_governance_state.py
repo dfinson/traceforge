@@ -2,8 +2,8 @@
 
 import pytest
 
-from tracemill.governance.persistence import SystemStore
-from tracemill.governance.state import (
+from traceforge.governance.persistence import SystemStore
+from traceforge.governance.state import (
     BudgetSnapshot,
     SessionState,
     TaintEntry,

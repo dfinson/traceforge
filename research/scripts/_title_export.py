@@ -2,7 +2,7 @@
 
 Self-contained promote path: torch -> no-past ONNX (encoder + decoder) -> int8
 dynamic quantize, written as ``encoder.onnx`` / ``decoder.onnx`` + ``tokenizer.json``
-into the served data dir (``src/tracemill/title/data`` by default). Uses only
+into the served data dir (``src/traceforge/title/data`` by default). Uses only
 ``torch.onnx`` + ``onnxruntime.quantization`` so it is robust to optimum/transformers
 version drift, and reproduces the exact IO contract the runtime expects:
 
@@ -12,7 +12,7 @@ version drift, and reproduces the exact IO contract the runtime expects:
 
 No-past (no kv-cache) by design: titles are short and generated only at span
 boundaries, so the stateless decoder re-feeds the growing sequence (see
-``src/tracemill/title/inference.py``). int8 weight-only dynamic quant (QInt8,
+``src/traceforge/title/inference.py``). int8 weight-only dynamic quant (QInt8,
 per-tensor) matches the AVX2 dynamic scheme of the prior shipped artifact.
 
 Usage:
@@ -142,7 +142,7 @@ def main() -> None:
     out_dir = (
         args[1]
         if len(args) > 1
-        else os.environ.get("TITLE_OUT_DIR", str(REPO / "src" / "tracemill" / "title" / "data"))
+        else os.environ.get("TITLE_OUT_DIR", str(REPO / "src" / "traceforge" / "title" / "data"))
     )
     export(model_dir, out_dir)
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from tracemill.boundary.decode import (
+from traceforge.boundary.decode import (
     DecodeParams,
     StreamingBoundaryDecoder,
     decode_scores,
@@ -102,7 +102,7 @@ def test_decode_scores_matches_streaming() -> None:
 
 def test_legacy_bundle_without_decode_params_uses_argmax() -> None:
     # decode_examples falls back to predict_examples when decode_params is None.
-    from tracemill.boundary import inference
+    from traceforge.boundary import inference
 
     class _StubModel:
         decode_params = None

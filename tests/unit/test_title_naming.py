@@ -1,6 +1,6 @@
 """Unit tests for the session-title providers (heuristic floor + opt-in API tier).
 
-The provider layer (:mod:`tracemill.title.naming`) chooses between the offline
+The provider layer (:mod:`traceforge.title.naming`) chooses between the offline
 heuristic and a LiteLLM API tier based on config *and* whether an API key is
 present. The load-bearing contract is that the API tier is strictly opt-in and
 never load-bearing: absent a key, or on any API failure/timeout, session naming
@@ -11,12 +11,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from tracemill.config.models import (
+from traceforge.config.models import (
     SessionNamingApiConfig,
     SessionNamingConfig,
     SessionNamingHeuristicConfig,
 )
-from tracemill.title.naming import (
+from traceforge.title.naming import (
     ApiProvider,
     HeuristicProvider,
     _api_key_present,

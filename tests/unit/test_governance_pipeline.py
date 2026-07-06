@@ -5,15 +5,15 @@ from pathlib import Path
 
 import pytest
 
-from tracemill.classify.core import Classification
-from tracemill.governance.budget import BudgetTracker
-from tracemill.governance.canonical import compute_canonical_hash
-from tracemill.governance.labeler import GovernanceLabeler
-from tracemill.governance.persistence import SystemStore
-from tracemill.governance.pii import PIIScanner
-from tracemill.governance.pipeline import GovernancePipeline
-from tracemill.governance.rules import parse_rules
-from tracemill.governance.types import (
+from traceforge.classify.core import Classification
+from traceforge.governance.budget import BudgetTracker
+from traceforge.governance.canonical import compute_canonical_hash
+from traceforge.governance.labeler import GovernanceLabeler
+from traceforge.governance.persistence import SystemStore
+from traceforge.governance.pii import PIIScanner
+from traceforge.governance.pipeline import GovernancePipeline
+from traceforge.governance.rules import parse_rules
+from traceforge.governance.types import (
     EnrichmentContext,
     ToolCallEvent,
 )
@@ -31,7 +31,7 @@ def rules():
     rules_path = (
         Path(__file__).parent.parent.parent
         / "src"
-        / "tracemill"
+        / "traceforge"
         / "classify"
         / "data"
         / "recommendation_rules.yaml"
@@ -193,7 +193,7 @@ class TestGovernanceLabeler:
 
 class TestGovernancePipeline:
     def test_full_pipeline_deny(self, store, rules):
-        from tracemill.classify.config import ClassificationEngine, ClassifyConfig
+        from traceforge.classify.config import ClassificationEngine, ClassifyConfig
 
         engine = ClassificationEngine(ClassifyConfig())
         labeler = GovernanceLabeler(pii_scanner=PIIScanner())
@@ -214,7 +214,7 @@ class TestGovernancePipeline:
         assert meta.evidence is not None
 
     def test_idempotency(self, store, rules):
-        from tracemill.classify.config import ClassificationEngine, ClassifyConfig
+        from traceforge.classify.config import ClassificationEngine, ClassifyConfig
 
         engine = ClassificationEngine(ClassifyConfig())
         labeler = GovernanceLabeler()
@@ -234,7 +234,7 @@ class TestGovernancePipeline:
         assert meta2.risk_assessment.score == meta1.risk_assessment.score
 
     def test_allow_for_safe_event(self, store, rules):
-        from tracemill.classify.config import ClassificationEngine, ClassifyConfig
+        from traceforge.classify.config import ClassificationEngine, ClassifyConfig
 
         engine = ClassificationEngine(ClassifyConfig())
         labeler = GovernanceLabeler()

@@ -9,7 +9,7 @@ the real on-disk shape so tool calls are not silently dropped.
 
 from __future__ import annotations
 
-from tracemill.preprocessors.continue_dev import preprocess_continue
+from traceforge.preprocessors.continue_dev import preprocess_continue
 
 
 def _raw_session() -> dict:

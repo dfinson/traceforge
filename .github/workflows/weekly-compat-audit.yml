@@ -36,7 +36,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install tracemill + framework SDK
+      - name: Install traceforge + framework SDK
         run: |
           pip install -e ".[dev]"
           pip install "${{ matrix.framework.package }}" --upgrade
@@ -111,18 +111,18 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install tracemill
+      - name: Install traceforge
         run: pip install -e ".[dev]"
 
       - name: Validate all YAML mappings load
         run: |
           python -c "
           from pathlib import Path
-          from tracemill.adapters.mapped_json import MappedJsonAdapter
-          from tracemill.adapters.otel import OtelSpanAdapter, _SPAN_KIND_MAP
+          from traceforge.adapters.mapped_json import MappedJsonAdapter
+          from traceforge.adapters.otel import OtelSpanAdapter, _SPAN_KIND_MAP
           import yaml
 
-          mappings_dir = Path('src/tracemill/mappings')
+          mappings_dir = Path('src/traceforge/mappings')
           failures = []
           for yaml_file in sorted(mappings_dir.glob('*.yaml')):
               try:
@@ -155,9 +155,9 @@ jobs:
           python -c "
           from pathlib import Path
           import yaml
-          from tracemill.types import KNOWN_KINDS
+          from traceforge.types import KNOWN_KINDS
 
-          mappings_dir = Path('src/tracemill/mappings')
+          mappings_dir = Path('src/traceforge/mappings')
           all_mapped_kinds: set[str] = set()
           for yaml_file in sorted(mappings_dir.glob('*.yaml')):
               with open(yaml_file) as f:

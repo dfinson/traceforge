@@ -4,6 +4,6 @@ source_repo: demo-issue-tracker-api
 framework_version: google-antigravity 0.1.5
 model: gemini-3-pro-preview
 captured_at: "2026-06-28T21:24:55Z"
-tracemill_commit: unknown
+traceforge_commit: unknown
 line_count: 15
 notes: "SHAPE FIXTURE (not a live paid run). Built by instantiating the Antigravity SDK's own types.Step pydantic models and serializing via model_dump(mode='json') — the identical serialization a live agent.conversation.history capture writes (see google.antigravity.connections.local.local_connection.from_dict). Field/enum shape is authoritative; content is representative of the canonical demo-repo task. Reason a live trace was not captured: the available GEMINI_API_KEY is free-tier, whose 5 RPM cap is exhausted by the localharness startup burst before any step surfaces. Replace with a real capture via capture_antigravity.py once a paid key is available (same serializer => stays 0-raw). Antigravity has no Windows IDE; SDK runs under WSL/Docker only."

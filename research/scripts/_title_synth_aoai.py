@@ -66,11 +66,11 @@ os.environ.setdefault("MKL_NUM_THREADS", "1")
 
 import httpx  # noqa: E402
 
-from tracemill_research.labeling.backends.aoai import (  # noqa: E402
+from traceforge_research.labeling.backends.aoai import (  # noqa: E402
     AoaiConfig,
     AzureOpenAIBackend,
 )
-from tracemill_research.paths import DATA_INTERIM  # noqa: E402
+from traceforge_research.paths import DATA_INTERIM  # noqa: E402
 
 # Reuse v1's real-pair recovery, dedup key, and title acceptance so the two
 # generators stay behaviourally identical on everything except HOW synth is made.

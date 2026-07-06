@@ -15,8 +15,8 @@ import threading
 
 import pytest
 
-from tracemill.governance.persistence import SystemStore
-from tracemill.governance.state import SessionState
+from traceforge.governance.persistence import SystemStore
+from traceforge.governance.state import SessionState
 
 
 @pytest.fixture

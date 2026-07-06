@@ -16,7 +16,7 @@ experiment:
     Per-event phase classification baselines on the labeled phase corpus
     (1,102 labeled events). Runs compare:
 
-      * a rule-only baseline derived from the existing tracemill enricher
+      * a rule-only baseline derived from the existing traceforge enricher
         _detect_phases() — establishes the floor;
       * one-vs-rest logistic regression on model2vec embeddings of
         tool_intent + payload text — establishes a portable feature

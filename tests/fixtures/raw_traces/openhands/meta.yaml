@@ -4,6 +4,6 @@ source_repo: demo-issue-tracker-api
 framework_version: 1.8.0 (openhands-ai; SDK events 1.27.0)
 model: gpt-5
 captured_at: "2026-06-28T13:04:22Z"
-tracemill_commit: f70fa41
+traceforge_commit: f70fa41
 line_count: 24
 notes: "Real OpenAI gpt-5 session using OpenHands SDK in Docker; native artifact: /workspace/openhands_persist/ce0627f2befe47e79041cd6288dde8d3/events/event-*.json."

@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from tracemill_research.ingest.copilot import (  # noqa: E402
+from traceforge_research.ingest.copilot import (  # noqa: E402
     CopilotIngestConfig,
     default_copilot_store_path,
     run_sync,

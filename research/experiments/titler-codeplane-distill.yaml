@@ -25,14 +25,14 @@
 # routes them through the real Enricher + ParquetSink, and stamps
 # metadata.step_id = node_id. The distillation context is then recomputed per
 # node from the enriched corpus via the SINGLE serve-side projection
-# tracemill.title.context.distilled_context -- so training context == serve
+# traceforge.title.context.distilled_context -- so training context == serve
 # context by construction. The gold `intent` is never in that context
 # (distilled_context only mines report_intent calls, of which CodePlane has
 # none), so the target is leak-free by construction (verified: 0/365 intent
 # strings appear in their own context).
 #
 # ARTIFACTS.
-#   research/src/tracemill_research/ingest/codeplane.py   (prod ingester)
+#   research/src/traceforge_research/ingest/codeplane.py   (prod ingester)
 #   research/scripts/ingest_codeplane.py                  (CLI runner + report)
 #   data/raw/codeplane/data.db                            (slim extract: trail_nodes + jobs; gitignored)
 #   data/interim/labeling-corpus/codeplane/<job>.parquet  (enriched corpus; gitignored)
@@ -82,4 +82,4 @@ next:
     diverse-12k 0.39 floor.
   - Train the cheap purpose / semantic-kind tiny classifiers on the aux gold
     from node-feature rows (no distilled_context needed).
-  - Do NOT re-ingest labelled tracemill sessions; CodePlane is a new source.
+  - Do NOT re-ingest labelled traceforge sessions; CodePlane is a new source.

@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from tracemill.parsers.aider import (
+from traceforge.parsers.aider import (
     AiderPreParser,
     ToolOutputKind,
     classify_tool_output,

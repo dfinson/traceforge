@@ -15,11 +15,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from tracemill.adapters.mapped_json import MappedJsonAdapter
-from tracemill.governance.pipeline import GovernancePipeline
-from tracemill.types import EventKind
+from traceforge.adapters.mapped_json import MappedJsonAdapter
+from traceforge.governance.pipeline import GovernancePipeline
+from traceforge.types import EventKind
 
-MAPPINGS_DIR = Path(__file__).resolve().parent.parent.parent / "src" / "tracemill" / "mappings"
+MAPPINGS_DIR = Path(__file__).resolve().parent.parent.parent / "src" / "traceforge" / "mappings"
 
 
 def _adapter(framework: str) -> MappedJsonAdapter:
@@ -817,7 +817,7 @@ class TestMotivationSerializationE2E:
 
         # Serialize to JSON and back
         json_str = tool_event.model_dump_json()
-        from tracemill.types import SessionEvent
+        from traceforge.types import SessionEvent
 
         restored = SessionEvent.model_validate_json(json_str)
 
@@ -845,7 +845,7 @@ class TestMotivationSerializationE2E:
         assert tool_event.metadata.motivation is None
 
         json_str = tool_event.model_dump_json()
-        from tracemill.types import SessionEvent
+        from traceforge.types import SessionEvent
 
         restored = SessionEvent.model_validate_json(json_str)
         assert restored.metadata.motivation is None
@@ -864,7 +864,7 @@ class TestDedupE2E:
         reasoning (hypothetical), it should only appear once in source_event_ids."""
         # Use copilot which has assistant.message mapped to intent.
         # We can't easily get dual-role from real YAMLs, so use the unit adapter.
-        from tracemill.adapters.mapped_json import (
+        from traceforge.adapters.mapped_json import (
             EventMapping,
             FrameworkMapping,
             MappedJsonAdapter,

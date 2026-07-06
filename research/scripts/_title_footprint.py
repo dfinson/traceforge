@@ -77,8 +77,8 @@ def main() -> None:
 
     # Log AFTER measurement so the mlflow import never contaminates the RSS probe.
     import mlflow
-    from tracemill_research.mlflow_utils import log_yaml_params, start_run
-    from tracemill_research.paths import EXPERIMENTS_DIR
+    from traceforge_research.mlflow_utils import log_yaml_params, start_run
+    from traceforge_research.paths import EXPERIMENTS_DIR
 
     yaml_path = EXPERIMENTS_DIR / "titler-architecture-sweep.yaml"
     with start_run(

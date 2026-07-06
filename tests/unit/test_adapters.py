@@ -9,12 +9,12 @@ from pathlib import Path
 
 import pytest
 
-from tracemill import EventKind, EventPipeline, SessionEvent
-from tracemill.adapters.mapped_json import MappedJsonAdapter
-from tracemill.sinks.callback import CallbackSink
+from traceforge import EventKind, EventPipeline, SessionEvent
+from traceforge.adapters.mapped_json import MappedJsonAdapter
+from traceforge.sinks.callback import CallbackSink
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
-MAPPINGS_DIR = Path(__file__).resolve().parents[2] / "src" / "tracemill" / "mappings"
+MAPPINGS_DIR = Path(__file__).resolve().parents[2] / "src" / "traceforge" / "mappings"
 
 
 def _copilot_adapter(session_id: str = "test-session") -> MappedJsonAdapter:

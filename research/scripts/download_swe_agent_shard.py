@@ -16,7 +16,7 @@ from pathlib import Path
 
 from huggingface_hub import hf_hub_download
 
-from tracemill_research.paths import DATA_RAW
+from traceforge_research.paths import DATA_RAW
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("download-swe-agent")

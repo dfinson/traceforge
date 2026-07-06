@@ -25,8 +25,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from tracemill.classify.core import Classification
-from tracemill.governance.ifc import (
+from traceforge.classify.core import Classification
+from traceforge.governance.ifc import (
     Clearance,
     IFCChecker,
     PATH_LABEL_RULES,
@@ -36,10 +36,10 @@ from tracemill.governance.ifc import (
     _max_clearance,
     _rank,
 )
-from tracemill.governance.labeler import GovernanceLabeler
-from tracemill.governance.pii import PIIScanner
-from tracemill.governance.state import SessionState
-from tracemill.governance.types import (
+from traceforge.governance.labeler import GovernanceLabeler
+from traceforge.governance.pii import PIIScanner
+from traceforge.governance.state import SessionState
+from traceforge.governance.types import (
     EnrichmentContext,
     ToolCallEvent,
     ToolResultEvent,

@@ -4,6 +4,6 @@ source_repo: microsoft/agents-for-python
 framework_version: 1.1.0
 model: gpt-5
 captured_at: "2026-06-28T09:31:15Z"
-tracemill_commit: 13f4d3d
+traceforge_commit: 13f4d3d
 line_count: 27
 notes: Real OpenAI session; coding task on demo-issue-tracker-api.

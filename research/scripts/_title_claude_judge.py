@@ -2,7 +2,7 @@
 
 Claude traces are NEVER in the titler's training data (training = copilot + swe
 only), so they are the genuine cross-source / cross-framework generalisation
-probe. We run the native tracemill pipeline (claude mapping -> enrich -> causal
+probe. We run the native traceforge pipeline (claude mapping -> enrich -> causal
 boundary segmentation) to produce per-segment distilled_context, then fill the
 judge's `gold`/B column with BASELINE-TINY titles. Pointing _title_judge at this
 parquet (with the nl6 model as A) yields, in one blinded run:
@@ -30,10 +30,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from tracemill.boundary import load as load_boundary_model
-from tracemill.boundary import predict_session
-from tracemill.cli.runner import load_mapping_path
-from tracemill.phase.event_rows import event_to_feature_row
+from traceforge.boundary import load as load_boundary_model
+from traceforge.boundary import predict_session
+from traceforge.cli.runner import load_mapping_path
+from traceforge.phase.event_rows import event_to_feature_row
 
 from scripts.eval_boundary_pipeline_e2e import _enrich_session  # noqa: E402
 from scripts._title_t5 import distilled_context  # noqa: E402

@@ -19,18 +19,18 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tracemill.classify.core import Classification
-from tracemill.governance.drift import DriftAssessment
-from tracemill.governance.labeler import (
+from traceforge.classify.core import Classification
+from traceforge.governance.drift import DriftAssessment
+from traceforge.governance.labeler import (
     GovernanceLabeler,
     GovernanceResult,
     _bounded,
     _RiskModifiersBuilder,
 )
-from tracemill.governance.mcp_drift import MCPIntegrityAlert, MCPScanResult
-from tracemill.governance.risk_wrapper import RiskModifiers
-from tracemill.governance.state import BudgetSnapshot, SessionStateSnapshot, TaintEntry
-from tracemill.governance.types import EnrichmentContext, ToolCallEvent
+from traceforge.governance.mcp_drift import MCPIntegrityAlert, MCPScanResult
+from traceforge.governance.risk_wrapper import RiskModifiers
+from traceforge.governance.state import BudgetSnapshot, SessionStateSnapshot, TaintEntry
+from traceforge.governance.types import EnrichmentContext, ToolCallEvent
 
 _TS = datetime(2024, 1, 1, tzinfo=timezone.utc)
 

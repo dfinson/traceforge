@@ -5,7 +5,7 @@
 # research/scripts/_title_footprint.py (CPU latency / RAM probe).
 #
 # MLflow: _title_footprint.py logs a footprint run (RSS add, decode latency) to
-# this experiment via tracemill_research.mlflow_utils.
+# this experiment via traceforge_research.mlflow_utils.
 #
 # Establishes that the abstractive titler's coherence ceiling was an
 # architecture-SHAPE problem, not a data/target/decoder problem. The default

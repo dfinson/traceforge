@@ -6,15 +6,15 @@ from pathlib import Path
 import pytest
 import yaml
 
-from tracemill.adapters.mapped_json import (
+from traceforge.adapters.mapped_json import (
     EventMapping,
     FrameworkMapping,
     MappedJsonAdapter,
     _resolve_path,
 )
-from tracemill.types import EventKind
+from traceforge.types import EventKind
 
-MAPPINGS_DIR = Path(__file__).resolve().parents[2] / "src" / "tracemill" / "mappings"
+MAPPINGS_DIR = Path(__file__).resolve().parents[2] / "src" / "traceforge" / "mappings"
 
 
 # ─── _resolve_path ───────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 """Quantitative leave-session-out eval of the CAUSAL boundary decoder.
 
 Proves the shipped decode contract (per-class F1-optimal threshold + causal
-refractory min-gap, applied by :func:`tracemill.boundary.decode.decode_scores`)
+refractory min-gap, applied by :func:`traceforge.boundary.decode.decode_scores`)
 against plain ``argmax``, on the copilot-native target domain. Reports activity
 and step P/R/F1 at exact-gap and at +/-2 tolerance (steps are defined to within a
 couple of events — 41% are flagged-borderline — so tolerance is the honest
@@ -31,9 +31,9 @@ from sklearn.model_selection import GroupKFold
 from sklearn.preprocessing import StandardScaler
 
 from scripts.train_boundary_baselines import _load_seg_params
-from tracemill.boundary.decode import DecodeParams, decode_scores
-from tracemill.phase.features import embed_texts, feature_set_blocks, merged_symbolic
-from tracemill_research.training.features import load_boundary_examples
+from traceforge.boundary.decode import DecodeParams, decode_scores
+from traceforge.phase.features import embed_texts, feature_set_blocks, merged_symbolic
+from traceforge_research.training.features import load_boundary_examples
 
 warnings.filterwarnings("ignore", category=ConvergenceWarning)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")

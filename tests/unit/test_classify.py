@@ -1,16 +1,16 @@
-"""Tests for tracemill.classify — tool normalization, classification, shell command parsing."""
+"""Tests for traceforge.classify — tool normalization, classification, shell command parsing."""
 
 from functools import partial
 
-from tracemill.classify import (
+from traceforge.classify import (
     _extract_commands_from_ast,
     classify_shell,
     classify_tool,
     get_default_engine,
     normalize_tool_name,
 )
-from tracemill.classify.core import Classification
-from tracemill.classify.rules import (
+from traceforge.classify.core import Classification
+from traceforge.classify.rules import (
     SHELL_DELIVERY,
     SHELL_IMPLEMENTATION,
     SHELL_INVESTIGATION,

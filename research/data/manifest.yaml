@@ -17,7 +17,7 @@ version: 1
 
 sources:
 
-  # ── Existing local data (legacy — copied from WSL ~/tracemill-labels/ on 2026-06-17) ──
+  # ── Existing local data (legacy — copied from WSL ~/traceforge-labels/ on 2026-06-17) ──
   # Paths are relative to research/data/raw/. All files are Windows-native here.
 
   legacy_labels_v2:

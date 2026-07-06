@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tracemill import CallbackSink
+from traceforge import CallbackSink
 from tests.conftest import make_event, make_span, make_usage
 
 

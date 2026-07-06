@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import sys
 
-from tracemill_research.mlflow_utils import (
+from traceforge_research.mlflow_utils import (
     iter_experiment_registrations,
     register_experiment,
 )

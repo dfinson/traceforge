@@ -1,4 +1,4 @@
-"""Shared test fixtures for tracemill tests."""
+"""Shared test fixtures for traceforge tests."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from tracemill import CallbackSink, EventKind, SessionEvent, TelemetrySpan, UsageRecord
-from tracemill.types import TitleUpdate
+from traceforge import CallbackSink, EventKind, SessionEvent, TelemetrySpan, UsageRecord
+from traceforge.types import TitleUpdate
 
 
 def make_event(

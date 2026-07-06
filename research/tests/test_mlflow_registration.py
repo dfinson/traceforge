@@ -8,7 +8,7 @@ import mlflow
 import pytest
 from mlflow.tracking import MlflowClient
 
-from tracemill_research.mlflow_utils import (
+from traceforge_research.mlflow_utils import (
     ExperimentRegistration,
     iter_experiment_registrations,
     register_experiment,
@@ -19,8 +19,8 @@ from tracemill_research.mlflow_utils import (
 def tmp_tracking(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     db = tmp_path / "mlflow.db"
     uri = f"sqlite:///{db.as_posix()}"
-    monkeypatch.setattr("tracemill_research.mlflow_utils.MLFLOW_TRACKING_URI", uri)
-    monkeypatch.setattr("tracemill_research.paths.MLFLOW_TRACKING_URI", uri)
+    monkeypatch.setattr("traceforge_research.mlflow_utils.MLFLOW_TRACKING_URI", uri)
+    monkeypatch.setattr("traceforge_research.paths.MLFLOW_TRACKING_URI", uri)
     mlflow.set_tracking_uri(uri)
     return tmp_path
 

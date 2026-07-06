@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from tracemill.governance.persistence import SystemStore
-from tracemill.governance.state import SessionState, TaintEntry
+from traceforge.governance.persistence import SystemStore
+from traceforge.governance.state import SessionState, TaintEntry
 
 
 @pytest.fixture

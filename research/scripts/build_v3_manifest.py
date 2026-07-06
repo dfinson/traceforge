@@ -27,7 +27,7 @@ from pathlib import Path
 import pyarrow.parquet as pq
 import yaml
 
-from tracemill_research.paths import DATA_INTERIM, EXPERIMENTS_DIR
+from traceforge_research.paths import DATA_INTERIM, EXPERIMENTS_DIR
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("v3-manifest")

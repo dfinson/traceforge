@@ -2,12 +2,12 @@
 
 from functools import partial
 
-from tracemill.classify import (
+from traceforge.classify import (
     classify_cmd_command,
     classify_powershell_command,
     get_default_engine,
 )
-from tracemill.classify.rules import (
+from traceforge.classify.rules import (
     SHELL_DELIVERY,
     SHELL_IMPLEMENTATION,
     SHELL_INVESTIGATION,
@@ -226,7 +226,7 @@ class TestCmdClassification:
 
 
 def _classify_bash(cmd: str):
-    from tracemill.classify import classify_shell
+    from traceforge.classify import classify_shell
 
     return classify_shell(cmd, engine=ENGINE)
 

@@ -1,4 +1,4 @@
-"""End-to-end tests: REAL agent execution flows with tracemill gating.
+"""End-to-end tests: REAL agent execution flows with traceforge gating.
 
 These tests run actual framework agent loops — not isolated hook calls.
 The full cycle: framework agent decides to call a tool → gate intercepts →
@@ -13,13 +13,13 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 
-from tracemill.governance.pipeline import GovernancePipeline
-from tracemill.sdk.gate_policy import GatePolicy
-from tracemill.sdk.gate_types import (
+from traceforge.governance.pipeline import GovernancePipeline
+from traceforge.sdk.gate_policy import GatePolicy
+from traceforge.sdk.gate_types import (
     GateContext,
     ToolCallRequest,
 )
-from tracemill.sdk.verdict import Verdict
+from traceforge.sdk.verdict import Verdict
 
 
 # ─── Shared gates ─────────────────────────────────────────────────────────────
@@ -449,7 +449,7 @@ class TestSmolagentsRealAgent:
 
 
 class TestOpenAIAgentsRealAgent:
-    """Real OpenAI Agents SDK agent with tracemill input guardrail."""
+    """Real OpenAI Agents SDK agent with traceforge input guardrail."""
 
     def test_guardrail_registered_on_agent(self):
         """Gate registers an input_guardrail on the Agent."""

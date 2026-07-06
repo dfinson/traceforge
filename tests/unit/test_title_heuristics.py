@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from tracemill.title.heuristics import clip, heuristic_title, hybrid, imperative, keyphrase
+from traceforge.title.heuristics import clip, heuristic_title, hybrid, imperative, keyphrase
 
 
 def test_empty_and_whitespace_yield_empty():

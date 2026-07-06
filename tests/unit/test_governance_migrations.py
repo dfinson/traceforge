@@ -13,7 +13,7 @@ import sqlite3
 
 import pytest
 
-from tracemill.governance.persistence import SystemStore
+from traceforge.governance.persistence import SystemStore
 
 _NORMALIZED_TABLES = {
     "budget_counters",

@@ -8,6 +8,6 @@ demo_repo_sha: 6ea7b6aba6ae924654ddcae7edc37aa8a6db4588
 capture_method: file_copy
 source_path: "C:\\Users\\davidfinson\\.codex\\sessions\\2026\\06\\28\\rollout-2026-06-28T12-28-15-019f0d8e-dd86-7cc0-b5e5-83e435aaf326.jsonl"
 captured_at: "2026-06-28T09:43:16Z"
-tracemill_commit: 13f4d3d
+traceforge_commit: 13f4d3d
 line_count: 59
 notes: Real demo repo session; harvested verbatim from Codex rollout JSONL.

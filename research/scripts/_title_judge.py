@@ -41,9 +41,9 @@ os.environ.setdefault("MKL_NUM_THREADS", "2")
 import pandas as pd
 import mlflow
 
-from tracemill_research.config import load_labeling_runtime_config
-from tracemill_research.mlflow_utils import log_yaml_params, start_run
-from tracemill_research.paths import EXPERIMENTS_DIR
+from traceforge_research.config import load_labeling_runtime_config
+from traceforge_research.mlflow_utils import log_yaml_params, start_run
+from traceforge_research.paths import EXPERIMENTS_DIR
 
 from scripts._title_hygiene import best_of
 from scripts._title_t5_train import DATASET, MAX_SRC, MAX_TGT, MODEL_DIR, PREFIX
@@ -289,7 +289,7 @@ async def _run(args: argparse.Namespace) -> int:
         ho = ho.assign(pred=_generate(ho))
 
     cfg = load_labeling_runtime_config()
-    from tracemill_research.labeling.backends.copilot_sdk import CopilotSdkBackend
+    from traceforge_research.labeling.backends.copilot_sdk import CopilotSdkBackend
 
     backend = CopilotSdkBackend(cfg.backend)
     sem = asyncio.Semaphore(args.concurrency)

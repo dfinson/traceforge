@@ -1,4 +1,4 @@
-"""Generate fresh Claude-Code agent traces for the tracemill titler corpus.
+"""Generate fresh Claude-Code agent traces for the traceforge titler corpus.
 
 WHY
 ---

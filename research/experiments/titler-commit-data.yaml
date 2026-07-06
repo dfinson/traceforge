@@ -27,12 +27,12 @@
 #     "ingest everything" cannot swamp the organic signal.
 #
 # PIPELINE (prod, zero train/serve skew). scripts.ingest_commitpack ->
-# tracemill_research.ingest.commitpack: each commit becomes ONE canonical
+# traceforge_research.ingest.commitpack: each commit becomes ONE canonical
 # tool.call.completed code-edit event (tool = create/delete/edit by which
 # contents are present; payload = touched file + UNIFIED DIFF of the change),
 # flows through the real Enricher + ParquetSink (schema byte-identical to the
 # copilot/swe/codeplane corpora), step_id = commit sha. The serve-side
-# tracemill.title.context.distilled_context is then recomputed from the enriched
+# traceforge.title.context.distilled_context is then recomputed from the enriched
 # rows -> the same `actions | files | symbols` slot string the titler consumes
 # live. Per-language distill shards checkpoint/resume the run.
 #

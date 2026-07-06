@@ -1,4 +1,4 @@
-"""Small OOD probe: can the served tracemill titler title CodePlane *jobs*?
+"""Small OOD probe: can the served traceforge titler title CodePlane *jobs*?
 
 CodePlane stores, per autonomous job, the initial user PROMPT and a short human
 ``title`` (e.g. prompt "...Save reverts to default, what's going on?" -> title
@@ -23,7 +23,7 @@ import re
 import sys
 from pathlib import Path
 
-from tracemill.title.inference import TitleModel
+from traceforge.title.inference import TitleModel
 
 _PAIRS = Path(__file__).resolve().parent.parent / "data" / "interim" / "codeplane_title_pairs.json"
 _STOP = {

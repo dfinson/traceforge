@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from tracemill.classify.config import ClassificationEngine, get_default_engine
-from tracemill.classify.core import Classification, Capability, Effect, Mechanism
-from tracemill.classify.coding import CodingMechanism
-from tracemill.classify.risk import (
+from traceforge.classify.config import ClassificationEngine, get_default_engine
+from traceforge.classify.core import Classification, Capability, Effect, Mechanism
+from traceforge.classify.coding import CodingMechanism
+from traceforge.classify.risk import (
     Confidence,
     RiskAssessment,
     assess_risk,
@@ -328,8 +328,8 @@ class TestRiskAssessment:
 
 class TestEnricherIntegration:
     def test_shell_event_gets_risk_enrichment(self) -> None:
-        from tracemill.enricher import Enricher
-        from tracemill.types import EventKind, EventMetadata, SessionEvent
+        from traceforge.enricher import Enricher
+        from traceforge.types import EventKind, EventMetadata, SessionEvent
         from datetime import datetime, timezone
 
         enricher = Enricher()
@@ -361,8 +361,8 @@ class TestEnricherIntegration:
         assert risk_data["score"] >= 0
 
     def test_non_shell_event_gets_tool_risk(self) -> None:
-        from tracemill.enricher import Enricher
-        from tracemill.types import EventKind, EventMetadata, SessionEvent
+        from traceforge.enricher import Enricher
+        from traceforge.types import EventKind, EventMetadata, SessionEvent
         from datetime import datetime, timezone
 
         enricher = Enricher()
@@ -428,8 +428,8 @@ class TestConfidence:
         assert risk.confidence == Confidence.LOW
 
     def test_confidence_in_enricher_output(self) -> None:
-        from tracemill.enricher import Enricher
-        from tracemill.types import EventKind, EventMetadata, SessionEvent
+        from traceforge.enricher import Enricher
+        from traceforge.types import EventKind, EventMetadata, SessionEvent
         from datetime import datetime, timezone
 
         enricher = Enricher()
@@ -621,8 +621,8 @@ class TestToolRisk:
 
     def test_enricher_edit_to_secrets(self) -> None:
         """Edit tool targeting .env should get risk with sensitive path bonus."""
-        from tracemill.enricher import Enricher
-        from tracemill.types import EventKind, EventMetadata, SessionEvent
+        from traceforge.enricher import Enricher
+        from traceforge.types import EventKind, EventMetadata, SessionEvent
         from datetime import datetime, timezone
 
         enricher = Enricher()
@@ -646,8 +646,8 @@ class TestToolRisk:
 
     def test_enricher_view_normal_file(self) -> None:
         """View tool on a normal file should be safe."""
-        from tracemill.enricher import Enricher
-        from tracemill.types import EventKind, EventMetadata, SessionEvent
+        from traceforge.enricher import Enricher
+        from traceforge.types import EventKind, EventMetadata, SessionEvent
         from datetime import datetime, timezone
 
         enricher = Enricher()
@@ -677,7 +677,7 @@ class TestContextPathNormalization:
     """Context adjustment should handle degenerate paths safely."""
 
     def test_dotdot_escape_detected(self):
-        from tracemill.classify.risk import _compute_context_adjustment
+        from traceforge.classify.risk import _compute_context_adjustment
 
         adj = _compute_context_adjustment(
             targets=["../../../etc/passwd"],
@@ -687,7 +687,7 @@ class TestContextPathNormalization:
         assert adj >= 20
 
     def test_relative_path_inside_project(self):
-        from tracemill.classify.risk import _compute_context_adjustment
+        from traceforge.classify.risk import _compute_context_adjustment
 
         adj = _compute_context_adjustment(
             targets=["src/main.py"],
@@ -697,7 +697,7 @@ class TestContextPathNormalization:
         assert adj <= 0
 
     def test_absolute_path_escaping(self):
-        from tracemill.classify.risk import _compute_context_adjustment
+        from traceforge.classify.risk import _compute_context_adjustment
 
         adj = _compute_context_adjustment(
             targets=["/etc/shadow"],
@@ -707,7 +707,7 @@ class TestContextPathNormalization:
         assert adj >= 20
 
     def test_empty_targets(self):
-        from tracemill.classify.risk import _compute_context_adjustment
+        from traceforge.classify.risk import _compute_context_adjustment
 
         adj = _compute_context_adjustment(
             targets=[],
@@ -717,7 +717,7 @@ class TestContextPathNormalization:
         assert adj == 0
 
     def test_none_in_targets_skipped(self):
-        from tracemill.classify.risk import _compute_context_adjustment
+        from traceforge.classify.risk import _compute_context_adjustment
 
         adj = _compute_context_adjustment(
             targets=[None, "", "src/foo.py"],
@@ -731,7 +731,7 @@ class TestTaintMiddleSegments:
     """Pipeline taint should detect dangerous sinks in middle segments."""
 
     def test_middle_segment_execution_sink(self):
-        from tracemill.classify.risk import _compute_taint_bonus
+        from traceforge.classify.risk import _compute_taint_bonus
 
         # cat file | sh | tee out — sh in the middle is a source→execution pair
         segments = [

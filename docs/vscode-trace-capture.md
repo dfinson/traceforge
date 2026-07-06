@@ -39,7 +39,7 @@ Copy-Item -Recurse "<repo>\tests\fixtures\demo_repos\demo-issue-tracker-api" $ds
 code $dst
 ```
 
-Open that folder (not the tracemill repo) in VS Code so the agent's file/edit tools
+Open that folder (not the traceforge repo) in VS Code so the agent's file/edit tools
 operate only on the disposable copy.
 
 ---
@@ -52,7 +52,7 @@ Chat does **not** reuse the standalone CLI's `~/.copilot/session-state/<id>/even
 and it is **not markdown** (markdown is only an *export*, see below). So this channel
 has a **dedicated VS Code mapping** (`copilot_vscode`) — it does **not** ride on
 `copilot.yaml`. The mapping + replay preprocessor are already built and tested
-(`src/tracemill/mappings/copilot_vscode.yaml`); all that remains is a demo-repo session.
+(`src/traceforge/mappings/copilot_vscode.yaml`); all that remains is a demo-repo session.
 
 **Run it:**
 1. Open the scratch repo (Step 0).
@@ -104,7 +104,7 @@ It maps cleanly through the `copilot_vscode` mapping and lands the committed fix
 ## Channel 2 — Cline / Roo Cline
 
 Both are installed (`microsoftai.ms-roo-cline` is in active use here). They share one
-native format, which tracemill's **`cline`** preprocessor already targets.
+native format, which traceforge's **`cline`** preprocessor already targets.
 
 **Run it:**
 1. Open the scratch repo.
@@ -117,7 +117,7 @@ native format, which tracemill's **`cline`** preprocessor already targets.
 
 Each `<id>` dir holds:
 - `api_conversation_history.json`  ← the native Anthropic-style turn list (**this is
-  the trace tracemill ingests**)
+  the trace traceforge ingests**)
 - `ui_messages.json`               ← UI render log (not needed)
 
 **Hand-off:** the newest task dir is the one you just created —
@@ -133,7 +133,7 @@ Send me `api_conversation_history.json`. Scrub it for secrets first.
 
 ## Channel 3 — Continue.dev  (needs install)
 
-Not installed on this machine (`~/.continue` is absent). tracemill's **`continue_dev`**
+Not installed on this machine (`~/.continue` is absent). traceforge's **`continue_dev`**
 preprocessor expects the camelCase session JSON.
 
 **Run it:**
@@ -152,7 +152,7 @@ preprocessor expects the camelCase session JSON.
 
 ## Channel 4 — Amazon Q for VS Code  (needs install + Builder ID)
 
-Not installed here (no AWS Toolkit / Amazon Q extension). tracemill's **`amazonq`**
+Not installed here (no AWS Toolkit / Amazon Q extension). traceforge's **`amazonq`**
 preprocessor targets its chat transcript.
 
 **Run it:**

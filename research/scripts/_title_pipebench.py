@@ -2,7 +2,7 @@
 
 Reconstructs a real multi-thousand-event Copilot session from the labelling
 corpus (full enrichment preserved via ``metadata_json``) and replays it through
-the production :class:`tracemill.pipeline.EventPipeline` with the real phase +
+the production :class:`traceforge.pipeline.EventPipeline` with the real phase +
 boundary models, then once more with ``enable_title=True``. The delta is the
 true cost of titling in situ: peak working set, CPU time, end-to-end wall time,
 per-event push latency, and per-segment titling latency.
@@ -29,10 +29,10 @@ from datetime import datetime, timezone
 
 import pyarrow.parquet as pq
 
-from tracemill.pipeline import EventPipeline
-from tracemill.sinks.base import StorageSink
-from tracemill.title.inferencer import TitleInferencer
-from tracemill.types import EventMetadata, SessionEvent
+from traceforge.pipeline import EventPipeline
+from traceforge.sinks.base import StorageSink
+from traceforge.title.inferencer import TitleInferencer
+from traceforge.types import EventMetadata, SessionEvent
 
 
 class _PMC(ctypes.Structure):
@@ -241,8 +241,8 @@ def main() -> None:
 
     # Log AFTER measurement so the mlflow import never contaminates the RSS probe.
     import mlflow
-    from tracemill_research.mlflow_utils import log_yaml_params, start_run
-    from tracemill_research.paths import EXPERIMENTS_DIR
+    from traceforge_research.mlflow_utils import log_yaml_params, start_run
+    from traceforge_research.paths import EXPERIMENTS_DIR
 
     yaml_path = EXPERIMENTS_DIR / "titler-live-footprint.yaml"
     with start_run("titler-live-footprint-v1", run_name=f"titling-{mode}", tags={"titling": mode}):

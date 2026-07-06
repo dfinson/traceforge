@@ -29,10 +29,10 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from tracemill.phase.event_rows import event_to_feature_row
-from tracemill.pipeline import EventPipeline
-from tracemill.sinks.base import StorageSink
-from tracemill.types import SessionEvent, TitleUpdate
+from traceforge.phase.event_rows import event_to_feature_row
+from traceforge.pipeline import EventPipeline
+from traceforge.sinks.base import StorageSink
+from traceforge.types import SessionEvent, TitleUpdate
 
 from scripts._title_pipebench import load_events  # noqa: E402
 
@@ -141,7 +141,7 @@ async def _run(a: argparse.Namespace) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
-    from tracemill.title.inferencer import TitleInferencer
+    from traceforge.title.inferencer import TitleInferencer
 
     d = Path(a.dir)
     files = sorted(d.glob("*.*.parquet"), key=lambda f: f.stat().st_size, reverse=True)

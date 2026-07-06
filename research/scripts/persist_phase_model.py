@@ -21,8 +21,8 @@ from scripts.train_phase_baselines import (
     _load_seg_params,
     _logreg_factory,
 )
-from tracemill_research.training.features import PHASES, load_phase_examples
-from tracemill_research.training.inference import (
+from traceforge_research.training.features import PHASES, load_phase_examples
+from traceforge_research.training.inference import (
     DEFAULT_FEATURE_SET,
     DEFAULT_MODEL_PATH,
     fit_phase_model,

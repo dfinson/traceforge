@@ -6,7 +6,7 @@
 #   research/scripts/_title_pipebench.py      (live footprint)
 #
 # MLflow: _title_toc_metrics.py logs a served-path run (verb concentration,
-#   grounding, hallucinated-id) to this experiment via tracemill_research.mlflow_utils.
+#   grounding, hallucinated-id) to this experiment via traceforge_research.mlflow_utils.
 #
 # PROBLEM (measured, not vibes). Scoring 979 titled segments produced by the live
 # pipeline over 5 held-out copilot-cli-native sessions, the tiny ORT titler emits
@@ -30,7 +30,7 @@ experiment:
   mlflow_experiment: titler-grounded-decoding-v1
   display_name: "Titler — Context-Grounded Decoding (anti-hallucination)"
   description: |
-    Inference-time only (no retrain): tracemill.title.inference grounds the beam
+    Inference-time only (no retrain): traceforge.title.inference grounds the beam
     candidates against the span's distilled context. Env-gated for A/B:
     TITLE_GROUND (default 1), TITLE_BEAMS (base width, default 5),
     TITLE_BEAMS_MAX (collapse-escalation width, default 2x base).

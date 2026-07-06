@@ -123,7 +123,7 @@ def _assert_leak_free(df: pd.DataFrame) -> None:
 
 def _generate_shipped(df: pd.DataFrame) -> list[str]:
     """Production request head: TitleInferencer().request_title (ONNX, CPU, t=1)."""
-    from tracemill.title.inferencer import TitleInferencer
+    from traceforge.title.inferencer import TitleInferencer
 
     inf = TitleInferencer()  # default packaged path -> data-request/ head
     return [inf.request_title(c) for c in df.ctx]
@@ -133,8 +133,8 @@ async def _run(args: argparse.Namespace) -> int:
     _utf8()
     from scripts._title_judge import _JUDGE_SYSTEM, _RUBRIC, _coin, _extract_json  # noqa: F401
     from scripts._title_judge import _judge_one, _agg  # reuse the exact protocol
-    from tracemill_research.config import load_labeling_runtime_config
-    from tracemill_research.labeling.backends.copilot_sdk import CopilotSdkBackend
+    from traceforge_research.config import load_labeling_runtime_config
+    from traceforge_research.labeling.backends.copilot_sdk import CopilotSdkBackend
 
     df = build_eval(args.cap)
     print(f"eval set: {len(df)} SWE-bench_Verified issues ({df.repo.nunique()} repos)")

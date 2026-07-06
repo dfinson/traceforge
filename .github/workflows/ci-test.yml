@@ -33,10 +33,10 @@ jobs:
           python-version: "3.13"
       - run: pip install hatchling build
       - run: python -m build
-      # tracemill now depends on tracemill-title-model, which is not on PyPI until
+      # traceforge now depends on traceforge-title-model, which is not on PyPI until
       # its own release tag is pushed. Build it into dist/ and resolve it locally
       # via --find-links so the base-wheel install works pre-publish (litellm,
       # onnxruntime, etc. still come from PyPI).
-      - run: python -m build packages/tracemill-title-model --outdir dist
-      - run: pip install --find-links dist tracemill
-      - run: python -c "import tracemill; print(tracemill.__name__)"
+      - run: python -m build packages/traceforge-title-model --outdir dist
+      - run: pip install --find-links dist traceforge
+      - run: python -c "import traceforge; print(traceforge.__name__)"

@@ -5,16 +5,16 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tracemill.governance.envelope import ContextGapEvent, EnrichedEvent
-from tracemill.governance.mcp_drift import (
+from traceforge.governance.envelope import ContextGapEvent, EnrichedEvent
+from traceforge.governance.mcp_drift import (
     MCPIntegrityAlert,
     MCPIntegrityScanner,
     _ADVERSARIAL_PATTERNS,
 )
-from tracemill.governance.drift import DriftAssessment, DriftDetector, _TRANSITION_BONUSES
-from tracemill.governance.observer import TracemillObserver
-from tracemill.governance.pipeline import SessionMeta
-from tracemill.governance.results import EscalationContext, TransformSuggestion
+from traceforge.governance.drift import DriftAssessment, DriftDetector, _TRANSITION_BONUSES
+from traceforge.governance.observer import TraceforgeObserver
+from traceforge.governance.pipeline import SessionMeta
+from traceforge.governance.results import EscalationContext, TransformSuggestion
 
 
 # ─── ContextGapEvent Tests ───
@@ -64,7 +64,7 @@ class TestContextGapEvent:
 
 class TestEnrichedEvent:
     def _make_meta(self, with_risk=False, with_recommendation=False):
-        from tracemill.classify.risk import RiskAssessment
+        from traceforge.classify.risk import RiskAssessment
 
         risk = None
         if with_risk:
@@ -104,7 +104,7 @@ class TestEnrichedEvent:
         assert "_governance" in d
 
     def test_to_dict_regular_event(self):
-        from tracemill.governance.types import ToolCallEvent
+        from traceforge.governance.types import ToolCallEvent
 
         event = ToolCallEvent(
             event_id="e1",
@@ -200,8 +200,8 @@ class TestMCPIntegrityScannerIntegration:
         return MCPIntegrityScanner(store), store
 
     def _make_ctx(self, server="mcp-fs", tool_name="read_file", desc="Read a file", schema="{}"):
-        from tracemill.governance.types import ToolCallEvent, EnrichmentContext
-        from tracemill.classify.core import Classification
+        from traceforge.governance.types import ToolCallEvent, EnrichmentContext
+        from traceforge.classify.core import Classification
 
         event = ToolCallEvent(
             event_id="e1",
@@ -239,8 +239,8 @@ class TestMCPIntegrityScannerIntegration:
         assert len(result.deferred_writes) == 1  # Deferred upsert
 
     def test_non_mcp_event_returns_empty(self):
-        from tracemill.governance.types import ToolCallEvent, EnrichmentContext
-        from tracemill.classify.core import Classification
+        from traceforge.governance.types import ToolCallEvent, EnrichmentContext
+        from traceforge.classify.core import Classification
 
         scanner, store = self._make_scanner()
         event = ToolCallEvent(
@@ -313,7 +313,7 @@ class TestDriftDetectorIntegration:
         return DriftDetector(store)
 
     def _make_snapshot(self, window):
-        from tracemill.governance.state import SessionStateSnapshot, BudgetSnapshot
+        from traceforge.governance.state import SessionStateSnapshot, BudgetSnapshot
 
         return SessionStateSnapshot(
             event_count=len(window),
@@ -347,13 +347,13 @@ class TestDriftDetectorIntegration:
 # ─── Observer Protocol Tests ───
 
 
-class TestTracemillObserver:
+class TestTraceforgeObserver:
     def test_protocol_definition(self):
         # Verify the protocol is importable and defines expected methods
-        assert hasattr(TracemillObserver, "on_pre_tool_call")
-        assert hasattr(TracemillObserver, "on_post_tool_call")
-        assert hasattr(TracemillObserver, "on_session_start")
-        assert hasattr(TracemillObserver, "on_session_end")
+        assert hasattr(TraceforgeObserver, "on_pre_tool_call")
+        assert hasattr(TraceforgeObserver, "on_post_tool_call")
+        assert hasattr(TraceforgeObserver, "on_session_start")
+        assert hasattr(TraceforgeObserver, "on_session_end")
 
     def test_protocol_is_runtime_checkable(self):
         class FakeObserver:
@@ -372,7 +372,7 @@ class TestTracemillObserver:
         assert hasattr(FakeObserver, "on_pre_tool_call")
 
     def test_agent_context_dataclass(self):
-        from tracemill.governance.observer import AgentContext
+        from traceforge.governance.observer import AgentContext
 
         ctx = AgentContext(session_id="s1", agent_model="gpt-4", repo="org/repo")
         assert ctx.session_id == "s1"
@@ -385,11 +385,11 @@ class TestTracemillObserver:
 
 class TestPipelineLifecycle:
     def _make_pipeline(self):
-        from tracemill.governance.pipeline import GovernancePipeline
-        from tracemill.governance.persistence import SystemStore
-        from tracemill.governance.labeler import GovernanceLabeler
-        from tracemill.governance.budget import BudgetTracker, BudgetThresholds
-        from tracemill.classify.config import ClassifyConfig, ClassificationEngine
+        from traceforge.governance.pipeline import GovernancePipeline
+        from traceforge.governance.persistence import SystemStore
+        from traceforge.governance.labeler import GovernanceLabeler
+        from traceforge.governance.budget import BudgetTracker, BudgetThresholds
+        from traceforge.classify.config import ClassifyConfig, ClassificationEngine
 
         store = SystemStore(":memory:")
         engine = ClassificationEngine(ClassifyConfig())
@@ -528,7 +528,7 @@ class TestTransformSuggestion:
 
 class TestEscalationContext:
     def test_creation(self):
-        from tracemill.governance.results import RecommendedAction
+        from traceforge.governance.results import RecommendedAction
 
         esc = EscalationContext(
             canonical_id="sha256:abc",

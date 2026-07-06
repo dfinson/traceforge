@@ -20,8 +20,8 @@ from pathlib import Path
 
 import pyarrow.parquet as pq
 
-from tracemill_research.config import load_labeling_runtime_config
-from tracemill_research.paths import DATA_PROCESSED, EXPERIMENTS_DIR
+from traceforge_research.config import load_labeling_runtime_config
+from traceforge_research.paths import DATA_PROCESSED, EXPERIMENTS_DIR
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("pilot-eval")

@@ -19,7 +19,7 @@ import hashlib
 
 import pandas as pd
 
-from tracemill_research.paths import DATA_INTERIM, DATA_PROCESSED
+from traceforge_research.paths import DATA_INTERIM, DATA_PROCESSED
 
 HELDOUT_FRAC = 0.15  # matches _title_t5_train.HELDOUT_FRAC
 SPAN_PREFIX = "summarize agent step: "

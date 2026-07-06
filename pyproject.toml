@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "tracemill"
+name = "traceforge"
 version = "0.1.0"
-description = "Framework-agnostic, CPU-only pipeline that mills AI agent traces into classified, risk-scored, governed output"
+description = "Framework-agnostic, CPU-only pipeline that forges AI agent traces into classified, risk-scored, governed output"
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "David Finson", email = "davidfinson@microsoft.com" }]
@@ -52,7 +52,7 @@ dependencies = [
     "scipy>=1.11",
     "sqlalchemy>=2.0",
     "tokenizers>=0.15",
-    "tracemill-title-model>=0.2",
+    "traceforge-title-model>=0.2",
     "tree-sitter>=0.24",
     "tree-sitter-bash>=0.24",
     "tree-sitter-markdown>=0.5",
@@ -72,19 +72,19 @@ s3 = [
 ]
 
 [project.scripts]
-tracemill = "tracemill.cli:main"
+traceforge = "traceforge.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/dfinson/tracemill"
-Repository = "https://github.com/dfinson/tracemill"
-Issues = "https://github.com/dfinson/tracemill/issues"
-Changelog = "https://github.com/dfinson/tracemill/releases"
+Homepage = "https://github.com/dfinson/traceforge"
+Repository = "https://github.com/dfinson/traceforge"
+Issues = "https://github.com/dfinson/traceforge/issues"
+Changelog = "https://github.com/dfinson/traceforge/releases"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 # Vendored demo repos (tests/fixtures/demo_repos/) carry their own test suites and
-# third-party deps (fastapi, etc.) and must not be collected by tracemill's suite.
+# third-party deps (fastapi, etc.) and must not be collected by traceforge's suite.
 addopts = "--ignore=tests/fixtures/demo_repos"
 
 [tool.ruff]
@@ -98,22 +98,22 @@ ignore = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/tracemill"]
-# The titler ONNX weights ship in the separate `tracemill-title-model` package
+packages = ["src/traceforge"]
+# The titler ONNX weights ship in the separate `traceforge-title-model` package
 # (a hard dependency), NOT in this wheel. Only the tiny non-model data files
 # (boilerplate list, phase/boundary heads) are force-included here.
-artifacts = ["src/tracemill/phase/data/*.joblib", "src/tracemill/phase/data/potion-base-8M/*", "src/tracemill/boundary/data/*.joblib", "src/tracemill/title/data/*.json"]
+artifacts = ["src/traceforge/phase/data/*.joblib", "src/traceforge/phase/data/potion-base-8M/*", "src/traceforge/boundary/data/*.joblib", "src/traceforge/title/data/*.json"]
 
 [tool.hatch.build.targets.sdist]
 # Keep the core sdist lean and safely under PyPI's 100 MiB per-file cap: ship only
 # what's needed to build the wheel. `only-include` (not `include`) is a strict
 # allowlist, so it also drops hatchling's default "every README.md/pyproject.toml
 # in the tree" selection. Excludes packages/ — the titler weights ship as their own
-# `tracemill-title-model` distribution, so bundling them here would add ~95 MB of
+# `traceforge-title-model` distribution, so bundling them here would add ~95 MB of
 # redundant ONNX and push the sdist past the limit — plus tests/, research/, and
 # docs/ fixtures that a source build of the wheel does not require.
 only-include = [
-    "src/tracemill",
+    "src/traceforge",
     "pyproject.toml",
     "README.md",
     "LICENSE",
@@ -122,9 +122,9 @@ only-include = [
 # During development, resolve the model package from the in-repo path so an
 # editable `uv sync` serves the real weights without a PyPI/GitHub round-trip.
 # This source is uv-only and is stripped from the published wheel (the base
-# `tracemill-title-model>=0.2` dependency is what real installs resolve).
+# `traceforge-title-model>=0.2` dependency is what real installs resolve).
 [tool.uv.sources]
-tracemill-title-model = { path = "packages/tracemill-title-model", editable = true }
+traceforge-title-model = { path = "packages/traceforge-title-model", editable = true }
 
 [dependency-groups]
 dev = [

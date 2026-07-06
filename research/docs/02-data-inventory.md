@@ -7,7 +7,7 @@ use for training.
 
 ### Legacy SWE-agent / OpenHands / SWE-smith (labeled)
 
-Copied from `\\wsl$\Ubuntu\home\dave01\tracemill-labels\` to
+Copied from `\\wsl$\Ubuntu\home\dave01\traceforge-labels\` to
 `research/data/raw/legacy/`. Six files, ~60 MB total.
 
 | File | Sessions | Turns / events | Source framework |
@@ -39,7 +39,7 @@ event types `tool.execution_start/complete`, `assistant.turn_start/message/turn_
 `hook.start/end`, `user.message`, `session.start/shutdown`, `abort`,
 `subagent.started/completed`, `skill.invoked`.
 
-`src/tracemill/mappings/copilot.yaml` already handles this exact schema —
+`src/traceforge/mappings/copilot.yaml` already handles this exact schema —
 sessions can be enriched without parser work.
 
 ### VS Code Copilot Chat / Claude Code Windows
@@ -53,10 +53,10 @@ Listed in `manifest.yaml` as placeholders, not fetched. Decision to date: do
 not download — we have the extracted subset already and full downloads are
 large.
 
-### The post-tracemill canonicalization problem
+### The post-traceforge canonicalization problem
 
 Important caveat for both label sets: **none of these labels were generated
-by looking at canonicalized tracemill output**. The original LLM annotator
+by looking at canonicalized traceforge output**. The original LLM annotator
 saw raw turn text and tool-call shapes. It did not see
 `metadata.classification`, `metadata.activity`, `metadata.phases`, or any
 post-enricher field — because those didn't exist on the labeled data.
@@ -69,7 +69,7 @@ measurement against labels that aren't grounded in the feature space we
 care about.
 
 This is why fresh labeling on the local Copilot corpus, *after* running
-those sessions through the tracemill enricher and showing the canonical
+those sessions through the traceforge enricher and showing the canonical
 view to the labeler, is on the roadmap. See
 [`05-data-sizing.md`](05-data-sizing.md) for the sizing recommendation.
 
@@ -84,7 +84,7 @@ This is the constraint that has shaped everything.
   fulltext has 46 events in extracted. The fulltext version was condensed /
   concatenated by an upstream preprocessor.
 
-**Consequence.** We cannot run `tracemill.Enricher` on the labeled data
+**Consequence.** We cannot run `traceforge.Enricher` on the labeled data
 end-to-end, because we have either *labels with text* or *events without
 labels*, and the join is broken for 511 of 514 sessions.
 

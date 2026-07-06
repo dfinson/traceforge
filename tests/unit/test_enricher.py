@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from tracemill import Enricher, EventKind, EventPipeline, SessionEvent
-from tracemill.classify import get_default_engine
-from tracemill.classify.core import Classification
+from traceforge import Enricher, EventKind, EventPipeline, SessionEvent
+from traceforge.classify import get_default_engine
+from traceforge.classify.core import Classification
 
 from tests.conftest import RecordingSink
 
@@ -15,19 +15,19 @@ ENGINE = get_default_engine()
 
 
 def _classify_shell(command: str):
-    from tracemill.classify import classify_shell
+    from traceforge.classify import classify_shell
 
     return classify_shell(command, engine=ENGINE)
 
 
 def _classify_tool(tool_name: str, custom_classifications=None):
-    from tracemill.classify.tools import classify_tool
+    from traceforge.classify.tools import classify_tool
 
     return classify_tool(tool_name, custom_classifications, engine=ENGINE)
 
 
 def _classify_binary(binary: str, subcmd, flags: list[str], all_words=None):
-    from tracemill.classify.rules import classify_binary
+    from traceforge.classify.rules import classify_binary
 
     return classify_binary(binary, subcmd, flags, all_words, engine=ENGINE)
 
@@ -548,7 +548,7 @@ class TestEdgeCases:
 
     def test_metadata_merged_from_start_to_complete(self):
         """Bug #5: Start-side metadata (turn_id, repo) should survive into paired event."""
-        from tracemill import EventMetadata
+        from traceforge import EventMetadata
 
         enricher = Enricher()
         start = SessionEvent(
@@ -913,7 +913,7 @@ class TestNewBinaryRules:
         assert cls.effect == "read_only"
 
     def test_grep_is_investigation(self):
-        from tracemill.classify.rules import SHELL_INVESTIGATION
+        from traceforge.classify.rules import SHELL_INVESTIGATION
 
         act = _classify_binary("grep", None, [], ["grep", "pattern", "file"])
         assert act == SHELL_INVESTIGATION
@@ -933,7 +933,7 @@ class TestNewBinaryRules:
         assert cls.has_role("persistence.version_control")
 
     def test_ls_is_investigation(self):
-        from tracemill.classify.rules import SHELL_INVESTIGATION
+        from traceforge.classify.rules import SHELL_INVESTIGATION
 
         act = _classify_binary("ls", None, ["-la"], ["ls", "-la"])
         assert act == SHELL_INVESTIGATION

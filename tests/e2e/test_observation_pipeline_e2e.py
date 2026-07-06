@@ -16,11 +16,11 @@ from pathlib import Path
 
 import pytest
 
-from tracemill.adapters.mapped_json import MappedJsonAdapter
-from tracemill.governance.pipeline import GovernancePipeline
-from tracemill.types import EventKind
+from traceforge.adapters.mapped_json import MappedJsonAdapter
+from traceforge.governance.pipeline import GovernancePipeline
+from traceforge.types import EventKind
 
-MAPPINGS_DIR = Path(__file__).resolve().parent.parent.parent / "src" / "tracemill" / "mappings"
+MAPPINGS_DIR = Path(__file__).resolve().parent.parent.parent / "src" / "traceforge" / "mappings"
 
 
 def _parse_event(yaml_name: str, event: dict) -> list:

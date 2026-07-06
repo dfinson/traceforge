@@ -11,21 +11,21 @@ from types import MappingProxyType
 
 import pytest
 
-from tracemill.classify.config import ClassificationEngine, ClassifyConfig
-from tracemill.classify.core import Classification
-from tracemill.governance.assessor import DefaultAssessor
-from tracemill.governance.budget import BudgetTracker
-from tracemill.governance.labeler import GovernanceLabeler
-from tracemill.governance.persistence import SystemStore
-from tracemill.governance.pipeline import GovernancePipeline
-from tracemill.governance.results import TransformSuggestion
-from tracemill.governance.rules import (
+from traceforge.classify.config import ClassificationEngine, ClassifyConfig
+from traceforge.classify.core import Classification
+from traceforge.governance.assessor import DefaultAssessor
+from traceforge.governance.budget import BudgetTracker
+from traceforge.governance.labeler import GovernanceLabeler
+from traceforge.governance.persistence import SystemStore
+from traceforge.governance.pipeline import GovernancePipeline
+from traceforge.governance.results import TransformSuggestion
+from traceforge.governance.rules import (
     Predicate,
     RecommendedAction,
     Rule,
     TransformTemplate,
 )
-from tracemill.governance.types import (
+from traceforge.governance.types import (
     CommandAnalysis,
     EnrichmentContext,
     ToolCallEvent,

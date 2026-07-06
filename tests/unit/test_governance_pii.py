@@ -1,4 +1,4 @@
-"""Tests for tracemill.governance.pii — the governance PIIScanner.
+"""Tests for traceforge.governance.pii — the governance PIIScanner.
 
 These exercise the real regex detectors and validators (no mocks): phone-number
 and cleartext key/value secret detection, example/test-domain and documentation
@@ -13,15 +13,15 @@ from datetime import datetime, timezone
 
 import pytest
 
-from tracemill.classify.core import Classification
-from tracemill.governance.pii import (
+from traceforge.classify.core import Classification
+from traceforge.governance.pii import (
     PIICategory,
     PIIScanner,
     _luhn_valid,
     _valid_email,
     _valid_ssn,
 )
-from tracemill.governance.types import (
+from traceforge.governance.types import (
     EnrichmentContext,
     ToolCallEvent,
     ToolResultEvent,
@@ -376,6 +376,6 @@ class TestPerformanceAndReDoS:
 
 def _detected_categories(content: str) -> set[PIICategory]:
     """Introspect which detectors (by category) fire on raw content."""
-    from tracemill.governance.pii import _DETECTORS
+    from traceforge.governance.pii import _DETECTORS
 
     return {d.category for d in _DETECTORS if d.found_in(content)}

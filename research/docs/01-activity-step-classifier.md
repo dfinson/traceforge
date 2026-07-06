@@ -53,9 +53,9 @@ unknowable mid-stream — and dropping it leaves F1_macro unchanged (0.443 →
 0.445), confirming the segmentation/semantic features already cover it.
 
 The fitted bundle ships **inside core** at
-`src/tracemill/boundary/data/boundary-model.joblib` (loadable via
-`tracemill.boundary.load()`); the same featuriser
-(`tracemill.boundary.features.featurize_session_gaps`) serves both training and
+`src/traceforge/boundary/data/boundary-model.joblib` (loadable via
+`traceforge.boundary.load()`); the same featuriser
+(`traceforge.boundary.features.featurize_session_gaps`) serves both training and
 inference, so there is no train/serve skew. Persist + MLflow logging:
 `research/scripts/persist_boundary_model.py` (experiment
 `boundary-classifier-production-v1`).
@@ -72,7 +72,7 @@ detection — so the fix is a decoder, not a new architecture, retraining, or
 activity-relative features (an oracle test with *gold* activity boundaries moved
 step F1 by −0.005 → tier-2 features dropped).
 
-The shipped decoder (`tracemill.boundary.decode`) is a **causal, streamable,
+The shipped decoder (`traceforge.boundary.decode`) is a **causal, streamable,
 O(1)-per-gap** rule that replaces `argmax`: emit class `c` at gap `i` iff
 `score_c ≥ threshold_c` **and** `(i − last_emitted_c) ≥ min_gap_c` (a per-class
 refractory period); activity has priority over step, and a suppressed coarser
@@ -173,7 +173,7 @@ The shipped bundle is now fit on the mixed corpus (**72,635 gaps / 782 sessions*
 1. **Fresh agent traces (`research/scripts/run_agent_traces.py`).** We generated
    substantive Copilot traces on demand by siccing the Copilot CLI (headless, via
    the Python SDK) on real OSS issues, recording each session live through the
-   real tracemill adapter + enricher (doubles as an e2e ingestion test). The
+   real traceforge adapter + enricher (doubles as an e2e ingestion test). The
    pilot drove 5 issues (`pallets/click` #2786 #3571, `psf/requests` #6102 #3829,
    `python-attrs/attrs` #864); every run produced a real fix (changed=True,
    34-119 tool calls, 313-1,289 events) and ingested cleanly. A scoped
@@ -191,7 +191,7 @@ The shipped bundle is now fit on the mixed corpus (**72,635 gaps / 782 sessions*
    per-gap boundary labels back together (centre-distance tie-break on overlap
    events; TOC activities merged across seams by event-range overlap + title
    Jaccard). 24 of 25 oversized natives (≤2,000 events) stitched cleanly; the one
-   holdout is an off-task ~2k-event tracemill-meta session whose densest windows
+   holdout is an off-task ~2k-event traceforge-meta session whose densest windows
    keep returning empty output.
 
 **Remaining gap (honest).** The Copilot ceiling on this machine is ~69
@@ -201,7 +201,7 @@ The single-call labeller only reached ~34 of these (≤220 events); the richer
 marathon sessions (222 – 67,936 events) truncate its JSON output at ~30k chars.
 **Chunked labelling (above) closed most of that** — we recovered 24 oversized
 natives (≤2,000 events) plus 5 fresh agent traces, taking the labelled set to 54.
-Still open: the giant sessions (2.5k – 68k events, mostly off-task tracemill-meta
+Still open: the giant sessions (2.5k – 68k events, mostly off-task traceforge-meta
 work) are deliberately excluded — windowing a 68k-event session is ~378 windows /
 ~760 model calls for low-value meta-traces. To scale Copilot labels further, run
 `run_agent_traces.py` on a larger curated OSS-issue set rather than mining local
@@ -283,6 +283,6 @@ MLflow run.
 - **Class imbalance.** 84% noise. Standard remedies (class weights, focal
   loss) — not a research question, just an implementation detail.
 - **Learned segmenter back into core.** Resolved: the persisted `combined-seg`
-  bundle ships **inside the core package** (`src/tracemill/boundary/`), since the
+  bundle ships **inside the core package** (`src/traceforge/boundary/`), since the
   feature contract is fully causal and the ML deps (scikit-learn / model2vec)
-  are already core. There is no separate `tracemill[ml]` extra.
+  are already core. There is no separate `traceforge[ml]` extra.

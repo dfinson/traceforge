@@ -14,8 +14,8 @@ boundary classifier was trained on:
 
 from __future__ import annotations
 
-from tracemill.boundary.features import featurize_session_gaps
-from tracemill.phase.segmentation import SegmentationParams
+from traceforge.boundary.features import featurize_session_gaps
+from traceforge.phase.segmentation import SegmentationParams
 
 PARAMS = SegmentationParams(
     windows=(3, 5, 10),

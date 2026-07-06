@@ -14,11 +14,11 @@ from pathlib import Path
 
 import yaml
 
-from tracemill_research.ingest.copilot import (
+from traceforge_research.ingest.copilot import (
     CopilotIngestConfig,
     ingest_from_manifest,
 )
-from tracemill_research.paths import DATA_INTERIM, RESEARCH_ROOT
+from traceforge_research.paths import DATA_INTERIM, RESEARCH_ROOT
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("ingest-corpus")

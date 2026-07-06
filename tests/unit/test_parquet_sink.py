@@ -8,9 +8,9 @@ import pyarrow.parquet as pq
 import pytest
 
 from tests.conftest import make_event
-from tracemill import EventKind
-from tracemill.classify.core import Classification
-from tracemill.types import EventMetadata, Phase, ToolMotivation
+from traceforge import EventKind
+from traceforge.classify.core import Classification
+from traceforge.types import EventMetadata, Phase, ToolMotivation
 
 
 class TestParquetSinkBuffering:
@@ -21,7 +21,7 @@ class TestParquetSinkBuffering:
         return tmp_path / "out"
 
     async def test_flushes_on_session_end(self, sink_dir: Path):
-        from tracemill.sinks.parquet import ParquetSink
+        from traceforge.sinks.parquet import ParquetSink
 
         sink = ParquetSink(path=str(sink_dir))
         try:
@@ -50,7 +50,7 @@ class TestParquetSinkBuffering:
             await sink.close()
 
     async def test_flushes_on_max_buffered_events(self, sink_dir: Path):
-        from tracemill.sinks.parquet import ParquetSink
+        from traceforge.sinks.parquet import ParquetSink
 
         sink = ParquetSink(path=str(sink_dir), max_buffered_events=3)
         try:
@@ -64,7 +64,7 @@ class TestParquetSinkBuffering:
             await sink.close()
 
     async def test_separate_sessions_get_separate_files(self, sink_dir: Path):
-        from tracemill.sinks.parquet import ParquetSink
+        from traceforge.sinks.parquet import ParquetSink
 
         sink = ParquetSink(path=str(sink_dir))
         try:
@@ -79,7 +79,7 @@ class TestParquetSinkBuffering:
             await sink.close()
 
     async def test_close_flushes_remaining(self, sink_dir: Path):
-        from tracemill.sinks.parquet import ParquetSink
+        from traceforge.sinks.parquet import ParquetSink
 
         sink = ParquetSink(path=str(sink_dir))
         await sink.on_event(make_event(session_id="dangling"))
@@ -95,7 +95,7 @@ class TestParquetSinkSchema:
     """Schema columns are present and typed correctly."""
 
     async def test_schema_columns_present(self, tmp_path: Path):
-        from tracemill.sinks.parquet import ParquetSink
+        from traceforge.sinks.parquet import ParquetSink
 
         sink = ParquetSink(path=str(tmp_path))
         await sink.on_event(make_event(session_id="schemacheck"))
@@ -134,7 +134,7 @@ class TestParquetSinkClassificationRoundtrip:
     """Multi-valued Classification dimensions (frozensets) write and read back as lists."""
 
     async def test_frozenset_dimensions_become_lists(self, tmp_path: Path):
-        from tracemill.sinks.parquet import ParquetSink
+        from traceforge.sinks.parquet import ParquetSink
 
         classification = Classification(
             mechanism="shell",
@@ -185,7 +185,7 @@ class TestParquetSinkPathTemplate:
     """{session_id} substitution and path containment."""
 
     async def test_session_id_in_template(self, tmp_path: Path):
-        from tracemill.sinks.parquet import ParquetSink
+        from traceforge.sinks.parquet import ParquetSink
 
         sink = ParquetSink(path=str(tmp_path / "{session_id}" / "events.parquet"))
         await sink.on_event(make_event(session_id="trace-001"))
@@ -195,7 +195,7 @@ class TestParquetSinkPathTemplate:
         assert out.exists()
 
     async def test_unsafe_session_id_is_sanitized(self, tmp_path: Path):
-        from tracemill.sinks.parquet import ParquetSink
+        from traceforge.sinks.parquet import ParquetSink
 
         sink = ParquetSink(path=str(tmp_path))
         await sink.on_event(make_event(session_id="../../escape-attempt"))

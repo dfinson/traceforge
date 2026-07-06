@@ -58,7 +58,7 @@
 #   research/scripts/_title_judge.py           (blinded Sonnet A/B on the 260
 #                                               CodePlane reals; request head)
 #   research/scripts/_title_export.py          (torch -> no-past int8 ONNX ->
-#                                               promote to src/tracemill/title/
+#                                               promote to src/traceforge/title/
 #                                               data-request/)
 #
 # MLflow: _title_t5_train.py logs here via TITLE_EXPERIMENT / TITLE_EXPERIMENT_YAML.
@@ -140,7 +140,7 @@ model:
     torch-free onnxruntime; ONLY "title task from request: " is ever decoded ->
     the rationale task adds ZERO serve footprint. Same int8 dynamic-quant export
     (opset 18, per_channel=False) and promote path as the span model. Replaces
-    src/tracemill/title/data-request/ 1:1 -- no new artifact, no new RAM/CPU vs
+    src/traceforge/title/data-request/ 1:1 -- no new artifact, no new RAM/CPU vs
     the current two-model ship (~33MB int8, once-per-session call, threads=1).
 
 conditions:

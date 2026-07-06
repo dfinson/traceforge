@@ -8,13 +8,28 @@ version = "0.2.0"
 description = "Pretrained int8 ONNX titler weights for tracemill (activity/step span head)"
 readme = "README.md"
 license = "MIT"
+authors = [{ name = "David Finson", email = "davidfinson@microsoft.com" }]
 requires-python = ">=3.11,<3.14"
+keywords = ["tracemill", "onnx", "titler", "model-weights"]
+# No legacy license classifier: `license = "MIT"` emits a PEP 639 License-Expression.
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 # Pure data distribution: no runtime imports of its own. The onnxruntime /
 # tokenizers stack that *reads* these files ships as a tracemill dependency.
 dependencies = []
 
 [project.urls]
 Homepage = "https://github.com/dfinson/tracemill"
+Repository = "https://github.com/dfinson/tracemill"
+Issues = "https://github.com/dfinson/tracemill/issues"
 Release = "https://github.com/dfinson/tracemill/releases"
 
 [tool.hatch.build.targets.wheel]

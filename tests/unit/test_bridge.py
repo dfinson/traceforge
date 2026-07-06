@@ -15,6 +15,7 @@ from tracemill.governance.persistence import SystemStore
 from tracemill.governance.pipeline import GovernancePipeline, SessionMeta
 from tracemill.governance.results import RecommendedAction
 from tracemill.governance.rules import parse_rules
+from tracemill.governance.state import SessionState
 from tracemill.types import EventKind, EventMetadata, SessionEvent
 
 
@@ -369,3 +370,60 @@ class TestScoreDoesNotSuppressObservation:
             f"score:{event.id}",
             event.id,
         }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Gate-before-observe durability (F2): the writer must persist even when the
+# Shield created the session's ephemeral (_db=None) gate state first.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestGateThenObserveDurability:
+    """Regression for F2: the observation writer must durably persist even when
+    the Shield gated the same session first.
+
+    The Shield's gate channel creates ephemeral ``SessionState(_db=None)`` for a
+    session — deliberately, so enforcement never does cross-thread sqlite. Before
+    the fix the ``SessionRegistry`` shared one residency map, so the
+    ``SessionMonitor``'s ``get_or_create`` was handed that same ``_db=None``
+    state; its ``persist_no_commit`` then silently no-op'd (it early-returns when
+    ``_db is None``) and the observed Phase-1 mutation never reached the DB. The
+    registry now keeps the gate (ephemeral) and observation (DB-backed)
+    residencies separate, so the writer always operates on a persistable state.
+    """
+
+    def test_gate_then_observe_persists_durably(self, pipeline, store):
+        session_id = "gate-then-observe"
+
+        # ── Gate first (Shield path): creates the ephemeral _db=None gate state,
+        # then advances the gate-channel counter at postflight.
+        payload = {
+            "tool_name": "bash",
+            "tool_input": {"command": "ls"},
+            "session_id": session_id,
+        }
+        trace, verdict = pipeline._score_and_gate_preflight(payload)
+        assert verdict.allowed
+        # Guard the assumption that both channels key on the same session id.
+        assert trace.session_id == session_id
+        pipeline._enforce_postflight(trace, session_id=trace.session_id, output={"result": "ok"})
+
+        # ── Observe the same session (SessionMonitor path — the single writer).
+        event = _make_event(
+            tool_name="bash",
+            arguments={"command": "ls"},
+            kind=EventKind.TOOL_CALL_COMPLETED,
+            session_id=session_id,
+        )
+        pipeline.observe_event(event)
+
+        # ── The observation must be DURABLE: a fresh read straight from the DB
+        # must reflect the advanced counter. Without the fix the writer mutated
+        # the gate's _db=None state, persist_no_commit no-op'd, no session_state
+        # row was written, and this reload returns 0.
+        reloaded = SessionState.load_from_db(session_id, store.connection)
+        assert reloaded.tool_call_count == 1
+
+        # ── And the writer's in-memory durable residency advanced exactly once —
+        # not twice from inheriting the gate's already-incremented counter.
+        assert pipeline.get_or_create_state(session_id).tool_call_count == 1

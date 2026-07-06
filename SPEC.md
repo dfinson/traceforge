@@ -1370,7 +1370,7 @@ API; the SDK `Pipeline` composes it with the observation backbone.
 |---|---|---|
 | `SessionState` | Encapsulate one session's accumulators — **one** tool-call counter, budget dimensions, taint ledger, phase window, gate history. Mutated only through its own methods; exposes an immutable `snapshot()` and a detached `clone` for previews. | — |
 | `SystemStore` | Durability: idempotency reservations, atomic commit, crash recovery, audit persistence. | sqlite |
-| `SessionRegistry` | Residency: the one place sessions are created, found, and LRU-evicted; reservation bookkeeping. | `SystemStore` |
+| `SessionRegistry` | Residency: the one place sessions are created and found, keeping two separate scopes — **durable** observation state (DB-backed, the single writer's) and **ephemeral** gate state (`_db=None`, never cross-thread sqlite) — so the writer always persists and the gate never touches the DB; plus eviction and reservation bookkeeping. | `SystemStore` |
 | `ContextBuilder` | Bridge a raw hook payload / adapted `SessionEvent` into an `EnrichmentContext` (classification + shell-command analysis). | engine |
 | `Phase1` | The Phase-1 state-advance step — budget, taint (IFC), phase window, pressure — applied to whichever `SessionState` it is handed (the real one, or a clone). | budget, labeler |
 | `Assessor` | Turn `(snapshot, event)` into a `SessionMeta` — label + risk + recommendation + drift + MCP. Side-effect-free. | labeler, rules, engine |
@@ -1390,7 +1390,7 @@ flowchart TB
     SCO["Scorer<br/>(read-only preview)"]
     SH["Shield<br/>(enforcement)"]
   end
-  REG["SessionRegistry<br/>(residency + eviction)"]
+  REG["SessionRegistry<br/>(durable + gate residency)"]
   ST["SessionState<br/>(one counter, methods only)"]
   ASS["Assessor<br/>(label · risk · drift · recommend)"]
   POL["GatePolicy<br/>(Verdict strategy)"]

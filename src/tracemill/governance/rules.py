@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
 import yaml
+
+from tracemill.governance.results import TransformSuggestion
 
 if TYPE_CHECKING:
     from tracemill.classify.core import Classification
@@ -23,13 +27,101 @@ class RecommendedAction(StrEnum):
     TRANSFORM = "transform"
 
 
+def _empty_parameters() -> Mapping[str, str]:
+    """Default immutable (read-only) parameter mapping."""
+    return MappingProxyType({})
+
+
+_MISSING = object()
+
+
+def _resolve_part(obj: object, part: str) -> object:
+    """Resolve a single path segment against a mapping, sequence, or object."""
+    if obj is None or part.startswith("_"):
+        return _MISSING
+    if isinstance(obj, Mapping):
+        return obj[part] if part in obj else _MISSING
+    if isinstance(obj, (list, tuple)):
+        try:
+            idx = int(part)
+        except ValueError:
+            return _MISSING
+        return obj[idx] if -len(obj) <= idx < len(obj) else _MISSING
+    return getattr(obj, part, _MISSING)
+
+
+def resolve_field(data: object, path: str | None) -> object | None:
+    """Resolve a dotted ``path`` against ``data``, supporting nested fields.
+
+    Traverses mappings (by key), sequences (by integer index), and objects (by
+    attribute). Returns ``None`` when ``path`` is empty/None or any segment is
+    absent — i.e. a missing field resolves to ``None`` rather than raising.
+    """
+    if not path:
+        return None
+    current: object = data
+    for part in path.split("."):
+        current = _resolve_part(current, part)
+        if current is _MISSING:
+            return None
+    return current
+
+
 @dataclass(frozen=True)
 class TransformTemplate:
-    """Static template for a transform suggestion."""
+    """Static template for a transform suggestion.
 
-    pattern: str
-    replacement: str
+    A transform is defined by a ``strategy`` (how to transform) plus immutable
+    ``parameters`` (strategy-specific config), applied to ``target_field`` (a
+    dotted path resolved against event data). ``pattern``/``replacement`` are
+    retained as the canonical inputs of the default ``pattern_replace`` strategy.
+    """
+
+    pattern: str | None = None
+    replacement: str | None = None
     description: str | None = None
+    target_field: str | None = None
+    strategy: str = "pattern_replace"
+    parameters: Mapping[str, str] = field(default_factory=_empty_parameters)
+
+    def __post_init__(self) -> None:
+        # Freeze parameters into a read-only copy (frozen=True only guards rebinding).
+        object.__setattr__(self, "parameters", MappingProxyType(dict(self.parameters)))
+
+    def __hash__(self) -> int:
+        return hash(
+            (
+                self.pattern,
+                self.replacement,
+                self.description,
+                self.target_field,
+                self.strategy,
+                frozenset(self.parameters.items()),
+            )
+        )
+
+    def render(self, data: object) -> TransformSuggestion:
+        """Render this template into a concrete ``TransformSuggestion``.
+
+        Resolves ``target_field`` against ``data`` (nested; missing -> ``None``)
+        and preserves ``strategy``, ``parameters``, and the resolved
+        ``original_value`` on the produced suggestion. Always returns a suggestion;
+        whether to drop an unresolved transform is a downstream consumer decision.
+        """
+        original_value = resolve_field(data, self.target_field)
+        original_str = "" if original_value is None else str(original_value)
+        return TransformSuggestion(
+            target_kind="field",
+            path=self.target_field or "",
+            original=original_str,
+            replacement=self.replacement,
+            rationale=self.description or "Rule suggests transformation",
+            confidence="medium",
+            target_field=self.target_field,
+            strategy=self.strategy,
+            parameters=self.parameters,
+            original_value=original_value,
+        )
 
 
 @dataclass(frozen=True)
@@ -98,10 +190,21 @@ def parse_rules(yaml_path: str | Path) -> list[Rule]:
         transform = None
         if "transform" in entry:
             t = entry["transform"]
+            if not isinstance(t, dict):
+                raise ValueError(f"Rule {i}: 'transform' must be a mapping")
+            params = t.get("parameters", {})
+            if not isinstance(params, dict):
+                raise ValueError(
+                    f"Rule {i}: transform 'parameters' must be a mapping, "
+                    f"got {type(params).__name__}"
+                )
             transform = TransformTemplate(
-                pattern=t["pattern"],
-                replacement=t["replacement"],
+                pattern=t.get("pattern"),
+                replacement=t.get("replacement"),
                 description=t.get("description"),
+                target_field=t.get("target_field"),
+                strategy=t.get("strategy", "pattern_replace"),
+                parameters=params,
             )
         rule_id = entry.get("id", f"rule_{i}")
         rules.append(

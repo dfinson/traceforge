@@ -39,11 +39,21 @@ class IntegrityWrite:
 
 
 class IntegrityVerifier:
-    """Verifies content integrity by comparing SHA-256 hashes against stored baselines."""
+    """Verifies content integrity by comparing SHA-256 hashes against stored baselines.
 
-    def __init__(self, store: "SystemStore", repo: str) -> None:
+    The repo key is derived **per event** from ``ctx.project_root`` (mirroring
+    ``drift.py``'s ``ctx.project_root or "unknown"``), not fixed at construction. A
+    single verifier therefore serves every session/repo a pipeline observes, so the
+    default composition can wire it unconditionally without a construction-time repo.
+    """
+
+    def __init__(self, store: "SystemStore") -> None:
         self._store = store
-        self._repo = repo
+
+    @staticmethod
+    def _repo_for(ctx: "EnrichmentContext") -> str:
+        """Repo key for this event — matches drift.py's ``project_root or "unknown"``."""
+        return ctx.project_root or "unknown"
 
     def should_check(self, classification: "object") -> bool:
         """Whether to verify integrity for this classification."""
@@ -60,14 +70,15 @@ class IntegrityVerifier:
         """High-level: check integrity for all file writes in event."""
         if not self.should_check(ctx.base_classification):
             return
+        repo = self._repo_for(ctx)
         for path, content in self._extract_file_writes(ctx):
-            result = self.check(path, content)
+            result = self.check(repo, path, content)
             if result and not result.matched:
                 cap.add("integrity_unverified")
 
-    def check(self, path: str, content: bytes) -> IntegrityCheck | None:
-        """Low-level: compare content hash against stored value."""
-        expected = self._store.get_content_hash(self._repo, path)
+    def check(self, repo: str, path: str, content: bytes) -> IntegrityCheck | None:
+        """Low-level: compare content hash against the stored value for ``repo``."""
+        expected = self._store.get_content_hash(repo, path)
         if expected is None:
             return None  # Path not tracked
 
@@ -75,7 +86,7 @@ class IntegrityVerifier:
         # Get writer from content_hashes table
         row = self._store.connection.execute(
             "SELECT updated_by_session FROM content_hashes WHERE repo = ? AND file_path = ?",
-            (self._repo, path),
+            (repo, path),
         ).fetchone()
         writer = row[0] if row else None
 
@@ -87,10 +98,12 @@ class IntegrityVerifier:
             last_known_writer=writer,
         )
 
-    def record_write(self, path: str, content: bytes, session_id: str, timestamp: str) -> None:
+    def record_write(
+        self, repo: str, path: str, content: bytes, session_id: str, timestamp: str
+    ) -> None:
         """Record a new content hash after a successful write."""
         sha = hashlib.sha256(content).hexdigest()
-        self._store.store_content_hash(self._repo, path, sha, session_id, timestamp)
+        self._store.store_content_hash(repo, path, sha, session_id, timestamp)
 
     def pending_writes(self, ctx: "EnrichmentContext") -> list[IntegrityWrite]:
         """Prescriptions to (re)baseline this event's writes. Pure — no store mutation.
@@ -103,12 +116,13 @@ class IntegrityVerifier:
         """
         if not self.should_check(ctx.base_classification):
             return []
+        repo = self._repo_for(ctx)
         ts = ctx.event.timestamp
         timestamp = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
         session_id = ctx.event.session_id
         return [
             IntegrityWrite(
-                repo=self._repo,
+                repo=repo,
                 path=path,
                 sha256=hashlib.sha256(content).hexdigest(),
                 session_id=session_id,

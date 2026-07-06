@@ -66,6 +66,41 @@ class JsonlSink(StorageSink):
     async def on_usage(self, usage: UsageRecord) -> None:
         pass
 
+    async def on_enriched_event(self, enriched) -> None:
+        """Persist a governance envelope. Live events keep byte-identical output;
+        context-gap markers are written as a tagged ``context_gap`` record."""
+        from tracemill.governance.envelope import ContextGapEvent
+
+        gap = enriched.event
+        if not isinstance(gap, ContextGapEvent):
+            await super().on_enriched_event(enriched)
+            return
+
+        path = self._resolve_path(gap.session_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        line = json.dumps(
+            {
+                "record": "context_gap",
+                "id": gap.id,
+                "session_id": gap.session_id,
+                "timestamp": gap.timestamp.isoformat(),
+                "dropped_count": gap.dropped_count,
+                "first_dropped_sequence": gap.first_dropped_sequence,
+                "last_dropped_sequence": gap.last_dropped_sequence,
+                "gap_ordinal": gap.gap_ordinal,
+                "reason": gap.reason,
+                "source_event_key": gap.source_event_key,
+            },
+            default=str,
+        )
+
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        except OSError as exc:
+            logger.error("JsonlSink: failed to write to %s: %s", path, exc)
+
     async def on_title_update(self, update: TitleUpdate) -> None:
         path = self._resolve_path(update.session_id)
         path.parent.mkdir(parents=True, exist_ok=True)

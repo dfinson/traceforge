@@ -239,7 +239,7 @@ All configurable via YAML -- no code required:
 | `JsonlSink` | ✅ Done | Append-only JSONL files (rotation supported) |
 | `SqliteSink` | ✅ Done | Local SQLite database |
 | `S3Sink` | ✅ Done | Cloud object storage |
-| `ParquetSink` | ✅ Done | Columnar Parquet files for analytics |
+| `ParquetSink` | ✅ Done | Columnar Parquet files for analytics (SDK use) |
 | `OtelExporterSink` | ✅ Done | OpenTelemetry (OTLP) span export |
 | `WebhookSink` | ✅ Done | POST events / assessments to a webhook URL |
 

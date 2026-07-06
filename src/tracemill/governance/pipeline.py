@@ -169,11 +169,11 @@ class GovernancePipeline:
             pii_scanner = PIIScanner()
 
         # Content integrity is live by default (opt out via integrity_verification).
-        # The repo key mirrors drift.py's ``project_root or "unknown"`` idiom so runtime
-        # contexts and the constructed verifier agree on the namespace.
+        # The verifier is per-event: it derives the repo key from each event's
+        # ctx.project_root, so no construction-time repo is needed.
         integrity_verifier = None
         if config.integrity_verification:
-            integrity_verifier = IntegrityVerifier(store, config.project_root or "unknown")
+            integrity_verifier = IntegrityVerifier(store)
 
         instance = cls(
             store=store,

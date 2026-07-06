@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -27,6 +28,13 @@ def create_default_pipeline(
     from tracemill.governance.labeler import GovernanceLabeler
     from tracemill.governance.rules import parse_rules
 
+    # watch/score/replay run inside the target repo, so cwd is its identity. Defaulting
+    # here (rather than leaving project_root unset) gives per-event integrity a real repo
+    # key instead of "unknown", so a persistent system.db doesn't bucket every repo the
+    # user watches under one namespace and raise cross-repo false drift.
+    if project_root is None:
+        project_root = os.getcwd()
+
     # Load default recommendation rules from bundled data
     rules_path = (
         Path(__file__).resolve().parent.parent / "classify" / "data" / "recommendation_rules.yaml"
@@ -34,10 +42,10 @@ def create_default_pipeline(
     rules = parse_rules(rules_path)
 
     engine = get_default_engine()
-    # Content integrity is live by default on this primary CLI/Score path. The repo
-    # key mirrors drift.py's ``project_root or "unknown"`` idiom so runtime contexts
-    # and the constructed verifier agree on the namespace.
-    integrity_verifier = IntegrityVerifier(store, project_root or "unknown")
+    # Content integrity is live by default on this primary CLI/Score path. The verifier
+    # is per-event: it derives the repo key from each event's ctx.project_root, so no
+    # construction-time repo is needed.
+    integrity_verifier = IntegrityVerifier(store)
     labeler = GovernanceLabeler(integrity_verifier=integrity_verifier)
     tracker = BudgetTracker()
 

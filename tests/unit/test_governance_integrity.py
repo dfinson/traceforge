@@ -13,6 +13,7 @@ writer attribution, and — critically — a preflight simulation that never rec
 
 import hashlib
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -73,7 +74,7 @@ def _write_event(path, content, session_id="sess1", event_id="evt-1", key="key-1
     )
 
 
-def _ctx(event, effect="mutating"):
+def _ctx(event, effect="mutating", project_root=REPO):
     classification = Classification(mechanism="filesystem.write", effect=effect)
     return EnrichmentContext(
         event=event,
@@ -81,7 +82,7 @@ def _ctx(event, effect="mutating"):
         command_analysis=None,
         session_state=None,
         mcp_profiles=None,
-        project_root=None,
+        project_root=project_root,
         engine="coding",
         drift_baseline=None,
         mcp_profile_key=None,
@@ -95,7 +96,7 @@ def _ctx(event, effect="mutating"):
 
 class TestVerifier:
     def test_first_seen_write_not_flagged_and_yields_prescription(self, store):
-        verifier = IntegrityVerifier(store, REPO)
+        verifier = IntegrityVerifier(store)
         ctx = _ctx(_write_event("src/a.py", "hello"))
 
         cap: set[str] = set()
@@ -114,26 +115,26 @@ class TestVerifier:
         ]
 
     def test_matching_rewrite_is_not_flagged(self, store):
-        verifier = IntegrityVerifier(store, REPO)
-        verifier.record_write("src/a.py", b"hello", "sess1", _TS)
+        verifier = IntegrityVerifier(store)
+        verifier.record_write(REPO, "src/a.py", b"hello", "sess1", _TS)
 
         cap: set[str] = set()
         verifier.check_event(_ctx(_write_event("src/a.py", "hello")), cap)
         assert "integrity_unverified" not in cap
 
-        check = verifier.check("src/a.py", b"hello")
+        check = verifier.check(REPO, "src/a.py", b"hello")
         assert check is not None and check.matched is True
 
     def test_mismatched_content_is_flagged(self, store):
-        verifier = IntegrityVerifier(store, REPO)
-        verifier.record_write("src/a.py", b"hello", "sess1", _TS)
+        verifier = IntegrityVerifier(store)
+        verifier.record_write(REPO, "src/a.py", b"hello", "sess1", _TS)
 
         cap: set[str] = set()
         verifier.check_event(_ctx(_write_event("src/a.py", "tampered")), cap)
         assert "integrity_unverified" in cap
 
     def test_should_check_gates_pending_writes(self, store):
-        verifier = IntegrityVerifier(store, REPO)
+        verifier = IntegrityVerifier(store)
         # read_only effect and no filesystem_write capability → not integrity-relevant
         assert (
             verifier.pending_writes(_ctx(_write_event("src/a.py", "x"), effect="read_only")) == []
@@ -142,17 +143,17 @@ class TestVerifier:
     def test_cross_session_attribution(self, store):
         """A write by session B on a path baselined by session A is detectable, and
         `last_known_writer` reflects the *prior* writer until B's record commits."""
-        writer_a = IntegrityVerifier(store, REPO)
-        writer_a.record_write("src/a.py", b"content-A", "session-A", _TS)
+        writer_a = IntegrityVerifier(store)
+        writer_a.record_write(REPO, "src/a.py", b"content-A", "session-A", _TS)
 
-        writer_b = IntegrityVerifier(store, REPO)
-        drift = writer_b.check("src/a.py", b"content-B")
+        writer_b = IntegrityVerifier(store)
+        drift = writer_b.check(REPO, "src/a.py", b"content-B")
         assert drift is not None
         assert drift.matched is False
         assert drift.last_known_writer == "session-A"  # attribution to prior writer
 
         # After session B's write commits, the baseline is re-attributed to B.
-        writer_b.record_write("src/a.py", b"content-B", "session-B", _TS)
+        writer_b.record_write(REPO, "src/a.py", b"content-B", "session-B", _TS)
         row = store.connection.execute(
             "SELECT updated_by_session FROM content_hashes WHERE repo = ? AND file_path = ?",
             (REPO, "src/a.py"),
@@ -167,8 +168,8 @@ class TestVerifier:
 
 class TestLabelerBonus:
     def test_mismatch_surfaces_integrity_bonus(self, store):
-        verifier = IntegrityVerifier(store, REPO)
-        verifier.record_write("src/a.py", b"original", "sess1", _TS)
+        verifier = IntegrityVerifier(store)
+        verifier.record_write(REPO, "src/a.py", b"original", "sess1", _TS)
         labeler = GovernanceLabeler(integrity_verifier=verifier)
 
         result = labeler.label(_ctx(_write_event("src/a.py", "tampered")))
@@ -180,8 +181,8 @@ class TestLabelerBonus:
         assert result.integrity_deferred_writes[0].sha256 == _sha(b"tampered")
 
     def test_matching_write_has_no_bonus(self, store):
-        verifier = IntegrityVerifier(store, REPO)
-        verifier.record_write("src/a.py", b"same", "sess1", _TS)
+        verifier = IntegrityVerifier(store)
+        verifier.record_write(REPO, "src/a.py", b"same", "sess1", _TS)
         labeler = GovernanceLabeler(integrity_verifier=verifier)
 
         result = labeler.label(_ctx(_write_event("src/a.py", "same")))
@@ -190,7 +191,7 @@ class TestLabelerBonus:
         assert result.risk_modifiers.integrity_bonus == 0
 
     def test_first_seen_has_no_bonus_but_defers_record(self, store):
-        verifier = IntegrityVerifier(store, REPO)
+        verifier = IntegrityVerifier(store)
         labeler = GovernanceLabeler(integrity_verifier=verifier)
 
         result = labeler.label(_ctx(_write_event("src/new.py", "brand-new")))
@@ -206,7 +207,7 @@ class TestLabelerBonus:
 
 
 def _pipeline(store, rules):
-    verifier = IntegrityVerifier(store, REPO)
+    verifier = IntegrityVerifier(store)
     labeler = GovernanceLabeler(integrity_verifier=verifier)
     return GovernancePipeline(
         store=store,
@@ -285,16 +286,23 @@ class TestDefaultInjection:
 
     def test_zero_config_pipeline_wires_integrity_live(self):
         # GovernancePipeline.create() with default config (the from_config root, which
-        # delegates here). No project_root → repo key "unknown"; still live by default.
+        # delegates here). Events with no project_root exercise the per-event "unknown"
+        # repo fallback (mirrors drift.py); integrity is still live by default.
         pipeline = GovernancePipeline.create()
 
         meta0 = pipeline.process_event(
-            _ctx(_write_event("src/a.py", "v1", session_id="A", event_id="e0", key="k0"))
+            _ctx(
+                _write_event("src/a.py", "v1", session_id="A", event_id="e0", key="k0"),
+                project_root=None,
+            )
         )
         assert "integrity_unverified" not in meta0.classification.capability
 
         meta_drift = pipeline.process_event(
-            _ctx(_write_event("src/a.py", "v2", session_id="B", event_id="e1", key="k1"))
+            _ctx(
+                _write_event("src/a.py", "v2", session_id="B", event_id="e1", key="k1"),
+                project_root=None,
+            )
         )
         assert "integrity_unverified" in meta_drift.classification.capability
         assert "integrity_unverified" in meta_drift.risk_assessment.factors
@@ -312,3 +320,39 @@ class TestDefaultInjection:
         )
         assert "integrity_unverified" not in meta_drift.classification.capability
         assert "integrity_unverified" not in meta_drift.risk_assessment.factors
+
+    def test_watch_style_pipeline_is_live_without_project_root(self, store):
+        # The way `tracemill watch`/`score`/`replay` build the pipeline: the factory is
+        # called with NO project_root. This is exactly the path that was dead before this
+        # fix — every real CLI entry omits project_root, so a construction-time-gated
+        # verifier was None there. A per-event verifier makes it live regardless.
+        pipeline = create_default_pipeline(store)
+
+        # Item 4: production derives a real repo identity from cwd, never a bare
+        # "unknown", so a persistent system.db keys baselines per repo instead of
+        # colliding every watched repo under one namespace (false cross-repo drift).
+        repo = os.getcwd()
+        assert pipeline._project_root == repo
+
+        # First-seen write records the baseline under the cwd repo key (no flag) …
+        meta0 = pipeline.process_event(
+            _ctx(
+                _write_event("src/a.py", "v1", session_id="A", event_id="e0", key="k0"),
+                project_root=repo,
+            )
+        )
+        assert "integrity_unverified" not in meta0.classification.capability
+        assert store.get_content_hash(repo, "src/a.py") == _sha(b"v1")
+
+        # … and a drifted re-write on the tracked path flags integrity_unverified and
+        # raises risk by exactly the +10 integrity bonus — integrity is LIVE by default.
+        meta_drift = pipeline.process_event(
+            _ctx(
+                _write_event("src/a.py", "v2", session_id="B", event_id="e1", key="k1"),
+                project_root=repo,
+            )
+        )
+        assert "integrity_unverified" in meta_drift.classification.capability
+        assert "integrity_unverified" in meta_drift.risk_assessment.factors
+        assert meta_drift.risk_assessment.score - meta0.risk_assessment.score == 10
+        assert store.get_content_hash(repo, "src/a.py") == _sha(b"v2")

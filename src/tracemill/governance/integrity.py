@@ -22,6 +22,22 @@ class IntegrityCheck:
     last_known_writer: str | None
 
 
+@dataclass(frozen=True)
+class IntegrityWrite:
+    """A self-contained prescription to (re)baseline one file's content hash.
+
+    Emitted during side-effect-free labeling and committed later by the monitor's
+    finalization transaction (mirroring ``mcp_deferred_writes``). Carries everything
+    needed to persist the row so the writer never needs the verifier's ``repo``.
+    """
+
+    repo: str
+    path: str
+    sha256: str
+    session_id: str
+    timestamp: str
+
+
 class IntegrityVerifier:
     """Verifies content integrity by comparing SHA-256 hashes against stored baselines."""
 
@@ -75,6 +91,31 @@ class IntegrityVerifier:
         """Record a new content hash after a successful write."""
         sha = hashlib.sha256(content).hexdigest()
         self._store.store_content_hash(self._repo, path, sha, session_id, timestamp)
+
+    def pending_writes(self, ctx: "EnrichmentContext") -> list[IntegrityWrite]:
+        """Prescriptions to (re)baseline this event's writes. Pure — no store mutation.
+
+        Gated by the same :meth:`should_check` as :meth:`check_event`, so only
+        mutating/destructive or ``filesystem_write`` events produce baselines. The
+        actual persistence is deferred to the monitor's finalization commit, which runs
+        *after* :meth:`check_event` has already compared against the prior baseline — so
+        drift (including cross-session drift) is detected before the baseline is updated.
+        """
+        if not self.should_check(ctx.base_classification):
+            return []
+        ts = ctx.event.timestamp
+        timestamp = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+        session_id = ctx.event.session_id
+        return [
+            IntegrityWrite(
+                repo=self._repo,
+                path=path,
+                sha256=hashlib.sha256(content).hexdigest(),
+                session_id=session_id,
+                timestamp=timestamp,
+            )
+            for path, content in self._extract_file_writes(ctx)
+        ]
 
     def _extract_file_writes(self, ctx: "EnrichmentContext") -> list[tuple[str, bytes]]:
         """Extract file paths and content from a write event."""

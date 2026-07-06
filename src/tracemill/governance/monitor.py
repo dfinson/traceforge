@@ -123,8 +123,10 @@ class SessionMonitor:
             # Finalize: write session summary
             snapshot = state.snapshot()
             self._write_session_summary(session_id, snapshot)
-            # Evict session state to prevent unbounded memory growth
+            # Evict session state to prevent unbounded memory growth. Both
+            # residencies (durable + gate) are dropped on session end.
             self._registry.evict(session_id)
+            self._registry.evict_gate(session_id)
             self._write_failures.pop(session_id, None)
             # Clean up any lingering phase23 attempts for this session's events
             for key in self._phase23_session_keys.pop(session_id, set()):

@@ -357,41 +357,44 @@ class TestDefaultInjection:
         assert meta_drift.risk_assessment.score - meta0.risk_assessment.score == 10
         assert store.get_content_hash(repo, "src/a.py") == _sha(b"v2")
 
-    def test_cli_factory_keys_baseline_by_cwd_not_unknown(self, store, monkeypatch, tmp_path):
-        # Two distinct repos watched through the SAME persistent store must NOT collide:
-        # create_default_pipeline keys each baseline by cwd (os.getcwd()), so one shared
-        # system.db keeps per-repo namespaces instead of bucketing every watched repo under
-        # "unknown" and raising cross-repo false drift (the watch/score/replay hazard).
-        repo_a = tmp_path / "repo_a"
-        repo_b = tmp_path / "repo_b"
+    def test_two_cwds_key_baselines_separately_no_unknown_collision(
+        self, store, monkeypatch, tmp_path
+    ):
+        # Canonical #61 repro: two DIFFERENT repos (cwds) sharing ONE persistent store must
+        # NOT collide. Pre-fix both keyed under "unknown", so repo B's first write to the same
+        # relative path drift-flagged against repo A's baseline. create_default_pipeline keying
+        # each baseline by cwd (default project_root=os.getcwd()) isolates them per repo.
+        repo_a = tmp_path / "repoA"
+        repo_b = tmp_path / "repoB"
         repo_a.mkdir()
         repo_b.mkdir()
 
         # Repo A: built inside repo_a, so the factory's cwd default is its repo identity.
         monkeypatch.chdir(repo_a)
-        key_a = os.getcwd()  # the factory's exact expression — asserted equal below
-        pipeline_a = create_default_pipeline(store)
-        assert pipeline_a._project_root == key_a  # factory & test share os.getcwd(): no drift
+        key_a = os.getcwd()  # AFTER chdir (symlink-safe); the factory's exact expression
+        pa = create_default_pipeline(store)
+        assert pa._project_root == key_a  # factory & test share os.getcwd(): no drift
         # The verifier is per-event (keys off ctx.project_root); in production ContextBuilder
-        # stamps the pipeline's project_root onto each event. Thread that SAME value here so
-        # the assertions truly exercise the factory default: drop it and pipeline._project_root
-        # is None, the write lands under "unknown", and the key_a lookup below returns None.
-        pipeline_a.process_event(
+        # stamps the pipeline's project_root onto each event. Thread that SAME value here so the
+        # namespace assertions truly exercise the factory default: revert it and _project_root is
+        # None, every write collapses to "unknown", and both the isolation AND the no-false-flag
+        # assertions below break.
+        meta_a = pa.process_event(
             _ctx(
-                _write_event("src/main.py", "content-A", session_id="A", event_id="a1", key="ka"),
-                project_root=pipeline_a._project_root,
+                _write_event("src/main.py", "AAA", session_id="A", event_id="a0", key="ka"),
+                project_root=pa._project_root,
             )
         )
 
-        # Repo B: a different cwd → a distinct integrity key through the same store.
+        # Repo B: a different cwd → a distinct integrity key through the SAME store.
         monkeypatch.chdir(repo_b)
         key_b = os.getcwd()
-        pipeline_b = create_default_pipeline(store)
-        assert pipeline_b._project_root == key_b
-        pipeline_b.process_event(
+        pb = create_default_pipeline(store)
+        assert pb._project_root == key_b
+        meta_b = pb.process_event(
             _ctx(
-                _write_event("src/main.py", "content-B", session_id="B", event_id="b1", key="kb"),
-                project_root=pipeline_b._project_root,
+                _write_event("src/main.py", "BBB", session_id="B", event_id="b0", key="kb"),
+                project_root=pb._project_root,
             )
         )
 
@@ -399,6 +402,10 @@ class TestDefaultInjection:
         assert key_a != key_b
         assert "unknown" not in (key_a, key_b)
         # … each namespace holds ONLY its own content, and the "unknown" bucket stays empty.
-        assert store.get_content_hash(key_a, "src/main.py") == _sha(b"content-A")
-        assert store.get_content_hash(key_b, "src/main.py") == _sha(b"content-B")
+        assert store.get_content_hash(key_a, "src/main.py") == _sha(b"AAA")
+        assert store.get_content_hash(key_b, "src/main.py") == _sha(b"BBB")
         assert store.get_content_hash("unknown", "src/main.py") is None
+        # Behavioral (the #61 sharp edge): repo B's differing-content write to the same relative
+        # path is NOT falsely flagged against repo A's baseline — and A's first write is clean too.
+        assert "integrity_unverified" not in meta_a.classification.capability
+        assert "integrity_unverified" not in meta_b.classification.capability

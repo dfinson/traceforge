@@ -34,9 +34,10 @@ def create_default_pipeline(
     rules = parse_rules(rules_path)
 
     engine = get_default_engine()
-    # Content-integrity verification is live when a project_root (the repo key) is
-    # configured; otherwise degrade gracefully to no verifier (no-op).
-    integrity_verifier = IntegrityVerifier(store, project_root) if project_root else None
+    # Content integrity is live by default on this primary CLI/Score path. The repo
+    # key mirrors drift.py's ``project_root or "unknown"`` idiom so runtime contexts
+    # and the constructed verifier agree on the namespace.
+    integrity_verifier = IntegrityVerifier(store, project_root or "unknown")
     labeler = GovernanceLabeler(integrity_verifier=integrity_verifier)
     tracker = BudgetTracker()
 

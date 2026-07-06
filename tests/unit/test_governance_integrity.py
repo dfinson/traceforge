@@ -21,6 +21,7 @@ import pytest
 from tracemill.classify.config import get_default_engine
 from tracemill.classify.core import Classification
 from tracemill.cli.factory import create_default_pipeline
+from tracemill.config import GovernanceConfig
 from tracemill.governance.budget import BudgetTracker
 from tracemill.governance.integrity import IntegrityVerifier, IntegrityWrite
 from tracemill.governance.labeler import GovernanceLabeler
@@ -246,19 +247,20 @@ class TestEndToEnd:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Default composition root: integrity is live with NO manual verifier injection
+# Default composition roots: integrity is live by default with NO manual injection
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestDefaultInjection:
-    """Proves the orphan is actually closed: a pipeline built by the default factory
-    (no manual verifier) records the baseline on a first write and flags a mismatched
-    re-write with the +10 integrity bonus. Gated on a configured project_root (the repo
-    key); with no project_root the verifier degrades to a no-op (covered implicitly by
-    the existing zero-config suite, which stays green)."""
+    """Proves the orphan is actually closed in production: pipelines built the standard
+    way — with NO hand-injected verifier — record the baseline on a first write and flag
+    a mismatched re-write with the +10 integrity bonus. Integrity is on by default at
+    both composition roots (`create_default_pipeline` and `GovernancePipeline.create`/
+    `from_config`) and opt-out via `integrity_verification: false`. The repo key falls
+    back to ``"unknown"`` (matching drift.py) when no project_root is configured."""
 
-    def test_default_pipeline_wires_integrity_live(self, store):
-        # No manual IntegrityVerifier — the factory wires it from project_root.
+    def test_default_factory_wires_integrity_live(self, store):
+        # cli/factory.py path (CLI + Score API). No manual IntegrityVerifier.
         pipeline = create_default_pipeline(store, project_root=REPO)
 
         # First-seen write: nothing to compare against → no flag, no bonus …
@@ -267,7 +269,7 @@ class TestDefaultInjection:
         )
         assert "integrity_unverified" not in meta0.classification.capability
         assert "integrity_unverified" not in meta0.risk_assessment.factors
-        # … but the baseline is recorded live (record_write is actually reached).
+        # … but the baseline is recorded live (record path is actually reached).
         assert store.get_content_hash(REPO, "src/a.py") == _sha(b"v1")
 
         # Mismatched re-write on the tracked path → integrity_unverified surfaces,
@@ -281,10 +283,32 @@ class TestDefaultInjection:
         # Drift re-baselines (deferred) to what was actually written.
         assert store.get_content_hash(REPO, "src/a.py") == _sha(b"v2")
 
-    def test_default_pipeline_without_project_root_is_noop(self, store):
-        """No project_root configured → verifier absent → no baseline, no flag, no crash."""
-        pipeline = create_default_pipeline(store)  # project_root defaults to None
+    def test_zero_config_pipeline_wires_integrity_live(self):
+        # GovernancePipeline.create() with default config (the from_config root, which
+        # delegates here). No project_root → repo key "unknown"; still live by default.
+        pipeline = GovernancePipeline.create()
 
-        meta = pipeline.process_event(_ctx(_write_event("src/a.py", "v1", event_id="e0", key="k0")))
-        assert "integrity_unverified" not in meta.classification.capability
-        assert store.get_content_hash(REPO, "src/a.py") is None
+        meta0 = pipeline.process_event(
+            _ctx(_write_event("src/a.py", "v1", session_id="A", event_id="e0", key="k0"))
+        )
+        assert "integrity_unverified" not in meta0.classification.capability
+
+        meta_drift = pipeline.process_event(
+            _ctx(_write_event("src/a.py", "v2", session_id="B", event_id="e1", key="k1"))
+        )
+        assert "integrity_unverified" in meta_drift.classification.capability
+        assert "integrity_unverified" in meta_drift.risk_assessment.factors
+        assert meta_drift.risk_assessment.score - meta0.risk_assessment.score == 10
+
+    def test_integrity_verification_disabled_is_noop(self):
+        # Opt-out: integrity_verification=False → no verifier → no labels even on drift.
+        pipeline = GovernancePipeline.create(GovernanceConfig(integrity_verification=False))
+
+        pipeline.process_event(
+            _ctx(_write_event("src/a.py", "v1", session_id="A", event_id="e0", key="k0"))
+        )
+        meta_drift = pipeline.process_event(
+            _ctx(_write_event("src/a.py", "v2", session_id="B", event_id="e1", key="k1"))
+        )
+        assert "integrity_unverified" not in meta_drift.classification.capability
+        assert "integrity_unverified" not in meta_drift.risk_assessment.factors

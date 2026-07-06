@@ -244,6 +244,7 @@ class GovernanceConfig(StrictModel):
           db_path: ./tracemill.db
           project_root: .
           pii_scanning: true
+          integrity_verification: true
           budget:
             max_tool_calls: 200
             max_by_effect:
@@ -254,6 +255,7 @@ class GovernanceConfig(StrictModel):
             db_path="./tracemill.db",
             project_root=".",
             pii_scanning=True,
+            integrity_verification=True,
             budget=BudgetConfig(max_tool_calls=200, max_by_effect={"destructive": 10}),
         )
     """
@@ -262,6 +264,7 @@ class GovernanceConfig(StrictModel):
     project_root: str | None = None
     rules_path: str | None = None  # custom rules YAML override
     pii_scanning: bool = True
+    integrity_verification: bool = True  # content-hash tamper detection (baseline + drift)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
     tool_preflight_gate: str | None = None  # dotted import path (e.g. "myapp.policies.my_policy")
 

@@ -21,7 +21,10 @@ class TestSystemStore:
         table_names = {t[0] for t in tables}
         assert "session_state" in table_names
         assert "processed_events" in table_names
-        assert "mcp_fingerprints" in table_names
+        assert "mcp_profiles" in table_names
+        assert "mcp_profile_attributes" in table_names
+        assert "budget_counters" in table_names
+        assert "taint_entries" in table_names
         assert "drift_baselines" in table_names
         assert "content_hashes" in table_names
         assert "session_summaries" in table_names
@@ -44,9 +47,9 @@ class TestSystemStore:
             "description_hash": "abc123",
             "schema_hash": "def456",
             "registered_effect": "mutating",
-            "registered_role": None,
-            "registered_capabilities": None,
-            "registered_scope": None,
+            "role": ["admin"],
+            "capability": ["network_outbound"],
+            "scope": [],
             "clearance": "internal",
             "first_seen": "2024-01-01T00:00:00Z",
             "last_seen": "2024-01-01T00:00:00Z",
@@ -56,6 +59,10 @@ class TestSystemStore:
         assert result is not None
         assert result["description_hash"] == "abc123"
         assert result["clearance"] == "internal"
+        assert result["registered_effect"] == "mutating"
+        assert result["role"] == ["admin"]
+        assert result["capability"] == ["network_outbound"]
+        assert result["scope"] == []
 
     def test_mcp_profile_not_found(self, store):
         assert store.get_mcp_profile("none", "none") is None

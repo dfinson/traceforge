@@ -36,9 +36,9 @@ def status(as_json: bool, db_path: str | None) -> None:
     row = conn.execute("SELECT COUNT(*) FROM processed_events").fetchone()
     stats["processed_events"] = row[0] if row else 0
 
-    # MCP fingerprints
-    row = conn.execute("SELECT COUNT(*) FROM mcp_fingerprints").fetchone()
-    stats["mcp_fingerprints"] = row[0] if row else 0
+    # MCP tool profiles
+    row = conn.execute("SELECT COUNT(*) FROM mcp_profiles").fetchone()
+    stats["mcp_profiles"] = row[0] if row else 0
 
     # Session summaries
     row = conn.execute("SELECT COUNT(*) FROM session_summaries").fetchone()
@@ -59,7 +59,7 @@ def status(as_json: bool, db_path: str | None) -> None:
         click.echo("─" * 40)
         click.echo(f"  Active sessions:    {stats['active_sessions']}")
         click.echo(f"  Processed events:   {stats['processed_events']}")
-        click.echo(f"  MCP fingerprints:   {stats['mcp_fingerprints']}")
+        click.echo(f"  MCP profiles:       {stats['mcp_profiles']}")
         click.echo(f"  Completed sessions: {stats['completed_sessions']}")
         if stats["last_session_recommendations"]:
             click.echo(f"  Last session recs:  {stats['last_session_recommendations']}")

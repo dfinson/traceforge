@@ -67,7 +67,7 @@ class SessionRegistry:
 
         if session_id not in self._durable_states:
             self._durable_states[session_id] = SessionState.load_from_db(
-                session_id, self._store.connection
+                session_id, self._store.connection, self._store.lock
             )
         return self._durable_states[session_id]
 

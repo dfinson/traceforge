@@ -2,18 +2,21 @@
 
 Schema is managed by Alembic migrations (src/tracemill/migrations/).
 On initialization, SystemStore runs ``alembic upgrade head`` to apply
-any pending migrations. For existing databases created before Alembic was
-introduced, we stamp the initial revision so future migrations apply cleanly.
+any pending migrations, creating the full normalized schema on a fresh
+database.
 """
 
 from __future__ import annotations
 
-import logging
+import json
 import sqlite3
 import threading
+from contextlib import contextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-logger = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 _LRU_CACHE_SIZE = 10_000
 
@@ -64,49 +67,28 @@ def _run_alembic(conn: sqlite3.Connection) -> None:
         conn.isolation_level = original_isolation_level
 
 
-def _stamp_existing_db(conn: sqlite3.Connection) -> None:
-    """Stamp an existing (pre-Alembic) database with the initial revision.
-
-    If the database already has tables but no alembic_version table, this
-    creates the version table and stamps it so migrations start from 0001.
-    """
-    cursor = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='alembic_version'"
-    )
-    if cursor.fetchone() is not None:
-        return  # Already managed by Alembic
-
-    # Check if this is an existing database (has our tables)
-    cursor = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='session_state'"
-    )
-    if cursor.fetchone() is None:
-        return  # Fresh database — Alembic will create everything
-
-    # Existing database without Alembic — stamp it at the initial revision
-    logger.info("Stamping existing database with initial Alembic revision")
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS alembic_version "
-        "(version_num VARCHAR(32) NOT NULL, PRIMARY KEY (version_num))"
-    )
-    conn.execute("INSERT OR IGNORE INTO alembic_version (version_num) VALUES ('0001_initial')")
-
-    # Also ensure gate_endpoints exists (was previously managed separately)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS gate_endpoints (
-            session_id TEXT PRIMARY KEY,
-            sock_path TEXT NOT NULL,
-            pid INTEGER NOT NULL,
-            registered_at TEXT NOT NULL DEFAULT (datetime('now'))
-        )
-    """)
-    conn.commit()
-
-
 class SystemStore:
     """SQLite-backed persistence for governance state.
 
     On construction, runs Alembic migrations to ensure the schema is at HEAD.
+
+    Single-writer guarantee
+    -----------------------
+    The store is a *synchronous* durability layer over a single ``sqlite3``
+    connection opened with ``check_same_thread=False``. The pipeline is asyncio
+    single-threaded and offloads store writes to a worker thread (via
+    ``asyncio.to_thread``), so writes can originate on *different* OS threads even
+    though they are never logically concurrent per session. An ``asyncio.Queue``
+    or ``asyncio.Lock`` cannot serialize work that runs off-loop on arbitrary
+    threads, so the correct primitive for this sync store is a
+    :class:`threading.Lock` — not a second, async concurrency primitive.
+
+    Every mutation is serialized by :attr:`_lock`. Single-statement writes take
+    the lock around ``execute`` + ``commit``. Multi-statement transactions MUST
+    go through :meth:`write_transaction`, which holds the lock for the *entire*
+    transaction (not just the terminal ``commit``), guaranteeing that no two
+    writers ever interleave statements on the shared connection. This is the one
+    and only write-serialization mechanism; callers must never open a second one.
     """
 
     def __init__(self, db_path: str | Path) -> None:
@@ -122,9 +104,6 @@ class SystemStore:
         self._conn.execute("PRAGMA busy_timeout = 5000")
         self._conn.execute("PRAGMA synchronous = NORMAL")
 
-        # Stamp existing databases so Alembic doesn't try to re-create tables
-        _stamp_existing_db(self._conn)
-
         # Run migrations to HEAD
         _run_alembic(self._conn)
 
@@ -136,6 +115,36 @@ class SystemStore:
     def lock(self):
         """Threading lock for callers needing multi-statement transactions."""
         return self._lock
+
+    @contextmanager
+    def write_transaction(self) -> "Iterator[sqlite3.Connection]":
+        """Serialize a full multi-statement write transaction under the writer lock.
+
+        This is the formal single-writer entry point for any write that spans more
+        than one statement (state persist + idempotency reservation, deferred MCP
+        writes + finalization, etc.). It:
+
+        * acquires :attr:`_lock` for the whole transaction — every statement the
+          body issues on the connection is covered, not merely the final commit —
+          so concurrent writers can never interleave on the shared connection;
+        * commits on clean exit; and
+        * rolls back and re-raises on *any* exception, leaving no dangling
+          transaction behind.
+
+        The body MUST issue its statements without re-acquiring the lock (use
+        :meth:`execute_in_transaction` / the ``*_no_commit`` helpers, which do not
+        lock). ``_lock`` is a non-reentrant :class:`threading.Lock`, so calling a
+        self-locking method (e.g. :meth:`commit`) from inside the body would
+        deadlock.
+        """
+        with self._lock:
+            try:
+                yield self._conn
+            except BaseException:
+                self._conn.rollback()
+                raise
+            else:
+                self._conn.commit()
 
     def is_duplicate(self, source_event_key: str) -> str | None:
         """Check if event was already processed. Returns cached meta JSON or None."""
@@ -187,60 +196,129 @@ class SystemStore:
         self._processed_cache[source_event_key] = meta_json
 
     def get_mcp_profile(self, server: str, tool_name: str) -> dict | None:
-        """Get stored MCP fingerprint."""
+        """Read an MCP tool profile from the normalized tables.
+
+        Returns the scalar fingerprint fields plus ``role``/``capability``/
+        ``scope`` as sorted lists reconstructed from ``mcp_profile_attributes``,
+        or ``None`` when the tool has never been registered.
+        """
         with self._lock:
             row = self._conn.execute(
-                "SELECT * FROM mcp_fingerprints WHERE server = ? AND tool_name = ?",
+                """SELECT server, tool_name, description_hash, schema_hash, registered_effect,
+                          clearance, first_seen, last_seen
+                   FROM mcp_profiles WHERE server = ? AND tool_name = ?""",
                 (server, tool_name),
             ).fetchone()
-        if not row:
-            return None
+            if not row:
+                return None
+            attr_rows = self._conn.execute(
+                "SELECT attr_type, attr_value FROM mcp_profile_attributes "
+                "WHERE server = ? AND tool_name = ?",
+                (server, tool_name),
+            ).fetchall()
+        attributes: dict[str, list[str]] = {"role": [], "capability": [], "scope": []}
+        for attr_type, attr_value in attr_rows:
+            attributes.setdefault(attr_type, []).append(attr_value)
         return {
             "server": row[0],
             "tool_name": row[1],
             "description_hash": row[2],
             "schema_hash": row[3],
             "registered_effect": row[4],
-            "registered_role": row[5],
-            "registered_capabilities": row[6],
-            "registered_scope": row[7],
-            "clearance": row[8],
-            "first_seen": row[9],
-            "last_seen": row[10],
+            "clearance": row[5],
+            "first_seen": row[6],
+            "last_seen": row[7],
+            "role": sorted(attributes["role"]),
+            "capability": sorted(attributes["capability"]),
+            "scope": sorted(attributes["scope"]),
         }
 
     def upsert_mcp_profile(self, server: str, tool_name: str, profile: dict) -> None:
         """Insert MCP profile only if not already registered (preserves first-seen baseline)."""
         with self._lock:
-            self._conn.execute(
-                """INSERT OR IGNORE INTO mcp_fingerprints
-                   (server, tool_name, description_hash, schema_hash, registered_effect,
-                    registered_role, registered_capabilities, registered_scope, clearance, first_seen, last_seen)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    server,
-                    tool_name,
-                    profile["description_hash"],
-                    profile["schema_hash"],
-                    profile.get("registered_effect"),
-                    profile.get("registered_role"),
-                    profile.get("registered_capabilities"),
-                    profile.get("registered_scope"),
-                    profile.get("clearance"),
-                    profile["first_seen"],
-                    profile["last_seen"],
-                ),
-            )
+            self.write_mcp_profile_no_commit(server, tool_name, profile)
             self._conn.commit()
+
+    def write_mcp_profile_no_commit(self, server: str, tool_name: str, profile: dict) -> None:
+        """Write an MCP profile within the caller's transaction (no lock, no commit).
+
+        Writes the scalar ``mcp_profiles`` row plus one ``mcp_profile_attributes``
+        row per role/capability/scope value. ``INSERT OR IGNORE`` on every table
+        preserves the first-seen baseline (a re-registration of an existing tool
+        is a no-op).
+        """
+        self._conn.execute(
+            """INSERT OR IGNORE INTO mcp_profiles
+               (server, tool_name, description_hash, schema_hash, registered_effect,
+                clearance, first_seen, last_seen)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                server,
+                tool_name,
+                profile["description_hash"],
+                profile["schema_hash"],
+                profile.get("registered_effect"),
+                profile.get("clearance"),
+                profile["first_seen"],
+                profile["last_seen"],
+            ),
+        )
+        for attr_type in ("role", "capability", "scope"):
+            for value in profile.get(attr_type) or ():
+                self._conn.execute(
+                    """INSERT OR IGNORE INTO mcp_profile_attributes
+                       (server, tool_name, attr_type, attr_value) VALUES (?, ?, ?, ?)""",
+                    (server, tool_name, attr_type, value),
+                )
 
     def update_mcp_last_seen(self, server: str, tool_name: str, last_seen: str) -> None:
         """Update only last_seen timestamp — preserves registered baseline."""
         with self._lock:
-            self._conn.execute(
-                "UPDATE mcp_fingerprints SET last_seen = ? WHERE server = ? AND tool_name = ?",
-                (last_seen, server, tool_name),
-            )
+            self.write_mcp_last_seen_no_commit(server, tool_name, last_seen)
             self._conn.commit()
+
+    def write_mcp_last_seen_no_commit(self, server: str, tool_name: str, last_seen: str) -> None:
+        """Bump last_seen on the profile within the caller's transaction."""
+        self._conn.execute(
+            "UPDATE mcp_profiles SET last_seen = ? WHERE server = ? AND tool_name = ?",
+            (last_seen, server, tool_name),
+        )
+
+    def get_budget_counters(self, session_id: str) -> dict[str, dict[str, int]]:
+        """Read a session's normalized dimensional budget counters.
+
+        Returns ``{dimension: {key: count}}`` reconstructed from
+        ``budget_counters``. The atomic scalar budget fields (total_tool_calls,
+        etc.) are columns on ``session_state``, not part of this projection.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT dimension, key, count FROM budget_counters WHERE session_id = ?",
+                (session_id,),
+            ).fetchall()
+        counters: dict[str, dict[str, int]] = {}
+        for dimension, key, count in rows:
+            counters.setdefault(dimension, {})[key] = count
+        return counters
+
+    def get_taint_entries(self, session_id: str) -> list[dict]:
+        """Read a session's normalized taint ledger, ordered by append ordinal."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT event_id, source_event_key, clearance, source, payload_pointer
+                   FROM taint_entries WHERE session_id = ? ORDER BY ordinal""",
+                (session_id,),
+            ).fetchall()
+        return [
+            {
+                "event_id": r[0],
+                "source_event_key": r[1],
+                "clearance": r[2],
+                "source": r[3],
+                "payload_pointer": r[4],
+            }
+            for r in rows
+        ]
 
     def get_content_hash(self, repo: str, file_path: str) -> str | None:
         with self._lock:
@@ -280,8 +358,6 @@ class SystemStore:
             ).fetchone()
         if not row:
             return None
-        import json
-
         return {"phase_counts": json.loads(row[0]), "total_events": row[1]}
 
     def execute_in_transaction(self, sql: str, params: tuple = ()) -> None:
@@ -308,13 +384,9 @@ class SystemStore:
 
         Accepts tuple[MCPDeferredWrite, ...] from MCPScanResult.
         """
-        import json as json_mod
-
         for write in writes:
             if write.kind == "upsert":
-                self.upsert_mcp_profile(
-                    write.server, write.tool_name, json_mod.loads(write.payload)
-                )
+                self.upsert_mcp_profile(write.server, write.tool_name, json.loads(write.payload))
             elif write.kind == "last_seen":
                 self.update_mcp_last_seen(write.server, write.tool_name, write.payload)
 

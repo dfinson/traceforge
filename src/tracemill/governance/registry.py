@@ -14,12 +14,11 @@ class SessionRegistry:
 
     Centralizing the residency map here means no two code paths can create
     divergent state for the same session (the pipeline previously carried two
-    uncoordinated creation paths). Two creation strategies share this single map:
+    uncoordinated creation paths). Two creation strategies share this single
+    map, and both return an already-resident state when one exists:
 
-      * ``get_or_create`` returns a DB-backed state — rehydrating from the durable
-        store on a miss, and promoting a gate-created ephemeral resident to a
-        durable one — so the observation writer's persistence always reaches disk
-        and its crash recovery sees persisted budgets.
+      * ``get_or_create`` rehydrates from the durable store, so the observation
+        channel's crash recovery sees persisted budgets.
       * ``ensure`` creates thread-safe ephemeral state (never touching SQLite
         cross-thread), which the gate channel uses for enforcement context.
     """
@@ -36,28 +35,12 @@ class SessionRegistry:
         return self._states.get(session_id)
 
     def get_or_create(self, session_id: str) -> "SessionState":
-        """Return a DB-backed resident state, rehydrating from the store on a miss.
-
-        This is the observation writer's path, so the returned state MUST be
-        DB-backed — its ``persist`` / ``persist_no_commit`` calls have to reach
-        SQLite. The gate channel's :meth:`ensure` may have already installed an
-        ephemeral, DB-less state for this session (the gate-before-observe
-        ordering); returning that instance would make every write silently no-op
-        and lose durability. In that case, promote it: load the durable
-        observation state from the store and carry the gate's in-memory
-        enforcement log forward (that log is never persisted, so a plain reload
-        would drop it).
-        """
+        """Return the resident state, rehydrating from the store on a miss."""
         from tracemill.governance.state import SessionState
 
-        resident = self._states.get(session_id)
-        if resident is not None and resident.is_db_backed():
-            return resident
-        durable = SessionState.load_from_db(session_id, self._store.connection)
-        if resident is not None:
-            durable.adopt_enforcement_log(resident)
-        self._states[session_id] = durable
-        return durable
+        if session_id not in self._states:
+            self._states[session_id] = SessionState.load_from_db(session_id, self._store.connection)
+        return self._states[session_id]
 
     def ensure(self, session_id: str) -> "SessionState":
         """Return the resident state, creating fresh ephemeral state on a miss.

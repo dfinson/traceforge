@@ -112,18 +112,62 @@ class SessionMonitor:
         return self._registry.get_or_create(session_id)
 
     def process_lifecycle(self, session_id: str, event_kind: str) -> SessionMeta:
-        """Handle session_start/end — Phase 1 only, skip Phase 2/3."""
+        """Handle session_start/end — Phase 1 only, skip Phase 2/3.
 
-        state = self.get_or_create_state(session_id)
+        Lifecycle deliveries are idempotent. Each ``(session_id, event_kind)`` is
+        recorded in the ``processed_events`` store under its lifecycle idempotency
+        key, and a re-delivery short-circuits to a true no-op that never touches
+        session state. This closes the session_end resurrection bug: without the
+        dedup guard a duplicate session_end would call ``get_or_create_state``,
+        rehydrating the just-evicted session back into the durable registry, and
+        re-run finalization against that rehydrated state. For session_end the
+        summary write and the idempotency record commit inside a single
+        ``write_transaction`` so they are atomic — the event is marked processed
+        only if its summary durably landed.
+        """
+        from tracemill.governance.state import BudgetSnapshot
+        from tracemill.governance.types import compute_source_event_key
 
-        if event_kind == "session_start":
-            # Initialize state (idempotent — load_from_db handles fresh sessions)
-            pass
-        elif event_kind == "session_end":
-            # Finalize: write session summary
+        # Reuse the canonical lifecycle key so retries with different adapter
+        # timestamps map to the same start/end event.
+        lifecycle_key = compute_source_event_key(session_id=session_id, event_kind=event_kind)
+
+        # A re-delivered lifecycle event is a true no-op: return without touching
+        # state, so an ended session is never resurrected into the registry.
+        if self._store.is_duplicate(lifecycle_key) is not None:
+            return self._lifecycle_meta(BudgetSnapshot())
+
+        marker_json = json.dumps({"lifecycle": event_kind})
+        now = datetime.now(timezone.utc).isoformat()
+
+        if event_kind == "session_end":
+            state = self.get_or_create_state(session_id)
             snapshot = state.snapshot()
-            self._write_session_summary(session_id, snapshot)
-            # Evict session state to prevent unbounded memory growth. Both
+            try:
+                # Summary write + idempotency record commit atomically: the event is
+                # marked processed only if its finalized summary durably landed.
+                with self._store.write_transaction():
+                    self._write_session_summary_no_commit(session_id, snapshot, now)
+                    self._store.execute_in_transaction(
+                        "INSERT OR IGNORE INTO processed_events "
+                        "(source_event_key, session_id, session_meta_json, processed_at) "
+                        "VALUES (?, ?, ?, ?)",
+                        (lifecycle_key, session_id, marker_json, now),
+                    )
+                self._store.cache_processed(lifecycle_key, marker_json)
+            except (sqlite3.OperationalError, sqlite3.IntegrityError) as e:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Failed to finalize session_end for %s: %s — will retry on next delivery",
+                    session_id,
+                    e,
+                )
+                # Rolled back and NOT marked processed: leave the state resident so a
+                # re-delivery re-runs finalization.
+                return self._lifecycle_meta(snapshot.budget)
+
+            # Evict only after the summary + idempotency record durably commit. Both
             # residencies (durable + gate) are dropped on session end.
             self._registry.evict(session_id)
             self._registry.evict_gate(session_id)
@@ -131,13 +175,40 @@ class SessionMonitor:
             # Clean up any lingering phase23 attempts for this session's events
             for key in self._phase23_session_keys.pop(session_id, set()):
                 self._phase23_attempts.pop(key, None)
+            return self._lifecycle_meta(snapshot.budget)
 
+        # session_start (and any other non-end lifecycle kind): no finalization side
+        # effects today, but record the delivery so the idempotency contract is
+        # uniform and a duplicate is recognized as a no-op without resurrecting state.
+        state = self.get_or_create_state(session_id)
         snapshot = state.snapshot()
+        try:
+            with self._store.write_transaction():
+                self._store.execute_in_transaction(
+                    "INSERT OR IGNORE INTO processed_events "
+                    "(source_event_key, session_id, session_meta_json, processed_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (lifecycle_key, session_id, marker_json, now),
+                )
+            self._store.cache_processed(lifecycle_key, marker_json)
+        except (sqlite3.OperationalError, sqlite3.IntegrityError) as e:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Failed to record %s for %s: %s — will retry on next delivery",
+                event_kind,
+                session_id,
+                e,
+            )
+        return self._lifecycle_meta(snapshot.budget)
+
+    def _lifecycle_meta(self, budget: "BudgetSnapshot") -> SessionMeta:
+        """Build the minimal Phase-1-only SessionMeta returned for lifecycle events."""
         return SessionMeta(
             classification=None,
             risk_assessment=None,
             recommendation=None,
-            budget_snapshot=snapshot.budget,
+            budget_snapshot=budget,
             drift=None,
             mcp_alerts=(),
             evidence=None,
@@ -430,12 +501,19 @@ class SessionMonitor:
                 write.timestamp,
             )
 
-    def _write_session_summary(self, session_id: str, snapshot: "SessionStateSnapshot") -> None:
-        """Write session summary to session_summaries table (idempotent — won't overwrite existing)."""
-        import json as json_mod
-        import logging
+    def _write_session_summary_no_commit(
+        self, session_id: str, snapshot: "SessionStateSnapshot", now: str
+    ) -> None:
+        """Write the session summary row on the caller's OPEN transaction (no commit).
 
-        now = datetime.now(timezone.utc).isoformat()
+        ``INSERT OR IGNORE`` keeps the first delivery authoritative: the started/
+        ended timestamps, event counts, and budget snapshot are recorded once, and a
+        duplicate delivery is a no-op at the SQL level. The caller owns the
+        surrounding ``write_transaction`` so the summary commits atomically with the
+        lifecycle idempotency record.
+        """
+        import json as json_mod
+
         budget_snapshot_json = json_mod.dumps(
             {
                 "total_tool_calls": snapshot.budget.total_tool_calls,
@@ -443,26 +521,19 @@ class SessionMonitor:
                 "pressure": snapshot.budget.pressure,
             }
         )
-        try:
-            # INSERT OR IGNORE: first delivery records started_at/ended_at; duplicates are no-ops.
-            # Routed through write_transaction so the commit is serialized on the
-            # shared connection (single writer) rather than racing another writer's
-            # open transaction with a bare connection.commit().
-            with self._store.write_transaction():
-                self._store.execute_in_transaction(
-                    """INSERT OR IGNORE INTO session_summaries
-                       (session_id, started_at, ended_at, total_events, dropped_events, budget_snapshot_json)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
-                    (
-                        session_id,
-                        now,
-                        now,
-                        snapshot.event_count,
-                        snapshot.dropped_events,
-                        budget_snapshot_json,
-                    ),
-                )
-        except sqlite3.OperationalError as e:
-            logging.getLogger(__name__).warning(
-                "Failed to write session summary for %s: %s", session_id, e
-            )
+        # INSERT OR IGNORE: first delivery records started_at/ended_at; duplicates
+        # are no-ops. The caller's write_transaction serializes the commit on the
+        # shared connection (single writer).
+        self._store.execute_in_transaction(
+            """INSERT OR IGNORE INTO session_summaries
+               (session_id, started_at, ended_at, total_events, dropped_events, budget_snapshot_json)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                session_id,
+                now,
+                now,
+                snapshot.event_count,
+                snapshot.dropped_events,
+                budget_snapshot_json,
+            ),
+        )

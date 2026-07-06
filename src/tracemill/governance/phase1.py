@@ -67,3 +67,11 @@ class Phase1:
             self._labeler.check_ifc(ctx, ifc_src_labels, state)
         state.record_event(None)
         self._budget.check_pressure(state)
+        # Motivation tracking (#10): record the id of the last assistant-authored
+        # governed event. Every event that reaches Phase 1 is an assistant-initiated
+        # tool call — session lifecycle is handled by process_lifecycle, and user/
+        # assistant *messages* are ungoverned at the observe choke point and never
+        # reach here — so the tool call's own event id is the assistant motivation
+        # pointer. There is no user-authored event in the tool-call observation path,
+        # so the user pointer is intentionally left unset (no phantom id).
+        state.set_last_assistant(ctx.event.event_id)

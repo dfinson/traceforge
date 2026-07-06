@@ -349,6 +349,8 @@ class SessionMonitor:
             )
             if assessment.mcp_deferred_writes:
                 self._commit_mcp_writes_no_commit(assessment.mcp_deferred_writes)
+            if assessment.integrity_deferred_writes:
+                self._commit_integrity_writes_no_commit(assessment.integrity_deferred_writes)
             self._store.commit()
             self._store.cache_processed(event.source_event_key, meta_json)
         except (
@@ -419,6 +421,22 @@ class SessionMonitor:
                     "UPDATE mcp_fingerprints SET last_seen = ? WHERE server = ? AND tool_name = ?",
                     (write.payload, write.server, write.tool_name),
                 )
+
+    def _commit_integrity_writes_no_commit(self, writes: tuple) -> None:
+        """Persist deferred content-hash baselines without committing — caller owns transaction.
+
+        Runs after :meth:`Assessor.assess` has already checked each write against the
+        prior baseline, so this only (re)baselines to what the agent wrote, stamped with
+        the writing session + timestamp. Committed atomically with the idempotency record.
+        """
+        for write in writes:
+            self._store.store_content_hash_no_commit(
+                write.repo,
+                write.path,
+                write.sha256,
+                write.session_id,
+                write.timestamp,
+            )
 
     def _write_session_summary(self, session_id: str, snapshot: "SessionStateSnapshot") -> None:
         """Write session summary to session_summaries table (idempotent — won't overwrite existing)."""

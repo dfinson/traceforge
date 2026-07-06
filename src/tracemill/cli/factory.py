@@ -23,6 +23,7 @@ def create_default_pipeline(
     """
     from tracemill.classify.config import get_default_engine
     from tracemill.governance.budget import BudgetTracker
+    from tracemill.governance.integrity import IntegrityVerifier
     from tracemill.governance.labeler import GovernanceLabeler
     from tracemill.governance.rules import parse_rules
 
@@ -33,7 +34,11 @@ def create_default_pipeline(
     rules = parse_rules(rules_path)
 
     engine = get_default_engine()
-    labeler = GovernanceLabeler()
+    # Content integrity is live by default on this primary CLI/Score path. The repo
+    # key mirrors drift.py's ``project_root or "unknown"`` idiom so runtime contexts
+    # and the constructed verifier agree on the namespace.
+    integrity_verifier = IntegrityVerifier(store, project_root or "unknown")
+    labeler = GovernanceLabeler(integrity_verifier=integrity_verifier)
     tracker = BudgetTracker()
 
     return GovernancePipeline(

@@ -31,6 +31,7 @@ class GovernanceResult:
     drift_result: "DriftResult | None" = None
     mcp_alerts: tuple = ()  # tuple[MCPIntegrityAlert, ...]
     mcp_deferred_writes: tuple = ()  # tuple[MCPDeferredWrite, ...] — committed by pipeline after finalization
+    integrity_deferred_writes: tuple = ()  # tuple[IntegrityWrite, ...] — committed by pipeline after finalization
 
 
 class GovernanceLabeler:
@@ -64,9 +65,13 @@ class GovernanceLabeler:
         if self._pii:
             self._pii.scan(ctx, cap, struct)
 
-        # Content integrity
+        # Content integrity — CHECK against the existing baseline (read-only), then
+        # collect deferred (re)baseline prescriptions. The check runs first so drift
+        # from a prior baseline is flagged before the monitor commits the new baseline.
+        integrity_deferred_writes: tuple = ()
         if self._integrity:
             self._integrity.check_event(ctx, cap)
+            integrity_deferred_writes = tuple(self._integrity.pending_writes(ctx))
 
         # MCP fingerprint drift — scan returns typed MCPScanResult
         mcp_alerts: tuple = ()
@@ -140,6 +145,7 @@ class GovernanceLabeler:
             drift_result=drift_result,
             mcp_alerts=mcp_alerts,
             mcp_deferred_writes=mcp_deferred_writes,
+            integrity_deferred_writes=integrity_deferred_writes,
         )
 
     def _ifc_label_only(self, ctx: "EnrichmentContext", src_labels: set[str]) -> None:

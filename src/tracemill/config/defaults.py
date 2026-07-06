@@ -46,6 +46,7 @@ score:
 # ─── Governance ─────────────────────────────────────────────────────────────
 governance:
   pii_scanning: true
+  integrity_verification: true
   # budget:
   #   max_tool_calls: 200
   #   max_by_effect:

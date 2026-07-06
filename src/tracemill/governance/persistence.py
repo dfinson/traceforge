@@ -250,15 +250,26 @@ class SystemStore:
             ).fetchone()
         return row[0] if row else None
 
+    def store_content_hash_no_commit(
+        self, repo: str, file_path: str, sha256: str, session_id: str, updated_at: str
+    ) -> None:
+        """Upsert a content-hash baseline within the caller's transaction (no commit).
+
+        Participates in the caller's open transaction, matching
+        :meth:`execute_in_transaction`. Used by the monitor's finalization commit so a
+        content-integrity baseline update lands atomically with the idempotency record.
+        """
+        self._conn.execute(
+            """INSERT OR REPLACE INTO content_hashes (repo, file_path, sha256, updated_at, updated_by_session)
+               VALUES (?, ?, ?, ?, ?)""",
+            (repo, file_path, sha256, updated_at, session_id),
+        )
+
     def store_content_hash(
         self, repo: str, file_path: str, sha256: str, session_id: str, updated_at: str
     ) -> None:
         with self._lock:
-            self._conn.execute(
-                """INSERT OR REPLACE INTO content_hashes (repo, file_path, sha256, updated_at, updated_by_session)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (repo, file_path, sha256, updated_at, session_id),
-            )
+            self.store_content_hash_no_commit(repo, file_path, sha256, session_id, updated_at)
             self._conn.commit()
 
     def get_drift_baseline(self, agent_model: str, repo: str) -> dict | None:

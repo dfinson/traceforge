@@ -39,12 +39,14 @@ class Assessment:
 
     ``meta`` is the caller-facing verdict surface (classification + risk +
     recommendation + evidence). ``mcp_deferred_writes`` carries the MCP fingerprint
-    write prescriptions emitted during labeling, which the writer persists *after*
-    finalization commits — the assessor itself never writes them.
+    write prescriptions emitted during labeling, and ``integrity_deferred_writes`` the
+    content-hash baseline prescriptions, which the writer persists *after* finalization
+    commits — the assessor itself never writes them.
     """
 
     meta: SessionMeta
     mcp_deferred_writes: tuple = field(default_factory=tuple)
+    integrity_deferred_writes: tuple = field(default_factory=tuple)
 
 
 class Assessor(Protocol):
@@ -93,7 +95,11 @@ class DefaultAssessor:
             mcp_alerts=gov_result.mcp_alerts,
             evidence=evidence,
         )
-        return Assessment(meta=meta, mcp_deferred_writes=gov_result.mcp_deferred_writes)
+        return Assessment(
+            meta=meta,
+            mcp_deferred_writes=gov_result.mcp_deferred_writes,
+            integrity_deferred_writes=gov_result.integrity_deferred_writes,
+        )
 
     def _with_snapshot(
         self, ctx: "EnrichmentContext", snapshot: "SessionStateSnapshot"

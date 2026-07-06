@@ -115,6 +115,14 @@ class SessionState:
     def attach_db(self, db: sqlite3.Connection | None) -> None:
         self._db = db
 
+    def is_db_backed(self) -> bool:
+        """True when this state can persist (has a live DB connection).
+
+        The gate channel's ephemeral states (created via ``SessionRegistry.ensure``)
+        are DB-less; the observation writer must never persist through one.
+        """
+        return self._db is not None
+
     def increment_budget(
         self,
         *,
@@ -209,6 +217,23 @@ class SessionState:
         observation (increment_budget), never here."""
         if tool_call_id:
             self._prior_tool_call_ids.append(tool_call_id)  # deque(maxlen=100)
+
+    def adopt_enforcement_log(self, other: "SessionState") -> None:
+        """Carry another state's in-memory Shield decision log into this one.
+
+        The enforcement log (denial count, prior verdicts, allowed tool-call ids)
+        lives only in memory — it is never persisted, so a session reloaded from
+        SQLite starts it empty. When the observation writer promotes the gate
+        channel's ephemeral state to a durable, DB-backed one, this transfers the
+        gate's accumulated decisions onto the durable state so they are not lost.
+        Observation fields are intentionally untouched: those are single-writer
+        and authoritative on the DB-backed instance.
+        """
+        self._denied_count = other._denied_count
+        self._prior_verdicts = deque(other._prior_verdicts, maxlen=other._prior_verdicts.maxlen)
+        self._prior_tool_call_ids = deque(
+            other._prior_tool_call_ids, maxlen=other._prior_tool_call_ids.maxlen
+        )
 
     def check_pressure(self, thresholds: dict | None) -> bool:
         """Check if any threshold is exceeded. Updates pressure flag."""

@@ -232,7 +232,7 @@ class DefaultAssessor:
         # Field-style transform: resolve target_field against structured event data.
         # render()/resolve_field never raise (data=None → original_value None).
         if template.target_field is not None:
-            return template.render(self._transform_event_data(ctx))
+            return template.render(self._render_data_for(ctx.event))
 
         try:
             if isinstance(ctx.event, ToolCallEvent) and ctx.command_analysis:
@@ -262,31 +262,27 @@ class DefaultAssessor:
             )
         return None
 
-    @staticmethod
-    def _transform_event_data(ctx: "EnrichmentContext") -> object | None:
-        """Best-effort structured event data for field resolution.
+    def _render_data_for(self, event) -> object | None:
+        """Best-effort structured payload for ``TransformTemplate.render()``; None if unavailable.
 
-        Parses the tool-call args JSON (:class:`ToolCallEvent`) or the result payload
-        JSON (:class:`ToolResultEvent`). Returns ``None`` on absence or malformed JSON
-        so the caller's ``render()`` resolves ``original_value`` to ``None`` rather than
-        raising.
+        Parses a :class:`ToolCallEvent`'s ``tool_args_json`` or a :class:`ToolResultEvent`'s
+        ``result_payload_json``. Absent or unparseable JSON yields ``None`` so the caller's
+        ``render()`` resolves ``original_value`` to ``None`` rather than raising.
         """
         import json
 
         from tracemill.governance.types import ToolCallEvent, ToolResultEvent
 
-        event = ctx.event
+        raw = None
         if isinstance(event, ToolCallEvent):
             raw = event.tool_args_json
         elif isinstance(event, ToolResultEvent):
             raw = event.result_payload_json
-        else:
-            return None
-        if not raw:
+        if raw is None:
             return None
         try:
             return json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
+        except (ValueError, TypeError):
             return None
 
     def _build_escalation(

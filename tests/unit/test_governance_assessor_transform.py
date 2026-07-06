@@ -223,6 +223,60 @@ class TestRenderTransformLegacyRegression:
         assert _assessor()._render_transform(None, _ctx(_tool_call_event("{}"))) is None
 
 
+class TestRenderTransformWiringDirective:
+    """The two directive-named checks: render() is live for field rules, legacy unchanged."""
+
+    def test_render_transform_uses_template_render_for_field_rules(self):
+        # A field-style template must actually invoke TransformTemplate.render() — proven
+        # non-vacuously by the resolved original_value coming from the event's JSON args.
+        template = TransformTemplate(
+            target_field="path",
+            strategy="redact",
+            parameters={"mask": "**"},
+            description="redact path",
+        )
+        ctx = _ctx(_tool_call_event('{"path": "/etc/secret"}'))
+
+        sugg = _assessor()._render_transform(template, ctx)
+
+        assert isinstance(sugg, TransformSuggestion)
+        assert sugg.target_kind == "field"
+        assert sugg.target_field == "path"
+        assert sugg.strategy == "redact"
+        assert isinstance(sugg.parameters, MappingProxyType)
+        assert dict(sugg.parameters) == {"mask": "**"}
+        with pytest.raises(TypeError):
+            sugg.parameters["mask"] = "leak"
+        assert sugg.original_value == "/etc/secret"
+
+    def test_render_transform_legacy_path_unchanged(self):
+        template = TransformTemplate(
+            pattern="secret", replacement="[redacted]", description="mask secret"
+        )
+        cmd = CommandAnalysis(
+            command="echo secret",
+            binary="echo",
+            flags=(),
+            targets=("secret",),
+            pipe_segments=None,
+        )
+        # shell_arg branch (command_analysis present) is untouched.
+        shell = _assessor()._render_transform(
+            template, _ctx(_tool_call_event('{"command": "echo secret"}'), command_analysis=cmd)
+        )
+        assert shell.target_kind == "shell_arg"
+        assert shell.replacement == "[redacted]"
+        assert shell.target_field is None
+
+        # tool_arg branch (no command_analysis) is untouched.
+        tool = _assessor()._render_transform(
+            template, _ctx(_tool_call_event('{"command": "echo secret"}'), command_analysis=None)
+        )
+        assert tool.target_kind == "tool_arg"
+        assert tool.path == "$.args"
+        assert tool.target_field is None
+
+
 class TestProcessEventFieldTransform:
     """End-to-end: a field-style rule yields a live TransformSuggestion via the pipeline."""
 

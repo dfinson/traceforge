@@ -745,6 +745,7 @@ class ClassificationEngine:
 | `mcp_profiles.yaml` | MCP server classification profiles |
 | `tool_classifications.yaml` | Full classifications for known native tools |
 | `risk.yaml` | Risk scoring weights, flag modifiers, injection patterns, taint rules |
+| `recommendation_rules.yaml` | Governance rule set → `RecommendedAction` (allow/warn/escalate/deny/transform), consumed by the `Assessor` (§22) |
 
 ### Workflow Dimensions (`classify/workflow.py`)
 
@@ -822,7 +823,8 @@ class StorageSink(ABC):
 | `SqliteSink` | ✅ Done | Local SQLite storage with WAL mode, schema migration, batch inserts. Configured via `type: sqlite` in YAML. |
 | `JsonlSink` | ✅ Done | Append-only JSONL files with optional size-based rotation. Configured via `type: jsonl` in YAML. |
 | `S3Sink` | ✅ Done | Cloud object storage with buffered upload and key formatting. Configured via `type: s3` in YAML. Requires `boto3` (optional dep). |
-| `OtelSink` | ✅ Done | Export spans to an OpenTelemetry collector. Configured via `type: otel` in YAML. |
+| `ParquetSink` | ✅ Done | One columnar Parquet file per session for analytics consumers. SDK/programmatic only (no YAML `type:` yet); requires `pyarrow` (optional dep). |
+| `OtelExporterSink` | ✅ Done | Export events / spans / usage as OTLP/HTTP JSON to an OpenTelemetry collector. Configured via `type: otel` in YAML. |
 | `ConsoleSink` | ✅ Done | Pretty-print governance results to terminal. Configured via `type: console` in YAML. |
 | `WebhookSink` | ✅ Done | POST governance results to a webhook URL. Configured via `type: webhook` in YAML. |
 
@@ -985,7 +987,8 @@ tracemill/
 │   │   ├── __init__.py
 │   │   ├── base.py              # Adapter, JsonLineAdapter ABCs
 │   │   ├── mapped_json.py       # MappedJsonAdapter (YAML-driven)
-│   │   └── otel.py              # OtelSpanAdapter (MAF spans)
+│   │   ├── otel.py              # OtelSpanAdapter (MAF spans)
+│   │   └── genai_otel.py        # GenAIOtelAdapter (generic gen_ai.* OTel receiver; experimental, not yet registered)
 │   ├── sources/
 │   │   ├── __init__.py
 │   │   ├── base.py              # Source ABC, RawRecord
@@ -994,7 +997,8 @@ tracemill/
 │   │   ├── http_poll.py         # HttpPollSource (ETag/conditional)
 │   │   ├── sse.py               # SSESource (WHATWG spec)
 │   │   ├── sqlite.py            # SqliteSource (row polling)
-│   │   └── replay.py            # ReplaySource (one-shot)
+│   │   ├── replay.py            # ReplaySource (one-shot)
+│   │   └── auto_detect.py       # Framework auto-detection helper (backs `tracemill detect`; not a Source)
 │   ├── sinks/
 │   │   ├── __init__.py
 │   │   ├── base.py              # StorageSink ABC
@@ -1043,11 +1047,13 @@ tracemill/
 │   │   ├── risk.py              # Risk scoring (0-100, MITRE mappings)
 │   │   ├── phases.py            # Phase derivation logic
 │   │   ├── registry.py          # DimensionRegistry
-│   │   └── data/                # YAML config files (9 files)
+│   │   ├── schema.yaml          # Tier-1 taxonomy schema (source of truth for _generated.py)
+│   │   └── data/                # YAML config files (10 files)
 │   │       ├── binary_info.yaml
 │   │       ├── canonical_tools.yaml
 │   │       ├── effect_overrides.yaml
 │   │       ├── mcp_profiles.yaml
+│   │       ├── recommendation_rules.yaml
 │   │       ├── risk.yaml
 │   │       ├── shell_defaults.yaml
 │   │       ├── shell_rules.yaml
@@ -1113,7 +1119,7 @@ tracemill/
 │   │   ├── hygiene.py
 │   │   ├── naming.py            # HeuristicProvider / ApiProvider / build_session_titler
 │   │   ├── _resolve.py
-│   │   └── data/                # Packaged ONNX titler model
+│   │   └── data/                # boilerplate_files.json (title hygiene); segment-titler ONNX model ships separately in the tracemill-title-model package
 │   ├── tracking/                # Deterministic phase segmenter (research signal, not live path)
 │   │   ├── __init__.py
 │   │   ├── models.py
@@ -1147,6 +1153,7 @@ tracemill/
 │   │   └── persistence.py       # SystemStore (SQLite persistence)
 │   ├── sdk/                     # Pipeline + gating SDK
 │   │   ├── __init__.py          # Pipeline, EventTrace, Verdict, GatePolicy re-exports
+│   │   ├── pipeline.py          # Pipeline — SDK facade (observation backbone + governance stage + gate_* helpers)
 │   │   ├── gate_policy.py       # GatePolicy, preflight / postflight gates
 │   │   ├── gate_types.py        # GateContext, ToolCallRequest / Result
 │   │   └── verdict.py           # Verdict, Decision
@@ -1309,7 +1316,7 @@ tracemill/
 | Live structuring (phase / boundary / title) | ✅ Complete | Packaged CPU-only ONNX models: PhaseInferencer + BoundaryInferencer default-on, TitleInferencer opt-in (emits `TitleUpdate`) |
 | Governance / assessment engine | ✅ Complete | `governance/` monitor + shield object model (SOLID): `SessionMonitor` (single writer), `Scorer` (read-only preview), `SessionRegistry`, `Assessor`, `Shield`, one-counter `SessionState`, `GovernancePipeline` facade; plus labeler, rules, PII, IFC, integrity, drift, budget, observer, persistence. Epic #7 (#9–#27) delivered. See §22 |
 | Configuration system | ✅ Complete | Hierarchical loading, env overrides, discriminated unions, bootstrap |
-| Classify data files (9 YAMLs) | ✅ Complete | Binary info, rules, profiles, risk config |
+| Classify data files (10 YAMLs) | ✅ Complete | Binary info, verb/shell/effect rules, MCP profiles, tool classifications, risk config, governance recommendation rules |
 | CI/CD | ✅ Complete | Lint, test matrix, publish, weekly audits |
 | Test suite | ✅ Complete | 1763 tests across unit/integration/top-level |
 

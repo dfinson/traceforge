@@ -200,12 +200,12 @@ class SessionMonitor:
             }
             reservation_json = json.dumps(reservation_data)
             try:
-                state.persist_no_commit()
-                self._store.execute_in_transaction(
-                    "INSERT OR IGNORE INTO processed_events (source_event_key, session_id, session_meta_json, processed_at) VALUES (?, ?, ?, ?)",
-                    (event.source_event_key, session_id, reservation_json, now),
-                )
-                self._store.commit()
+                with self._store.write_transaction():
+                    state.persist_no_commit()
+                    self._store.execute_in_transaction(
+                        "INSERT OR IGNORE INTO processed_events (source_event_key, session_id, session_meta_json, processed_at) VALUES (?, ?, ?, ?)",
+                        (event.source_event_key, session_id, reservation_json, now),
+                    )
                 self._write_failures[session_id] = 0
                 self._store.cache_processed(event.source_event_key, reservation_json)
             except (sqlite3.OperationalError, sqlite3.IntegrityError) as e:
@@ -216,8 +216,8 @@ class SessionMonitor:
                     session_id,
                     e,
                 )
-                self._store.rollback()
-                # Discard corrupted in-memory state — reload clean from DB
+                # write_transaction already rolled back — discard the corrupted
+                # in-memory state and reload a clean copy from the DB.
                 self._registry.evict(session_id)
                 state = self.get_or_create_state(session_id)
                 # Return degraded response — event will be re-delivered
@@ -236,11 +236,16 @@ class SessionMonitor:
         # For retries (existing=reserved), use the persisted event-time snapshot
         if existing:
             snapshot_data = meta_dict.get("snapshot")
-            if snapshot_data:
-                snapshot = self._codec.deserialize_snapshot(snapshot_data)
-            else:
-                # Legacy reservation without snapshot — fall back to current state
-                snapshot = state.snapshot()
+            if not snapshot_data:
+                # Every reservation persists an event-time snapshot (see the
+                # reservation write below), so its absence is a corrupt/foreign
+                # record, not a recoverable state — fail loudly rather than
+                # silently reassessing against drifted current state.
+                raise ValueError(
+                    f"reserved event {event.source_event_key} has no persisted "
+                    "snapshot; refusing to reassess against current state"
+                )
+            snapshot = self._codec.deserialize_snapshot(snapshot_data)
         else:
             snapshot = snapshot_for_reservation
         try:
@@ -280,11 +285,11 @@ class SessionMonitor:
                     }
                 )
                 try:
-                    self._store.execute_in_transaction(
-                        "UPDATE processed_events SET session_meta_json = ? WHERE source_event_key = ?",
-                        (degraded_json, event.source_event_key),
-                    )
-                    self._store.commit()
+                    with self._store.write_transaction():
+                        self._store.execute_in_transaction(
+                            "UPDATE processed_events SET session_meta_json = ? WHERE source_event_key = ?",
+                            (degraded_json, event.source_event_key),
+                        )
                     self._store.cache_processed(event.source_event_key, degraded_json)
                     # Only clear attempts after successful dead-letter persistence
                     del self._phase23_attempts[event.source_event_key]
@@ -295,8 +300,9 @@ class SessionMonitor:
                         if not dl_keys:
                             del self._phase23_session_keys[session_id]
                 except (sqlite3.OperationalError, sqlite3.IntegrityError):
-                    self._store.rollback()
-                    # Keep attempt count — next retry will try dead-lettering again
+                    # write_transaction already rolled back — keep the attempt
+                    # count so the next retry re-attempts dead-lettering.
+                    pass
                 return degraded_meta
             else:
                 logger.warning(
@@ -316,14 +322,14 @@ class SessionMonitor:
                             "snapshot": self._codec.serialize_snapshot(snapshot),
                         }
                     )
-                    self._store.execute_in_transaction(
-                        "UPDATE processed_events SET session_meta_json = ? WHERE source_event_key = ?",
-                        (reservation_json, event.source_event_key),
-                    )
-                    self._store.commit()
+                    with self._store.write_transaction():
+                        self._store.execute_in_transaction(
+                            "UPDATE processed_events SET session_meta_json = ? WHERE source_event_key = ?",
+                            (reservation_json, event.source_event_key),
+                        )
                     self._store.cache_processed(event.source_event_key, reservation_json)
                 except (sqlite3.OperationalError, sqlite3.IntegrityError):
-                    self._store.rollback()
+                    pass  # write_transaction already rolled back
                 return SessionMeta(
                     classification=None,
                     risk_assessment=None,
@@ -343,15 +349,15 @@ class SessionMonitor:
         # Finalize idempotency record + deferred MCP writes in single transaction
         try:
             meta_json = json.dumps(self._codec.serialize_meta(meta))
-            self._store.execute_in_transaction(
-                "UPDATE processed_events SET session_meta_json = ? WHERE source_event_key = ?",
-                (meta_json, event.source_event_key),
-            )
-            if assessment.mcp_deferred_writes:
-                self._commit_mcp_writes_no_commit(assessment.mcp_deferred_writes)
-            if assessment.integrity_deferred_writes:
-                self._commit_integrity_writes_no_commit(assessment.integrity_deferred_writes)
-            self._store.commit()
+            with self._store.write_transaction():
+                self._store.execute_in_transaction(
+                    "UPDATE processed_events SET session_meta_json = ? WHERE source_event_key = ?",
+                    (meta_json, event.source_event_key),
+                )
+                if assessment.mcp_deferred_writes:
+                    self._commit_mcp_writes_no_commit(assessment.mcp_deferred_writes)
+                if assessment.integrity_deferred_writes:
+                    self._commit_integrity_writes_no_commit(assessment.integrity_deferred_writes)
             self._store.cache_processed(event.source_event_key, meta_json)
         except (
             sqlite3.OperationalError,
@@ -369,9 +375,8 @@ class SessionMonitor:
                 event.source_event_key,
                 e,
             )
-            self._store.rollback()
-            # Event stays reserved; next delivery re-runs Phase 2/3
-            # Do NOT clear retry counter — finalization did not commit
+            # write_transaction already rolled back — event stays reserved so the
+            # next delivery re-runs Phase 2/3. Do NOT clear the retry counter.
             return SessionMeta(
                 classification=meta.classification,
                 risk_assessment=meta.risk_assessment,
@@ -393,33 +398,20 @@ class SessionMonitor:
         return meta
 
     def _commit_mcp_writes_no_commit(self, writes: tuple) -> None:
-        """Execute deferred MCP writes without committing — caller owns transaction."""
+        """Execute deferred MCP writes without committing — caller owns transaction.
+
+        Delegates to the store's ``*_no_commit`` helpers so each write lands in the
+        normalized tables (``mcp_profiles`` + ``mcp_profile_attributes``) inside the
+        caller's :meth:`SystemStore.write_transaction`.
+        """
         for write in writes:
             if write.kind == "upsert":
-                profile = json.loads(write.payload)
-                self._store.execute_in_transaction(
-                    """INSERT OR IGNORE INTO mcp_fingerprints
-                       (server, tool_name, description_hash, schema_hash, registered_effect,
-                        registered_role, registered_capabilities, registered_scope, clearance, first_seen, last_seen)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        write.server,
-                        write.tool_name,
-                        profile["description_hash"],
-                        profile["schema_hash"],
-                        profile.get("registered_effect"),
-                        profile.get("registered_role"),
-                        profile.get("registered_capabilities"),
-                        profile.get("registered_scope"),
-                        profile.get("clearance"),
-                        profile["first_seen"],
-                        profile["last_seen"],
-                    ),
+                self._store.write_mcp_profile_no_commit(
+                    write.server, write.tool_name, json.loads(write.payload)
                 )
             elif write.kind == "last_seen":
-                self._store.execute_in_transaction(
-                    "UPDATE mcp_fingerprints SET last_seen = ? WHERE server = ? AND tool_name = ?",
-                    (write.payload, write.server, write.tool_name),
+                self._store.write_mcp_last_seen_no_commit(
+                    write.server, write.tool_name, write.payload
                 )
 
     def _commit_integrity_writes_no_commit(self, writes: tuple) -> None:
@@ -444,7 +436,7 @@ class SessionMonitor:
         import logging
 
         now = datetime.now(timezone.utc).isoformat()
-        budget_json = json_mod.dumps(
+        budget_snapshot_json = json_mod.dumps(
             {
                 "total_tool_calls": snapshot.budget.total_tool_calls,
                 "total_tokens": snapshot.budget.total_tokens,
@@ -452,14 +444,24 @@ class SessionMonitor:
             }
         )
         try:
-            # INSERT OR IGNORE: first delivery records started_at/ended_at; duplicates are no-ops
-            self._store.connection.execute(
-                """INSERT OR IGNORE INTO session_summaries
-                   (session_id, started_at, ended_at, total_events, dropped_events, budget_snapshot_json)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (session_id, now, now, snapshot.event_count, snapshot.dropped_events, budget_json),
-            )
-            self._store.connection.commit()
+            # INSERT OR IGNORE: first delivery records started_at/ended_at; duplicates are no-ops.
+            # Routed through write_transaction so the commit is serialized on the
+            # shared connection (single writer) rather than racing another writer's
+            # open transaction with a bare connection.commit().
+            with self._store.write_transaction():
+                self._store.execute_in_transaction(
+                    """INSERT OR IGNORE INTO session_summaries
+                       (session_id, started_at, ended_at, total_events, dropped_events, budget_snapshot_json)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        session_id,
+                        now,
+                        now,
+                        snapshot.event_count,
+                        snapshot.dropped_events,
+                        budget_snapshot_json,
+                    ),
+                )
         except sqlite3.OperationalError as e:
             logging.getLogger(__name__).warning(
                 "Failed to write session summary for %s: %s", session_id, e

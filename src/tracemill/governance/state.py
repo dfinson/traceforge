@@ -4,9 +4,22 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from collections import Counter, deque
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+
+_BUDGET_DIMENSIONS = (
+    "effect",
+    "mechanism",
+    "scope",
+    "role",
+    "phase",
+    "capability",
+    "action",
+    "structure",
+)
 
 
 @dataclass(frozen=True)
@@ -90,6 +103,10 @@ class SessionState:
     _last_sequence: int | None = None
     _gap_ordinal: int = 0
     _db: sqlite3.Connection | None = None
+    # Writer lock shared with the owning SystemStore. When present, a standalone
+    # ``persist`` acquires it for the whole transaction so it is serialized against
+    # the monitor's ``write_transaction`` on the shared connection (single writer).
+    _lock: "threading.Lock | None" = None
     # Shield (enforcement) decision log. The tool-call counter itself is NOT
     # here — it is _total_tool_calls above, advanced only by increment_budget.
     _denied_count: int = 0
@@ -112,8 +129,11 @@ class SessionState:
                 "structure": Counter(),
             }
 
-    def attach_db(self, db: sqlite3.Connection | None) -> None:
+    def attach_db(
+        self, db: sqlite3.Connection | None, lock: "threading.Lock | None" = None
+    ) -> None:
         self._db = db
+        self._lock = lock
 
     def increment_budget(
         self,
@@ -285,58 +305,31 @@ class SessionState:
             gap_ordinal=self._gap_ordinal,
         )
 
-    def persist(self) -> None:
-        """Write-through to SQLite."""
-        if self._db is None:
-            return
-        budget_json = json.dumps(
-            {
-                "version": 1,
-                "total_tool_calls": self._total_tool_calls,
-                "total_tokens": self._total_tokens,
-                "elapsed_seconds": self._elapsed_seconds,
-                "by_effect": dict(self._budget_counters["effect"]),
-                "by_mechanism": dict(self._budget_counters["mechanism"]),
-                "by_scope": dict(self._budget_counters["scope"]),
-                "by_role": dict(self._budget_counters["role"]),
-                "by_phase": dict(self._budget_counters["phase"]),
-                "by_capability": dict(self._budget_counters["capability"]),
-                "by_action": dict(self._budget_counters["action"]),
-                "by_structure": dict(self._budget_counters["structure"]),
-                "pressure": self._pressure,
-            }
-        )
-        phase_json = json.dumps(self._phase_window)
-        taints_json = (
-            json.dumps(
-                [
-                    {
-                        "event_id": t.event_id,
-                        "source_event_key": t.source_event_key,
-                        "clearance": t.clearance,
-                        "source": t.source,
-                        "payload_pointer": t.payload_pointer,
-                    }
-                    for t in self._taint_ledger
-                ]
-            )
-            if self._taint_ledger
-            else None
-        )
+    def _write_state_rows(self) -> None:
+        """Write every durable row for this session on the OPEN transaction.
+
+        Writes the ``session_state`` scalar row plus the normalized projections
+        (``budget_counters`` dimensional maps, ``taint_entries`` ledger). Does not
+        commit and does not lock — the caller owns both (either :meth:`persist`
+        under the writer lock, or the monitor's ``write_transaction``).
+        """
+        assert self._db is not None  # guarded by callers
         now = datetime.now(timezone.utc).isoformat()
         self._db.execute(
             """INSERT OR REPLACE INTO session_state
-               (session_id, budget_json, phase_window_json, last_assistant_json,
-                last_user_json, pii_taints_json, event_count, dropped_events,
-                last_sequence, last_event_id, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (session_id, total_tool_calls, total_tokens, elapsed_seconds, pressure,
+                phase_window_json, last_assistant_json, last_user_json,
+                event_count, dropped_events, last_sequence, last_event_id, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 self.session_id,
-                budget_json,
-                phase_json,
+                self._total_tool_calls,
+                self._total_tokens,
+                self._elapsed_seconds,
+                int(self._pressure),
+                json.dumps(self._phase_window),
                 self._last_assistant_event_id,
                 self._last_user_event_id,
-                taints_json,
                 self._event_count,
                 self._dropped_events,
                 self._last_sequence,
@@ -344,111 +337,130 @@ class SessionState:
                 now,
             ),
         )
-        self._db.commit()
+        # Normalized budget counters: full rewrite mirrors the write-through
+        # semantics of INSERT OR REPLACE above (the in-memory Counters are the
+        # single source of truth for this session).
+        self._db.execute("DELETE FROM budget_counters WHERE session_id = ?", (self.session_id,))
+        for dimension, counter in self._budget_counters.items():
+            for key, count in counter.items():
+                self._db.execute(
+                    "INSERT INTO budget_counters (session_id, dimension, key, count) "
+                    "VALUES (?, ?, ?, ?)",
+                    (self.session_id, dimension, key, count),
+                )
+        # Normalized taint ledger: ordinal preserves append order so the bounded
+        # ring-buffer trim behaves identically after a reload.
+        self._db.execute("DELETE FROM taint_entries WHERE session_id = ?", (self.session_id,))
+        for ordinal, t in enumerate(self._taint_ledger):
+            self._db.execute(
+                "INSERT INTO taint_entries (session_id, ordinal, event_id, source_event_key, "
+                "clearance, source, payload_pointer) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    self.session_id,
+                    ordinal,
+                    t.event_id,
+                    t.source_event_key,
+                    t.clearance,
+                    t.source,
+                    t.payload_pointer,
+                ),
+            )
+
+    def persist(self) -> None:
+        """Write-through to SQLite (self-committing, single-writer safe).
+
+        Acquires the store's writer lock (when one was attached) for the whole
+        transaction, so a standalone persist — e.g. the emitter's drop-recording
+        path — is serialized against the monitor's ``write_transaction`` on the
+        shared connection instead of racing it.
+        """
+        if self._db is None:
+            return
+        with self._lock if self._lock is not None else nullcontext():
+            self._write_state_rows()
+            self._db.commit()
 
     def persist_no_commit(self) -> None:
         """Write state to SQLite WITHOUT committing — caller must commit.
-        Used for atomic state+reservation transactions."""
+
+        Used for atomic state+reservation transactions; the caller (the monitor's
+        ``write_transaction``) already holds the writer lock, so this must not lock
+        or commit.
+        """
         if self._db is None:
             return
-        budget_json = json.dumps(
-            {
-                "version": 1,
-                "total_tool_calls": self._total_tool_calls,
-                "total_tokens": self._total_tokens,
-                "elapsed_seconds": self._elapsed_seconds,
-                "by_effect": dict(self._budget_counters["effect"]),
-                "by_mechanism": dict(self._budget_counters["mechanism"]),
-                "by_scope": dict(self._budget_counters["scope"]),
-                "by_role": dict(self._budget_counters["role"]),
-                "by_phase": dict(self._budget_counters["phase"]),
-                "by_capability": dict(self._budget_counters["capability"]),
-                "by_action": dict(self._budget_counters["action"]),
-                "by_structure": dict(self._budget_counters["structure"]),
-                "pressure": self._pressure,
-            }
-        )
-        phase_json = json.dumps(self._phase_window)
-        taints_json = (
-            json.dumps(
-                [
-                    {
-                        "event_id": t.event_id,
-                        "source_event_key": t.source_event_key,
-                        "clearance": t.clearance,
-                        "source": t.source,
-                        "payload_pointer": t.payload_pointer,
-                    }
-                    for t in self._taint_ledger
-                ]
+        self._write_state_rows()
+
+    @staticmethod
+    def _read_budget_counters(db: sqlite3.Connection, session_id: str) -> dict[str, dict[str, int]]:
+        """Read the normalized dimensional counters as ``{dimension: {key: count}}``."""
+        rows = db.execute(
+            "SELECT dimension, key, count FROM budget_counters WHERE session_id = ?",
+            (session_id,),
+        ).fetchall()
+        counters: dict[str, dict[str, int]] = {}
+        for dimension, key, count in rows:
+            counters.setdefault(dimension, {})[key] = count
+        return counters
+
+    @staticmethod
+    def _read_taint_entries(db: sqlite3.Connection, session_id: str) -> list["TaintEntry"]:
+        """Read the normalized taint ledger, ordered by append ordinal."""
+        rows = db.execute(
+            "SELECT event_id, source_event_key, clearance, source, payload_pointer "
+            "FROM taint_entries WHERE session_id = ? ORDER BY ordinal",
+            (session_id,),
+        ).fetchall()
+        return [
+            TaintEntry(
+                event_id=r[0],
+                source_event_key=r[1],
+                clearance=r[2],
+                source=r[3],
+                payload_pointer=r[4],
             )
-            if self._taint_ledger
-            else None
-        )
-        now = datetime.now(timezone.utc).isoformat()
-        self._db.execute(
-            """INSERT OR REPLACE INTO session_state
-               (session_id, budget_json, phase_window_json, last_assistant_json,
-                last_user_json, pii_taints_json, event_count, dropped_events,
-                last_sequence, last_event_id, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                self.session_id,
-                budget_json,
-                phase_json,
-                self._last_assistant_event_id,
-                self._last_user_event_id,
-                taints_json,
-                self._event_count,
-                self._dropped_events,
-                self._last_sequence,
-                None,
-                now,
-            ),
-        )
+            for r in rows
+        ]
 
     @classmethod
-    def load_from_db(cls, session_id: str, db: sqlite3.Connection) -> "SessionState":
-        """Load state from SQLite on restart."""
-        row = db.execute(
-            "SELECT * FROM session_state WHERE session_id = ?", (session_id,)
-        ).fetchone()
+    def load_from_db(
+        cls,
+        session_id: str,
+        db: sqlite3.Connection,
+        lock: "threading.Lock | None" = None,
+    ) -> "SessionState":
+        """Load state from SQLite on restart.
+
+        SQLite is authoritative: the atomic budget scalars are read from
+        ``session_state`` columns, the dimensional counters from
+        ``budget_counters``, and the taint ledger from ``taint_entries``. The
+        whole read runs under the writer lock (when provided) for a consistent
+        snapshot against a concurrent ``write_transaction``.
+        """
         state = cls(session_id=session_id)
-        state.attach_db(db)
-        if row is None:
-            return state
-        budget_data = json.loads(row[1]) if row[1] else {}
-        state._total_tool_calls = budget_data.get("total_tool_calls", 0)
-        state._total_tokens = budget_data.get("total_tokens", 0)
-        state._elapsed_seconds = budget_data.get("elapsed_seconds", 0.0)
-        state._pressure = budget_data.get("pressure", False)
-        for dim in (
-            "effect",
-            "mechanism",
-            "scope",
-            "role",
-            "phase",
-            "capability",
-            "action",
-            "structure",
-        ):
-            state._budget_counters[dim] = Counter(budget_data.get(f"by_{dim}", {}))
-        state._phase_window = json.loads(row[2]) if row[2] else []
-        state._last_assistant_event_id = row[3]
-        state._last_user_event_id = row[4]
-        if row[5]:
-            taints = json.loads(row[5])
-            state._taint_ledger = [
-                TaintEntry(
-                    event_id=t["event_id"],
-                    source_event_key=t.get("source_event_key") or t["event_id"],
-                    clearance=t["clearance"],
-                    source=t["source"],
-                    payload_pointer=t["payload_pointer"],
-                )
-                for t in taints
-            ]
-        state._event_count = row[6] or 0
-        state._dropped_events = row[7] or 0
-        state._last_sequence = row[8]
+        state.attach_db(db, lock)
+        with lock if lock is not None else nullcontext():
+            row = db.execute(
+                """SELECT total_tool_calls, total_tokens, elapsed_seconds, pressure,
+                          phase_window_json, last_assistant_json, last_user_json,
+                          event_count, dropped_events, last_sequence
+                   FROM session_state WHERE session_id = ?""",
+                (session_id,),
+            ).fetchone()
+            if row is None:
+                return state
+            state._total_tool_calls = row[0] or 0
+            state._total_tokens = row[1] or 0
+            state._elapsed_seconds = row[2] or 0.0
+            state._pressure = bool(row[3])
+            counters = cls._read_budget_counters(db, session_id)
+            for dim in _BUDGET_DIMENSIONS:
+                state._budget_counters[dim] = Counter(counters.get(dim, {}))
+            state._phase_window = json.loads(row[4]) if row[4] else []
+            state._last_assistant_event_id = row[5]
+            state._last_user_event_id = row[6]
+            state._taint_ledger = cls._read_taint_entries(db, session_id)
+            state._event_count = row[7] or 0
+            state._dropped_events = row[8] or 0
+            state._last_sequence = row[9]
         return state

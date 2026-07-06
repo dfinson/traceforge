@@ -142,13 +142,9 @@ class MCPIntegrityScanner:
                             "description_hash": desc_hash,
                             "schema_hash": schema_hash,
                             "registered_effect": cls.effect,
-                            "registered_role": json.dumps(sorted(cls.role)) if cls.role else None,
-                            "registered_capabilities": json.dumps(sorted(cls.capability))
-                            if cls.capability
-                            else None,
-                            "registered_scope": json.dumps(sorted(cls.scope))
-                            if cls.scope
-                            else None,
+                            "role": sorted(cls.role),
+                            "capability": sorted(cls.capability),
+                            "scope": sorted(cls.scope),
                             "clearance": None,
                             "first_seen": now.isoformat(),
                             "last_seen": now.isoformat(),
@@ -261,8 +257,7 @@ class MCPIntegrityScanner:
                 )
 
         # Capability gain
-        reg_caps_raw = stored.get("registered_capabilities")
-        reg_caps = frozenset(json.loads(reg_caps_raw)) if reg_caps_raw else frozenset()
+        reg_caps = frozenset(stored.get("capability") or ())
         new_caps = current.capability - reg_caps
         dangerous_new = new_caps & _DANGEROUS_CAPS
         if dangerous_new:
@@ -279,8 +274,7 @@ class MCPIntegrityScanner:
             )
 
         # Scope expansion
-        reg_scope_raw = stored.get("registered_scope")
-        reg_scope = frozenset(json.loads(reg_scope_raw)) if reg_scope_raw else frozenset()
+        reg_scope = frozenset(stored.get("scope") or ())
         new_scope = current.scope - reg_scope
         if new_scope:
             max_prev = max((_SCOPE_ORDER.get(s, 0) for s in reg_scope), default=0)

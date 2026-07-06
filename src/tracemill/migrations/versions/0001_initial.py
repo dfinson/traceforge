@@ -1,4 +1,10 @@
-"""Initial schema — captures existing tables.
+"""Initial schema — the single, normalized system database.
+
+Budget dimensions, the taint ledger, and MCP tool profiles are stored in
+first-normal-form tables from the outset (``budget_counters``,
+``taint_entries``, ``mcp_profiles`` + ``mcp_profile_attributes``); the atomic
+budget scalars are plain columns on ``session_state``. No JSON-blob or
+JSON-array representation of these ever exists.
 
 Revision ID: 0001_initial
 Revises: None
@@ -29,11 +35,13 @@ def upgrade() -> None:
     conn.exec_driver_sql("""
         CREATE TABLE IF NOT EXISTS session_state (
             session_id TEXT PRIMARY KEY,
-            budget_json TEXT NOT NULL DEFAULT '{"version":1,"total_tool_calls":0,"total_tokens":0,"elapsed_seconds":0.0,"pressure":false}',
+            total_tool_calls INTEGER NOT NULL DEFAULT 0,
+            total_tokens INTEGER NOT NULL DEFAULT 0,
+            elapsed_seconds REAL NOT NULL DEFAULT 0.0,
+            pressure INTEGER NOT NULL DEFAULT 0,
             phase_window_json TEXT NOT NULL DEFAULT '[]',
             last_assistant_json TEXT,
             last_user_json TEXT,
-            pii_taints_json TEXT,
             event_count INTEGER NOT NULL DEFAULT 0,
             dropped_events INTEGER NOT NULL DEFAULT 0,
             last_sequence INTEGER,
@@ -51,20 +59,60 @@ def upgrade() -> None:
         )
     """)
 
+    # ── Normalized MCP tool profiles ──
+    # Scalar fingerprint per (server, tool). The many-valued role/capability/
+    # scope attributes live in mcp_profile_attributes (1NF), one row per value.
     conn.exec_driver_sql("""
-        CREATE TABLE IF NOT EXISTS mcp_fingerprints (
+        CREATE TABLE IF NOT EXISTS mcp_profiles (
             server TEXT NOT NULL,
             tool_name TEXT NOT NULL,
             description_hash TEXT NOT NULL,
             schema_hash TEXT NOT NULL,
             registered_effect TEXT,
-            registered_role TEXT,
-            registered_capabilities TEXT,
-            registered_scope TEXT,
             clearance TEXT,
             first_seen TEXT NOT NULL,
             last_seen TEXT NOT NULL,
             PRIMARY KEY (server, tool_name)
+        )
+    """)
+
+    conn.exec_driver_sql("""
+        CREATE TABLE IF NOT EXISTS mcp_profile_attributes (
+            server TEXT NOT NULL,
+            tool_name TEXT NOT NULL,
+            attr_type TEXT NOT NULL,
+            attr_value TEXT NOT NULL,
+            PRIMARY KEY (server, tool_name, attr_type, attr_value)
+        )
+    """)
+
+    # ── Normalized budget counters ──
+    # One row per (session, dimension, key). Replaces the by_* maps that a JSON
+    # budget blob would otherwise carry; the atomic scalars are columns on
+    # session_state.
+    conn.exec_driver_sql("""
+        CREATE TABLE IF NOT EXISTS budget_counters (
+            session_id TEXT NOT NULL,
+            dimension TEXT NOT NULL,
+            key TEXT NOT NULL,
+            count INTEGER NOT NULL,
+            PRIMARY KEY (session_id, dimension, key)
+        )
+    """)
+
+    # ── Normalized taint ledger ──
+    # One row per taint entry; ordinal preserves append order so the bounded
+    # ring-buffer semantics survive a reload.
+    conn.exec_driver_sql("""
+        CREATE TABLE IF NOT EXISTS taint_entries (
+            session_id TEXT NOT NULL,
+            ordinal INTEGER NOT NULL,
+            event_id TEXT NOT NULL,
+            source_event_key TEXT NOT NULL,
+            clearance TEXT NOT NULL,
+            source TEXT NOT NULL,
+            payload_pointer TEXT NOT NULL,
+            PRIMARY KEY (session_id, ordinal)
         )
     """)
 
@@ -120,6 +168,9 @@ def downgrade() -> None:
     op.drop_table("session_summaries")
     op.drop_table("content_hashes")
     op.drop_table("drift_baselines")
-    op.drop_table("mcp_fingerprints")
+    op.drop_table("taint_entries")
+    op.drop_table("budget_counters")
+    op.drop_table("mcp_profile_attributes")
+    op.drop_table("mcp_profiles")
     op.drop_table("processed_events")
     op.drop_table("session_state")

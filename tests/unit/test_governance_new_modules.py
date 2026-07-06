@@ -443,6 +443,85 @@ class TestTransformSuggestion:
         )
         assert t.replacement is None
 
+    def test_new_fields_default_when_omitted(self):
+        # assessor.py and codec.py construct with only the original six fields.
+        t = TransformSuggestion(
+            target_kind="shell_arg",
+            path="command[0:10]",
+            original="rm -rf /",
+            replacement=None,
+            rationale="x",
+        )
+        assert t.target_field is None
+        assert t.strategy == "pattern_replace"
+        assert dict(t.parameters) == {}
+        assert t.original_value is None
+
+    def test_preserves_parameters_and_original_value(self):
+        t = TransformSuggestion(
+            target_kind="field",
+            path="tool.args.password",
+            original="secret123",
+            replacement=None,
+            rationale="Redact",
+            strategy="redact",
+            parameters={"replacement": "***"},
+            target_field="tool.args.password",
+            original_value="secret123",
+        )
+        assert t.strategy == "redact"
+        assert dict(t.parameters) == {"replacement": "***"}
+        assert t.original_value == "secret123"
+
+    def test_parameters_are_immutable(self):
+        t = TransformSuggestion(
+            target_kind="field",
+            path="a",
+            original="",
+            replacement=None,
+            rationale="x",
+            parameters={"k": "v"},
+        )
+        with pytest.raises(TypeError):
+            t.parameters["k"] = "mutated"  # type: ignore[index]
+
+    def test_parameters_copied_not_aliased(self):
+        source = {"k": "v"}
+        t = TransformSuggestion(
+            target_kind="field",
+            path="a",
+            original="",
+            replacement=None,
+            rationale="x",
+            parameters=source,
+        )
+        source["k"] = "mutated"
+        assert t.parameters["k"] == "v"
+
+    def test_is_hashable(self):
+        t = TransformSuggestion(
+            target_kind="field",
+            path="a",
+            original="",
+            replacement=None,
+            rationale="x",
+            parameters={"k": "v"},
+        )
+        assert isinstance(hash(t), int)
+
+    def test_original_value_container_stays_hashable(self):
+        # original_value is excluded from __hash__ so a container value cannot
+        # break hashing of an otherwise-immutable suggestion.
+        t = TransformSuggestion(
+            target_kind="field",
+            path="a",
+            original="",
+            replacement=None,
+            rationale="x",
+            original_value={"nested": 1},
+        )
+        assert isinstance(hash(t), int)
+
 
 # ─── EscalationContext Tests ───
 

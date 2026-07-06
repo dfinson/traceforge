@@ -215,13 +215,24 @@ class DefaultAssessor:
     def _render_transform(self, template, ctx: "EnrichmentContext") -> TransformSuggestion | None:
         """Render TransformTemplate → TransformSuggestion using event data.
 
-        Returns None if target cannot be located in event data.
+        Field-style templates (``target_field`` set) delegate to the template's own
+        renderer, which resolves the target against the event's argument/result JSON
+        (nested; missing → ``None``) and preserves the ``strategy``, immutable
+        ``parameters``, and resolved ``original_value``. Legacy pattern/replacement
+        templates (``target_field`` unset) keep their shell/tool-arg heuristics and are
+        dropped when the target cannot be located.
         """
         if template is None:
             return None
 
-        from tracemill.governance.types import ToolCallEvent
         import logging
+
+        from tracemill.governance.types import ToolCallEvent
+
+        # Field-style transform: resolve target_field against structured event data.
+        # render()/resolve_field never raise (data=None → original_value None).
+        if template.target_field is not None:
+            return template.render(self._render_data_for(ctx.event))
 
         try:
             if isinstance(ctx.event, ToolCallEvent) and ctx.command_analysis:
@@ -250,6 +261,29 @@ class DefaultAssessor:
                 "Transform rendering failed for template %s: %s", template, e
             )
         return None
+
+    def _render_data_for(self, event) -> object | None:
+        """Best-effort structured payload for ``TransformTemplate.render()``; None if unavailable.
+
+        Parses a :class:`ToolCallEvent`'s ``tool_args_json`` or a :class:`ToolResultEvent`'s
+        ``result_payload_json``. Absent or unparseable JSON yields ``None`` so the caller's
+        ``render()`` resolves ``original_value`` to ``None`` rather than raising.
+        """
+        import json
+
+        from tracemill.governance.types import ToolCallEvent, ToolResultEvent
+
+        raw = None
+        if isinstance(event, ToolCallEvent):
+            raw = event.tool_args_json
+        elif isinstance(event, ToolResultEvent):
+            raw = event.result_payload_json
+        if raw is None:
+            return None
+        try:
+            return json.loads(raw)
+        except (ValueError, TypeError):
+            return None
 
     def _build_escalation(
         self,

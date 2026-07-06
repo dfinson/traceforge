@@ -94,6 +94,12 @@ class EscalationContext:
     tool_args_summary: str  # Sanitized — no secrets
     session_id: str
     timestamp: datetime
+    # --- #24: richer escalation context ---
+    event_id: str = ""  # Triggering event's id (ctx.event.event_id)
+    classification_summary: str = ""  # Concise deterministic human-readable summary
+    risk_factors: tuple[str, ...] = ()  # risk.factors that drove the score
+    session_event_count: int = 0  # snapshot.event_count at escalation time
+    recent_phase_window: tuple[str, ...] = ()  # snapshot.phase_window (recent phases)
 
 
 @dataclass(frozen=True)
@@ -127,6 +133,9 @@ class Evidence:
     mitre_techniques: tuple[str, ...]
     pointers: tuple[EvidencePointer, ...]
     escalation: EscalationContext | None = None
+    # --- #25: promote rule provenance + matched-predicate detail to the top level ---
+    rule_id: str = ""  # Matching rule id (also carried on each EvidencePointer)
+    matched_predicates: tuple[str, ...] = ()  # Serialized rule predicates that matched
 
 
 @dataclass(frozen=True)

@@ -45,6 +45,21 @@ CREATE TABLE IF NOT EXISTS segment_titles (
 );
 
 CREATE INDEX IF NOT EXISTS idx_segment_titles_session ON segment_titles(session_id);
+
+CREATE TABLE IF NOT EXISTS context_gaps (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
+    dropped_count INTEGER NOT NULL,
+    first_dropped_sequence INTEGER,
+    last_dropped_sequence INTEGER,
+    gap_ordinal INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    source_event_key TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_context_gaps_session ON context_gaps(session_id);
 """
 
 
@@ -126,6 +141,45 @@ class SqliteOutputSink(StorageSink):
 
     async def on_usage(self, usage: UsageRecord) -> None:
         pass
+
+    async def on_enriched_event(self, enriched) -> None:
+        """Persist a governance envelope. Live events keep byte-identical output
+        (delegated to :meth:`on_event`); context-gap markers land in the
+        ``context_gaps`` table."""
+        from tracemill.governance.envelope import ContextGapEvent
+
+        gap = enriched.event
+        if not isinstance(gap, ContextGapEvent):
+            await super().on_enriched_event(enriched)
+            return
+
+        params = (
+            gap.id,
+            gap.session_id,
+            gap.timestamp.isoformat() if gap.timestamp else None,
+            gap.dropped_count,
+            gap.first_dropped_sequence,
+            gap.last_dropped_sequence,
+            gap.gap_ordinal,
+            gap.reason,
+            gap.source_event_key,
+        )
+        await asyncio.to_thread(self._write_gap, params)
+
+    def _write_gap(self, params: tuple) -> None:
+        """Synchronous gap write — called via asyncio.to_thread."""
+        conn = self._get_conn()
+        try:
+            conn.execute(
+                """INSERT OR IGNORE INTO context_gaps
+                   (id, session_id, timestamp, dropped_count, first_dropped_sequence,
+                    last_dropped_sequence, gap_ordinal, reason, source_event_key)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                params,
+            )
+            conn.commit()
+        except sqlite3.Error as exc:
+            logger.error("SqliteOutputSink: gap write failed: %s", exc)
 
     async def on_title_update(self, update: TitleUpdate) -> None:
         params = (

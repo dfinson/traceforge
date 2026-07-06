@@ -7,6 +7,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
+    import tracemill.types
+
     from tracemill.governance.pipeline import SessionMeta
     from tracemill.governance.types import SessionEvent
 
@@ -50,7 +52,7 @@ class EnrichedEvent:
     Sinks serialize this as {"event": {...}, "_governance": {...}} or equivalent per sink type.
     """
 
-    event: "SessionEvent | ContextGapEvent"
+    event: "tracemill.types.SessionEvent | SessionEvent | ContextGapEvent"
     governance: "SessionMeta"
 
     def to_dict(self) -> dict:
@@ -67,6 +69,25 @@ class EnrichedEvent:
                 "last_dropped_sequence": self.event.last_dropped_sequence,
                 "gap_ordinal": self.event.gap_ordinal,
                 "reason": self.event.reason,
+            }
+        elif hasattr(self.event, "model_dump"):
+            # Live tracemill.types.SessionEvent (pydantic). Mirror JsonlSink's
+            # event body, but lift governance out of metadata into the top-level
+            # ``_governance`` slot so the event stays the raw structural record
+            # and governance is not duplicated inside it.
+            live = self.event
+            metadata_dict = (
+                live.metadata.model_dump(exclude_none=True) if live.metadata is not None else None
+            )
+            if isinstance(metadata_dict, dict):
+                metadata_dict.pop("governance", None)
+            event_dict = {
+                "id": live.id,
+                "kind": live.kind,
+                "session_id": live.session_id,
+                "timestamp": live.timestamp.isoformat(),
+                "payload": live.payload,
+                "metadata": metadata_dict,
             }
         else:
             event_dict = {

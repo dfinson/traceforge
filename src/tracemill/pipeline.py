@@ -6,10 +6,14 @@ import asyncio
 import logging
 from collections import OrderedDict
 from collections.abc import Awaitable, Iterable
+from typing import TYPE_CHECKING
 
 from tracemill.enricher import Enricher
 from tracemill.sinks.base import StorageSink
 from tracemill.types import EventMetadata, SessionEvent, TelemetrySpan, TitleUpdate, UsageRecord
+
+if TYPE_CHECKING:
+    from tracemill.governance.results import SessionMeta
 
 logger = logging.getLogger(__name__)
 
@@ -613,18 +617,47 @@ class EventPipeline:
         attached to the fully-structured event, then the event fans out to every
         sink. Every event passes through here (the single sink choke point), so
         this is where governance belongs as one stage of the pipeline.
-        """
-        if self._governance is not None:
-            event = self._annotate_governance(event)
-        await self._fanout((sink.on_event(event) for sink in self._sinks), f"event {event.id}")
 
-    def _annotate_governance(self, event: SessionEvent) -> SessionEvent:
+        When governance produces a ``SessionMeta``, the event and its meta are
+        wrapped in an :class:`~tracemill.governance.envelope.EnrichedEvent` and
+        dispatched via ``sink.on_enriched_event`` — the ``{event, _governance}``
+        envelope. This is backward compatible: the event is *also* stamped with
+        ``metadata.governance`` (as before), and the base ``on_enriched_event``
+        default forwards a live event to ``on_event``, so a sink that only
+        implements ``on_event`` sees byte-identical output. When governance is not
+        wired, or produces no meta for this event kind, the bare event goes to
+        ``on_event`` exactly as before.
+        """
+        if self._governance is None:
+            await self._fanout((sink.on_event(event) for sink in self._sinks), f"event {event.id}")
+            return
+
+        stamped, meta = self._annotate_governance(event)
+        if meta is None:
+            await self._fanout(
+                (sink.on_event(stamped) for sink in self._sinks), f"event {stamped.id}"
+            )
+            return
+
+        from tracemill.governance.envelope import EnrichedEvent
+
+        enriched = EnrichedEvent(event=stamped, governance=meta)
+        await self._fanout(
+            (sink.on_enriched_event(enriched) for sink in self._sinks),
+            f"enriched event {stamped.id}",
+        )
+
+    def _annotate_governance(
+        self, event: SessionEvent
+    ) -> tuple[SessionEvent, "SessionMeta | None"]:
         """Score one event through the governance stage and stamp its SessionMeta.
 
-        Returns a copy of the event with ``metadata.governance`` populated. The
-        stage is error-isolated: on any governance failure the original event is
-        emitted unchanged (logged), so the observation stream is never blocked by
-        the governance stage.
+        Returns ``(event, meta)``: a copy of the event with
+        ``metadata.governance`` populated, alongside the ``SessionMeta`` itself
+        (or ``(event, None)`` when the stage produces no governance for this event
+        kind). The stage is error-isolated: on any governance failure the original
+        event is returned unchanged with ``None`` meta (logged), so the
+        observation stream is never blocked by the governance stage.
         """
         try:
             meta = self._governance.observe_event(event)
@@ -635,15 +668,15 @@ class EventPipeline:
                 exc,
                 exc_info=True,
             )
-            return event
+            return event, None
         if meta is None:
-            return event
+            return event, None
         metadata = event.metadata
         if metadata is None:
             metadata = EventMetadata.model_construct(governance=meta)
         else:
             metadata = metadata.model_copy(update={"governance": meta})
-        return event.model_copy(update={"metadata": metadata})
+        return event.model_copy(update={"metadata": metadata}), meta
 
     async def close(self) -> None:
         """Flush then close all sinks. Error-isolated."""

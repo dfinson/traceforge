@@ -46,7 +46,13 @@ from tracemill.governance.mcp_drift import MCPIntegrityScanner, MCPIntegrityAler
 from tracemill.governance.drift import DriftDetector, DriftAssessment
 from tracemill.governance.budget import BudgetThresholds, BudgetTracker
 from tracemill.governance.envelope import ContextGapEvent, EnrichedEvent
-from tracemill.governance.observer import TracemillObserver, AgentContext
+from tracemill.governance.emitter import EnrichedEmitter
+from tracemill.governance.observer import (
+    AgentContext,
+    GovernanceObserver,
+    TracemillObserver,
+    create_observer,
+)
 
 __all__ = [
     # Types
@@ -107,6 +113,9 @@ __all__ = [
     # Envelope & Observer
     "ContextGapEvent",
     "EnrichedEvent",
+    "EnrichedEmitter",
     "TracemillObserver",
+    "GovernanceObserver",
     "AgentContext",
+    "create_observer",
 ]

@@ -165,8 +165,7 @@ never bundles the titler weights and never approaches PyPI's 100 MiB per-file ca
 **One-time publishing setup (still pending — do once before the first tag):**
 
 - [x] Create the `pypi` **GitHub Environment** on the repo (optionally with required
-      reviewers) — see [§5](#5-pypi-trusted-publishing-oidc). *(Done — the `pypi`
-      environment exists on the repo.)*
+      reviewers) — see [§5](#5-pypi-trusted-publishing-oidc). (done — environment exists on the repo)
 - [ ] Register **PyPI Trusted Publishers** for **both** dists: `traceforge-toolkit`
       (`publish.yml`) and `traceforge-title-model` (`publish-title-model.yml`).
 

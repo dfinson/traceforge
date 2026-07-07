@@ -129,8 +129,31 @@ class Pipeline:
 
         Same knobs as :meth:`create`, but the governance engine is loaded from the
         given config file (see :meth:`GovernancePipeline.from_config`).
+
+        Sink hydration (SDK/CLI parity, issue #116): when ``sinks`` is **omitted**
+        (left as ``None``), the standard sinks declared in the config's pipelines
+        (``pipelines[].sinks``) are auto-built from their ``SinkConfig`` entries via
+        the shared :func:`traceforge.sinks.factory.build_sinks` — the same factory the
+        ``traceforge watch`` daemon uses. Sinks declared across multiple named
+        pipelines are flattened into one list, since the SDK backbone is a single
+        source/adapter-agnostic event stream and every declared sink is a live
+        destination.
+
+        Programmatic sinks always win: passing ``sinks=[...]`` — **including an
+        explicit empty list ``[]``** — is honored exactly and disables
+        auto-hydration. ``None`` is the sole "omitted" sentinel.
         """
         gov_engine = GovernancePipeline.from_config(path, policy=policy)
+
+        if sinks is None:
+            from traceforge.config.loader import load_config_from_path
+            from traceforge.sinks.factory import build_sinks
+
+            config = load_config_from_path(path)
+            sinks = build_sinks(
+                [sink_config for pipeline in config.pipelines for sink_config in pipeline.sinks]
+            )
+
         return cls._assemble(
             gov_engine,
             sinks=sinks,

@@ -226,28 +226,15 @@ async def _process_pipeline_once(
 
 
 def _build_sinks(pipeline: ResolvedPipeline) -> list:
-    """Instantiate the configured sink objects for a resolved pipeline (once)."""
-    from traceforge.sinks.console import ConsoleSink
-    from traceforge.sinks.jsonl import JsonlSink
-    from traceforge.sinks.sqlite_output import SqliteOutputSink
+    """Instantiate the configured sink objects for a resolved pipeline (once).
 
-    sinks: list = []
-    for sink_config in pipeline.sinks:
-        sink_type = getattr(sink_config, "type", None)
-        if sink_type == "console":
-            sinks.append(
-                ConsoleSink(
-                    filter_actions=getattr(sink_config, "filter", None),
-                    color=getattr(sink_config, "color", True),
-                )
-            )
-        elif sink_type == "sqlite":
-            sinks.append(SqliteOutputSink(path=sink_config.path))
-        elif sink_type == "jsonl":
-            sinks.append(JsonlSink(path=sink_config.path))
-        else:
-            logger.warning("Unknown sink type %r in pipeline %s", sink_type, pipeline.name)
-    return sinks
+    Delegates to the shared :func:`traceforge.sinks.factory.build_sinks` so the
+    daemon and the SDK build sinks from one mapping of the full ``SinkConfig``
+    union.
+    """
+    from traceforge.sinks.factory import build_sinks
+
+    return build_sinks(pipeline.sinks)
 
 
 def _build_pipeline_runtime(pipeline: ResolvedPipeline, governance: "GovernancePipeline"):

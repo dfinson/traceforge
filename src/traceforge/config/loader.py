@@ -197,6 +197,33 @@ def load_config(**overrides: Any) -> TraceforgeConfig:
     return _config
 
 
+def load_config_from_path(path: Any = None) -> TraceforgeConfig:
+    """Resolve a full ``TraceforgeConfig``, optionally forcing a specific file.
+
+    When ``path`` is given it becomes the sole config source (applied via the
+    ``TRACEFORGE_CONFIG`` override, then restored); when ``None`` the standard
+    discovery chain runs (``TRACEFORGE_CONFIG`` env, ``./traceforge.yaml``,
+    ``~/.traceforge/config.yaml``).
+
+    This is the single ``path -> config`` resolution shared by the SDK
+    (:meth:`traceforge.sdk.Pipeline.from_config`) and governance
+    (:meth:`traceforge.governance.pipeline.GovernancePipeline.from_config`)
+    entry points, so both hydrate from the same resolved config.
+    """
+    if path is None:
+        return load_config()
+
+    old_env = os.environ.get("TRACEFORGE_CONFIG")
+    os.environ["TRACEFORGE_CONFIG"] = str(path)
+    try:
+        return load_config()
+    finally:
+        if old_env is None:
+            os.environ.pop("TRACEFORGE_CONFIG", None)
+        else:
+            os.environ["TRACEFORGE_CONFIG"] = old_env
+
+
 def get_config() -> TraceforgeConfig:
     """Get the current config singleton, loading defaults if needed."""
     global _config

@@ -8,7 +8,7 @@ description: traceforge.yaml, ~/.traceforge/config.yaml, TRACEFORGE_* environmen
 # Configuration
 
 TraceForge reads a hierarchical configuration from YAML files and environment variables. A
-config file is optional — sensible defaults apply on first use.
+config file is optional, sensible defaults apply on first use.
 
 ## Loading precedence
 
@@ -25,8 +25,8 @@ From highest to lowest priority:
 
 On first config access, `~/.traceforge/` is auto-created with:
 
-- `config.yaml` — a default configuration template.
-- `mappings/` — a directory for your custom [YAML mappings](reference/adapters.md).
+- `config.yaml`: a default configuration template.
+- `mappings/`: a directory for your custom [YAML mappings](reference/adapters.md).
 
 No separate init step is required, though `traceforge config init` will write the default
 config explicitly.
@@ -37,7 +37,7 @@ config explicitly.
 | --- | --- |
 | `TRACEFORGE_CONFIG` | Explicit config file path. |
 | `TRACEFORGE_LOG_LEVEL` | Scalar override (`DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL`). |
-| `TRACEFORGE_SDK__BATCH_SIZE` | Nested override — double underscore denotes nesting. |
+| `TRACEFORGE_SDK__BATCH_SIZE` | Nested override, double underscore denotes nesting. |
 | `TRACEFORGE_PHASE_MODEL` | Path override for the phase classifier model bundle. |
 
 The double-underscore convention maps to nested config keys, so
@@ -46,7 +46,7 @@ The double-underscore convention maps to nested config keys, so
 :::note API keys are never read from config
 When [session naming](reference/live-structuring.md#session-naming) uses the optional API
 refiner, the API key is sourced by LiteLLM from the provider's conventional environment
-variable (`OPENAI_API_KEY`, `AZURE_API_KEY`, …) — **never** from the config file.
+variable (`OPENAI_API_KEY`, `AZURE_API_KEY`, …), **never** from the config file.
 :::
 
 ## Root config schema
@@ -64,7 +64,7 @@ class SDKConfig(StrictModel):
     max_queue_size: int = 10000
 ```
 
-Config objects are `StrictModel` — unknown fields are rejected, so typos fail loudly.
+Config objects are `StrictModel`, unknown fields are rejected, so typos fail loudly.
 
 ## Pipelines
 
@@ -80,8 +80,8 @@ class PipelineConfig(StrictModel):
 
 The `type` discriminators available in config:
 
-- **Sources**: `file_watch`, `poll`, `http_poll`, `sse`, `replay`.
-- **Adapters**: `mapped_json`, `otel`.
+- **Sources**: `file_watch`, `file_poll`, `http_poll`, `sse`, `replay`.
+- **Adapters**: `mapped_json`, `otel_span`.
 - **Sinks**: `sqlite`, `jsonl`, `s3`, `console`, `webhook`, `otel`.
 
 ```yaml
@@ -92,8 +92,8 @@ pipelines:
   - name: copilot-local
     source:
       type: file_watch
-      path: ~/.copilot/logs/
-      glob: "*.jsonl"
+      path: ~/.copilot/logs/session.jsonl   # one agent log file
+      start_at: end                          # or "beginning" to replay existing lines
     adapter:
       type: mapped_json
       mapping: copilot
@@ -102,7 +102,7 @@ pipelines:
         path: ./events.db
       - type: jsonl
         path: ./output/events.jsonl
-        rotate_mb: 100
+        rotate_size_mb: 100
 ```
 
 ## Governance section
@@ -143,4 +143,4 @@ title:
 ```
 
 When `strategy: api` but no key is present (or a call fails/times out), naming silently falls
-back to the heuristic — a missing key never errors or blocks.
+back to the heuristic, a missing key never errors or blocks.

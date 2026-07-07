@@ -2,7 +2,7 @@
 id: overview
 title: Governance Overview
 sidebar_label: Overview
-description: The monitor observes, the shield enforces — an observation-first assessment engine that recommends, leaving final authority with the consumer.
+description: The monitor observes, the shield enforces, an observation-first assessment engine that recommends, leaving final authority with the consumer.
 ---
 
 # Governance Overview
@@ -40,7 +40,7 @@ Two compositions of the same collaborators:
 1. Agent session starts
 2. traceforge observation pipeline starts (reads from configured source)
 3. Events stream in -> parse -> enrich -> classify -> structure -> observe (monitor stage)
-   • SessionState advances once per real tool call — the single writer, single counter
+   • SessionState advances once per real tool call (single writer, single counter)
    • Each emitted event carries its SessionMeta on metadata.governance; sinks persist
 4. IF a Shield (GatePolicy) is registered AND a pre-execution hook fires:
    a. Hook relays the pending call (score_tool_call / traceforge gate)
@@ -52,8 +52,8 @@ Two compositions of the same collaborators:
    • Denied events: never in source, never committed -> no state mutation
 ```
 
-Because `score_tool_call()` is **read-only**, blocked calls never corrupt budget / taint state
-— the monitor is the single source of truth for state mutations.
+Because `score_tool_call()` is **read-only**, blocked calls never corrupt budget or taint
+state; the monitor stays the single source of truth for state mutations.
 
 ## What TraceForge owns vs the consumer
 
@@ -82,9 +82,9 @@ Because `score_tool_call()` is **read-only**, blocked calls never corrupt budget
 | PydanticAI | In-process | `pipeline.gate_pydantic_ai(agent)` | ✓ |
 | MAF / Semantic Kernel | In-process | `pipeline.gate_maf()` | ✓ |
 | smolagents | Class wrap | `pipeline.gate_smolagents()` | ✓ |
-| Aider / SWE-agent | None | — | ✗ (observation only) |
+| Aider / SWE-agent | None | n/a | ✗ (observation only) |
 
-Aider and SWE-agent have no pre-execution hook — TraceForge observes and scores their events,
+Aider and SWE-agent have no pre-execution hook. TraceForge observes and scores their events,
 but no consumer can block their tool calls.
 
 Continue to the **[Governance Extensions](extensions.md)** for what the assessment measures, the

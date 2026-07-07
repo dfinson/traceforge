@@ -2,7 +2,7 @@
 id: overview
 title: Architecture Overview
 sidebar_label: Overview
-description: The TraceForge observation pipeline — Source, Parser, Adapter, Enricher, Pipeline, and Sinks — plus the synchronous gate path.
+description: The TraceForge observation pipeline, Source, Parser, Adapter, Enricher, Pipeline, and Sinks, plus the synchronous gate path.
 ---
 
 # Architecture Overview
@@ -64,13 +64,32 @@ Gate:        Hook Payload → Adapter.parse_one() → Enricher.classify() → Sh
   `classify/` and `mappings/` with observation but operates on a single event and returns a
   `Verdict` instead of writing to sinks.
 
+Both paths use the same public API. One `Pipeline` object carries observation (async
+`push` to sinks) and the opt-in gate layer (synchronous allow/deny at the tool boundary):
+
+```python
+from traceforge.sdk import Pipeline, GatePolicy, Verdict, ToolCallRequest, GateContext
+from traceforge.sinks.jsonl import JsonlSink
+
+def preflight(request: ToolCallRequest, ctx: GateContext) -> Verdict:
+    if request.risk_score >= 80:
+        return Verdict.deny(f"risk {request.risk_score} exceeds threshold")
+    return Verdict.allow()
+
+pipeline = Pipeline.create(
+    sinks=[JsonlSink("events.jsonl")],         # observation: async fan-out to sinks
+    policy=GatePolicy().preflight(preflight),  # gate: synchronous allow/deny
+)
+safe_tool = pipeline.gate_langchain(my_tool)   # wrap a tool at the boundary
+```
+
 ## Record types
 
 Three record types flow through sinks:
 
 | Record | Purpose |
 | --- | --- |
-| `SessionEvent` | The primary event type — all enrichment applies here. |
+| `SessionEvent` | The primary event type, all enrichment applies here. |
 | `TelemetrySpan` | Derived span data (start/end pairs). |
 | `UsageRecord` | LLM token / cost accounting. |
 

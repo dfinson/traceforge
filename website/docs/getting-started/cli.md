@@ -2,7 +2,7 @@
 id: cli
 title: CLI Reference
 sidebar_label: CLI
-description: Every TraceForge command — watch, replay, score, gate, detect, init, status, config, and download-model.
+description: Every TraceForge command, watch, replay, score, gate, detect, init, status, config, and download-model.
 ---
 
 # CLI Reference
@@ -106,7 +106,7 @@ traceforge detect --json-output # JSON array (name, path, adapter, ingestion_mod
 ## `init`
 
 Auto-inject a TraceForge hook configuration for a supported agent. Today `claude-code` is
-supported — it writes a `PreToolUse` hook to `.claude/settings.json` calling
+supported, it writes a `PreToolUse` hook to `.claude/settings.json` calling
 `traceforge gate --stdin`.
 
 ```bash

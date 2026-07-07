@@ -2,39 +2,35 @@
 id: extensions
 title: Governance Extensions
 sidebar_label: Extensions
-description: The assessment substrate — risk recommendations, MCP integrity, budget tracking, PII, information-flow control, drift, and evidence.
+description: The assessment substrate, risk recommendations, MCP integrity, budget tracking, PII, information-flow control, drift, and evidence.
 ---
 
 # Governance Extensions
 
 The governance assessment **extends the existing classification substrate** (the 7-dimension
 taxonomy, tree-sitter AST, phase detection, taint analysis) rather than adding parallel systems.
-TraceForge classifies and labels; it never gates, blocks, or modifies execution on its own —
-`deny` / `escalate` / `transform` are **classification labels**, recommendations that TraceForge
-emits but never enforces.
+TraceForge classifies and labels; it never gates, blocks, or modifies execution on its own.
+`deny`, `escalate`, and `transform` are **classification labels**: recommendations that
+TraceForge emits but never enforces.
 
-## The two-phase enrichment pipeline
+## What the assessment adds
 
-Governance enrichment runs as phases inside the engine, keyed for idempotency by a stable
-`source_event_key`:
+On top of the base classification, governance layers extra labels, a risk score, and a
+recommendation onto every event, without ever mutating the event. For each tool call it:
 
-1. **State update** *(idempotent)* — base classification, phase detection, and a single advance
-   of `SessionState`: increment budget counters (by phase, mechanism, effect, scope, capability,
-   role), update the phase window, refresh MCP profile `last_seen`, and track motivation /
-   lineage. Lifecycle events (session start/end) run this phase only.
-2. **Label enrichment** *(pure reads of a state snapshot)* — PII scan, IFC check, content
-   integrity check, budget pressure, phase drift, and MCP drift, producing enriched
-   classification labels and risk modifiers.
-3. **Scoring & recommendation** — apply drift/IFC bonuses to the base risk score, evaluate the
-   data-driven rules, and (on a match) materialize a `RiskRecommendation`, a canonical action
-   identity, and an `Evidence` object.
+- scans arguments and output for PII and credentials,
+- tracks information flow against a clearance lattice (taint analysis),
+- verifies content integrity against known state,
+- counts per-session budgets and flags budget pressure,
+- detects phase drift and MCP profile drift, and
+- evaluates data-driven rules to emit a recommendation backed by an `Evidence` record.
 
-Events are never mutated: sinks receive an envelope pairing the original event with its
-`SessionMeta`.
+The result is a `SessionMeta`. Sinks receive an envelope pairing the original event with its
+assessment, so nothing downstream has to re-classify.
 
 ## Substrate additions
 
-Governance registers new dimension values in the existing `DimensionRegistry`:
+Governance adds classification labels for its own concerns:
 
 ```yaml
 capability:
@@ -62,9 +58,9 @@ structure:
 | 6 | **IFC Source Labels** | Information-flow control over a `PUBLIC < INTERNAL < CONFIDENTIAL < SECRET` lattice with a taint ledger; flags `ifc_violation` when data flows to a tool below its clearance. |
 | 7 | **Transform Suggestion** | Recommends a `transform` (e.g. redaction) rather than an outright deny when a safer form of the action exists. |
 | 8 | **Phase-Aware Drift** | Compares the session's phase window against a baseline to flag `phase_anomaly`. |
-| 9 | **Observer Protocol** | `TraceforgeObserver` — the external, host-facing protocol that delegates to the enricher internally. |
+| 9 | **Observer Protocol** | `TraceforgeObserver`, the host-facing protocol for embedding governance assessment inside another application. |
 | 10 | **Escalation Context** | Assembles the context a human-in-the-loop reviewer needs when an action escalates. |
-| 11 | **Evidence Objects** | A structured record of *why* a recommendation fired — matched rule id, contributing classification fields, and canonical id. |
+| 11 | **Evidence Objects** | A structured record of *why* a recommendation fired, matched rule id, contributing classification fields, and canonical id. |
 | 12 | **Content Integrity** | Hashes content against known state to detect unverified / tampered content (`integrity_unverified`). |
 
 ## Recommendation rules

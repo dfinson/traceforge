@@ -8,7 +8,7 @@ description: The multi-dimensional classification engine, shell AST analysis, MC
 # Classification & Risk
 
 TraceForge classifies every tool invocation along **seven independent dimensions**, then
-derives a 0–100 risk score. The engine is YAML-driven — rules, weights, and profiles are all
+derives a 0–100 risk score. The engine is YAML-driven, rules, weights, and profiles are all
 externalized to data files, not code.
 
 ## Dimensions
@@ -44,25 +44,30 @@ class Classification:
 
 ## Three classification paths
 
-- **Shell commands** — deep AST analysis. Bash and PowerShell use tree-sitter grammars; cmd.exe
+- **Shell commands**: deep AST analysis. Bash and PowerShell use tree-sitter grammars; cmd.exe
   uses lightweight tokenization. Shared infrastructure unwraps transparent wrappers (`env`,
   `sudo`, `nohup`, …), classifies binaries via rule tables, analyzes subcommands and flags,
   detects activity (verification, delivery, setup, investigation, implementation), and groups
   per-command phases into a `phase_map`.
-- **Native tools** — static lookup via declarative classification tables.
-- **MCP tools** — profile-based classification keyed on the `mcp__<server>__<tool>` namespace.
+- **Native tools**: static lookup via declarative classification tables.
+- **MCP tools**: profile-based classification keyed on the `mcp__<server>__<tool>` namespace.
+
+### Classifying directly
+
+Most classification runs inside the [Enricher](enrichment.md), but you can call the classifiers
+yourself with a default engine:
 
 ```python
-@dataclass(frozen=True)
-class McpServerProfile:
-    namespace_aliases: tuple[str, ...]   # e.g. ("github", "gh")
-    mechanism: str
-    role: frozenset[str]
-    default_effect: str | None
-    scope: frozenset[str]
-    action: frozenset[str]
-    capability: frozenset[str]
-    tool_overrides: dict[str, McpToolOverride]
+from traceforge import classify_shell, classify_tool
+from traceforge.classify import get_default_engine
+
+engine = get_default_engine()
+
+shell = classify_shell("rm -rf build && git push", engine=engine)
+# shell.mechanism, shell.effect, and shell.capability describe the command
+
+tool = classify_tool("mcp__github__create_issue", engine=engine)
+# profile-based Classification for the MCP tool
 ```
 
 ## Risk scoring
@@ -82,11 +87,11 @@ class RiskAssessment:
 
 Five scoring layers combine:
 
-1. **Structural** — effect × scope (from the Classification).
-2. **Flag modifiers** — per-binary flag rules (from `risk.yaml`).
-3. **Injection patterns** — regex-matched evasion / injection patterns (capped).
-4. **Pipeline taint** — source→sink flow escalation through pipe operators.
-5. **Context** — project-relative path targeting adjustments.
+1. **Structural**: effect × scope (from the Classification).
+2. **Flag modifiers**: per-binary flag rules (from `risk.yaml`).
+3. **Injection patterns**: regex-matched evasion / injection patterns (capped).
+4. **Pipeline taint**: source→sink flow escalation through pipe operators.
+5. **Context**: project-relative path targeting adjustments.
 
 ## Data files
 

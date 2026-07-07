@@ -2,22 +2,15 @@
 id: event-model
 title: Event Model
 sidebar_label: Event Model
-description: The core immutable domain types — EventKind, SessionEvent, EventMetadata, TelemetrySpan, and UsageRecord.
+description: The core immutable domain types, EventKind, SessionEvent, EventMetadata, TelemetrySpan, and UsageRecord.
 ---
 
 # Event Model
 
 Every stage of the pipeline speaks in terms of a small set of **immutable** domain types.
-All domain objects inherit from `FrozenModel` (a frozen Pydantic model); all
-configuration/schema objects inherit from `StrictModel` (rejects unknown fields).
-
-```python
-class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-class FrozenModel(BaseModel):
-    model_config = ConfigDict(frozen=True)
-```
+Domain objects are frozen Pydantic models, so an event can be shared across sinks without one
+stage mutating another's view. Configuration and schema objects reject unknown fields, so
+typos fail loudly instead of passing silently.
 
 ## EventKind
 
@@ -122,6 +115,23 @@ class UsageRecord(FrozenModel):
     cost_usd: float | None   # >= 0
 ```
 
-The governance engine adds two further records — the unified `EventTrace` and the stateful
+The governance engine adds two further records, the unified `EventTrace` and the stateful
 `SessionMeta` attached to `metadata.governance`. Those are covered in the
 [SDK & Governance Engine](../reference/sdk.md) reference.
+
+## Reading events
+
+Consume enriched events with a `CallbackSink`. Each event arrives fully classified, so you
+can read `kind`, classification, and timing straight off the object:
+
+```python
+from traceforge import CallbackSink
+from traceforge.sdk import Pipeline
+
+async def on_event(event):
+    md = event.metadata
+    print(event.kind, md.classification, md.duration_ms)
+
+async with Pipeline.create(sinks=[CallbackSink(on_event=on_event)]) as pipeline:
+    await pipeline.push(raw_event)
+```

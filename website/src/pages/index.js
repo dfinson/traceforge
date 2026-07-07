@@ -10,11 +10,11 @@ const STAGES = ['Source', 'Parser', 'Adapter', 'Enricher', 'Pipeline', 'Sink(s)'
 const FEATURES = [
   {
     title: 'Framework-agnostic',
-    body: 'Support a new agent framework by writing a single YAML mapping — no Python required. 16+ frameworks ship out of the box.',
+    body: 'Add a new agent framework with a single YAML mapping, no Python required. 22 mappings ship out of the box.',
   },
   {
-    title: 'CPU-only, no torch',
-    body: 'Live phase, boundary, and title structuring runs on packaged ONNX models. No GPU, no heavyweight ML stack.',
+    title: 'Runs anywhere',
+    body: 'Installs and runs anywhere Python does, from a laptop to CI. No GPU or heavyweight ML stack; phase, boundary, and title structuring run on packaged ONNX models.',
   },
   {
     title: 'Classification & risk',
@@ -22,15 +22,15 @@ const FEATURES = [
   },
   {
     title: 'Governance built in',
-    body: 'Data labeling, information-flow control, drift and budget tracking, and rule-driven recommendations — with an opt-in gate layer.',
+    body: 'Data labeling, information-flow control, drift and budget tracking, and rule-driven recommendations, with an opt-in gate layer.',
   },
   {
     title: 'Eight storage sinks',
-    body: 'JSONL, SQLite, Parquet, S3, OTLP, webhook, console, and callback sinks — all configurable from YAML with error isolation.',
+    body: 'JSONL, SQLite, Parquet, S3, OTLP, webhook, console, and callback sinks, all configurable from YAML with error isolation.',
   },
   {
     title: 'Observation-first',
-    body: 'Observes, enriches, and recommends by default — never touching agent behavior. Enforcement is a separate, opt-in gate layer you switch on when you want it.',
+    body: 'Observes, enriches, and recommends by default. Enforcement is a separate, opt-in gate layer you switch on when you want it.',
   },
 ];
 
@@ -46,7 +46,7 @@ function Hero() {
         </Heading>
         <p className={styles.heroTagline}>Observe. Understand. Control.</p>
         <p className={styles.heroPitch}>
-          A framework-agnostic, CPU-only Python library that forges raw AI-agent traces into
+          A framework-agnostic Python library that forges raw AI-agent traces into
           structured, classified, risk-scored, and governance-assessed output.
         </p>
         <div className={styles.heroButtons}>
@@ -100,7 +100,7 @@ export default function Home() {
   return (
     <Layout
       title="Observe. Understand. Control."
-      description="Framework-agnostic, CPU-only Python pipeline that forges AI-agent traces into structured, classified, risk-scored, and governance-assessed output.">
+      description="Framework-agnostic Python pipeline that forges AI-agent traces into structured, classified, risk-scored, and governance-assessed output.">
       <Hero />
       <main>
         <Features />

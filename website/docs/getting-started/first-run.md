@@ -18,8 +18,8 @@ pipelines:
   - name: copilot-local
     source:
       type: file_watch
-      path: ~/.copilot/logs/
-      glob: "*.jsonl"
+      path: ~/.copilot/logs/session.jsonl   # one agent log file
+      start_at: end                          # or "beginning" to replay existing lines
     adapter:
       type: mapped_json
       mapping: copilot

@@ -2,24 +2,18 @@
 id: adapters
 title: Adapters, Mappings, Preprocessors & Parsers
 sidebar_label: Adapters & Mappings
-description: How raw input becomes a SessionEvent — the MappedJsonAdapter, the YAML mapping system, preprocessors, and markdown parsers.
+description: How raw input becomes a SessionEvent, the MappedJsonAdapter, the YAML mapping system, preprocessors, and markdown parsers.
 ---
 
 # Adapters, Mappings, Preprocessors & Parsers
 
 Adapters turn raw input into a stream of `SessionEvent`s. The primary adapter is **data-driven
-via YAML** — supporting a new framework is usually just a new mapping file, no Python.
+via YAML**: supporting a new framework is usually just a new mapping file, no Python.
 
 ## Adapters
 
-```python
-class Adapter(ABC):
-    def parse(self, raw: bytes | str) -> Iterator[SessionEvent]: ...
-
-class JsonLineAdapter(Adapter):
-    """Handles bytes→str, JSON parsing, dict validation."""
-    def parse_dict(self, obj: dict[str, Any]) -> Iterator[SessionEvent]: ...
-```
+An adapter takes raw input (JSON lines or OTel spans) and yields `SessionEvent`s. Two ship
+today:
 
 | Adapter | Input | Mechanism |
 | --- | --- | --- |
@@ -47,7 +41,7 @@ camelCase keys, computes duration from start/end nanoseconds, extracts attribute
 `maf.yaml`, and maps status codes to error kinds.
 
 :::note OTel spans carry structure, not content
-MAF OTel spans carry only structural metadata (timing, routing, counts) — not message text.
+MAF OTel spans carry only structural metadata (timing, routing, counts), not message text.
 For full activity content, use the `maf_transcript` mapping with `MappedJsonAdapter`, which
 reads JSONL from the SDK's `TranscriptLoggerMiddleware`. The two adapters are complementary.
 :::
@@ -65,7 +59,7 @@ timestamp_field: timestamp       # dot-path to the timestamp
 default_kind: raw                # kind for unmapped event types
 preprocessor: claude             # optional: registered preprocessor name
 
-motivation:                      # optional — see below
+motivation:                      # optional; see below
   sources:
     - events: ["assistant.message", "assistant.intent"]
       field: content
@@ -83,7 +77,7 @@ events:
 
 ### Motivation tracking
 
-Tool-call events gain context from the assistant messages that preceded them — the
+Tool-call events gain context from the assistant messages that preceded them, the
 "motivation" for a call. Configured declaratively per framework via the `motivation:` block,
 it populates `metadata.motivation` (a `ToolMotivation` with `intent`, `reasoning`, and a
 rolling window of `source_event_ids`).
@@ -129,19 +123,11 @@ Search order (first match wins), so user mappings override bundled ones with the
 
 ## Preprocessors
 
-Preprocessors normalize raw dicts into flat dicts suitable for `type_field`-based mapping —
+Preprocessors normalize raw dicts into flat dicts suitable for `type_field`-based mapping,
 handling compound discriminators, nested structures, and field-presence typing. They are
-registered by name and referenced from a mapping's `preprocessor` field.
-
-```python
-PreprocessorFn = Callable[[dict[str, Any]], list[dict[str, Any]]]
-
-@register_preprocessor("claude")
-def preprocess_claude(obj: dict) -> list[dict]: ...
-```
-
-Each takes one raw dict and returns a list of flat dicts (one input may expand to several
-events). Fourteen preprocessors ship, including `claude`, `cline`, `goose`, `openhands`,
+registered by name and referenced from a mapping's `preprocessor` field, and each one turns a
+single raw dict into a list of flat dicts (one input may expand to several events). Fourteen
+preprocessors ship, including `claude`, `cline`, `goose`, `openhands`,
 `pydantic_ai`, `smolagents`, `amazonq`, `antigravity`, `codex`, `continue_dev`,
 `copilot_vscode`, `maf_transcript`, `openai_agents`, and `opencode`.
 
@@ -149,15 +135,7 @@ events). Fourteen preprocessors ship, including `claude`, `cline`, `goose`, `ope
 
 For frameworks that don't emit JSONL natively, a **pre-parser** converts unstructured formats
 (markdown, log files) into structured event dicts that then flow through `MappedJsonAdapter`.
-
-```python
-class MarkdownPreParser(ABC):
-    """Tree-sitter markdown AST parser with incremental support."""
-    def parse_file(self, path: Path) -> Iterator[dict[str, Any]]: ...
-    def parse_text(self, text: str) -> Iterator[dict[str, Any]]: ...
-    def parse_chunk(self, chunk: str) -> Iterator[dict[str, Any]]: ...
-    def flush(self) -> Iterator[dict[str, Any]]: ...
-```
+Two ship today:
 
 | Parser | Input | Output mapping |
 | --- | --- | --- |

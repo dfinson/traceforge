@@ -13,7 +13,7 @@ This page adapts the internal design spec
 It documents advanced structuring behavior for contributors and power users.
 :::
 
-Every tool-call event is labeled with its **activity** — the *intrinsic purpose* of that one
+Every tool-call event is labeled with its **activity**: the *intrinsic purpose* of that one
 call (a `view` is `retrieval` regardless of context). The **Phase Tracker** answers a different,
 session-level question: *what aggregate stage is the agent operating in right now?* It produces a
 streaming timeline of phase blocks plus cumulative statistics, so a summary can answer "when did
@@ -36,12 +36,12 @@ not phases themselves. Both use the project's dot-path convention (e.g. `retriev
 
 All output types are frozen. The tracker emits three shapes:
 
-- **`PhaseBlock`** — a contiguous run of events dominated by one phase: `session_id`, `phase`,
+- **`PhaseBlock`**: a contiguous run of events dominated by one phase: `session_id`, `phase`,
   `phase_root`, `start_time`/`end_time`, `event_count`, `tool_names`, `dominant_motivation`, and
   `minority_activities` (signals that pointed elsewhere inside the block).
-- **`PhaseTimeline`** — the full segmentation of a session: an appended tuple of `blocks` plus
+- **`PhaseTimeline`**: the full segmentation of a session: an appended tuple of `blocks` plus
   `transitions`, built incrementally (the last block may still be open).
-- **`PhaseSummary`** — aggregate stats derived from a finalized timeline: `by_phase`
+- **`PhaseSummary`**: aggregate stats derived from a finalized timeline: `by_phase`
   percentages, `transition_count`, and `most_common_transitions`.
 
 ## Segmentation: debounced majority vote
@@ -65,23 +65,23 @@ on observe(activity, ts, event_id):
 ```
 
 This is deliberately *not* a learned segmenter or BOCPD/HMM: sessions are short (100–500 events
-typically), activity labels are crisp categorical signals, and the algorithm is O(1) per event —
-a learned segmenter is an open research track, not a v1 requirement.
+typically), activity labels are crisp categorical signals, and the algorithm is O(1) per event.
+A learned segmenter is an open research track, not a v1 requirement.
 
 ## The per-event phase classifier
 
 `metadata.phase` itself is produced by a **trained per-event classifier**
-(`traceforge.phase.inference.PhaseInferencer`), not by rules — there is no deterministic
+(`traceforge.phase.inference.PhaseInferencer`), not by rules; there is no deterministic
 fallback. Its ML dependencies (scikit-learn / scipy / joblib / model2vec) live in **core**, not
 an optional extra, and the featurizer is shared verbatim by training and runtime. Every feature
-is **causal** (trailing centroids, windowed majority/entropy — no future window), so a phase
+is **causal** (trailing centroids, windowed majority/entropy, no future window), so a phase
 depends only on an event's own prefix and can be stamped the instant the event arrives.
 Streaming and batch produce identical results.
 
 ## Persistence & configuration
 
-Phase blocks are first-class pipeline data — emitted to sinks and the system DB on each boundary
-commit — so a live consumer sees the timeline grow in real time. Algorithm parameters
+Phase blocks are first-class pipeline data, emitted to sinks and the system DB on each boundary
+commit, so a live consumer sees the timeline grow in real time. Algorithm parameters
 (`WINDOW_SIZE`, `DEBOUNCE`, grouping depth) are config-driven via `config/phase_tracker.yaml`,
 keeping the tracker free of hardcoded taxonomy.
 

@@ -8,8 +8,8 @@ description: The Pipeline facade, the GovernancePipeline composition root, Event
 # SDK & Governance Engine
 
 TraceForge's SDK composes two halves into one object: the **observation backbone**
-(`EventPipeline` — enrich → classify → structure → sinks) and the **governance engine**
-(`GovernancePipeline` — the monitor, plus an optional shield).
+(`EventPipeline`, enrich → classify → structure → sinks) and the **governance engine**
+(`GovernancePipeline`, the monitor, plus an optional shield).
 
 Governance is neither a separate track nor the whole pipeline. It is a **runtime monitor** over
 a session's event trace, plus an optional **shield** at the framework's execution boundary. See
@@ -89,7 +89,7 @@ clone** of current state, committing nothing. Writer and reader share the same `
 
 ## Unified records
 
-`EventTrace` is the frozen unified record — identity, classification, and assessment on one
+`EventTrace` is the frozen unified record, identity, classification, and assessment on one
 object:
 
 ```python
@@ -127,7 +127,7 @@ class RecommendedAction(StrEnum):
 ```
 
 These are **recommendations** from the rules engine (the `Assessor`). On their own they enforce
-nothing — a registered `GatePolicy` is what turns a recommendation into an enforced `Verdict`.
+nothing, a registered `GatePolicy` is what turns a recommendation into an enforced `Verdict`.
 
 ## The object model
 
@@ -136,22 +136,21 @@ dependency injection at the `GovernancePipeline` root.
 
 | Collaborator | Single responsibility |
 | --- | --- |
-| `SessionState` | One session's accumulators — **one** tool-call counter, budget, taint ledger, phase window, gate history. Mutated only through its own methods. |
+| `SessionState` | One session's accumulators, **one** tool-call counter, budget, taint ledger, phase window, gate history. Mutated only through its own methods. |
 | `SystemStore` | Durability: idempotency reservations, atomic commit, crash recovery, audit persistence. |
 | `SessionRegistry` | Residency: where sessions are created/found, with durable (DB-backed) and ephemeral (gate) scopes kept separate. |
-| `Phase1` | The Phase-1 state-advance step — budget, taint (IFC), phase window, pressure. |
-| `Assessor` | `(snapshot, event) -> SessionMeta` — label + risk + recommendation + drift + MCP. Side-effect-free. |
+| `Phase1` | The Phase-1 state-advance step, budget, taint (IFC), phase window, pressure. |
+| `Assessor` | `(snapshot, event) -> SessionMeta`, label + risk + recommendation + drift + MCP. Side-effect-free. |
 | `SessionMonitor` | The **single writer**: advance the real `SessionState`, commit atomically, then assess. |
 | `Scorer` | The **read side**: preview `Phase1` + `Assessor` against a **detached clone**, mutating nothing. |
 | `GatePolicy` | Map an assessed request/result to a `Verdict` (pre) / `PostflightVerdict` (post). |
 | `Shield` | Runtime enforcement: build gate context, run the policy's chains, record allow/deny. |
 | `GovernancePipeline` | Composition root + facade wiring all of the above. |
 
-Design constraints: **one state authority** (a single tool-call counter), **single writer**
-(only the monitor advances state), **monitor observes / shield enforces** (enforcement is opt-in),
-**program to interfaces** (`Assessor` and `GatePolicy` are injected strategies), **determinism**
-(non-deterministic enrichment is captured onto the event, never re-derived — so replay reproduces
-the live assessment), **no framework deps in the core**, **rules are data**, and **fail-closed
-enforcement** (any error in the shield's chains yields DENY / SUPPRESS).
+The engine holds to a few guarantees: the monitor is the **single writer** (only it advances
+state), the shield is **opt-in** (observation never enforces), and replay **reproduces the live
+assessment** (enrichment is captured onto the event, never re-derived). The core carries **no
+framework dependencies**, rules are **data, not code**, and enforcement is **fail-closed** (any
+error in the shield's chains yields DENY / SUPPRESS).
 
 For enforcement patterns and framework adapters, see the [Gate](../governance/gate.md) page.

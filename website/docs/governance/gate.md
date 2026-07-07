@@ -51,7 +51,7 @@ prints a verdict in the framework's format:
 
 ```bash
 #!/bin/bash
-# Claude Code PreToolUse hook — consumer's script
+# Claude Code PreToolUse hook (consumer's script)
 echo "$TOOL_EVENT_JSON" | traceforge gate --stdin --format claude-code
 # the JSON/exit-code verdict is consumed by the agent's native hook contract
 ```
@@ -78,7 +78,7 @@ async def can_use_tool(tool_name, input_data, session_id):
     return trace.suggested_action not in ("deny", "escalate", "transform")
 ```
 
-`score_tool_call()` is read-only — it scores against accumulated state but does **not** advance
+`score_tool_call()` is read-only: it scores against accumulated state but does **not** advance
 the counter, budget, taint, or drift. State changes only when the monitor observes an event from
 its source, so blocked calls never corrupt budget or taint.
 

@@ -4,15 +4,15 @@ Thanks for your interest in improving TraceForge! This guide covers local setup,
 workflow, how to add support for a new agent framework, and our commit/PR conventions.
 
 TraceForge is a **docs-and-code** project with a strict scope discipline: by default it
-*observes and enriches* agent traces without modifying agent behavior, and any enforcement is a
-separate, opt-in layer. Please keep changes aligned with the
+*observes and enriches* agent traces, and any behavior-changing enforcement is a separate,
+opt-in layer. Please keep changes aligned with the
 [design principles](#design-principles) below.
 
 ## Prerequisites
 
 - **Python 3.11, 3.12, or 3.13** (CI tests all three).
 - **[uv](https://docs.astral.sh/uv/)** for environment and dependency management.
-- **Git** with LFS enabled (`git lfs install`) — some test fixtures are stored via LFS.
+- **Git** with LFS enabled (`git lfs install`); some test fixtures are stored via LFS.
 
 ## Development setup
 
@@ -24,7 +24,7 @@ cd traceforge
 uv sync --group dev
 ```
 
-`uv sync --group dev` installs the dev toolchain into `.venv` — `pytest` plus the agent-framework
+`uv sync --group dev` installs the dev toolchain into `.venv`, `pytest` plus the agent-framework
 libraries (CrewAI, LangChain, LangGraph, Semantic Kernel, smolagents, OpenAI Agents) that the gate
 adapter tests import. This mirrors the CI **Test** job exactly.
 
@@ -43,7 +43,7 @@ uv run pytest -q
 
 The suite lives under `tests/` with `unit/`, `integration/`, and `e2e/` subdirectories. The
 `e2e/test_raw_traces.py` golden harness replays committed raw traces through the real mappings and
-fails on any unmapped (`raw`) fallthrough — see [Adding a framework](#adding-a-new-agent-framework).
+fails on any unmapped (`raw`) fallthrough; see [Adding a framework](#adding-a-new-agent-framework).
 Vendored demo repos under `tests/fixtures/demo_repos/` are excluded from collection.
 
 ## Linting & formatting
@@ -67,14 +67,14 @@ TraceForge is framework-agnostic: **adding a framework is normally just a YAML f
 required for standard JSON-line formats.
 
 1. **Write a mapping** at `src/traceforge/mappings/<framework>.yaml`. It declaratively maps the
-   framework's native event fields onto the common `SessionEvent` shape (see existing mappings —
-   there are 22 bundled — for the schema, e.g. `copilot.yaml`, `claude.yaml`, `cline.yaml`).
+   framework's native event fields onto the common `SessionEvent` shape. Use an existing mapping
+   as a template (22 ship today, e.g. `copilot.yaml`, `claude.yaml`, `cline.yaml`).
 2. **Add a preprocessor** *only if* the framework doesn't emit JSONL natively (markdown logs,
    SQLite, chunked formats). Preprocessors live in `src/traceforge/preprocessors/` and use
    tree-sitter for AST-based parsing.
 3. **Add a golden fixture.** Drop a real, secret-scrubbed native trace into
    `tests/fixtures/raw_traces/<framework>/<scenario>.jsonl`. The `e2e/test_raw_traces.py` harness
-   replays it through your mapping and fails if any event falls through to `raw` — this is the
+   replays it through your mapping and fails if any event falls through to `raw`; this is the
    drift guard that keeps mappings honest. For editor-based agents, see the
    [VS Code trace capture runbook](docs/vscode-trace-capture.md).
 4. **Run** `uv run pytest tests/e2e/test_raw_traces.py -q` and iterate until there are no `raw`
@@ -101,7 +101,7 @@ src/traceforge/
 ```
 
 Other top-level dirs: `tests/`, `docs/` (design specs), `packages/` (the separate title-model
-distribution), `scripts/`, `research/`, and `website/` (the Docusaurus docs site — an independent
+distribution), `scripts/`, `research/`, and `website/` (the Docusaurus docs site, an independent
 Node subproject, see [`website/README.md`](website/README.md)).
 
 The authoritative technical spec is [`SPEC.md`](SPEC.md).
@@ -119,8 +119,8 @@ The authoritative technical spec is [`SPEC.md`](SPEC.md).
   ```
 
 - **CI must pass** before merge:
-  - **Lint** — `ruff check .` + `ruff format --check .` on Python 3.13.
-  - **Test** — `pytest` on Python 3.11, 3.12, and 3.13, plus a `build` job that builds the sdist/wheel
+  - **Lint**: `ruff check .` + `ruff format --check .` on Python 3.13.
+  - **Test**: `pytest` on Python 3.11, 3.12, and 3.13, plus a `build` job that builds the sdist/wheel
     and imports the package.
 - **Secret hygiene:** never commit API keys or real user traces. Fixtures must contain only
   first-party demo content; GitHub push protection will block secrets.
@@ -129,15 +129,15 @@ The authoritative technical spec is [`SPEC.md`](SPEC.md).
 
 Keep contributions consistent with these:
 
-- **Observation-first** — observe, enrich, and recommend by default, never touching agent
-  behavior. Enforcement is strictly opt-in (a registered `GatePolicy`).
-- **Framework-agnostic** — new framework support should be a new YAML file wherever possible.
-- **Defensive parsing** — malformed input is logged and skipped, never crashes the pipeline.
-- **Immutable domain objects** — events and outputs are frozen.
-- **Error isolation** — one failing sink cannot block others.
-- **Data-driven** — classification, risk scoring, and MCP profiles are externalized to YAML, not
+- **Observation-first**: observe, enrich, and recommend by default; enforcement that can
+  change agent behavior is strictly opt-in (a registered `GatePolicy`).
+- **Framework-agnostic**: new framework support should be a new YAML file wherever possible.
+- **Defensive parsing**: malformed input is logged and skipped, never crashes the pipeline.
+- **Immutable domain objects**: events and outputs are frozen.
+- **Error isolation**: one failing sink cannot block others.
+- **Data-driven**: classification, risk scoring, and MCP profiles are externalized to YAML, not
   hardcoded.
-- **CPU-only** — no torch, no GPU dependencies. Structuring models are packaged ONNX.
+- **CPU-only**: no torch, no GPU dependencies. Structuring models are packaged ONNX.
 
 ---
 

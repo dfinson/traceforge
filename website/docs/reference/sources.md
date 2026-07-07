@@ -2,13 +2,14 @@
 id: sources
 title: Sources
 sidebar_label: Sources
-description: The async transport layer — FileWatch, FilePoll, HttpPoll, SSE, Sqlite, and Replay sources.
+description: The async transport layer, FileWatch, FilePoll, HttpPoll, SSE, Sqlite, and Replay sources.
 ---
 
 # Sources
 
-Sources are the **async transport layer**. Each implements the `Source` ABC — an async
-context manager that yields `RawRecord` objects via `__aiter__`.
+Sources are the **async transport layer**. Each one is an async context manager that yields
+`RawRecord` objects as data arrives; you configure sources from YAML rather than constructing
+them yourself.
 
 ```python
 @dataclass(slots=True)
@@ -18,12 +19,6 @@ class RawRecord:
     mode: IngestionMode
     sequence: int | None = None
     received_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-
-class Source(ABC):
-    name: str
-    async def __aenter__(self) -> "Source": ...
-    async def __aexit__(self, ...): ...
-    def __aiter__(self) -> AsyncIterator[RawRecord]: ...
 ```
 
 ## Implementations
@@ -47,9 +42,9 @@ All sources:
 - **Validate resources** on `__aenter__`.
 
 :::note SqliteSource in config
-`SqliteSource` is implemented but not yet exposed in the `traceforge.yaml` source union — it
+`SqliteSource` is implemented but not yet exposed in the `traceforge.yaml` source union, it
 is used programmatically (for example by `CopilotPreParser`) rather than instantiated from
-config. The config-exposed source types are `file_watch`, `poll`, `http_poll`, `sse`, and
+config. The config-exposed source types are `file_watch`, `file_poll`, `http_poll`, `sse`, and
 `replay`.
 :::
 

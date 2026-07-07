@@ -206,6 +206,7 @@ binary_info:
   invoke-webrequest: { role: retriever.api_client, default_effect: null, network: true }
   nc: { role: retriever.api_client, default_effect: null, network: true }
   ncat: { role: retriever.api_client, default_effect: null, network: true }
+  netcat: { role: retriever.api_client, default_effect: null, network: true }
   nslookup: { role: retriever.api_client, default_effect: read_only, network: true }
   ping: { role: retriever.api_client, default_effect: read_only, network: true }
   socat: { role: retriever.api_client, default_effect: null, network: true }

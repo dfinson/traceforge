@@ -23,6 +23,7 @@ from traceforge.classify.coding import (
     CodingMechanism,
     ShellStructure,
 )
+from traceforge.classify.hazards import detect_command_hazards
 from traceforge.classify.rules import (
     SHELL_DELIVERY,
     SHELL_SETUP,
@@ -476,6 +477,8 @@ def classify_shell(
     cls = build_classification_from_commands(command_results, structure, "bash")
     # Merge wrapper capabilities (e.g., elevated_privilege from sudo)
     extra_caps: set[str] = set(all_wrapper_caps)
+    # Semantic hazard tags (raw-device write, fs format, persistence, fork bomb)
+    extra_caps |= detect_command_hazards(command, cls)
     extra_effect: str | None = None
     # Redirections (>, >>, 2>) indicate filesystem writes
     if ShellStructure.REDIRECTED in structure:

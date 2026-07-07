@@ -10,6 +10,15 @@ description: The TraceForge observation pipeline, Source, Parser, Adapter, Enric
 TraceForge is a linear, composable pipeline. Each stage has a single responsibility and
 hands a progressively richer object to the next.
 
+<figure className="pipeline-figure">
+  <picture>
+    <source media="(max-width: 640px)" srcSet="/traceforge/img/pipeline-mobile.svg" />
+    <img src="/traceforge/img/pipeline-desktop.svg" alt="TraceForge pipeline: Source, optional Parser, Adapter, Enricher, Pipeline, and one or more Sinks, with an opt-in Governance branch off the Pipeline." />
+  </picture>
+</figure>
+
+The concrete components at each stage:
+
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
 │                        SOURCES (Transport)                            │
@@ -95,11 +104,3 @@ Three record types flow through sinks:
 
 See the **[Event Model](event-model.md)** for the full type definitions, and the
 **[Reference](../reference/sources.md)** section for a deep dive into each stage.
-
-## Extraction lineage
-
-TraceForge was extracted from CodePlane, whose observation logic was tightly coupled to its
-UI. TraceForge decouples the pipeline so any consumer can subscribe to agent events without
-importing CodePlane's domain concerns. Known consumers today include
-[memrelay](https://github.com/dfinson/memrelay) (persistent agent memory via Graphiti) and
-[CodePlane](https://github.com/dfinson/codeplane) (a full agent control plane).

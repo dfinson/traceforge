@@ -14,7 +14,7 @@ const FEATURES = [
   },
   {
     title: 'Runs anywhere',
-    body: 'Installs and runs anywhere Python does, from a laptop to CI. No GPU or heavyweight ML stack; phase, boundary, and title structuring run on packaged ONNX models.',
+    body: 'Installs and runs anywhere Python does, from a laptop to CI, with no GPU or heavyweight ML stack.',
   },
   {
     title: 'Classification & risk',

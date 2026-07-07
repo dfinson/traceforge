@@ -2,12 +2,12 @@
 id: live-structuring
 title: Live Structuring
 sidebar_label: Live Structuring
-description: CPU-only, torch-free phase, boundary, and title models that turn a flat event stream into navigable structure live.
+description: Torch-free phase, boundary, and title models that turn a flat event stream into navigable structure live, with no GPU.
 ---
 
 # Live Structuring
 
-Three CPU-only, torch-free models run at the `EventPipeline` layer and turn a flat event
+Three lightweight, torch-free models run at the `EventPipeline` layer and turn a flat event
 stream into navigable structure **live**, as events arrive. All inference is **causal**: each
 decision uses only the events seen so far, never look-ahead and never an end-of-session batch
 pass, so structure is available mid-session and survives `SESSION_ENDED` / `SESSION_PAUSED`.

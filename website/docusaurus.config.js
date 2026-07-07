@@ -98,13 +98,6 @@ const config = {
               {label: 'SPEC.md', href: 'https://github.com/dfinson/traceforge/blob/main/SPEC.md'},
             ],
           },
-          {
-            title: 'Ecosystem',
-            items: [
-              {label: 'CodePlane', href: 'https://github.com/dfinson/codeplane'},
-              {label: 'memrelay', href: 'https://github.com/dfinson/memrelay'},
-            ],
-          },
         ],
         copyright: `Copyright © ${new Date().getFullYear()} TraceForge · MIT License · Built with Docusaurus.`,
       },

@@ -106,3 +106,13 @@
   --ifm-button-color: #1a1200;
   font-weight: 600;
 }
+
+/* Pipeline diagram figure (README + Architecture). */
+.pipeline-figure {
+  margin: 2rem 0 2.5rem;
+  text-align: center;
+}
+.pipeline-figure img {
+  max-width: 100%;
+  height: auto;
+}

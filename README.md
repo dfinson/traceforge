@@ -2,8 +2,6 @@
 
 <img src="website/static/img/logo-full.png" alt="TraceForge" width="420" />
 
-### Observe. Understand. Control.
-
 **Forge raw AI-agent traces into structured, classified, risk-scored, and governance-assessed output.**
 
 [![Lint](https://github.com/dfinson/traceforge/actions/workflows/ci-lint.yml/badge.svg)](https://github.com/dfinson/traceforge/actions/workflows/ci-lint.yml)
@@ -24,10 +22,12 @@ AI coding agents into a clean, strongly-typed event stream, classified, risk-sco
 governance-assessed in real time. Adding support for a new agent framework requires only a **YAML
 mapping file**: no code.
 
-```text
-Source → [Parser] → Adapter → Enricher → Pipeline → Sink(s)
-                                                   ↘ Governance (opt-in)
-```
+<p align="center">
+  <picture>
+    <source media="(max-width: 600px)" srcset="website/static/img/pipeline-mobile.svg">
+    <img src="website/static/img/pipeline-desktop.svg" alt="TraceForge pipeline: Source, optional Parser, Adapter, Enricher, Pipeline, and one or more Sinks, with an opt-in Governance branch off the Pipeline." width="860">
+  </picture>
+</p>
 
 ## What it does
 
@@ -45,7 +45,7 @@ Source → [Parser] → Adapter → Enricher → Pipeline → Sink(s)
 pip install traceforge      # or: uv add traceforge
 ```
 
-Everything ships in a single install, no extras, no GPU, no torch. Describe a pipeline in
+Everything ships in a single install, with no extras and no GPU required. Describe a pipeline in
 `traceforge.yaml`:
 
 ```yaml
@@ -90,7 +90,7 @@ for the full CLI (`watch`, `replay`, `score`, `gate`, `init`, `detect`, `status`
 | | |
 | --- | --- |
 | 🧩 **Framework-agnostic** | 22 bundled YAML mappings covering Copilot, Claude Code, Cline, Aider, CrewAI, LangGraph, OpenHands, PydanticAI, smolagents, Goose, and more. |
-| 🖥️ **Runs anywhere** | Installs and runs anywhere Python does, from a laptop to CI. No GPU or heavyweight ML stack; the structuring models are packaged ONNX. |
+| 🖥️ **Runs anywhere** | Installs and runs anywhere Python does, from a laptop to CI, with no GPU or heavyweight ML stack. |
 | 🏷️ **Rich classification** | 7-dimension taxonomy, tree-sitter shell AST, MCP profiles, 0–100 risk scoring with MITRE ATT&CK mappings. |
 | 🧠 **Live structure** | Phase, activity/step boundaries, and human-readable titles stamped as events arrive. |
 | 🛡️ **Governance** | Data labeling, information-flow control, drift & budget tracking, and `allow/warn/escalate/deny/transform` recommendations. |

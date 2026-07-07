@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="812" viewBox="0 0 640 812" role="img" aria-label="TraceForge pipeline: Source, optional Parser, Adapter, Enricher, Pipeline, Sink(s), with an opt-in Governance branch off the Pipeline.">
+  <title>TraceForge pipeline</title>
+  <defs>
+    <linearGradient id="flow" gradientUnits="userSpaceOnUse" x1="0" y1="82.0" x2="0" y2="722.0">
+      <stop offset="0" stop-color="#256EF3"/>
+      <stop offset="0.36" stop-color="#7359AE"/>
+      <stop offset="0.66" stop-color="#EF686B"/>
+      <stop offset="1" stop-color="#FF9921"/>
+    </linearGradient>
+    <radialGradient id="forge" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#FF9921" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#FF9921" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <ellipse cx="210" cy="530" rx="210" ry="210" fill="url(#forge)"/>
+  <line x1="210" y1="82" x2="210" y2="722" stroke="url(#flow)" stroke-width="4" stroke-linecap="round" opacity="0.9"/>
+  <path d="M 201 139 L 210 151 L 219 139" fill="none" stroke="url(#flow)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 201 267 L 210 279 L 219 267" fill="none" stroke="url(#flow)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 201 395 L 210 407 L 219 395" fill="none" stroke="url(#flow)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 201 523 L 210 535 L 219 523" fill="none" stroke="url(#flow)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 201 651 L 210 663 L 219 651" fill="none" stroke="url(#flow)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="60" y="40" width="300" height="84" rx="16" fill="#0E1220" stroke="#2A3350" stroke-width="1.5"/>
+  <text x="210" y="82" text-anchor="middle" dominant-baseline="central" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="26" font-weight="600" fill="#FFFFFF">Source</text>
+  <rect x="60" y="168" width="300" height="84" rx="16" fill="#0E1220" stroke="#2A3350" stroke-width="1.5"/>
+  <text x="210" y="201" text-anchor="middle" dominant-baseline="central" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="26" font-weight="600" fill="#FFFFFF">Parser</text>
+  <text x="210" y="225" text-anchor="middle" dominant-baseline="central" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" fill="#9AA3BC">optional</text>
+  <rect x="60" y="296" width="300" height="84" rx="16" fill="#0E1220" stroke="#2A3350" stroke-width="1.5"/>
+  <text x="210" y="338" text-anchor="middle" dominant-baseline="central" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="26" font-weight="600" fill="#FFFFFF">Adapter</text>
+  <rect x="60" y="424" width="300" height="84" rx="16" fill="#0E1220" stroke="#FF9921" stroke-width="2"/>
+  <text x="210" y="466" text-anchor="middle" dominant-baseline="central" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="26" font-weight="600" fill="#FFFFFF">Enricher</text>
+  <rect x="60" y="552" width="300" height="84" rx="16" fill="#0E1220" stroke="#FF9921" stroke-width="2"/>
+  <text x="210" y="594" text-anchor="middle" dominant-baseline="central" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="26" font-weight="600" fill="#FFFFFF">Pipeline</text>
+  <rect x="60" y="680" width="300" height="84" rx="16" fill="#0E1220" stroke="#2A3350" stroke-width="1.5"/>
+  <text x="210" y="722" text-anchor="middle" dominant-baseline="central" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="26" font-weight="600" fill="#FFFFFF">Sink(s)</text>
+  <line x1="360" y1="594" x2="388" y2="594" stroke="#FF9921" stroke-width="2" stroke-dasharray="5 5"/>
+  <text x="486" y="540" text-anchor="middle" dominant-baseline="central" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-style="italic" fill="#FF9921">opt-in</text>
+  <rect x="388" y="552" width="196" height="84" rx="16" fill="#0E1220" stroke="#FF9921" stroke-width="2" stroke-dasharray="5 5"/>
+  <text x="486" y="585" text-anchor="middle" dominant-baseline="central" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="19" font-weight="600" fill="#FFFFFF">Governance</text>
+  <text x="486" y="609" text-anchor="middle" dominant-baseline="central" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12" fill="#9AA3BC">assess &amp; recommend</text>
+</svg>

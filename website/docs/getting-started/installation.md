@@ -2,12 +2,12 @@
 id: installation
 title: Installation
 sidebar_label: Installation
-description: Install TraceForge with pip or uv, one install, no extras, CPU-only.
+description: "Install TraceForge with pip or uv: one install, no extras, no GPU required."
 ---
 
 # Installation
 
-TraceForge is a pure-Python, CPU-only library. It runs on **Python 3.11, 3.12, and 3.13**.
+TraceForge installs anywhere Python does, with no GPU required. It runs on **Python 3.11, 3.12, and 3.13**.
 
 ```bash
 pip install traceforge      # or: uv add traceforge
@@ -20,7 +20,7 @@ included.
 
 ## The titler model weights
 
-The activity/step titler model weights (~90 MB int8 ONNX) live in a separate
+The activity/step titler model weights (~90 MB) live in a separate
 `traceforge-title-model` package that `traceforge` depends on, so `pip install traceforge`
 pulls them automatically. The weights are hosted on PyPI (primary) and mirrored on this
 repo's `title-model-v*` GitHub releases.
@@ -32,13 +32,13 @@ the install from the GitHub mirror:
 traceforge download-model --source gh
 ```
 
-The phase and boundary models (scikit-learn heads + a frozen model2vec embedder) ship
-**inside** the base wheel, so only the large T5 titler is split out.
+The phase and boundary models ship **inside** the base wheel, so only the larger titler is
+split out.
 
-:::note CPU-only guarantee
-The only ML runtime dependencies are `model2vec`, `scikit-learn`, `scipy`, `joblib`,
-`onnxruntime`, `tokenizers`, and `numpy`. **`torch` and `transformers` are never imported at
-runtime.** All ML subsystems load lazily, so an unused subsystem costs nothing.
+:::note Lightweight runtime
+No GPU, no `torch`, and no `transformers` at runtime. The structuring models run on a light ML
+stack that loads lazily, so an unused subsystem costs nothing. See
+[Live Structuring](../reference/live-structuring.md) for the full runtime footprint.
 :::
 
 ## Optional sink dependencies

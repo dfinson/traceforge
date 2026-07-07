@@ -60,8 +60,7 @@ Raw records flow left to right, gaining structure at every stage:
 
 - **Observation-first**: observes, enriches, and recommends by default; enforcement is strictly opt-in (a registered gate policy).
 - **Framework-agnostic**: new framework support = new YAML file.
-- **Runs anywhere**: no GPU or heavyweight ML stack. Live phase/boundary/title structuring
-  runs on packaged scikit-learn and ONNX models, with no `torch` or `transformers` at runtime.
+- **Runs anywhere**: no GPU or heavyweight ML stack; structuring runs live as events arrive.
 - **Defensive parsing**: malformed input is logged and skipped, never crashes.
 - **Immutable domain objects**: all events are frozen Pydantic models.
 - **Error isolation**: one failing sink cannot block others.
@@ -100,7 +99,6 @@ print(trace.risk_score, trace.suggested_action)   # e.g. 66 escalate
 - **[Governance](governance/overview.md)**: the monitor + shield assessment engine.
 - **[Reference](reference/sources.md)**: a stage-by-stage tour of every component.
 
-TraceForge was extracted from [CodePlane](https://github.com/dfinson/codeplane)'s event
-processing internals and packaged as a standalone, reusable library. For the full
+TraceForge is a standalone, reusable library with no framework lock-in. For the full
 authoritative specification, see
 [`SPEC.md`](https://github.com/dfinson/traceforge/blob/main/SPEC.md).

@@ -45,11 +45,6 @@ const sidebars = {
         'reference/sdk',
       ],
     },
-    {
-      type: 'category',
-      label: 'Design Notes',
-      items: ['design/phase-tracker', 'design/vscode-trace-capture'],
-    },
   ],
 };
 

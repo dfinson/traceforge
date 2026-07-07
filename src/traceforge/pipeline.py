@@ -361,6 +361,12 @@ class EventPipeline:
                     updates = []
                 for update in updates:
                     await self._push_title_update(update)
+                # NOTE: eviction does not schedule API refinement for the trailing
+                # activity. It already cancelled this session's in-flight
+                # refinements above; finalizing with packaged titles only keeps a
+                # clean contract (evicted sessions get no API upgrades) and leaves
+                # no API task running after the stream is gone. Normally-completing
+                # sessions refine their trailing activity in _flush_title_streams.
         self._boundary_streams.pop(session_id, None)
 
     async def _push_locked(self, event: SessionEvent) -> None:
@@ -499,6 +505,13 @@ class EventPipeline:
         if refine_text is not None:
             self._schedule_session_refine(event.session_id, refine_text)
 
+        # Likewise upgrade the just-closed activity's packaged titles off the hot
+        # path when an activity API tier is configured: the stream queued each
+        # closed activity (with its distilled context) for an abstractive upgrade.
+        # By default (strategy=model) nothing is queued, so this is a no-op.
+        for closed in stream.take_activity_refinements():
+            self._schedule_activity_refine(event.session_id, closed)
+
     def _schedule_session_refine(self, session_id: str, text: str) -> None:
         """Refine a session title via the API off the hot path (fire-and-forget).
 
@@ -561,6 +574,50 @@ class EventPipeline:
                 title=refined,
             )
         )
+
+    def _schedule_activity_refine(self, session_id: str, closed) -> None:
+        """Refine a closed activity's titles via the API off the hot path.
+
+        Mirrors :meth:`_schedule_session_refine`: spawns a tracked background task
+        indexed in the *same* ``_refine_tasks`` bucket, so eviction cancels it
+        (:meth:`_cancel_session_refinements`) and :meth:`flush` awaits it before
+        teardown. Live event emission is never blocked on the network.
+        """
+        task = asyncio.create_task(self._activity_refine(session_id, closed))
+        self._refine_tasks.setdefault(session_id, set()).add(task)
+        task.add_done_callback(lambda t: self._discard_refine_task(session_id, t))
+
+    async def _activity_refine(self, session_id: str, closed) -> None:
+        """Compute API activity/step titles in a worker thread and emit upgrades.
+
+        Runs off the hot path. Each returned
+        :class:`~traceforge.title.inferencer.TitleRefinement` becomes a later
+        append-only :class:`~traceforge.types.TitleUpdate` on the *same* segment
+        id, upgrading the packaged-model title. On empty output (unconfigured
+        refiner, no extractable signal, timeout, or any provider error) the
+        packaged titles already emitted stand and nothing further is published.
+        Error-isolated so a failing refinement never propagates into the loop.
+        """
+        try:
+            refinements = await asyncio.to_thread(self._title_inferencer.refine_activity, closed)
+        except Exception as exc:
+            logger.error(
+                "Activity-title API refinement failed for session %s: %s — keeping packaged titles",
+                session_id,
+                exc,
+                exc_info=True,
+            )
+            return
+        for ref in refinements:
+            await self._push_title_update(
+                TitleUpdate(
+                    session_id=session_id,
+                    segment_id=ref.segment_id,
+                    kind=ref.kind,
+                    title=ref.title,
+                    parent_id=ref.parent_id,
+                )
+            )
 
     def _boundary_stamp(self, event: SessionEvent) -> SessionEvent:
         """Run one event through its session's live boundary stream."""
@@ -629,6 +686,10 @@ class EventPipeline:
                 updates = []
             for update in updates:
                 await self._push_title_update(update)
+            # Upgrade the trailing activity's packaged titles off the hot path
+            # when configured; flush() below awaits these before closing sinks.
+            for closed in stream.take_activity_refinements():
+                self._schedule_activity_refine(session_id, closed)
 
     async def _fanout(
         self,

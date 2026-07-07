@@ -281,6 +281,143 @@ def test_non_substantive_message_queues_no_refinement():
     assert stream.take_session_refinement() is None
 
 
+# ─── activity/step-title API refinement (packaged now, API upgrade later) ────
+
+
+class _RecordingActivityRefiner:
+    """A deterministic activity refiner recording the spans it was asked to title.
+
+    Stands in for :class:`traceforge.title.naming.ActivityApiProvider` so the
+    inferencer/stream can be tested without LiteLLM or a network. Returns an
+    :class:`~traceforge.title.naming.ActivityTitles` upgrading the activity and
+    each step title.
+    """
+
+    def __init__(self, activity="API Activity", steps=None):
+        self._activity = activity
+        self._steps = steps
+        self.spans: list = []
+
+    def __call__(self, span):
+        from traceforge.title.naming import ActivityTitles
+
+        self.spans.append(span)
+        steps = self._steps
+        if steps is None:
+            steps = [f"API Step {i}" for i in range(len(span.step_contexts))]
+        return ActivityTitles(self._activity, steps)
+
+
+def test_no_activity_refiner_queues_nothing():
+    # Default (strategy=model): no refiner is configured, so closing an activity
+    # emits its packaged titles and queues NOTHING for off-hot-path refinement.
+    inf = TitleInferencer(model=_FakeTitle())
+    assert inf.has_activity_refiner is False
+    stream = inf.new_stream("S", "copilot")
+    stream.push(_event(0, tool="edit"))
+    _e, updates = stream.push(_event(1, boundary="activity-boundary"))
+    assert any(u.kind == "activity" for u in updates)  # packaged titles emitted
+    assert stream.take_activity_refinements() == []  # nothing queued
+
+
+def test_activity_refiner_queues_closed_activity_once():
+    # With a refiner configured, closing an activity queues exactly one closed
+    # activity (ids + rows) for refinement, popped once by the pipeline.
+    inf = TitleInferencer(model=_FakeTitle(), activity_refiner=_RecordingActivityRefiner())
+    assert inf.has_activity_refiner is True
+    stream = inf.new_stream("S", "copilot")
+    stream.push(_event(0, tool="edit"))  # activity e0 / step e0
+    stream.push(_event(1, tool="shell", boundary="step-boundary"))  # step e1
+    stream.push(_event(2, tool="grep", boundary="activity-boundary"))  # closes e0
+
+    queued = stream.take_activity_refinements()
+    assert len(queued) == 1
+    closed = queued[0]
+    assert closed.activity_id == "e0"
+    assert [sid for sid, _rows in closed.steps] == ["e0", "e1"]
+    # Popped once, not re-queued.
+    assert stream.take_activity_refinements() == []
+
+
+def test_signal_less_activity_is_not_queued():
+    # A span with no packaged title (no signal) emits no updates, so there is
+    # nothing to upgrade -> it is never queued even with a refiner configured.
+    inf = TitleInferencer(model=_FakeTitle(), activity_refiner=_RecordingActivityRefiner())
+    stream = inf.new_stream("S", "copilot")
+    stream.push(_event(0, tool=None, payload={}))  # no signal
+    _e, updates = stream.push(_event(1, tool=None, payload={}, boundary="activity-boundary"))
+    assert updates == []
+    assert stream.take_activity_refinements() == []
+
+
+def test_refine_activity_maps_api_titles_to_refinements():
+    # refine_activity distils the closed activity + steps, calls the refiner
+    # ONCE, and maps the returned titles to per-segment refinements (activity +
+    # each step, parented to the activity).
+    refiner = _RecordingActivityRefiner()
+    inf = TitleInferencer(model=_FakeTitle(), activity_refiner=refiner)
+    stream = inf.new_stream("S", "copilot")
+    stream.push(_event(0, tool="edit"))
+    stream.push(_event(1, tool="shell", boundary="step-boundary"))
+    stream.push(_event(2, tool="grep", boundary="activity-boundary"))
+    closed = stream.take_activity_refinements()[0]
+
+    refs = inf.refine_activity(closed)
+    assert len(refiner.spans) == 1  # exactly one API call for the whole activity
+    by = {(r.kind, r.segment_id): r for r in refs}
+    assert by[("activity", "e0")].title == "API Activity"
+    assert by[("activity", "e0")].parent_id is None
+    assert by[("step", "e0")].title == "API Step 0" and by[("step", "e0")].parent_id == "e0"
+    assert by[("step", "e1")].title == "API Step 1" and by[("step", "e1")].parent_id == "e0"
+
+
+def test_refine_activity_drops_step_titles_colliding_with_activity():
+    # A step title that collides with the (effective) activity title is dropped
+    # so that step keeps its distinct packaged-model title.
+    refiner = _RecordingActivityRefiner(activity="Add Auth", steps=["Add Auth", "Write Tests"])
+    inf = TitleInferencer(model=_FakeTitle(), activity_refiner=refiner)
+    stream = inf.new_stream("S", "copilot")
+    stream.push(_event(0, tool="edit"))
+    stream.push(_event(1, tool="shell", boundary="step-boundary"))
+    stream.push(_event(2, tool="grep", boundary="activity-boundary"))
+    closed = stream.take_activity_refinements()[0]
+
+    refs = inf.refine_activity(closed)
+    kinds = {(r.kind, r.segment_id): r.title for r in refs}
+    assert kinds[("activity", "e0")] == "Add Auth"
+    assert ("step", "e0") not in kinds  # collided -> dropped
+    assert kinds[("step", "e1")] == "Write Tests"  # distinct -> kept
+
+
+def test_refine_activity_none_activity_keeps_packaged_and_seeds_distinctness():
+    # When the API declines the activity title (None), no activity refinement is
+    # produced (the packaged one stands) and step distinctness is seeded off the
+    # packaged activity title.
+    refiner = _RecordingActivityRefiner(activity=None, steps=["Step One", "Step Two"])
+    inf = TitleInferencer(model=_FakeTitle(), activity_refiner=refiner)
+    stream = inf.new_stream("S", "copilot")
+    stream.push(_event(0, tool="edit"))
+    stream.push(_event(1, tool="shell", boundary="step-boundary"))
+    stream.push(_event(2, tool="grep", boundary="activity-boundary"))
+    closed = stream.take_activity_refinements()[0]
+
+    refs = inf.refine_activity(closed)
+    assert all(r.kind == "step" for r in refs)  # no activity refinement
+    assert {r.title for r in refs} == {"Step One", "Step Two"}
+
+
+def test_refine_activity_without_refiner_returns_empty():
+    inf = TitleInferencer(model=_FakeTitle())  # no refiner
+    stream = inf.new_stream("S", "copilot")
+    stream.push(_event(0, tool="edit"))
+    updates = stream.flush()
+    assert updates  # packaged titles emitted
+    # Nothing queued, but refine_activity is still a safe no-op if called.
+    from traceforge.title.inferencer import _ClosedActivity
+
+    assert inf.refine_activity(_ClosedActivity("e0", "Title 0", [("e0", [])])) == []
+
+
 # ─── real packaged model ─────────────────────────────────────────────────────
 
 _HAS_DEPS = (

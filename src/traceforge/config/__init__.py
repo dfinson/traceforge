@@ -21,7 +21,10 @@ from traceforge.config.models import (
     SqliteSinkConfig,
     JsonlSinkConfig,
     S3SinkConfig,
+    TitleApiConfig,
     TitleConfig,
+    ActivityTitlingConfig,
+    ActivityTitlingApiConfig,
     TraceforgeConfig,
 )
 from traceforge.config.loader import load_config, get_config, reset_config
@@ -55,9 +58,12 @@ __all__ = [
     "BudgetConfig",
     # Title
     "TitleConfig",
+    "TitleApiConfig",
     "SessionNamingConfig",
     "SessionNamingHeuristicConfig",
     "SessionNamingApiConfig",
+    "ActivityTitlingConfig",
+    "ActivityTitlingApiConfig",
     # Loading
     "load_config",
     "get_config",

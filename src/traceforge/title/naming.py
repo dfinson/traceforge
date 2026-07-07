@@ -1,17 +1,25 @@
-"""Session-title providers: heuristic floor + opt-in LiteLLM API tier.
+"""Title providers: offline floor + opt-in LiteLLM API tier (session and span).
 
-:func:`build_session_titler` reads :class:`~traceforge.config.SessionNamingConfig`
-and returns a plain ``Callable[[str], str]`` -- the session titler used by
-:meth:`traceforge.title.TitleInferencer.request_title`.
+This module owns the LiteLLM plumbing, the opt-in key-presence gate, and the
+graceful-fallback contract shared by both configurable title surfaces:
 
-Resolution:
+* **Session naming.** :func:`build_session_titler_split` reads
+  :class:`~traceforge.config.SessionNamingConfig` and returns a
+  :class:`SessionTitler` (an immediate :class:`HeuristicProvider` floor + an
+  optional :class:`ApiProvider` refiner). The heuristic is a free, offline
+  extractive title over the user's own words; the API tier engages only when a
+  key is present.
+* **Activity/step titling.** :func:`build_activity_refiner` reads
+  :class:`~traceforge.config.ActivityTitlingConfig` and returns an optional
+  :class:`ActivityApiProvider` refiner. Here the offline floor is the *packaged
+  ONNX span model* (owned by :mod:`traceforge.title.inferencer`, emitted the
+  instant an activity closes); the refiner, when configured and keyed, upgrades
+  the activity title and all its step titles in one call, off the hot path.
 
-* ``strategy: heuristic`` (default) -> :class:`HeuristicProvider`, a free, offline
-  extractive title over the user's own words (see :mod:`traceforge.title.heuristics`).
-* ``strategy: api`` -> :class:`ApiProvider` (LiteLLM), **but only if the provider's
-  API key is present in the environment**. When the key is absent -- or any API
-  call fails or times out -- the titler transparently falls back to the heuristic,
-  so a missing key or a flaky network never errors, blocks, or empties a title.
+In both cases the API tier is **strictly opt-in and never load-bearing**: absent
+a key -- or on any API call that fails, times out, or returns nothing usable --
+the offline floor stands, so a missing key or a flaky network never errors,
+blocks, or empties a title.
 
 The API key is never read from config: LiteLLM sources it from the provider's
 conventional env var; ``api.api_key_env`` only overrides *which* var to read.
@@ -19,6 +27,7 @@ conventional env var; ``api.api_key_env`` only overrides *which* var to read.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -29,9 +38,12 @@ from .heuristics import heuristic_title
 
 if TYPE_CHECKING:
     from traceforge.config.models import (
+        ActivityTitlingApiConfig,
+        ActivityTitlingConfig,
         SessionNamingApiConfig,
         SessionNamingConfig,
         SessionNamingHeuristicConfig,
+        TitleApiConfig,
     )
 
 logger = logging.getLogger(__name__)
@@ -118,12 +130,14 @@ class _WithFallback:
     __call__ = title
 
 
-def _api_key_present(cfg: "SessionNamingApiConfig") -> bool:
+def _api_key_present(cfg: "TitleApiConfig") -> bool:
     """True iff the API tier can authenticate right now (opt-in gate).
 
-    Honors an explicit ``api_key_env`` override; otherwise defers to LiteLLM's
+    Shared by both title surfaces (session naming and activity/step titling),
+    since both ``api`` sub-configs derive from :class:`TitleApiConfig`. Honors an
+    explicit ``api_key_env`` override; otherwise defers to LiteLLM's
     provider-aware environment validation so any provider's conventional key var
-    counts. Absent LiteLLM or on any error, reports not-present (-> heuristic).
+    counts. Absent LiteLLM or on any error, reports not-present (-> offline floor).
     """
     if cfg.api_base and not cfg.api_key_env:
         # Local/self-hosted runtimes (ollama/vllm) often need no key.
@@ -202,10 +216,183 @@ def build_session_titler_split(
     return SessionTitler(heuristic, None)
 
 
+# ─── Activity/step (span) title refinement ───────────────────────────────────
+
+#: Terse, instruction-tight span prompt. The model sees each segment's distilled
+#: context and must return ONLY a JSON object titling the activity and its steps.
+_SPAN_SYSTEM = (
+    "You title one activity in a developer's coding session and each of its "
+    "numbered steps, from their distilled contexts. Reply with ONLY a JSON "
+    'object of the form {{"activity": "<title>", "steps": ["<step 1>", '
+    '"<step 2>", ...]}} -- exactly one step title per numbered step, in order. '
+    "Each title is a short, specific phrase in imperative or gerund mood, at most "
+    "{max_words} words, no trailing punctuation, no quotes. Keep every step title "
+    "distinct from the activity title and from the other step titles."
+)
+
+
+@dataclass(frozen=True)
+class ActivitySpan:
+    """The distilled context of a closed activity and its steps, fed to the API.
+
+    ``activity_context`` is the distilled context over the whole activity;
+    ``step_contexts`` holds one distilled context per step, in order. Both are
+    produced by :func:`traceforge.title.context.distilled_context`, so the API
+    tier sees the same source-agnostic slots the packaged model was trained on.
+    """
+
+    activity_context: str
+    step_contexts: list[str]
+
+
+@dataclass(frozen=True)
+class ActivityTitles:
+    """The API's proposed titles for an :class:`ActivitySpan`.
+
+    ``activity`` is the refined activity title (``None`` when the API declined or
+    failed); ``steps`` is aligned index-for-index with the span's ``step_contexts``
+    -- ``None`` in any slot the API did not usefully cover, so the caller keeps
+    that segment's packaged-model title.
+    """
+
+    activity: str | None
+    steps: list[str | None]
+
+
+def _empty_titles(n_steps: int) -> ActivityTitles:
+    return ActivityTitles(None, [None] * n_steps)
+
+
+def _loads_json_object(raw: str):
+    """Best-effort parse of a JSON object from a model reply.
+
+    Tolerates a model that wraps the object in prose or code fences by falling
+    back to the outermost ``{...}`` slice. Returns the parsed object or ``None``.
+    """
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        pass
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start != -1 and end > start:
+        try:
+            return json.loads(raw[start : end + 1])
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
+class ActivityApiProvider:
+    """Abstractive activity/step titles via LiteLLM (any provider + local runtimes).
+
+    One :meth:`refine` call per closed activity returns the activity title and all
+    of its step titles together, so the model sees the full activity context and
+    can keep step titles distinct. Returns :class:`ActivityTitles` with ``None``
+    slots on any failure (missing key, provider/network error, timeout, or an
+    unparseable reply) so the caller falls back to the packaged-model titles.
+    """
+
+    def __init__(self, cfg: "ActivityTitlingApiConfig", max_words: int = 8) -> None:
+        self._cfg = cfg
+        self._max_words = max_words
+
+    @staticmethod
+    def _render(span: ActivitySpan) -> str:
+        lines = [f"activity: {span.activity_context}"]
+        for i, ctx in enumerate(span.step_contexts, start=1):
+            lines.append(f"step {i}: {ctx}")
+        return "\n".join(lines)
+
+    def refine(self, span: ActivitySpan) -> ActivityTitles:
+        n = len(span.step_contexts)
+        try:
+            import litellm
+        except ImportError:  # pragma: no cover - litellm ships as a base dep
+            logger.debug("litellm unavailable; activity-titling API tier disabled")
+            return _empty_titles(n)
+        cfg = self._cfg
+        system = _SPAN_SYSTEM.format(max_words=self._max_words)
+        kwargs: dict = {
+            "model": cfg.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": self._render(span)},
+            ],
+            "max_tokens": cfg.max_tokens,
+            "timeout": cfg.timeout,
+            "temperature": 0.0,
+        }
+        if cfg.api_base:
+            kwargs["api_base"] = cfg.api_base
+        if cfg.api_key_env:
+            key = os.environ.get(cfg.api_key_env)
+            if not key:
+                return _empty_titles(n)
+            kwargs["api_key"] = key
+        try:
+            resp = litellm.completion(**kwargs)
+            raw = (resp.choices[0].message.content or "").strip()
+        except Exception as exc:  # noqa: BLE001 - any provider/network error -> fallback
+            logger.warning("activity-titling API call failed (%s); using packaged model", exc)
+            return _empty_titles(n)
+        return self._parse(raw, n)
+
+    @staticmethod
+    def _parse(raw: str, n_steps: int) -> ActivityTitles:
+        data = _loads_json_object(raw)
+        if not isinstance(data, dict):
+            return _empty_titles(n_steps)
+        act = data.get("activity")
+        activity = clean_title(act) if isinstance(act, str) and act.strip() else None
+        steps: list[str | None] = [None] * n_steps
+        raw_steps = data.get("steps")
+        if isinstance(raw_steps, list):
+            for i in range(min(n_steps, len(raw_steps))):
+                s = raw_steps[i]
+                if isinstance(s, str) and s.strip():
+                    cleaned = clean_title(s)
+                    steps[i] = cleaned or None
+        return ActivityTitles(activity or None, steps)
+
+    __call__ = refine
+
+
+def build_activity_refiner(
+    cfg: "ActivityTitlingConfig | None" = None,
+) -> "ActivityApiProvider | None":
+    """Build the optional off-hot-path activity/step title refiner.
+
+    Returns an :class:`ActivityApiProvider` only when ``strategy=api`` *and* a
+    usable API key is present in the environment; otherwise ``None``, in which
+    case the packaged ONNX titles (emitted the instant an activity closes) are
+    final. Mirrors :func:`build_session_titler_split`'s ``api_refiner`` gate --
+    the packaged model itself is the always-present floor, owned by the inferencer.
+    """
+    if cfg is None:
+        from traceforge.config import get_config
+
+        cfg = get_config().title.activity_titling
+
+    if cfg.strategy == "api" and _api_key_present(cfg.api):
+        return ActivityApiProvider(cfg.api)
+    if cfg.strategy == "api":
+        logger.info(
+            "title.activity_titling.strategy=api but no API key for model %r found in "
+            "the environment; using the packaged ONNX titler.",
+            cfg.api.model,
+        )
+    return None
+
+
 __all__ = [
     "HeuristicProvider",
     "ApiProvider",
     "SessionTitler",
+    "ActivitySpan",
+    "ActivityTitles",
+    "ActivityApiProvider",
     "build_session_titler",
     "build_session_titler_split",
+    "build_activity_refiner",
 ]

@@ -59,46 +59,14 @@ jobs:
               print('\n✅ All YAML files valid')
           " 2>&1 | tee -a audit-output.txt
 
+      # Delegates to the maintained unit tests (single source of truth) instead
+      # of re-deriving enum rules inline — that inline copy drifted from the
+      # typed config API and rotted silently for a month. These tests validate
+      # tool_classifications + binary_info + mcp_profiles enum values against the
+      # registry.validate() API. See tests/unit/test_classification.py.
       - name: Validate enum dimensions in YAML
         run: |
-          uv run python -c "
-          import sys
-          from traceforge.classify.coding import CodingRole, CodingScope, CodingAction
-          from traceforge.classify.config import load_config
-
-          config = load_config()
-          errors = []
-
-          # load_config() returns a typed ClassifyConfig: binary_info values are
-          # BinaryInfoConfig models (attribute access) and mcp_profiles is a list
-          # of McpProfileConfig — NOT the raw dicts this check once assumed.
-
-          # Validate binary_info roles
-          valid_role_prefixes = {r.value.split('.')[0] for r in CodingRole}
-          for name, info in config.binary_info.items():
-              role = info.role or ''
-              if '.' in role:
-                  prefix = role.split('.')[0]
-                  if prefix not in valid_role_prefixes:
-                      errors.append(f'binary_info[{name}].role={role} — invalid prefix')
-
-          # Validate MCP profile dimensions
-          for profile in config.mcp_profiles:
-              profile_name = profile.id or ','.join(profile.namespace_aliases)
-              for v in profile.role:
-                  if '.' in str(v):
-                      prefix = str(v).split('.')[0]
-                      if prefix not in valid_role_prefixes:
-                          errors.append(f'mcp_profiles[{profile_name}].role={v} — invalid')
-
-          if errors:
-              print(f'❌ {len(errors)} dimension validation errors:')
-              for err in errors[:20]:
-                  print(f'  • {err}')
-              sys.exit(1)
-          else:
-              print('✅ All dimensions valid')
-          " 2>&1 | tee -a audit-output.txt
+          uv run pytest tests/unit/test_classification.py -k "enum_values" -q 2>&1 | tee -a audit-output.txt
 
       - name: Run classification engine smoke test
         run: |

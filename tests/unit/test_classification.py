@@ -469,6 +469,47 @@ class TestRedTeamRegressions:
             for a in cls.action:
                 assert reg.validate("action", a), f"{name}: action '{a}' not registered"
 
+    def test_enum_values_in_binary_info_and_mcp_profiles_are_registered(self):
+        """binary_info + mcp_profiles enum values must be registered dimension values.
+
+        This is the maintained home for the check the weekly Tool Surface Audit
+        used to run with inline YAML-parsing code in the workflow. That inline
+        copy drifted from the typed config API and only checked role *prefixes*;
+        keeping the check here (against the same registry.validate() API the
+        sibling tool_classifications test uses) means it can never silently rot
+        out-of-sync with the config models again.
+        """
+        from traceforge.classify.config import load_config
+        from traceforge.classify.registry import get_default_registry
+
+        config = load_config()
+        reg = get_default_registry()
+
+        # Teeth: the loops below must run over real data (not pass vacuously),
+        # and the registry must actually reject an unregistered value.
+        assert config.binary_info, "no binary_info loaded — check would pass vacuously"
+        assert config.mcp_profiles, "no mcp_profiles loaded — check would pass vacuously"
+        assert not reg.validate("role", "bogus.not_a_real_role")
+
+        for name, info in config.binary_info.items():
+            assert reg.validate("role", info.role), (
+                f"binary_info[{name}]: role '{info.role}' not registered"
+            )
+
+        for profile in config.mcp_profiles:
+            pid = profile.id or ",".join(profile.namespace_aliases)
+            assert reg.validate("mechanism", profile.mechanism), (
+                f"mcp_profiles[{pid}]: mechanism '{profile.mechanism}' not registered"
+            )
+            for r in profile.role:
+                assert reg.validate("role", r), f"mcp_profiles[{pid}]: role '{r}' not registered"
+            for s in profile.scope:
+                assert reg.validate("scope", s), f"mcp_profiles[{pid}]: scope '{s}' not registered"
+            for a in profile.action:
+                assert reg.validate("action", a), (
+                    f"mcp_profiles[{pid}]: action '{a}' not registered"
+                )
+
     def test_rule_effects_override_binary_info_defaults(self):
         """Shell rules with explicit effect must override binary_info defaults."""
         # find -delete rule has effect=destructive, binary_info has read_only default

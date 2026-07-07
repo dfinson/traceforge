@@ -20,7 +20,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - uses: astral-sh/setup-uv@v7
       - run: uv sync --group dev
-      - run: uv run pytest --tb=short -q
+      - run: uv run pytest --tb=short -q --cov=traceforge --cov-report=term-missing
 
   build:
     runs-on: ubuntu-latest

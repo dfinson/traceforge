@@ -239,7 +239,7 @@ def _handle_event_msg(payload: dict[str, Any], base: dict[str, Any]) -> list[dic
         ]
 
     if event_type == "mcp_tool_call_begin":
-        invocation = payload.get("invocation", {})
+        invocation = payload.get("invocation") or {}
         return [
             {
                 **base,
@@ -252,7 +252,7 @@ def _handle_event_msg(payload: dict[str, Any], base: dict[str, Any]) -> list[dic
         ]
 
     if event_type == "mcp_tool_call_end":
-        invocation = payload.get("invocation", {})
+        invocation = payload.get("invocation") or {}
         result = payload.get("result", {})
         # Result is {"Ok": {...}} or {"Err": "..."}
         ok_val = result.get("Ok", {}) if isinstance(result, dict) else {}

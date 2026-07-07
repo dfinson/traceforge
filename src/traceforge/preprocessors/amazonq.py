@@ -44,12 +44,13 @@ def _expand_amazonq_pair(entry: dict[str, Any], cid: str) -> list[dict[str, Any]
         results = None
         if isinstance(content, dict):
             if "Prompt" in content:
-                prompt = content["Prompt"].get("prompt")
+                prompt = (content["Prompt"] or {}).get("prompt")
             elif "CancelledToolUses" in content:
-                prompt = content["CancelledToolUses"].get("prompt")
-                results = content["CancelledToolUses"].get("tool_use_results")
+                cancelled = content["CancelledToolUses"] or {}
+                prompt = cancelled.get("prompt")
+                results = cancelled.get("tool_use_results")
             elif "ToolUseResults" in content:
-                results = content["ToolUseResults"].get("tool_use_results")
+                results = (content["ToolUseResults"] or {}).get("tool_use_results")
         if prompt:
             out.append({"block_type": "message.user", "conversation_id": cid, "content": prompt})
         for r in results or []:

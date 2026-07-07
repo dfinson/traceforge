@@ -26,7 +26,7 @@ def preprocess_pydantic_ai(obj: dict[str, Any]) -> list[dict[str, Any]]:
         elif event_kind == "model_response_stream":
             normalized["type"] = "model_response_chunk"
             if "chunk" not in normalized:
-                normalized["chunk"] = normalized.get("part", {}).get("content", "")
+                normalized["chunk"] = (normalized.get("part") or {}).get("content", "")
         else:
             normalized["type"] = f"stream.{event_kind}"
         return [normalized]
@@ -37,7 +37,7 @@ def preprocess_pydantic_ai(obj: dict[str, Any]) -> list[dict[str, Any]]:
         normalized = dict(obj)
         normalized["type"] = "model_response"
         # Extract text from parts for convenience
-        parts = normalized.get("parts", [])
+        parts = normalized.get("parts") or []
         text_parts = [
             p.get("content", "")
             for p in parts
@@ -49,7 +49,7 @@ def preprocess_pydantic_ai(obj: dict[str, Any]) -> list[dict[str, Any]]:
     elif kind == "request":
         normalized = dict(obj)
         normalized["type"] = "model_request"
-        parts = normalized.get("parts", [])
+        parts = normalized.get("parts") or []
         user_parts = [
             p.get("content", "")
             for p in parts

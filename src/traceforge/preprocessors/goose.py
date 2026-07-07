@@ -42,7 +42,7 @@ def preprocess_goose(obj: dict[str, Any]) -> list[dict[str, Any]]:
             has_text = True
         elif item_type == "toolRequest":
             tool_call = item.get("toolCall", {})
-            value = tool_call.get("value", {}) if isinstance(tool_call, dict) else {}
+            value = (tool_call.get("value") or {}) if isinstance(tool_call, dict) else {}
             results.append(
                 {
                     "role": "tool_use",
@@ -59,7 +59,7 @@ def preprocess_goose(obj: dict[str, Any]) -> list[dict[str, Any]]:
                     "role": "tool_result",
                     "created_at": ts,
                     "tool_use_id": item.get("id", ""),
-                    "content": tool_result.get("value", {}).get("content", "")
+                    "content": (tool_result.get("value") or {}).get("content", "")
                     if isinstance(tool_result, dict)
                     else "",
                     "is_success": tool_result.get("status") == "success"
@@ -118,7 +118,7 @@ def preprocess_goose(obj: dict[str, Any]) -> list[dict[str, Any]]:
             )
         elif item_type == "frontendToolRequest":
             tool_call = item.get("toolCall", {})
-            value = tool_call.get("value", {}) if isinstance(tool_call, dict) else {}
+            value = (tool_call.get("value") or {}) if isinstance(tool_call, dict) else {}
             results.append(
                 {
                     "role": "frontend_tool_request",

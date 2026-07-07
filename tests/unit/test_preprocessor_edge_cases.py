@@ -1014,50 +1014,33 @@ class TestAntigravity:
 # where ``key`` is PRESENT but explicitly ``null`` (a plausible schema drift). ``.get``
 # returns the ``None`` value — not the default — and the code then iterates / attributes it.
 #
-# Per the #84 ticket (tests-only, no src changes) these are pinned as strict xfails and
-# reported to the epic coordinator to be triaged as their own issue. When the src is fixed,
-# ``strict=True`` turns the xpass into a failure so this guard is removed deliberately.
+# These were pinned as strict xfails while the fix was deferred to its own issue (#92);
+# the src is now normalized (``d.get(key) or <default>``) so they are ordinary passing
+# regression tests that lock in the fix.
 
 
 class TestKnownProductBugsNullContainers:
-    """Captured crashes on ``null`` where a list/dict container was expected."""
+    """Null where a list/dict container was expected must normalize, not crash."""
 
-    @pytest.mark.xfail(
-        reason="BUG: pydantic_ai crashes on response parts=null (drift); "
-        "reported to #90 coordinator",
-        strict=True,
-        raises=TypeError,
-    )
     def test_pydantic_ai_response_null_parts(self) -> None:
         out = preprocess_pydantic_ai({"kind": "response", "parts": None})
         assert isinstance(out, list)
+        assert len(out) == 1
+        assert out[0]["type"] == "model_response"
 
-    @pytest.mark.xfail(
-        reason="BUG: pydantic_ai crashes on request parts=null (drift); "
-        "reported to #90 coordinator",
-        strict=True,
-        raises=TypeError,
-    )
     def test_pydantic_ai_request_null_parts(self) -> None:
         out = preprocess_pydantic_ai({"kind": "request", "parts": None})
         assert isinstance(out, list)
+        assert len(out) == 1
+        assert out[0]["type"] == "model_request"
 
-    @pytest.mark.xfail(
-        reason="BUG: pydantic_ai crashes on stream chunk part=null (drift); "
-        "reported to #90 coordinator",
-        strict=True,
-        raises=AttributeError,
-    )
     def test_pydantic_ai_stream_null_part(self) -> None:
         out = preprocess_pydantic_ai({"event_kind": "model_response_stream", "part": None})
         assert isinstance(out, list)
+        assert len(out) == 1
+        assert out[0]["type"] == "model_response_chunk"
+        assert out[0]["chunk"] == ""
 
-    @pytest.mark.xfail(
-        reason="BUG: amazonq crashes on history user.content={'Prompt': null} "
-        "(drift); reported to #90 coordinator",
-        strict=True,
-        raises=AttributeError,
-    )
     def test_amazonq_null_prompt_enum(self) -> None:
         out = preprocess_amazonq(
             {
@@ -1068,3 +1051,5 @@ class TestKnownProductBugsNullContainers:
             }
         )
         assert isinstance(out, list)
+        assert len(out) == 1
+        assert out[0]["block_type"] == "raw.empty"

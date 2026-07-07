@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime, timezone
 
 import pytest
@@ -93,3 +94,18 @@ class RecordingSink:
 @pytest.fixture
 def recording_sink() -> RecordingSink:
     return RecordingSink()
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Auto-skip ``@pytest.mark.windows_only`` tests on non-Windows platforms.
+
+    The gate IPC transport differs by OS (AF_UNIX sockets on POSIX, loopback TCP
+    on Windows); tests asserting Windows-specific behavior carry this marker and
+    are skipped elsewhere — including the Linux CI matrix.
+    """
+    if sys.platform == "win32":
+        return
+    skip_windows = pytest.mark.skip(reason="windows_only: runs only on Windows")
+    for item in items:
+        if "windows_only" in item.keywords:
+            item.add_marker(skip_windows)

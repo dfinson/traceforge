@@ -1,0 +1,151 @@
+/**
+ * Homepage hero + feature grid.
+ * Dark-first, brand palette (see src/css/custom.css for the tokens).
+ */
+
+.hero {
+  position: relative;
+  overflow: hidden;
+  padding: 5rem 0 4rem;
+  background: radial-gradient(1200px 600px at 50% -10%, rgba(37, 110, 243, 0.14), transparent 60%),
+    var(--tf-bg, #05070f);
+  text-align: center;
+}
+
+/* Subtle signature-gradient glow behind the hero content. */
+.heroGlow {
+  position: absolute;
+  inset: -40% 0 auto 0;
+  height: 520px;
+  margin: 0 auto;
+  max-width: 900px;
+  background: var(--tf-gradient);
+  opacity: 0.16;
+  filter: blur(90px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.heroInner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.heroLogo {
+  width: 132px;
+  height: 132px;
+  margin-bottom: 1.25rem;
+  filter: drop-shadow(0 8px 30px rgba(255, 153, 33, 0.28));
+}
+
+.heroTitle {
+  font-size: clamp(2.8rem, 6vw, 4.5rem);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  margin-bottom: 0.5rem;
+}
+
+.heroTagline {
+  font-size: clamp(1.1rem, 2.4vw, 1.5rem);
+  font-weight: 600;
+  color: var(--tf-orange, #ff9921);
+  margin-bottom: 1rem;
+}
+
+.heroPitch {
+  max-width: 640px;
+  font-size: 1.075rem;
+  line-height: 1.6;
+  color: var(--ifm-color-content-secondary, #aab2c8);
+  margin-bottom: 2rem;
+}
+
+.heroButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+  margin-bottom: 3rem;
+}
+
+/* Pipeline strip: Source -> Parser -> Adapter -> Enricher -> Pipeline -> Sink(s). */
+.pipeline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem 0.5rem;
+  max-width: 820px;
+}
+
+.pipelineRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.stage {
+  display: inline-block;
+  padding: 0.4rem 0.85rem;
+  border: 1px solid #1b2133;
+  border-radius: 999px;
+  background: var(--tf-surface, #0e1220);
+  color: var(--ifm-heading-color, #fff);
+  font-size: 0.9rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.arrow {
+  color: var(--tf-orange, #ff9921);
+  font-weight: 700;
+}
+
+/* Feature grid. */
+.features {
+  padding: 4rem 0 5rem;
+}
+
+.featureGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.25rem;
+}
+
+.featureCard {
+  padding: 1.5rem;
+  border: 1px solid #161d30;
+  border-radius: 14px;
+  background: var(--tf-surface, #0e1220);
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.featureCard:hover {
+  border-color: var(--tf-orange, #ff9921);
+  transform: translateY(-3px);
+}
+
+.featureTitle {
+  font-size: 1.2rem;
+  margin-bottom: 0.5rem;
+  color: var(--ifm-heading-color, #fff);
+}
+
+.featureBody {
+  margin-bottom: 0;
+  color: var(--ifm-color-content-secondary, #aab2c8);
+  line-height: 1.6;
+}
+
+@media (max-width: 768px) {
+  .hero {
+    padding: 3.5rem 0 3rem;
+  }
+  .heroLogo {
+    width: 104px;
+    height: 104px;
+  }
+}

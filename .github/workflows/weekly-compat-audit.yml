@@ -22,10 +22,8 @@ jobs:
             package: pydantic-ai-slim
           - name: smolagents
             package: smolagents
-          - name: autogen
-            package: autogen-agentchat
           - name: maf
-            package: microsoft-agents-hosting-core
+            package: agent-framework-core
           - name: aider
             package: aider-chat
 
@@ -54,9 +52,25 @@ jobs:
         id: test
         continue-on-error: true
         run: |
-          uv run --no-sync pytest tests/ -q --tb=short \
-            -k "${{ matrix.framework.name }}" \
-            2>&1 | tee test-output.txt
+          # pytest test names use underscores (e.g. pydantic_ai) but the matrix name is
+          # hyphenated (pydantic-ai); a hyphen in -k collects zero tests (pytest exit 5),
+          # so normalize '-' -> '_' before selecting.
+          kfilter="${{ matrix.framework.name }}"
+          kfilter="${kfilter//-/_}"
+          # Disable errexit so the pipeline failure doesn't abort the step before we read
+          # pytest's real exit code (PIPESTATUS[0]) — tee would otherwise mask it.
+          set +e
+          uv run --no-sync pytest tests/ -q --tb=short -k "$kfilter" 2>&1 | tee test-output.txt
+          status=${PIPESTATUS[0]}
+          set -e
+          # Exit 5 = "no tests collected": a framework may have a valid YAML mapping
+          # (still audited by the compat check step below) but no adapter pytest tests.
+          # That is a legitimate skip, not a failure. A real test failure (exit 1) still fails.
+          if [ "$status" -eq 5 ]; then
+            echo "No adapter pytest tests collected for '$kfilter' (pytest exit 5) — treated as pass/skip."
+            status=0
+          fi
+          exit "$status"
 
       - name: Check for breaking SDK changes
         id: check

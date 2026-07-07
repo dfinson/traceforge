@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import click
 
 from traceforge.cli.detect import detect
@@ -19,6 +21,14 @@ from traceforge.cli.download_cmd import download_model
 @click.version_option(package_name="traceforge")
 def main() -> None:
     """Traceforge — governance pipeline for AI coding agents."""
+    # Force UTF-8 on stdout/stderr so the CLI's Unicode glyphs (box rules,
+    # ✓/✗) never raise UnicodeEncodeError on a non-UTF-8 console such as a
+    # Windows cp1252 stdout. Guarded because streams may lack reconfigure
+    # (e.g. when replaced by an in-memory buffer under test).
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8")
 
 
 main.add_command(watch)

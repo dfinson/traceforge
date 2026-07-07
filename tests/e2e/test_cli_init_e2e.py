@@ -6,31 +6,22 @@ Wave-5 gate story (#86); here we assert the operator contract lightly — a
 supported agent writes the settings file, an unsupported one is a Click usage
 error.
 
-The success path echoes a ``✓`` glyph *after* writing the file, so on a Windows
-cp1252 stdout it crashes with exit 1 (the file is still written). That is the
-same CLI-wide Unicode bug pinned elsewhere; here via a strict conditional xfail.
+The success path echoes a ``✓`` glyph *after* writing the file; the CLI entry
+point forces UTF-8 output so this succeeds on every platform, including a
+Windows cp1252 stdout.
 """
 
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
 from tests.e2e._cli import combined_output, run_cli
 
-_WIN_UNICODE_BUG = (
-    "bug: `init claude-code` echoes '✓ Wrote PreToolUse hook' after writing the "
-    "settings file (src/traceforge/cli/init_cmd.py:73); on Windows cp1252 stdout "
-    "the glyph raises UnicodeEncodeError and the command exits 1 instead of 0 "
-    "(the file is still written)."
-)
-
 
 @pytest.mark.e2e
-@pytest.mark.xfail(sys.platform.startswith("win"), strict=True, reason=_WIN_UNICODE_BUG)
 def test_init_claude_code_writes_settings(tmp_traceforge_home: Path) -> None:
     project = tmp_traceforge_home / "proj"
     project.mkdir(parents=True, exist_ok=True)

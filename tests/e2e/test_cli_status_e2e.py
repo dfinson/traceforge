@@ -6,25 +6,18 @@ pipeline has run. We build a real (empty) ``system.db`` through the production
 machine-readable JSON contract cross-platform. The missing-DB path must fail
 cleanly (exit 1, not a traceback).
 
-The human-readable table draws a ``─`` rule and so crashes on a Windows cp1252
-stdout — pinned with a strict conditional xfail (real pass on Linux CI).
+The human-readable table draws a ``─`` rule; the CLI entry point forces UTF-8
+output so this succeeds on every platform, including a Windows cp1252 stdout.
 """
 
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
 from tests.e2e._cli import combined_output, run_cli
-
-_WIN_UNICODE_BUG = (
-    "bug: `status` (non-JSON) prints a U+2500 rule via click.echo "
-    "(src/traceforge/cli/status.py:59); on Windows cp1252 stdout this raises "
-    "UnicodeEncodeError and the command exits 1 instead of 0."
-)
 
 _EXPECTED_KEYS = {
     "active_sessions",
@@ -72,7 +65,6 @@ def test_status_missing_db_reports_cleanly(tmp_traceforge_home: Path) -> None:
 
 
 @pytest.mark.e2e
-@pytest.mark.xfail(sys.platform.startswith("win"), strict=True, reason=_WIN_UNICODE_BUG)
 def test_status_plain_table_succeeds(tmp_traceforge_home: Path) -> None:
     db_path = _build_system_db(tmp_traceforge_home)
 

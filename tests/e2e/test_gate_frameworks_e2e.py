@@ -7,10 +7,10 @@ adapters that had no e2e coverage:
     its native ``process(context, call_next)`` protocol. Only the tool body is
     faked; the middleware, ``MiddlewareTermination`` deny, and postflight
     redact/suppress transforms are the real traceforge code paths.
-  * ``pipeline.gate_pydantic_ai()`` — Pydantic AI tool hooks. This adapter is
-    currently BROKEN (it calls ``agent.tool_hook(...)`` which does not exist on
-    pydantic-ai>=1); the single test below is an ``xfail(strict=True)`` pinning
-    the bug so a future fix flips it to XPASS and alerts us.
+  * ``pipeline.gate_pydantic_ai()`` — Pydantic AI tool gating. The adapter wraps the
+    agent's leaf toolsets in a ``WrapperToolset`` whose ``call_tool`` runs the real
+    traceforge preflight (deny) and postflight (redact/suppress) code paths; only the
+    tool body is faked. Driven through a real ``Agent(TestModel())``.
 
 Both frameworks are guarded with ``importorskip`` so a missing optional dep
 skips (rather than errors) that framework's tests independently.
@@ -209,31 +209,135 @@ class TestMAFGating:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestPydanticAIGating:
-    """E2E: pipeline.gate_pydantic_ai() tool-hook registration."""
+def _run_pydantic_agent(agent, prompt: str = "go") -> list:
+    """Run a gated Pydantic AI agent and collect its tool-return contents.
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "bug: gate_pydantic_ai registers hooks via agent.tool_hook('before'/'after'), "
-            "but pydantic-ai>=1 Agent has no tool_hook attribute. "
-            "EXPECTED: hooks register and a dangerous call is denied. "
-            "ACTUAL: AttributeError: 'Agent' object has no attribute 'tool_hook'. "
-            "src/traceforge/governance/pipeline.py:740 and :758."
-        ),
-    )
-    def test_gate_pydantic_ai_registers_hooks(self):
+    ``TestModel(call_tools="all")`` emits exactly one call per registered function
+    tool, so a single registered tool is invoked once and routed through the gate.
+    Output tools are not gated and do not appear here.
+    """
+    from pydantic_ai.messages import ToolReturnPart
+
+    result = agent.run_sync(prompt)
+    returns = []
+    for message in result.all_messages():
+        for part in getattr(message, "parts", []):
+            if isinstance(part, ToolReturnPart):
+                returns.append(part.content)
+    return returns
+
+
+class TestPydanticAIGating:
+    """E2E: pipeline.gate_pydantic_ai() wrapping-toolset enforcement.
+
+    Driven through a real ``Agent(TestModel())``. Only the tool body is faked; the
+    ``WrapperToolset`` gate, preflight deny, and postflight redact/suppress transforms
+    are the real traceforge code paths.
+    """
+
+    def test_gate_registration_is_idempotent(self):
+        """gate_pydantic_ai marks the agent gated and a second call is a no-op."""
+        pytest.importorskip("pydantic_ai")
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        pipeline = make_pipeline(preflight=allow_all_gate)
+        agent = Agent(TestModel())
+
+        assert getattr(agent, "_traceforge_gated", False) is False
+        pipeline.gate_pydantic_ai(agent)
+        assert getattr(agent, "_traceforge_gated", False) is True
+
+        gated_toolset = agent._function_toolset
+        pipeline.gate_pydantic_ai(agent)  # second call must not re-wrap
+        assert agent._function_toolset is gated_toolset
+
+    def test_dangerous_call_denied(self):
+        """A denied tool raises out of the run and its body never executes."""
         pytest.importorskip("pydantic_ai")
         from pydantic_ai import Agent
         from pydantic_ai.models.test import TestModel
 
         pipeline = make_pipeline(preflight=deny_rm_gate)
         agent = Agent(TestModel())
+        called = {"n": 0}
 
-        # Currently raises AttributeError inside gate_pydantic_ai (the bug).
+        @agent.tool_plain(name="rm")
+        def remove(path: str) -> str:
+            called["n"] += 1
+            return f"removed {path}"
+
         pipeline.gate_pydantic_ai(agent)
 
-        # Reached only once the adapter is fixed: registration must be idempotent
-        # and mark the agent as gated.
-        assert getattr(agent, "_traceforge_gated", False) is True
-        pipeline.gate_pydantic_ai(agent)  # idempotent no-op
+        with pytest.raises(RuntimeError, match="Denied: Destructive tool blocked: rm"):
+            agent.run_sync("go")
+
+        assert called["n"] == 0  # tool body never executed
+
+    def test_safe_call_allowed(self):
+        """A safe tool is allowed: it executes and its result passes through."""
+        pytest.importorskip("pydantic_ai")
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        pipeline = make_pipeline(preflight=deny_rm_gate)
+        agent = Agent(TestModel())
+        called = {"n": 0}
+
+        @agent.tool_plain
+        def read_file(path: str) -> str:
+            called["n"] += 1
+            return "contents of the file"
+
+        pipeline.gate_pydantic_ai(agent)
+
+        returns = _run_pydantic_agent(agent)
+
+        assert called["n"] == 1
+        assert "contents of the file" in returns
+
+    def test_postflight_redacts_secret(self):
+        """A successful result containing SECRET is redacted in place."""
+        pytest.importorskip("pydantic_ai")
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        pipeline = make_pipeline(
+            preflight=allow_all_gate,
+            postflight=redact_secret_postflight,
+        )
+        agent = Agent(TestModel())
+
+        @agent.tool_plain
+        def search(query: str) -> str:
+            return "the SECRET api key is 42"
+
+        pipeline.gate_pydantic_ai(agent)
+
+        returns = _run_pydantic_agent(agent)
+
+        assert returns  # the tool was called and returned through the gate
+        assert all("SECRET" not in str(r) for r in returns)
+        assert any("[REDACTED]" in str(r) for r in returns)
+
+    def test_postflight_suppresses_output(self):
+        """A successful result flagged for suppression is replaced wholesale."""
+        pytest.importorskip("pydantic_ai")
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+
+        pipeline = make_pipeline(
+            preflight=allow_all_gate,
+            postflight=suppress_if_output_contains_hide,
+        )
+        agent = Agent(TestModel())
+
+        @agent.tool_plain
+        def dump(what: str) -> str:
+            return "please HIDE this from the caller"
+
+        pipeline.gate_pydantic_ai(agent)
+
+        returns = _run_pydantic_agent(agent)
+
+        assert "[output suppressed by policy]" in returns

@@ -722,60 +722,65 @@ class GovernancePipeline:
         return _TraceforgeAgent
 
     def gate_pydantic_ai(self, agent) -> None:
-        """Register traceforge as Pydantic AI tool-execute hooks (before/after).
+        """Gate a Pydantic AI agent's tool calls via a wrapping toolset.
 
-        Blocking: raises SkipToolExecution with denial reason on preflight.
-        Session ID: from ctx.run_id (Pydantic AI's native UUID7 run ID).
-        Idempotent: calling twice on same agent is a no-op.
+        Blocking: preflight DENY raises ``RuntimeError('Denied: ...')``, which
+            propagates out of the agent run so the tool body never executes.
+        Session ID: from ``ctx.run_id`` (Pydantic AI's native per-run UUID).
+        Postflight: SUPPRESS/REDACT rewrite the tool's return value; TERMINATE raises.
+        Idempotent: calling twice on the same agent is a no-op.
+
+        Pydantic AI (>=1) exposes no tool-execution hooks; the supported per-tool
+        interception point is ``AbstractToolset.call_tool``. We wrap each of the
+        agent's leaf toolsets (its function tools plus any user/dynamic toolsets) in a
+        ``WrapperToolset`` subclass, so every tool call routes through the gate. Because
+        preflight and postflight run in the same ``call_tool`` invocation, the trace is
+        a local variable — no cross-hook stash is needed. Apply after tools are
+        registered.
         """
         if getattr(agent, "_traceforge_gated", False):
             return
-        agent._traceforge_gated = True
+
+        from pydantic_ai.toolsets import WrapperToolset
 
         pipeline = self
-        # External trace stash keyed by (run_id, tool_name) — avoids touching frozen ctx
-        _pending: dict[str, "EventTrace"] = {}
-        _MAX_PENDING = 1000
 
-        @agent.tool_hook("before")
-        async def _traceforge_before_tool(ctx, tool_def, args):
-            from pydantic_ai.exceptions import SkipToolExecution
+        class _TraceforgeGateToolset(WrapperToolset):
+            async def call_tool(self, name, tool_args, ctx, tool):
+                from traceforge.sdk.gate_types import PostflightAction
 
-            sid = str(getattr(ctx, "run_id", None) or "pydantic_ai")
-            payload = {
-                "tool_name": tool_def.name,
-                "tool_input": args if isinstance(args, dict) else {"raw": args},
-                "session_id": sid,
-            }
-            trace, verdict = pipeline._score_and_gate_preflight(payload)
-            if verdict.denied:
-                raise SkipToolExecution(f"Denied: {verdict.reason}")
-            stash_key = f"{sid}:{tool_def.name}:{id(args)}"
-            if len(_pending) >= _MAX_PENDING:
-                _pending.pop(next(iter(_pending)), None)
-            _pending[stash_key] = trace
+                sid = str(getattr(ctx, "run_id", None) or "pydantic_ai")
+                payload = {
+                    "tool_name": name,
+                    "tool_input": tool_args if isinstance(tool_args, dict) else {"raw": tool_args},
+                    "session_id": sid,
+                    "tool_call_id": getattr(ctx, "tool_call_id", None),
+                }
+                trace, verdict = pipeline._score_and_gate_preflight(payload)
+                if verdict.denied:
+                    raise RuntimeError(f"Denied: {verdict.reason}")
 
-        @agent.tool_hook("after")
-        async def _traceforge_after_tool(ctx, tool_def, args, result):
-            sid = str(getattr(ctx, "run_id", None) or "pydantic_ai")
-            stash_key = f"{sid}:{tool_def.name}:{id(args)}"
-            trace = _pending.pop(stash_key, None)
-            if trace is None:
-                return
-            pv = pipeline._enforce_postflight(
-                trace,
-                session_id=sid,
-                output={"result": str(result)} if result else None,
-            )
-            from traceforge.sdk.gate_types import PostflightAction
+                result = await super().call_tool(name, tool_args, ctx, tool)
 
-            if pv.action == PostflightAction.TERMINATE:
-                raise RuntimeError(f"Session terminated by policy: {pv.reason}")
-            if pv.action == PostflightAction.SUPPRESS:
-                # Return replacement string — Pydantic AI after hooks can return modified output
-                return "[output suppressed by policy]"
-            if pv.action == PostflightAction.REDACT and isinstance(result, str):
-                return pipeline._apply_postflight_to_output(pv, result)
+                pv = pipeline._enforce_postflight(
+                    trace,
+                    session_id=sid,
+                    output={"result": str(result)} if result is not None else None,
+                )
+                if pv.action == PostflightAction.TERMINATE:
+                    raise RuntimeError(f"Session terminated by policy: {pv.reason}")
+                if pv.action == PostflightAction.SUPPRESS:
+                    return "[output suppressed by policy]"
+                if pv.action == PostflightAction.REDACT and isinstance(result, str):
+                    return pipeline._apply_postflight_to_output(pv, result)
+                return result
+
+        # Wrap every leaf toolset the agent will assemble into its run toolset, then
+        # mark gated only after wrapping succeeds (no half-gated state on failure).
+        agent._function_toolset = _TraceforgeGateToolset(agent._function_toolset)
+        agent._user_toolsets = [_TraceforgeGateToolset(ts) for ts in agent._user_toolsets]
+        agent._dynamic_toolsets = [_TraceforgeGateToolset(ts) for ts in agent._dynamic_toolsets]
+        agent._traceforge_gated = True
 
     def gate_openai_agents(self, agent):
         """Register traceforge as an OpenAI Agents SDK input guardrail.

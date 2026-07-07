@@ -183,7 +183,7 @@ class FileWatchSource(Source):
             self._file.close()
             self._file = None
         try:
-            self._file = self.path.open("r", encoding=self.encoding, newline="")
+            self._file = self.path.open("r", encoding=self.encoding, errors="replace", newline="")
         except FileNotFoundError:
             self._file = None
             self._inode = None

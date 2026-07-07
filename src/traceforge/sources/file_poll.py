@@ -111,7 +111,7 @@ class FilePollSource(Source):
             yield self._make_record(line.rstrip("\r\n"))
 
     def _read_from_offset(self) -> str:
-        with self.path.open("r", encoding=self.encoding, newline="") as handle:
+        with self.path.open("r", encoding=self.encoding, errors="replace", newline="") as handle:
             handle.seek(self._offset)
             data = handle.read()
             self._offset = handle.tell()

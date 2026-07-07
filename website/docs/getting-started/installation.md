@@ -2,12 +2,12 @@
 id: installation
 title: Installation
 sidebar_label: Installation
-description: "Install TraceForge with pip or uv: one install, no extras, no GPU required."
+description: "Install TraceForge with pip or uv: one install, no extras."
 ---
 
 # Installation
 
-TraceForge installs anywhere Python does, with no GPU required. It runs on **Python 3.11, 3.12, and 3.13**.
+TraceForge runs on **Python 3.11, 3.12, and 3.13**.
 
 ```bash
 pip install traceforge      # or: uv add traceforge

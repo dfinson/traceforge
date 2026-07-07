@@ -18,7 +18,7 @@
 ---
 
 TraceForge is a framework-agnostic Python library that turns the raw session logs of
-AI coding agents into a clean, strongly-typed event stream, classified, risk-scored, and
+AI coding agents into a strongly-typed event stream, classified, risk-scored, and
 governance-assessed in real time. Adding support for a new agent framework requires only a **YAML
 mapping file**: no code.
 
@@ -45,7 +45,7 @@ mapping file**: no code.
 pip install traceforge      # or: uv add traceforge
 ```
 
-Everything ships in a single install, with no extras and no GPU required. Describe a pipeline in
+Everything ships in a single install, with no extras. Describe a pipeline in
 `traceforge.yaml`:
 
 ```yaml
@@ -90,8 +90,8 @@ for the full CLI (`watch`, `replay`, `score`, `gate`, `init`, `detect`, `status`
 | | |
 | --- | --- |
 | 🧩 **Framework-agnostic** | 22 bundled YAML mappings covering Copilot, Claude Code, Cline, Aider, CrewAI, LangGraph, OpenHands, PydanticAI, smolagents, Goose, and more. |
-| 🖥️ **Runs anywhere** | Installs and runs anywhere Python does, from a laptop to CI, with no GPU or heavyweight ML stack. |
-| 🏷️ **Rich classification** | 7-dimension taxonomy, tree-sitter shell AST, MCP profiles, 0–100 risk scoring with MITRE ATT&CK mappings. |
+| 🖥️ **Runs anywhere** | Runs from a laptop to CI. CPU-only, no heavyweight ML stack. |
+| 🏷️ **Classification & risk** | 7-dimension taxonomy, tree-sitter shell AST, MCP profiles, 0–100 risk scoring with MITRE ATT&CK mappings. |
 | 🧠 **Live structure** | Phase, activity/step boundaries, and human-readable titles stamped as events arrive. |
 | 🛡️ **Governance** | Data labeling, information-flow control, drift & budget tracking, and `allow/warn/escalate/deny/transform` recommendations. |
 | 🔌 **Pluggable sinks** | JSONL, SQLite, S3, Parquet, OpenTelemetry, webhook, console, and custom callbacks, all YAML-configurable. |

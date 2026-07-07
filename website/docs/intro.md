@@ -60,7 +60,7 @@ Raw records flow left to right, gaining structure at every stage:
 
 - **Observation-first**: observes, enriches, and recommends by default; enforcement is strictly opt-in (a registered gate policy).
 - **Framework-agnostic**: new framework support = new YAML file.
-- **Runs anywhere**: no GPU or heavyweight ML stack; structuring runs live as events arrive.
+- **Runs anywhere**: CPU-only, no heavyweight ML stack; structuring runs live as events arrive.
 - **Defensive parsing**: malformed input is logged and skipped, never crashes.
 - **Immutable domain objects**: all events are frozen Pydantic models.
 - **Error isolation**: one failing sink cannot block others.

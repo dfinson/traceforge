@@ -1,0 +1,17 @@
+{
+  "event_count": 95,
+  "kinds": {
+    "file.edited": 2,
+    "llm.call.completed": 6,
+    "llm.call.started": 6,
+    "llm.reasoning.completed": 14,
+    "message.assistant": 22,
+    "message.user": 8,
+    "session.info": 9,
+    "session.started": 1,
+    "tool.call.completed": 12,
+    "tool.call.started": 13,
+    "workflow.agent_switched": 1,
+    "workflow.model_switched": 1
+  }
+}

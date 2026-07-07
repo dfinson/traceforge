@@ -1,0 +1,11 @@
+{
+  "event_count": 8,
+  "kinds": {
+    "config.auto_commits": 1,
+    "context.repository": 1,
+    "llm.call.completed": 2,
+    "llm.call.started": 2,
+    "session.ended": 1,
+    "session.started": 1
+  }
+}

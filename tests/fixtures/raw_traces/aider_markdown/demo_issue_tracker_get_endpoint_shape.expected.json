@@ -1,0 +1,16 @@
+{
+  "event_count": 20,
+  "kinds": {
+    "command.started": 2,
+    "file.edited": 4,
+    "input.received": 2,
+    "knowledge.query.completed": 1,
+    "message.assistant": 1,
+    "message.user": 1,
+    "session.info": 3,
+    "session.started": 1,
+    "telemetry.usage": 1,
+    "tool.call.completed": 1,
+    "tool.output": 3
+  }
+}

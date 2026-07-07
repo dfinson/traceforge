@@ -1,0 +1,10 @@
+{
+  "event_count": 19,
+  "kinds": {
+    "message.assistant": 7,
+    "message.user": 3,
+    "session.info": 2,
+    "tool.call.started": 3,
+    "tool.output": 4
+  }
+}

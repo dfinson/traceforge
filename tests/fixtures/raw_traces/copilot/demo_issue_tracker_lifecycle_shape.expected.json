@@ -1,0 +1,11 @@
+{
+  "event_count": 9,
+  "kinds": {
+    "file.edited": 2,
+    "permission.granted": 1,
+    "planning.completed": 1,
+    "session.ended": 1,
+    "session.info": 3,
+    "session.started": 1
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "event_count": 24,
+  "kinds": {
+    "command.completed": 10,
+    "command.started": 10,
+    "message.system": 1,
+    "message.user": 1,
+    "session.ended": 2
+  }
+}

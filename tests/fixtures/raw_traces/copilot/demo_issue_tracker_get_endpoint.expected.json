@@ -1,0 +1,17 @@
+{
+  "event_count": 59,
+  "kinds": {
+    "hook.completed": 9,
+    "hook.started": 9,
+    "message.assistant": 6,
+    "message.system": 1,
+    "message.user": 1,
+    "session.ended": 1,
+    "session.started": 1,
+    "tool.call.completed": 9,
+    "tool.call.started": 9,
+    "turn.ended": 6,
+    "turn.started": 6,
+    "workflow.model_switched": 1
+  }
+}

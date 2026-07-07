@@ -1,0 +1,12 @@
+{
+  "event_count": 15,
+  "kinds": {
+    "message.assistant": 2,
+    "message.system": 1,
+    "message.user": 1,
+    "reasoning.started": 2,
+    "session.info": 1,
+    "task.completed": 1,
+    "tool.call.started": 7
+  }
+}

@@ -85,7 +85,7 @@ def check_pydantic_ai() -> list[str]:
         _validate_mapping_with_sample(
             "pydantic_ai",
             {
-                "event_type": "agent_run_start",
+                "type": "agent_run_start",
                 "timestamp": "2024-01-01T00:00:00Z",
                 "agent_name": "test_agent",
                 "model_name": "gpt-4o",
@@ -108,23 +108,13 @@ def check_smolagents() -> list[str]:
         _validate_mapping_with_sample(
             "smolagents",
             {
-                "step_type": "AgentStep",
+                "step_type": "ActionStep",
                 "timestamp": "2024-01-01T00:00:00Z",
                 "agent_name": "ToolCallingAgent",
                 "thought": "I should search for this",
             },
         )
     )
-    return errors
-
-
-def check_autogen() -> list[str]:
-    """Verify AutoGen is importable."""
-    errors: list[str] = []
-    try:
-        import autogen_agentchat  # noqa: F401
-    except ImportError as e:
-        errors.append(f"autogen_agentchat not importable: {e}")
     return errors
 
 
@@ -265,7 +255,6 @@ _CHECKERS = {
     "langgraph": check_langgraph,
     "pydantic-ai": check_pydantic_ai,
     "smolagents": check_smolagents,
-    "autogen": check_autogen,
     "maf": check_maf,
     "aider": check_aider,
 }

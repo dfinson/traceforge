@@ -83,6 +83,47 @@ effect_overrides:
         mode: any_present
     default_effect: read_only
 
+  # netcat family / socat: a bare connection transfers data (mutating sink).
+  # Listen mode (-l/-L/--listen/-k) and help/version are read-only. This lets a
+  # read-sensitive-then-network pipe (e.g. `cat secret | nc host port`) aggregate
+  # to a mutating effect and trip the mutating_with_network rule.
+  nc:
+    flag_effects:
+      - flags: ["-l", "-L", "--listen", "-k"]
+        effect: read_only
+        mode: any_present
+      - flags: ["-h", "--help", "-V", "--version"]
+        effect: read_only
+        mode: any_present
+    default_effect: mutating
+
+  ncat:
+    flag_effects:
+      - flags: ["-l", "-L", "--listen", "-k"]
+        effect: read_only
+        mode: any_present
+      - flags: ["-h", "--help", "-V", "--version"]
+        effect: read_only
+        mode: any_present
+    default_effect: mutating
+
+  netcat:
+    flag_effects:
+      - flags: ["-l", "-L", "--listen", "-k"]
+        effect: read_only
+        mode: any_present
+      - flags: ["-h", "--help", "-V", "--version"]
+        effect: read_only
+        mode: any_present
+    default_effect: mutating
+
+  socat:
+    flag_effects:
+      - flags: ["-h", "-hh", "-hhh", "--help", "-V", "--version"]
+        effect: read_only
+        mode: any_present
+    default_effect: mutating
+
   # Git: subcmd determines effect
   git:
     subcmd_effects:

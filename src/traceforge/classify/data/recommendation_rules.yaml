@@ -91,6 +91,37 @@ recommendation_rules:
     recommend: warn
     reason: content_integrity_mismatch
 
+  # ── Semantic hazard tags (classify/hazards.py) ──
+  # These escalate dangerous command shapes regardless of numeric risk score.
+
+  # Raw block-device write (dd of=/dev/sda, redirect into /dev/nvme0n1, ...)
+  - id: raw_device_write
+    when:
+      capability: [raw_device_write]
+    recommend: escalate
+    reason: raw_block_device_write
+
+  # Filesystem format / wipe (mkfs*, mke2fs, mkswap, wipefs, destructive parted)
+  - id: filesystem_format
+    when:
+      capability: [filesystem_format]
+    recommend: escalate
+    reason: filesystem_format
+
+  # Persistence-mechanism write (cron, systemd unit, shell rc file)
+  - id: persistence_write
+    when:
+      capability: [persistence_write]
+    recommend: escalate
+    reason: persistence_mechanism_write
+
+  # Fork bomb / resource-exhaustion pattern
+  - id: fork_bomb
+    when:
+      capability: [fork_bomb]
+    recommend: escalate
+    reason: fork_bomb_pattern
+
   # Fallback risk score thresholds
   - id: risk_critical
     when:

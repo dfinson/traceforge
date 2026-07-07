@@ -8,7 +8,7 @@ description: traceforge.yaml, ~/.traceforge/config.yaml, TRACEFORGE_* environmen
 # Configuration
 
 TraceForge reads a hierarchical configuration from YAML files and environment variables. A
-config file is optional, sensible defaults apply on first use.
+config file is optional, defaults apply on first use.
 
 ## Loading precedence
 
@@ -127,7 +127,7 @@ governance:
 ## Session naming
 
 Sessions are named from the first substantive user message. By default this is a zero-cost,
-offline heuristic. You can opt into an LLM API (via LiteLLM) for polished abstractive titles:
+offline heuristic. You can opt into an LLM API (via LiteLLM) for abstractive titles:
 
 ```yaml
 title:

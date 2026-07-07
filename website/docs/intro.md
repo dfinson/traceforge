@@ -99,6 +99,6 @@ print(trace.risk_score, trace.suggested_action)   # e.g. 66 escalate
 - **[Governance](governance/overview.md)**: the monitor + shield assessment engine.
 - **[Reference](reference/sources.md)**: a stage-by-stage tour of every component.
 
-TraceForge is a standalone, reusable library with no framework lock-in. For the full
+TraceForge is a standalone, reusable library. For the full
 authoritative specification, see
 [`SPEC.md`](https://github.com/dfinson/traceforge/blob/main/SPEC.md).

@@ -202,21 +202,9 @@ class GovernancePipeline:
             pipeline = Pipeline.from_config()
             pipeline = Pipeline.from_config(policy=my_policy)
         """
-        import os
+        from traceforge.config.loader import load_config_from_path
 
-        from traceforge.config.loader import load_config
-
-        old_env = os.environ.get("TRACEFORGE_CONFIG")
-        if path is not None:
-            os.environ["TRACEFORGE_CONFIG"] = str(path)
-        try:
-            config = load_config()
-        finally:
-            if path is not None:
-                if old_env is None:
-                    os.environ.pop("TRACEFORGE_CONFIG", None)
-                else:
-                    os.environ["TRACEFORGE_CONFIG"] = old_env
+        config = load_config_from_path(path)
 
         instance = cls.create(config.governance)
 

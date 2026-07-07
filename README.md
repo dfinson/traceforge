@@ -6,7 +6,7 @@
 
 [![Lint](https://github.com/dfinson/traceforge/actions/workflows/ci-lint.yml/badge.svg)](https://github.com/dfinson/traceforge/actions/workflows/ci-lint.yml)
 [![Test](https://github.com/dfinson/traceforge/actions/workflows/ci-test.yml/badge.svg)](https://github.com/dfinson/traceforge/actions/workflows/ci-test.yml)
-[![PyPI](https://img.shields.io/badge/PyPI-coming%20soon-FF9921)](https://pypi.org/project/traceforge/)
+[![PyPI](https://img.shields.io/pypi/v/traceforge-toolkit?color=FF9921&label=PyPI)](https://pypi.org/project/traceforge-toolkit/)
 [![Python](https://img.shields.io/badge/python-3.11%20|%203.12%20|%203.13-256EF3)](https://github.com/dfinson/traceforge)
 [![License: MIT](https://img.shields.io/badge/license-MIT-7359AE.svg)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-traceforge-FF9921)](https://dfinson.github.io/traceforge/)
@@ -125,7 +125,7 @@ the test suite, linting with `ruff`, and how to add a new agent framework mappin
 
 ## Status
 
-🚧 **Under active development**: not yet published to PyPI. The pipeline is feature-complete:
+✅ **Released**: available on PyPI as [`traceforge-toolkit`](https://pypi.org/project/traceforge-toolkit/) (`pip install traceforge-toolkit`). The pipeline is feature-complete:
 sources, adapters, enricher, classification, risk scoring, live phase/boundary/title structuring,
 the governance engine, all storage sinks, and the `traceforge` CLI all ship today.
 

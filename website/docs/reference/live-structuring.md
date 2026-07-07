@@ -2,7 +2,7 @@
 id: live-structuring
 title: Live Structuring
 sidebar_label: Live Structuring
-description: Torch-free phase, boundary, and title models that turn a flat event stream into navigable structure live, with no GPU.
+description: Torch-free phase, boundary, and title models that turn a flat event stream into navigable structure live.
 ---
 
 # Live Structuring

@@ -53,7 +53,7 @@ traceforge watch --frameworks claude,copilot
 
 ## 3. Or replay recorded traces
 
-To re-run the full pipeline over captured session files (great for testing and batch
+To re-run the full pipeline over captured session files (for testing and batch
 reprocessing), use `replay` with an explicit adapter mapping:
 
 ```bash

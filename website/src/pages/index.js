@@ -14,7 +14,7 @@ const FEATURES = [
   },
   {
     title: 'Runs anywhere',
-    body: 'Installs and runs anywhere Python does, from a laptop to CI, with no GPU or heavyweight ML stack.',
+    body: 'Runs from a laptop to CI. CPU-only, no heavyweight ML stack.',
   },
   {
     title: 'Classification & risk',

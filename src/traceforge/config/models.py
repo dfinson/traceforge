@@ -17,7 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from traceforge.models import StrictModel
 
@@ -234,6 +234,42 @@ class BudgetConfig(StrictModel):
     max_by_scope: dict[str, int] | None = None
 
 
+class SubprocessGateConfig(StrictModel):
+    """External preflight gate that shells out to a decider command per call.
+
+    The JSON request is written to the process's stdin; the JSON verdict is read
+    from stdout. Fail-closed by default (any error/timeout/bad output -> DENY).
+    """
+
+    type: Literal["subprocess"] = "subprocess"
+    command: str
+    timeout: float = Field(default=10.0, gt=0)
+    fail_open: bool = False
+    max_input_bytes: int = Field(default=65536, gt=0)
+
+
+class HttpGateConfig(StrictModel):
+    """External preflight gate that POSTs the request to a persistent HTTP PDP.
+
+    Recommended mode (e.g. an OPA REST server). Fail-closed by default (any
+    error/timeout/non-2xx -> DENY). ``headers`` carries auth tokens.
+    """
+
+    type: Literal["http"] = "http"
+    endpoint: str
+    timeout: float = Field(default=2.0, gt=0)
+    fail_open: bool = False
+    headers: dict[str, str] = Field(default_factory=dict)
+    max_input_bytes: int = Field(default=65536, gt=0)
+
+
+# Discriminated union of external (out-of-process) preflight gate types
+ExternalGateConfig = Annotated[
+    SubprocessGateConfig | HttpGateConfig,
+    Field(discriminator="type"),
+]
+
+
 class GovernanceConfig(StrictModel):
     """Governance pipeline configuration.
 
@@ -258,6 +294,15 @@ class GovernanceConfig(StrictModel):
             integrity_verification=True,
             budget=BudgetConfig(max_tool_calls=200, max_by_effect={"destructive": 10}),
         )
+
+    Preflight gating is configured one of two mutually-exclusive ways:
+
+      * ``tool_preflight_gate`` — a dotted import path to an in-process Python
+        ``PreflightGate`` callable (SDK / code-defined policy).
+      * ``preflight_gate`` — an out-of-process, YAML-native external decider
+        (``http`` or ``subprocess``); see :data:`ExternalGateConfig`.
+
+    Setting both is a configuration error (raised by the validator below).
     """
 
     db_path: str | None = None  # None = in-memory
@@ -267,6 +312,24 @@ class GovernanceConfig(StrictModel):
     integrity_verification: bool = True  # content-hash tamper detection (baseline + drift)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
     tool_preflight_gate: str | None = None  # dotted import path (e.g. "myapp.policies.my_policy")
+    preflight_gate: ExternalGateConfig | None = (
+        None  # out-of-process external decider (http/subprocess)
+    )
+
+    @model_validator(mode="after")
+    def _preflight_gate_exclusivity(self) -> "GovernanceConfig":
+        """``tool_preflight_gate`` and ``preflight_gate`` are mutually exclusive.
+
+        They configure the same slot (the preflight gate chain) via two different
+        mechanisms; allowing both would make precedence ambiguous. Fail loudly.
+        """
+        if self.tool_preflight_gate is not None and self.preflight_gate is not None:
+            raise ValueError(
+                "governance.tool_preflight_gate (dotted import path) and "
+                "governance.preflight_gate (external gate config) are mutually "
+                "exclusive — set only one."
+            )
+        return self
 
 
 # ─── Score API Config ────────────────────────────────────────────────────────

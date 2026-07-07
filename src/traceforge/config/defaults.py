@@ -51,6 +51,30 @@ governance:
   #   max_tool_calls: 200
   #   max_by_effect:
   #     destructive: 10
+  #
+  # ── External preflight gate (out-of-process tool-call decider) ──────────────
+  # Delegate the ALLOW/DENY decision to an external Policy Decision Point instead
+  # of an in-process Python callback. Fail-CLOSED by default (any error/timeout/
+  # non-2xx/bad output => DENY). Mutually exclusive with `tool_preflight_gate`.
+  # Choose ONE of the two forms below.
+  #
+  # HTTP PDP (recommended — e.g. an OPA REST server):
+  # preflight_gate:
+  #   type: http
+  #   endpoint: http://localhost:8181/v1/data/traceforge/verdict
+  #   timeout: 2.0
+  #   fail_open: false        # false = fail-closed (DENY on error). Keep false.
+  #   headers:                # optional, e.g. auth tokens
+  #     Authorization: "Bearer ${PDP_TOKEN}"
+  #   max_input_bytes: 65536  # per-string cap on tool input sent to the decider
+  #
+  # Subprocess decider (portable / air-gapped — e.g. `opa eval`):
+  # preflight_gate:
+  #   type: subprocess
+  #   command: "opa eval -I -f raw data.traceforge.verdict"
+  #   timeout: 10.0
+  #   fail_open: false
+  #   max_input_bytes: 65536
 
 # ─── Phase tracker (session-level phase segmentation) ───────────────────────
 # Smooths per-event activity labels into stable workflow phases via a debounced

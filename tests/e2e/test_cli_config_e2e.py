@@ -5,9 +5,9 @@ Covers the operator config lifecycle — ``init`` (write the default file),
 bad) — as real subprocesses against an isolated ``~/.traceforge``.
 
 Two happy paths (``validate`` on a valid file, ``show``) echo Unicode via
-``click.echo`` (a ``✓`` glyph and the ``─`` rules inside the default template)
-and therefore crash on a Windows cp1252 stdout. They are pinned with a strict
-conditional xfail so they are real passes on Linux CI and bug-pins on Windows.
+``click.echo`` (a ``✓`` glyph and the ``─`` rules inside the default template);
+the CLI entry point forces UTF-8 output so they pass on every platform,
+including a Windows cp1252 stdout.
 """
 
 from __future__ import annotations
@@ -20,19 +20,6 @@ import pytest
 from tests.e2e._cli import combined_output, run_cli
 
 _CONFIG_REL = Path(".traceforge") / "config.yaml"
-
-_WIN_UNICODE_BUG_VALIDATE = (
-    "bug: `config validate` on a VALID file echoes '✓ Config valid' "
-    "(src/traceforge/cli/config_cmd.py:63); on Windows cp1252 stdout the glyph "
-    "raises UnicodeEncodeError, caught by the except clause, so a valid config "
-    "wrongly reports invalid and exits 1 instead of 0."
-)
-_WIN_UNICODE_BUG_SHOW = (
-    "bug: `config show` prints the default template, whose section rules use "
-    "U+2500 (src/traceforge/config/defaults.py); click.echo of that content "
-    "raises UnicodeEncodeError on Windows cp1252 stdout, exiting 1 instead of 0 "
-    "(src/traceforge/cli/config_cmd.py:47)."
-)
 
 
 @pytest.mark.e2e
@@ -109,7 +96,6 @@ def test_config_validate_missing_path_is_usage_error(tmp_traceforge_home: Path) 
 
 
 @pytest.mark.e2e
-@pytest.mark.xfail(sys.platform.startswith("win"), strict=True, reason=_WIN_UNICODE_BUG_VALIDATE)
 def test_config_validate_accepts_valid_file(tmp_traceforge_home: Path) -> None:
     assert run_cli("config", "init").returncode == 0
 
@@ -120,7 +106,6 @@ def test_config_validate_accepts_valid_file(tmp_traceforge_home: Path) -> None:
 
 
 @pytest.mark.e2e
-@pytest.mark.xfail(sys.platform.startswith("win"), strict=True, reason=_WIN_UNICODE_BUG_SHOW)
 def test_config_show_prints_effective_config(tmp_traceforge_home: Path) -> None:
     assert run_cli("config", "init").returncode == 0
 

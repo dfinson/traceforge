@@ -60,10 +60,13 @@ def validate(config_path: str | None) -> None:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             raise ValueError("Config must be a YAML mapping")
-        click.echo(f"✓ Config valid: {path}")
     except Exception as exc:
         click.echo(f"✗ Config invalid: {exc}", err=True)
         sys.exit(1)
+
+    # Emit the success line outside the try so a valid config is never
+    # misreported as invalid if the echo itself were to fail.
+    click.echo(f"✓ Config valid: {path}")
 
 
 def _resolve_config_path() -> Path | None:

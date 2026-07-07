@@ -5,27 +5,19 @@ These drive the real subprocess against the isolated ``tmp_traceforge_home`` and
 assert the exit code + output contract for the JSON surface (the machine-readable
 path an integration would parse) and the argument grammar.
 
-The human-readable table path emits a ``─`` rule via ``click.echo`` and so
-crashes on a Windows cp1252 stdout — a real product bug pinned below.
+The human-readable table path emits a ``─`` rule via ``click.echo``; the CLI
+entry point forces UTF-8 output so this succeeds on every platform, including a
+Windows cp1252 stdout.
 """
 
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
 from tests.e2e._cli import combined_output, run_cli
-
-# See test_config_cmd / status / init: one root cause across the CLI — Unicode
-# glyphs echoed without forcing UTF-8 fail on Windows' default cp1252 stdout.
-_WIN_UNICODE_BUG = (
-    "bug: `detect` (non-JSON) prints a U+2500 rule via click.echo "
-    "(src/traceforge/cli/detect.py:44); on Windows cp1252 stdout this raises "
-    "UnicodeEncodeError and the command exits 1 instead of 0."
-)
 
 
 def _seed_claude(home: Path) -> None:
@@ -86,13 +78,11 @@ def test_detect_unknown_framework_is_silently_empty(tmp_traceforge_home: Path) -
 
 
 @pytest.mark.e2e
-@pytest.mark.xfail(sys.platform.startswith("win"), strict=True, reason=_WIN_UNICODE_BUG)
 def test_detect_plain_table_succeeds(tmp_traceforge_home: Path) -> None:
     """The default (table) output should print detected frameworks and exit 0.
 
-    On Windows it currently crashes (see ``_WIN_UNICODE_BUG``); this is a strict
-    conditional xfail, so it is a real PASS on the Linux CI matrix and an
-    xfailed bug-pin on Windows.
+    The ``─`` rule is emitted via ``click.echo``; the CLI forces UTF-8 output
+    so this passes on every platform, including a Windows cp1252 stdout.
     """
     _seed_claude(tmp_traceforge_home)
 

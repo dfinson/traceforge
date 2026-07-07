@@ -1,0 +1,10 @@
+{
+  "event_count": 39,
+  "kinds": {
+    "agent.completed": 1,
+    "llm.call.completed": 13,
+    "session.started": 1,
+    "tool.call.completed": 12,
+    "tool.call.started": 12
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "event_count": 41,
+  "kinds": {
+    "agent.completed": 1,
+    "agent.log.entry": 6,
+    "agent.log.started": 1,
+    "agent.spawned": 1,
+    "llm.call.completed": 7,
+    "llm.call.started": 7,
+    "reasoning.completed": 1,
+    "reasoning.started": 1,
+    "session.ended": 1,
+    "session.started": 1,
+    "task.completed": 1,
+    "task.started": 1,
+    "tool.call.completed": 6,
+    "tool.call.started": 6
+  }
+}

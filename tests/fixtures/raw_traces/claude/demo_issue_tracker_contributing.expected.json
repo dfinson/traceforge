@@ -1,0 +1,10 @@
+{
+  "event_count": 21,
+  "kinds": {
+    "llm.thinking.chunk": 4,
+    "message.assistant": 4,
+    "message.user": 1,
+    "tool.call.completed": 5,
+    "tool.call.started": 7
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "event_count": 5,
+  "kinds": {
+    "message.assistant": 2,
+    "message.user": 1,
+    "tool.call.completed": 1,
+    "tool.call.started": 1
+  }
+}

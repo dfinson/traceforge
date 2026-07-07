@@ -1,0 +1,14 @@
+{
+  "event_count": 11,
+  "kinds": {
+    "file.read": 1,
+    "hook.completed": 1,
+    "hook.started": 2,
+    "memory.query.started": 1,
+    "memory.save.started": 1,
+    "message.assistant": 2,
+    "message.user": 1,
+    "session.info": 1,
+    "turn.started": 1
+  }
+}

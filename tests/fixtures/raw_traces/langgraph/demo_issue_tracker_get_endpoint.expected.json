@@ -1,0 +1,13 @@
+{
+  "event_count": 1690,
+  "kinds": {
+    "llm.call.completed": 12,
+    "llm.call.started": 12,
+    "message.assistant.chunk": 1454,
+    "tool.call.completed": 11,
+    "tool.call.started": 11,
+    "workflow.completed": 72,
+    "workflow.started": 72,
+    "workflow.stream": 46
+  }
+}

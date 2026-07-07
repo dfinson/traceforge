@@ -1,0 +1,9 @@
+{
+  "event_count": 38,
+  "kinds": {
+    "message.assistant": 18,
+    "message.system": 1,
+    "message.user": 1,
+    "tool.output": 18
+  }
+}

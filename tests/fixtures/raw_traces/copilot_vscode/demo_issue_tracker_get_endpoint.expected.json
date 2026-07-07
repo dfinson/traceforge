@@ -1,0 +1,15 @@
+{
+  "event_count": 71,
+  "kinds": {
+    "checkpoint.created": 3,
+    "file.edited": 3,
+    "file.read": 9,
+    "llm.call.completed": 1,
+    "mcp.connection.started": 1,
+    "message.assistant": 17,
+    "message.user": 1,
+    "reasoning.started": 12,
+    "session.started": 1,
+    "tool.call.completed": 23
+  }
+}

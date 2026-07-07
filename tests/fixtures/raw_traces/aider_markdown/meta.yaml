@@ -1,0 +1,9 @@
+framework: aider_markdown
+scenario: demo_issue_tracker_get_endpoint_shape
+source_repo: demo-issue-tracker-api
+framework_version: aider 0.86.2
+model: gpt-5
+captured_at: "2026-07-07T09:23:30Z"
+traceforge_commit: b41dafc
+line_count: 20
+notes: "SHAPE FIXTURE (not a live paid run). Derived by feeding a real-format .aider.chat.history.md (format authority Aider-AI/aider:aider/io.py, mirrored from the repo's pinned reference tests/fixtures/aider_chat_history.md) through the REAL traceforge.parsers.aider.AiderPreParser and serializing its native output dicts verbatim. Event shape is authoritative (identical to what the pre-parser emits at runtime for aider_markdown.yaml); content is representative of the canonical demo-repo task. Regenerate with scripts/capture_traces/derive_aider_markdown.py."

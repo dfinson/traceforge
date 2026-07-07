@@ -1,0 +1,11 @@
+{"attributes": {"activity.channel_id": "directline", "activity.conversation.id": "conv-9f2c1a7b-demo-issue-tracker", "activity.delivery_mode": "normal", "activity.id": "act-in-001", "activity.type": "message"}, "end_time_unix_nano": 1782552675008000000, "name": "agents.adapter.process", "start_time_unix_nano": 1782552675000000000, "status": {"status_code": 1}}
+{"attributes": {"activity.is_agentic_request": true, "activity.type": "message"}, "end_time_unix_nano": 1782552675429000000, "name": "agents.app.run", "start_time_unix_nano": 1782552675009000000, "status": {"status_code": 1}}
+{"attributes": {"route.is_invoke": false, "route.matched": true}, "end_time_unix_nano": 1782552675840000000, "name": "agents.app.route_handler", "start_time_unix_nano": 1782552675430000000, "status": {"status_code": 1}}
+{"attributes": {}, "end_time_unix_nano": 1782552675844000000, "name": "agents.app.before_turn", "start_time_unix_nano": 1782552675841000000, "status": {"status_code": 1}}
+{"attributes": {"storage.keys.count": 2}, "end_time_unix_nano": 1782552675851000000, "name": "agents.storage.read", "start_time_unix_nano": 1782552675845000000, "status": {"status_code": 1}}
+{"attributes": {}, "end_time_unix_nano": 1782552675856000000, "name": "agents.adapter.create_connector_client", "start_time_unix_nano": 1782552675852000000, "status": {"status_code": 1}}
+{"attributes": {}, "end_time_unix_nano": 1782552675869000000, "name": "agents.app.download_files", "start_time_unix_nano": 1782552675857000000, "status": {"status_code": 1}}
+{"attributes": {}, "end_time_unix_nano": 1782552675875000000, "name": "agents.turn.send_activities", "start_time_unix_nano": 1782552675870000000, "status": {"status_code": 1}}
+{"attributes": {"activities.count": 1}, "end_time_unix_nano": 1782552675885000000, "name": "agents.adapter.send_activities", "start_time_unix_nano": 1782552675876000000, "status": {"status_code": 1}}
+{"attributes": {"storage.keys.count": 2}, "end_time_unix_nano": 1782552675893000000, "name": "agents.storage.write", "start_time_unix_nano": 1782552675886000000, "status": {"status_code": 1}}
+{"attributes": {}, "end_time_unix_nano": 1782552675896000000, "name": "agents.app.after_turn", "start_time_unix_nano": 1782552675894000000, "status": {"status_code": 1}}

@@ -1,0 +1,9 @@
+framework: copilot_markdown
+scenario: demo_issue_tracker_get_endpoint_shape
+source_repo: demo-issue-tracker-api
+framework_version: copilot-cli 1.0
+model: gpt-5
+captured_at: "2026-07-07T09:23:32Z"
+traceforge_commit: b41dafc
+line_count: 19
+notes: SHAPE FIXTURE (not a live capture). Derived by feeding real-shape Copilot CLI turns-table rows ({session_id, turn_index, user_message, assistant_response, timestamp} — the shape SqliteSource yields) through the REAL traceforge.parsers.copilot.CopilotPreParser.parse_turn and serializing its native output dicts verbatim. Tool calls are recovered heuristically from fenced code blocks (medium fidelity, no raw tool_use ids — by design of copilot_markdown.yaml). Event shape is authoritative; content is representative of the canonical demo-repo task. Regenerate with scripts/capture_traces/derive_copilot_markdown.py.

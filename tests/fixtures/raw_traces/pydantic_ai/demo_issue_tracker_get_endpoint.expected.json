@@ -1,0 +1,10 @@
+{
+  "event_count": 1456,
+  "kinds": {
+    "llm.call.completed": 12,
+    "llm.output.chunk": 1416,
+    "message.assistant": 15,
+    "message.user": 12,
+    "session.ended": 1
+  }
+}

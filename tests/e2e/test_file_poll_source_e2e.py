@@ -125,16 +125,6 @@ async def test_missing_wait_tolerates_absent_then_created_file(tmp_path: Path) -
     assert record.payload == "arrived"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "bug: FilePollSource crashes on invalid UTF-8 instead of logging and "
-        "continuing. _read_from_offset (src/traceforge/sources/file_poll.py:113-118) "
-        "opens with the default errors='strict', while _poll_once (lines 92-98) "
-        "only catches (FileNotFoundError, OSError); a UnicodeDecodeError therefore "
-        "propagates out of the async iterator and kills the poll loop."
-    ),
-)
 async def test_invalid_utf8_is_logged_not_crashed(tmp_path: Path) -> None:
     log = tmp_path / "poll.log"
     log.write_bytes(b"valid\n")
@@ -157,4 +147,7 @@ async def test_invalid_utf8_is_logged_not_crashed(tmp_path: Path) -> None:
             except (asyncio.TimeoutError, StopAsyncIteration):
                 break
 
+    # The decode failure did not kill the poll loop: the record before the bad
+    # bytes was surfaced first, and the later valid record was still emitted.
+    assert seen[0] == "valid"
     assert "after" in seen

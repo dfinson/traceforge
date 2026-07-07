@@ -3,8 +3,11 @@
 This repo publishes **two** independent distributions to PyPI. This document is
 the operational runbook and go/no-go checklist for cutting a release.
 
-> **Status:** the first PyPI release is **prepared but BLOCKED**. Do not push a
-> release tag until the two gating items in [§7](#7-gono-go-checklist) are merged.
+> **Status:** packaging is **ready** and both former code blockers are resolved —
+> the F2 governance durability fix (#58) and the docs refresh (#78, plus red-team
+> passes #113/#114) are merged to `main`. Cutting the first release now depends only
+> on the one-time PyPI Trusted Publisher setup ([§5](#5-pypi-trusted-publishing-oidc))
+> and pushing the release tag ([§7](#7-gono-go-checklist)).
 
 ---
 
@@ -130,11 +133,14 @@ never bundles the titler weights and never approaches PyPI's 100 MiB per-file ca
 
 **Blockers (must be TRUE before any tag is pushed):**
 
-- [ ] **F2 — governance durability fix merged.** The `SessionRegistry.ensure()`
-      `_db=None` gate-state path can no-op `persist_no_commit`, losing durability.
-      Tracked as duck-round finding **F2**; a first release must not ship it.
-- [ ] **Docs-refresh PR merged.** README/SPEC are being reconciled with delivery
-      in a separate session; the release readme pointer must reflect that.
+- [x] **F2 — governance durability fix merged.** Resolved by **#58** (commit
+      `3710a3e`): `SessionRegistry` now holds two separate residency maps —
+      `_durable_states` (DB-backed observation writer) and `_gate_states`
+      (ephemeral `_db=None` gate) — so the gate-state path can no longer no-op
+      `persist_no_commit` and lose durability.
+- [x] **Docs-refresh PR merged.** Resolved by **#78** (Docusaurus site + README +
+      CONTRIBUTING) and the red-team doc passes **#113**/**#114**; README/SPEC now
+      reflect delivery.
 
 **Packaging readiness (verified by this PR):**
 
@@ -155,6 +161,14 @@ never bundles the titler weights and never approaches PyPI's 100 MiB per-file ca
       proven to build a complete wheel from itself.
 - [x] Trusted-publishing workflows in place for both distributions with
       `lfs: true` checkouts.
+
+**One-time publishing setup (still pending — do once before the first tag):**
+
+- [x] Create the `pypi` **GitHub Environment** on the repo (optionally with required
+      reviewers) — see [§5](#5-pypi-trusted-publishing-oidc). *(Done — the `pypi`
+      environment exists on the repo.)*
+- [ ] Register **PyPI Trusted Publishers** for **both** dists: `traceforge-toolkit`
+      (`publish.yml`) and `traceforge-title-model` (`publish-title-model.yml`).
 
 **Release steps (once blockers clear):**
 

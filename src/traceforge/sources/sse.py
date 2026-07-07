@@ -126,13 +126,18 @@ class SSESource(Source):
                     # Dispatch event
                     if data_buf:
                         data = "\n".join(data_buf)
-                        if last_id is not None:
-                            self._last_event_id = last_id
-                        yield SSEEvent(
-                            data=data,
-                            event_type=event_type or "message",
-                            last_event_id=self._last_event_id,
-                        )
+                        # SSE is at-least-once: after a reconnect the server may
+                        # redeliver an already-seen id (e.g. resumed via Last-Event-ID).
+                        # Drop such redeliveries; only emit ids newer than the last one
+                        # we emitted, advancing _last_event_id solely for emitted events.
+                        if last_id is None or not self._is_duplicate(last_id):
+                            if last_id is not None:
+                                self._last_event_id = last_id
+                            yield SSEEvent(
+                                data=data,
+                                event_type=event_type or "message",
+                                last_event_id=self._last_event_id,
+                            )
                     # Reset per-event state
                     data_buf = []
                     event_type = ""
@@ -157,6 +162,25 @@ class SSESource(Source):
                 elif field == "retry":
                     if value.isdigit():
                         self.reconnect_delay = max(int(value) / 1000.0, 0.0)
+
+    def _is_duplicate(self, event_id: str) -> bool:
+        """Return True if ``event_id`` was already emitted (at-least-once redelivery).
+
+        After a reconnect an SSE server may redeliver events the client has already
+        seen. When both the last-emitted id and the candidate are integers, treat any
+        id not strictly greater than the last-seen id as a duplicate (monotonic ids,
+        the common case). For ids that cannot be ordered numerically, drop only an id
+        that exactly equals the last-emitted one (the immediately-preceding event).
+        """
+        last = self._last_event_id
+        if not last:
+            return False
+        if event_id == last:
+            return True
+        try:
+            return int(event_id) <= int(last)
+        except ValueError:
+            return False
 
     def _backoff_delay(self, reconnects: int) -> float:
         exponent = max(reconnects - 1, 0)

@@ -158,15 +158,6 @@ async def test_sse_reconnect_sends_last_event_id(sse_server: SSEServer) -> None:
 # ─── duplicate id after reconnect NOT re-emitted (dedup) ─────────────────────
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "bug: SSESource performs no client-side dedup. When a server redelivers an "
-        "already-seen id after reconnect (at-least-once delivery), the source re-emits it: "
-        "sources/sse.py _iter_records/_stream_once yield every parsed event and _last_event_id "
-        "is only sent on reconnect, never used to filter ids <= the last seen."
-    ),
-)
 @pytest.mark.e2e
 @pytest.mark.net
 async def test_sse_duplicate_id_after_reconnect_not_reemitted(sse_server: SSEServer) -> None:

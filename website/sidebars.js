@@ -42,6 +42,7 @@ const sidebars = {
         'reference/pipeline',
         'reference/sinks',
         'reference/live-structuring',
+        'reference/external-gating',
         'reference/sdk',
       ],
     },

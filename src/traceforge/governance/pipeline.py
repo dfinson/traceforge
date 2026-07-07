@@ -6,6 +6,7 @@ Wires the governance collaborator graph and forwards the public API to them
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 from traceforge.governance.assessor import DefaultAssessor
@@ -208,7 +209,7 @@ class GovernancePipeline:
 
         instance = cls.create(config.governance)
 
-        # Resolve policy: explicit arg > config dotted path > None
+        # Resolve policy: explicit arg > config dotted path > config external gate > None
         if policy is not None:
             instance.policy = policy
         elif config.governance.tool_preflight_gate:
@@ -217,6 +218,27 @@ class GovernancePipeline:
             gate_fn = _import_dotted(config.governance.tool_preflight_gate)
             auto_policy = GatePolicy().preflight(gate_fn)
             instance.policy = auto_policy
+        elif config.governance.preflight_gate is not None:
+            from traceforge.gate.external import HttpGate, SubprocessGate
+            from traceforge.sdk.gate_policy import GatePolicy
+
+            gate_cfg = config.governance.preflight_gate
+            if gate_cfg.type == "http":
+                gate_fn = HttpGate(
+                    endpoint=gate_cfg.endpoint,
+                    timeout=gate_cfg.timeout,
+                    fail_open=gate_cfg.fail_open,
+                    headers=dict(gate_cfg.headers) if gate_cfg.headers else None,
+                    max_input_bytes=gate_cfg.max_input_bytes,
+                )
+            else:  # gate_cfg.type == "subprocess"
+                gate_fn = SubprocessGate(
+                    command=gate_cfg.command,
+                    timeout=gate_cfg.timeout,
+                    fail_open=gate_cfg.fail_open,
+                    max_input_bytes=gate_cfg.max_input_bytes,
+                )
+            instance.policy = GatePolicy().preflight(gate_fn)
 
         return instance
 
@@ -559,7 +581,7 @@ class GovernancePipeline:
                 "tool_input": dict(context.arguments) if context.arguments else {},
                 "session_id": sid,
             }
-            trace, verdict = pipeline._score_and_gate_preflight(payload)
+            trace, verdict = await asyncio.to_thread(pipeline._score_and_gate_preflight, payload)
             if verdict.denied:
                 from semantic_kernel.functions import FunctionResult
 
@@ -618,7 +640,9 @@ class GovernancePipeline:
                     "session_id": sid,
                     "tool_call_id": getattr(context, "call_id", None),
                 }
-                trace, verdict = pipeline._score_and_gate_preflight(payload)
+                trace, verdict = await asyncio.to_thread(
+                    pipeline._score_and_gate_preflight, payload
+                )
                 if verdict.denied:
                     raise MiddlewareTermination(f"Denied: {verdict.reason}")
 
@@ -744,7 +768,9 @@ class GovernancePipeline:
                     "session_id": sid,
                     "tool_call_id": getattr(ctx, "tool_call_id", None),
                 }
-                trace, verdict = pipeline._score_and_gate_preflight(payload)
+                trace, verdict = await asyncio.to_thread(
+                    pipeline._score_and_gate_preflight, payload
+                )
                 if verdict.denied:
                     raise RuntimeError(f"Denied: {verdict.reason}")
 
@@ -797,7 +823,7 @@ class GovernancePipeline:
                 "tool_input": getattr(input_data, "tool_input", {}),
                 "session_id": sid,
             }
-            trace, verdict = pipeline._score_and_gate_preflight(payload)
+            trace, verdict = await asyncio.to_thread(pipeline._score_and_gate_preflight, payload)
             if verdict.denied:
                 return GuardrailFunctionOutput(
                     output_info=verdict.reason,

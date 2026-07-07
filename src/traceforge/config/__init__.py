@@ -6,6 +6,7 @@ from traceforge.config.models import (
     FileWatchSourceConfig,
     FilePollSourceConfig,
     GovernanceConfig,
+    HttpGateConfig,
     HttpPollSourceConfig,
     MappedJsonAdapterConfig,
     OtelSpanAdapterConfig,
@@ -19,8 +20,10 @@ from traceforge.config.models import (
     SourceConfig,
     SSESourceConfig,
     SqliteSinkConfig,
+    SubprocessGateConfig,
     JsonlSinkConfig,
     S3SinkConfig,
+    ExternalGateConfig,
     TitleApiConfig,
     TitleConfig,
     ActivityTitlingConfig,
@@ -56,6 +59,9 @@ __all__ = [
     # Governance
     "GovernanceConfig",
     "BudgetConfig",
+    "ExternalGateConfig",
+    "SubprocessGateConfig",
+    "HttpGateConfig",
     # Title
     "TitleConfig",
     "TitleApiConfig",

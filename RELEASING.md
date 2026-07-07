@@ -12,14 +12,19 @@ the operational runbook and go/no-go checklist for cutting a release.
 
 | Distribution | Source | Contents | Publish workflow | Tag |
 |---|---|---|---|---|
-| `traceforge` | root `pyproject.toml` | code + small data (classify/mappings/gates YAML, phase/boundary/title heads, `potion-base-8M` `.safetensors`) | `.github/workflows/publish.yml` | `v*` |
+| `traceforge-toolkit` | root `pyproject.toml` | code + small data (classify/mappings/gates YAML, phase/boundary/title heads, `potion-base-8M` `.safetensors`) | `.github/workflows/publish.yml` | `v*` |
 | `traceforge-title-model` | `packages/traceforge-title-model` | pure-data ONNX span titler (`encoder.onnx`, `decoder.onnx`, `tokenizer.json`) | `.github/workflows/publish-title-model.yml` | `title-model-v*` |
 
-`traceforge` depends on `traceforge-title-model>=0.2`. The titler weights are a
+> **Note:** the core distribution is published to PyPI as **`traceforge-toolkit`** because
+> the bare name `traceforge` was already taken by an unrelated project. The import package
+> (`import traceforge`), the `traceforge` CLI command, and the brand stay `traceforge` — the
+> `scikit-learn` → `import sklearn` pattern.
+
+`traceforge-toolkit` depends on `traceforge-title-model>=0.2`. The titler weights are a
 separate distribution so the core wheel stays code-first and the ~95 MB model
 only re-releases when it is retrained (rarely), on its own tag.
 
-Both weight classes (`.safetensors` in `traceforge`, `.onnx` in
+Both weight classes (`.safetensors` in `traceforge-toolkit`, `.onnx` in
 `traceforge-title-model`) are tracked with **Git LFS** — see [§4](#4-git-lfs--weight-integrity).
 
 ## 2. Versioning strategy
@@ -29,17 +34,17 @@ Both weight classes (`.safetensors` in `traceforge`, `.onnx` in
   a **PATCH** bump is reserved for backwards-compatible fixes. Cut `1.0.0` once the
   public API (SDK `Pipeline`/`GatePolicy`/`Verdict`, the `traceforge` CLI surface,
   and the YAML config schema) is committed to stability.
-- **Initial versions:** `traceforge` `0.1.0`; `traceforge-title-model` `0.2.0`
+- **Initial versions:** `traceforge-toolkit` `0.1.0`; `traceforge-title-model` `0.2.0`
   (already ahead — it iterated during model development).
 - **Independent lifecycles:** the two versions move independently. A code-only
-  release bumps `traceforge` and reuses the existing model. A retrain bumps
+  release bumps `traceforge-toolkit` and reuses the existing model. A retrain bumps
   `traceforge-title-model` and, if the new weights require it, widens the
-  `traceforge` dependency floor.
+  `traceforge-toolkit` dependency floor.
 - **Single source of truth:** each version lives only in its own
   `pyproject.toml`. The CLI reports it via `importlib.metadata`
-  (`click.version_option(package_name="traceforge")`) — never hard-code a version
+  (`click.version_option(package_name="traceforge-toolkit")`) — never hard-code a version
   string elsewhere.
-- **Model dependency pin:** `traceforge` requires `traceforge-title-model>=0.2`.
+- **Model dependency pin:** `traceforge-toolkit` requires `traceforge-title-model>=0.2`.
   The model is a pure-data package with a stable three-file head contract
   (`encoder.onnx`/`decoder.onnx`/`tokenizer.json`), so a compatible retrain is
   drop-in. If a future retrain changes that on-disk contract, raise the floor
@@ -47,14 +52,14 @@ Both weight classes (`.safetensors` in `traceforge`, `.onnx` in
 
 ## 3. Release order (critical)
 
-Because `traceforge` depends on `traceforge-title-model`, a fresh model release
+Because `traceforge-toolkit` depends on `traceforge-title-model`, a fresh model release
 must land on PyPI **before** the code release that requires it:
 
 1. (Only if the model changed) tag `title-model-vX.Y.Z` → wait for
    `Publish title model` to finish and the version to be visible on PyPI.
-2. Tag `vA.B.C` → `Publish` builds and uploads `traceforge`.
+2. Tag `vA.B.C` → `Publish` builds and uploads `traceforge-toolkit`.
 
-If the model is unchanged, step 1 is skipped and `traceforge` resolves the
+If the model is unchanged, step 1 is skipped and `traceforge-toolkit` resolves the
 already-published model.
 
 ## 4. Git LFS & weight integrity
@@ -90,7 +95,7 @@ One-time PyPI setup (per distribution, done in the PyPI project's
 |---|---|
 | Owner | `dfinson` |
 | Repository | `traceforge` |
-| Workflow (traceforge) | `publish.yml` |
+| Workflow (traceforge-toolkit) | `publish.yml` |
 | Workflow (title-model) | `publish-title-model.yml` |
 | Environment | `pypi` |
 
@@ -115,9 +120,9 @@ uv run --no-project python scripts/verify_no_lfs_pointers.py dist \
 uv run --no-project --with twine twine check dist/*
 ```
 
-Expected: the traceforge wheel carries the classify/mappings/gates YAML, the
+Expected: the traceforge-toolkit wheel carries the classify/mappings/gates YAML, the
 phase/boundary/title heads, `py.typed`, and the `potion-base-8M` `.safetensors`;
-the title-model wheel carries the ONNX triad; the traceforge **sdist** stays lean
+the title-model wheel carries the ONNX triad; the traceforge-toolkit **sdist** stays lean
 (~29 MB — it deliberately excludes `packages/`, `tests/`, and `research/`, so it
 never bundles the titler weights and never approaches PyPI's 100 MiB per-file cap).
 
@@ -133,7 +138,7 @@ never bundles the titler weights and never approaches PyPI's 100 MiB per-file ca
 
 **Packaging readiness (verified by this PR):**
 
-- [x] `traceforge` metadata complete: name, version, description, readme, license
+- [x] `traceforge-toolkit` metadata complete: name, version, description, readme, license
       (SPDX `MIT` → `License-Expression`), authors, requires-python
       (`>=3.11,<3.14`), classifiers (Dev Status 4-Beta, Python 3.11/3.12/3.13,
       Typing :: Typed), keywords, `project.urls`.
@@ -156,9 +161,9 @@ never bundles the titler weights and never approaches PyPI's 100 MiB per-file ca
 1. [ ] Final `main` is green (Test on 3.11/3.12/3.13, Lint).
 2. [ ] Bump versions if needed; update this checklist.
 3. [ ] (If model changed) push `title-model-vX.Y.Z`; confirm on PyPI + GH release mirror.
-4. [ ] Push `vA.B.C`; confirm `Publish` succeeds and `pip install traceforge` pulls
+4. [ ] Push `vA.B.C`; confirm `Publish` succeeds and `pip install traceforge-toolkit` pulls
        the model automatically.
-5. [ ] Smoke test in a clean env: `pip install traceforge && traceforge --version`.
+5. [ ] Smoke test in a clean env: `pip install traceforge-toolkit && traceforge --version`.
 
 ## 8. Fallback: GitHub-release model mirror
 

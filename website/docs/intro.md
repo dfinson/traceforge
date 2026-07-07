@@ -72,7 +72,7 @@ Raw records flow left to right, gaining structure at every stage:
 Point TraceForge at your agent's logs and stream structured events to storage:
 
 ```bash
-pip install traceforge
+pip install traceforge-toolkit
 traceforge init claude-code      # write a starter traceforge.yaml
 traceforge watch                 # observe, enrich, classify, and store live
 ```
@@ -93,7 +93,7 @@ print(trace.risk_score, trace.suggested_action)   # e.g. 66 escalate
 
 ## Where to go next
 
-- **[Installation](getting-started/installation.md)**: `pip install traceforge` and your
+- **[Installation](getting-started/installation.md)**: `pip install traceforge-toolkit` and your
   first run.
 - **[Architecture](architecture/overview.md)**: how the pipeline stages fit together.
 - **[Governance](governance/overview.md)**: the monitor + shield assessment engine.

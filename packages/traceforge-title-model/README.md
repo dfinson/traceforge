@@ -19,8 +19,8 @@ The core `traceforge` wheel is code-only and small. The model weights live here 
 are pulled in automatically as a hard dependency of `traceforge`:
 
 ```bash
-pip install traceforge      # pulls traceforge-title-model from PyPI
-uv add traceforge
+pip install traceforge-toolkit  # pulls traceforge-title-model from PyPI
+uv add traceforge-toolkit
 ```
 
 You almost never depend on this package directly — `traceforge.title` resolves the

@@ -4624,7 +4624,76 @@ wheels = [
 ]
 
 [[package]]
-name = "traceforge"
+name = "traceforge-research"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "datasets" },
+    { name = "github-copilot-sdk" },
+    { name = "huggingface-hub" },
+    { name = "mlflow" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "pyarrow" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "scikit-learn" },
+    { name = "tqdm" },
+    { name = "traceforge-toolkit" },
+]
+
+[package.optional-dependencies]
+embeddings = [
+    { name = "model2vec" },
+    { name = "sentence-transformers" },
+]
+notebook = [
+    { name = "jupyterlab" },
+    { name = "matplotlib" },
+    { name = "seaborn" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "datasets", specifier = ">=3.0" },
+    { name = "github-copilot-sdk", specifier = ">=0.3.0,<0.4" },
+    { name = "huggingface-hub", specifier = ">=0.25" },
+    { name = "jupyterlab", marker = "extra == 'notebook'" },
+    { name = "matplotlib", marker = "extra == 'notebook'" },
+    { name = "mlflow", specifier = ">=2.16" },
+    { name = "model2vec", marker = "extra == 'embeddings'", specifier = ">=0.8.2" },
+    { name = "numpy", specifier = ">=1.26" },
+    { name = "pandas", specifier = ">=2.2" },
+    { name = "pyarrow", specifier = ">=15" },
+    { name = "pydantic", specifier = ">=2" },
+    { name = "pyyaml" },
+    { name = "scikit-learn", specifier = ">=1.5" },
+    { name = "seaborn", marker = "extra == 'notebook'" },
+    { name = "sentence-transformers", marker = "extra == 'embeddings'", specifier = ">=3.0" },
+    { name = "tqdm" },
+    { name = "traceforge-toolkit", editable = "../" },
+]
+provides-extras = ["embeddings", "notebook"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=9.1.0" },
+    { name = "pytest-asyncio", specifier = ">=1.4.0" },
+]
+
+[[package]]
+name = "traceforge-title-model"
+version = "0.2.0"
+source = { editable = "../packages/traceforge-title-model" }
+
+[[package]]
+name = "traceforge-toolkit"
 version = "0.1.0"
 source = { editable = "../" }
 dependencies = [
@@ -4685,85 +4754,21 @@ provides-extras = ["dev", "s3"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "agent-framework-core", specifier = ">=1.0" },
+    { name = "boto3", specifier = ">=1.28" },
     { name = "crewai", specifier = ">=0.80" },
     { name = "datamodel-code-generator", specifier = ">=0.63.0" },
     { name = "langchain-core", specifier = ">=0.3" },
     { name = "langgraph", specifier = ">=0.2" },
+    { name = "moto", extras = ["s3"], specifier = ">=5.0" },
     { name = "openai-agents", specifier = ">=0.1" },
+    { name = "pydantic-ai-slim", specifier = ">=1.0" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
+    { name = "pytest-cov", specifier = ">=5.0" },
     { name = "semantic-kernel", specifier = ">=1.20" },
     { name = "smolagents", specifier = ">=1.0" },
 ]
-
-[[package]]
-name = "traceforge-research"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "datasets" },
-    { name = "github-copilot-sdk" },
-    { name = "huggingface-hub" },
-    { name = "mlflow" },
-    { name = "numpy" },
-    { name = "pandas" },
-    { name = "pyarrow" },
-    { name = "pydantic" },
-    { name = "pyyaml" },
-    { name = "scikit-learn" },
-    { name = "tqdm" },
-    { name = "traceforge" },
-]
-
-[package.optional-dependencies]
-embeddings = [
-    { name = "model2vec" },
-    { name = "sentence-transformers" },
-]
-notebook = [
-    { name = "jupyterlab" },
-    { name = "matplotlib" },
-    { name = "seaborn" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "datasets", specifier = ">=3.0" },
-    { name = "github-copilot-sdk", specifier = ">=0.3.0,<0.4" },
-    { name = "huggingface-hub", specifier = ">=0.25" },
-    { name = "jupyterlab", marker = "extra == 'notebook'" },
-    { name = "matplotlib", marker = "extra == 'notebook'" },
-    { name = "mlflow", specifier = ">=2.16" },
-    { name = "model2vec", marker = "extra == 'embeddings'", specifier = ">=0.8.2" },
-    { name = "numpy", specifier = ">=1.26" },
-    { name = "pandas", specifier = ">=2.2" },
-    { name = "pyarrow", specifier = ">=15" },
-    { name = "pydantic", specifier = ">=2" },
-    { name = "pyyaml" },
-    { name = "scikit-learn", specifier = ">=1.5" },
-    { name = "seaborn", marker = "extra == 'notebook'" },
-    { name = "sentence-transformers", marker = "extra == 'embeddings'", specifier = ">=3.0" },
-    { name = "tqdm" },
-    { name = "traceforge", editable = "../" },
-]
-provides-extras = ["embeddings", "notebook"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=9.1.0" },
-    { name = "pytest-asyncio", specifier = ">=1.4.0" },
-]
-
-[[package]]
-name = "traceforge-title-model"
-version = "0.2.0"
-source = { editable = "../packages/traceforge-title-model" }
 
 [[package]]
 name = "traitlets"

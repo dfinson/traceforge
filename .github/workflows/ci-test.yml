@@ -38,5 +38,5 @@ jobs:
       # via --find-links so the base-wheel install works pre-publish (litellm,
       # onnxruntime, etc. still come from PyPI).
       - run: python -m build packages/traceforge-title-model --outdir dist
-      - run: pip install --find-links dist traceforge
+      - run: pip install --find-links dist traceforge-toolkit
       - run: python -c "import traceforge; print(traceforge.__name__)"

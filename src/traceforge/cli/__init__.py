@@ -18,7 +18,7 @@ from traceforge.cli.download_cmd import download_model
 
 
 @click.group()
-@click.version_option(package_name="traceforge")
+@click.version_option(package_name="traceforge-toolkit")
 def main() -> None:
     """Traceforge — governance pipeline for AI coding agents."""
     # Force UTF-8 on stdout/stderr so the CLI's Unicode glyphs (box rules,

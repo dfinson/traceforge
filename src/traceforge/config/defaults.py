@@ -69,11 +69,16 @@ sdk:
   max_queue_size: 10000
 
 # ─── Titling ────────────────────────────────────────────────────────────────
-# Activity/step titles always use the packaged model. Session naming (the title
-# derived from the first substantive user message) defaults to a free, offline
-# heuristic over the user's own words. Opt into an LLM for abstractive titles by
-# setting strategy: api and providing the provider's API key in the environment
-# (e.g. export OPENAI_API_KEY=...). No key => it silently stays on the heuristic.
+# Two title surfaces, each with a free/offline floor and an opt-in LLM API tier
+# that engages only when the provider's API key is present in the environment
+# (e.g. export OPENAI_API_KEY=...). No key => it silently stays on the offline
+# floor. The floor is emitted immediately; the API upgrade (when configured and
+# keyed) is applied later, off the hot path, so live emission is never blocked.
+#
+#   * session_naming  — the title from the first substantive user message; floor
+#                       is a free heuristic over the user's own words.
+#   * activity_titling — the activity/step (span) titles; floor is the packaged,
+#                       offline ONNX model shipped with every install.
 #
 # title:
 #   session_naming:
@@ -89,6 +94,14 @@ sdk:
 #       api_key_env: null     # override which env var holds the key
 #       timeout: 10
 #       max_tokens: 24
+#   activity_titling:
+#     strategy: model         # model | api  (model = packaged offline ONNX titler)
+#     api:
+#       model: gpt-4o-mini    # any LiteLLM model string (as above)
+#       api_base: null        # for azure / ollama / vllm / openai-compatible
+#       api_key_env: null     # override which env var holds the key
+#       timeout: 10
+#       max_tokens: 256       # one call returns the activity + all step titles
 
 # ─── Additional mapping directories ────────────────────────────────────────
 mappings_dirs:

@@ -462,6 +462,253 @@ class TestPipelineSessionEviction:
         assert [u.title for u in sess] == ["Heuristic title", "Refined API title"]
 
 
+class TestPipelineActivityTitleRefinement:
+    """The opt-in activity/step-title API tier upgrades the packaged titles.
+
+    Mirrors the session-title refinement tests: the packaged ONNX titles are
+    emitted the instant an activity closes (the default, never blocking), and
+    when an activity refiner is configured each closed activity is refined off
+    the hot path and its upgraded titles arrive as later append-only
+    TitleUpdate records on the same segment ids.
+    """
+
+    @staticmethod
+    def _activity_refiner(activity="API Activity", steps_prefix="API Step"):
+        from traceforge.title.naming import ActivityTitles
+
+        def refine(span):
+            steps = [f"{steps_prefix} {i}" for i in range(len(span.step_contexts))]
+            return ActivityTitles(activity, steps)
+
+        return refine
+
+    async def test_default_model_strategy_makes_no_api_call(self, monkeypatch):
+        # strategy=model (the default): no refiner is wired, so a closed activity
+        # emits only its packaged titles and the API is never touched. Patch
+        # litellm.completion to explode so any accidental call fails loudly.
+        import litellm
+
+        from tests.unit.test_title_inferencer import _FakeTitle, _event
+
+        from traceforge.title import TitleInferencer
+
+        def _boom(**_kw):  # pragma: no cover - must never run on the default path
+            raise AssertionError("the default strategy must not call the API")
+
+        monkeypatch.setattr(litellm, "completion", _boom)
+
+        recorder = RecordingSink()
+        pipeline = EventPipeline(
+            sinks=[recorder.sink],
+            enable_phase=False,
+            enable_boundary=False,
+            title_inferencer=TitleInferencer(model=_FakeTitle()),
+        )
+        await pipeline.push(_event(0, tool="edit"))
+        await pipeline.push(_event(1, tool="shell", boundary="step-boundary"))
+        await pipeline.push(_event(2, tool="grep", boundary="activity-boundary"))
+        await pipeline.flush()
+
+        # Exactly the packaged titles, one update per segment (no later upgrade).
+        acts = [u for u in recorder.title_updates if u.kind == "activity" and u.segment_id == "e0"]
+        assert [u.title for u in acts] == ["Title 0"]
+        steps = [u for u in recorder.title_updates if u.kind == "step" and u.segment_id == "e0"]
+        assert [u.title for u in steps] == ["Title 1"]
+
+    async def test_no_key_falls_back_to_packaged(self, monkeypatch):
+        # strategy=api but no key present -> build_activity_refiner returns None,
+        # so the inferencer wires no refiner and the packaged titles stand.
+        from tests.unit.test_title_inferencer import _FakeTitle, _event
+
+        from traceforge.config.models import ActivityTitlingApiConfig, ActivityTitlingConfig
+        from traceforge.title import TitleInferencer
+        from traceforge.title.naming import build_activity_refiner
+
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        cfg = ActivityTitlingConfig(
+            strategy="api", api=ActivityTitlingApiConfig(api_key_env="OPENAI_API_KEY")
+        )
+        refiner = build_activity_refiner(cfg)
+        assert refiner is None  # the opt-in gate declined
+
+        recorder = RecordingSink()
+        pipeline = EventPipeline(
+            sinks=[recorder.sink],
+            enable_phase=False,
+            enable_boundary=False,
+            title_inferencer=TitleInferencer(model=_FakeTitle(), activity_refiner=refiner),
+        )
+        await pipeline.push(_event(0, tool="edit"))
+        await pipeline.push(_event(1, boundary="activity-boundary"))
+        await pipeline.flush()
+        acts = [u for u in recorder.title_updates if u.kind == "activity" and u.segment_id == "e0"]
+        assert [u.title for u in acts] == ["Title 0"]  # packaged only
+
+    async def test_api_refines_activity_and_steps_off_hot_path(self):
+        # With a refiner configured the packaged titles are emitted immediately;
+        # the API upgrades for the activity and each step arrive later (same
+        # segment ids), awaited at flush.
+        from tests.unit.test_title_inferencer import _FakeTitle, _event
+
+        from traceforge.title import TitleInferencer
+
+        recorder = RecordingSink()
+        pipeline = EventPipeline(
+            sinks=[recorder.sink],
+            enable_phase=False,
+            enable_boundary=False,
+            title_inferencer=TitleInferencer(
+                model=_FakeTitle(), activity_refiner=self._activity_refiner()
+            ),
+        )
+        await pipeline.push(_event(0, tool="edit"))
+        await pipeline.push(_event(1, tool="shell", boundary="step-boundary"))
+        await pipeline.push(_event(2, tool="grep", boundary="activity-boundary"))
+
+        # The packaged activity title emitted immediately; no API upgrade yet.
+        acts = [u for u in recorder.title_updates if u.kind == "activity" and u.segment_id == "e0"]
+        assert [u.title for u in acts] == ["Title 0"]
+
+        await pipeline.flush()
+        # Flush awaited the background refinement: each segment now has a second,
+        # API update superseding its packaged title.
+        acts = [u for u in recorder.title_updates if u.kind == "activity" and u.segment_id == "e0"]
+        assert [u.title for u in acts] == ["Title 0", "API Activity"]
+        s0 = [u for u in recorder.title_updates if u.kind == "step" and u.segment_id == "e0"]
+        s1 = [u for u in recorder.title_updates if u.kind == "step" and u.segment_id == "e1"]
+        assert [u.title for u in s0] == ["Title 1", "API Step 0"]
+        assert [u.title for u in s1] == ["Title 2", "API Step 1"]
+        # The API step updates stay parented to the activity.
+        assert s0[-1].parent_id == "e0" and s1[-1].parent_id == "e0"
+
+    async def test_api_failure_keeps_packaged_titles(self):
+        # A refiner that raises (provider/network error) must not error or block:
+        # the packaged titles already emitted stand and no upgrade is published.
+        from tests.unit.test_title_inferencer import _FakeTitle, _event
+
+        from traceforge.title import TitleInferencer
+
+        def boom(span):
+            raise RuntimeError("network down")
+
+        recorder = RecordingSink()
+        pipeline = EventPipeline(
+            sinks=[recorder.sink],
+            enable_phase=False,
+            enable_boundary=False,
+            title_inferencer=TitleInferencer(model=_FakeTitle(), activity_refiner=boom),
+        )
+        await pipeline.push(_event(0, tool="edit"))
+        await pipeline.push(_event(1, boundary="activity-boundary"))
+        await pipeline.flush()  # must not raise
+        acts = [u for u in recorder.title_updates if u.kind == "activity" and u.segment_id == "e0"]
+        assert [u.title for u in acts] == ["Title 0"]  # packaged only, no upgrade
+
+    async def test_refinement_does_not_block_later_events(self):
+        # A slow activity refinement must not delay subsequent live events: while
+        # the refiner blocks in its worker thread, further events keep streaming.
+        import threading
+
+        from tests.unit.test_title_inferencer import _FakeTitle, _event
+
+        from traceforge.title import TitleInferencer
+        from traceforge.title.naming import ActivityTitles
+
+        release = threading.Event()
+
+        def refine(span):
+            release.wait(timeout=5)  # block until the test lets it finish
+            return ActivityTitles("API Activity", ["API Step 0"])
+
+        recorder = RecordingSink()
+        pipeline = EventPipeline(
+            sinks=[recorder.sink],
+            enable_phase=False,
+            enable_boundary=False,
+            title_inferencer=TitleInferencer(model=_FakeTitle(), activity_refiner=refine),
+        )
+        await pipeline.push(_event(0, tool="edit"))
+        await pipeline.push(
+            _event(1, boundary="activity-boundary")
+        )  # closes e0 -> schedules refine
+        # The refinement is now blocked in a worker thread; following events
+        # still emit immediately without waiting for it.
+        await pipeline.push(_event(2, tool="edit"))
+        assert [e.id for e in recorder.events] == ["e0", "e1", "e2"]
+        acts = [u for u in recorder.title_updates if u.kind == "activity" and u.segment_id == "e0"]
+        assert [u.title for u in acts] == ["Title 0"]  # only packaged so far
+
+        release.set()  # let the refinement complete
+        await pipeline.flush()
+        acts = [u for u in recorder.title_updates if u.kind == "activity" and u.segment_id == "e0"]
+        assert [u.title for u in acts] == ["Title 0", "API Activity"]
+
+    async def test_eviction_cancels_pending_activity_refinement(self):
+        # A slow activity refinement scheduled before eviction is cancelled with
+        # the session, so the evicted session keeps only its packaged titles while
+        # the survivor's refinement still lands.
+        import threading
+        from datetime import datetime, timezone
+
+        from tests.unit.test_title_inferencer import _FakeTitle
+
+        from traceforge.title import TitleInferencer
+        from traceforge.title.naming import ActivityTitles
+        from traceforge.types import EventMetadata, SessionEvent
+
+        def _sev(session_id: str, boundary=None) -> SessionEvent:
+            return SessionEvent(
+                id=f"{session_id}-0" if boundary is None else f"{session_id}-1",
+                kind="tool.call",
+                session_id=session_id,
+                timestamp=datetime.now(timezone.utc),
+                payload={"tool_name": "edit"},
+                metadata=EventMetadata(source_framework="copilot", boundary=boundary),
+            )
+
+        release = threading.Event()
+
+        def refine(span):
+            release.wait(timeout=5)  # block so the refinement is still in-flight
+            return ActivityTitles(
+                "API Activity", [f"API Step {i}" for i in range(len(span.step_contexts))]
+            )
+
+        recorder = RecordingSink()
+        pipeline = EventPipeline(
+            sinks=[recorder.sink],
+            enable_phase=False,
+            enable_boundary=False,
+            title_inferencer=TitleInferencer(model=_FakeTitle(), activity_refiner=refine),
+            max_sessions=1,
+        )
+        # Session A: open then close an activity so its refinement is scheduled
+        # and blocked in a worker thread.
+        await pipeline.push(_sev("A"))
+        await pipeline.push(_sev("A", boundary="activity-boundary"))
+        # Pushing B is over the cap -> A is finalized/evicted, cancelling A's
+        # in-flight activity refinement before it can emit an upgrade.
+        await pipeline.push(_sev("B"))
+        release.set()
+        await pipeline.flush()
+
+        # The evicted activity A-0 kept only its packaged title: its in-flight
+        # refinement was cancelled, so no API upgrade ever landed on it.
+        a0_acts = [
+            u.title
+            for u in recorder.title_updates
+            if u.session_id == "A" and u.segment_id == "A-0" and u.kind == "activity"
+        ]
+        assert a0_acts == ["Title 0"]
+        # And no activity/step update for session A carries an API upgrade.
+        a_api = [
+            u
+            for u in recorder.title_updates
+            if u.session_id == "A" and u.kind in ("activity", "step") and "API" in u.title
+        ]
+        assert a_api == []
+
+
 class TestPipelineSpanAndUsage:
     async def test_push_span_fanout(self):
         recorders = [RecordingSink() for _ in range(2)]

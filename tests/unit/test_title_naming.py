@@ -12,14 +12,20 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from traceforge.config.models import (
+    ActivityTitlingApiConfig,
+    ActivityTitlingConfig,
     SessionNamingApiConfig,
     SessionNamingConfig,
     SessionNamingHeuristicConfig,
 )
 from traceforge.title.naming import (
+    ActivityApiProvider,
+    ActivitySpan,
+    ActivityTitles,
     ApiProvider,
     HeuristicProvider,
     _api_key_present,
+    build_activity_refiner,
     build_session_titler,
 )
 
@@ -143,3 +149,136 @@ def test_with_fallback_prefers_api_when_available(monkeypatch):
     )
     titler = build_session_titler(cfg)
     assert titler("some request") == "Wire up the retry backoff"
+
+
+# ─── activity/step (span) title refinement ───────────────────────────────────
+#
+# The span refiner mirrors the session API tier exactly (same LiteLLM plumbing,
+# key-presence gate, and graceful-fallback contract) but titles a whole closed
+# activity and its steps in ONE call, returning JSON. The offline floor here is
+# the packaged ONNX span model (owned by the inferencer), so absent a key -- or
+# on any API failure -- ``build_activity_refiner`` returns ``None`` and the
+# refiner returns all-``None`` titles, leaving the packaged titles standing.
+
+
+def _span(n_steps: int = 2) -> ActivitySpan:
+    return ActivitySpan(
+        activity_context="intent: add retry backoff | files: client.py",
+        step_contexts=[f"step {i} context" for i in range(n_steps)],
+    )
+
+
+# ─── build_activity_refiner resolution ───────────────────────────────────────
+
+
+def test_activity_default_strategy_builds_no_refiner():
+    # strategy=model (the default) -> the packaged ONNX titles are final; no
+    # API refiner is built and the pipeline pays nothing.
+    assert build_activity_refiner(ActivityTitlingConfig()) is None
+
+
+def test_activity_api_without_key_falls_back_to_packaged(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    cfg = ActivityTitlingConfig(
+        strategy="api", api=ActivityTitlingApiConfig(api_key_env="OPENAI_API_KEY")
+    )
+    # No key -> the opt-in gate declines, so the packaged model stands (None).
+    assert build_activity_refiner(cfg) is None
+
+
+def test_activity_api_with_key_builds_provider(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    cfg = ActivityTitlingConfig(
+        strategy="api", api=ActivityTitlingApiConfig(api_key_env="OPENAI_API_KEY")
+    )
+    refiner = build_activity_refiner(cfg)
+    assert isinstance(refiner, ActivityApiProvider)
+
+
+# ─── _api_key_present opt-in gate (shared, over the activity api config) ──────
+
+
+def test_activity_api_key_present_honors_explicit_env(monkeypatch):
+    cfg = ActivityTitlingApiConfig(api_key_env="MY_KEY")
+    monkeypatch.delenv("MY_KEY", raising=False)
+    assert _api_key_present(cfg) is False
+    monkeypatch.setenv("MY_KEY", "x")
+    assert _api_key_present(cfg) is True
+
+
+def test_activity_api_key_present_local_base_needs_no_key():
+    cfg = ActivityTitlingApiConfig(api_base="http://localhost:11434", api_key_env=None)
+    assert _api_key_present(cfg) is True
+
+
+# ─── ActivityApiProvider behavior (litellm mocked) ───────────────────────────
+
+
+def test_activity_provider_parses_activity_and_step_titles(monkeypatch):
+    import litellm
+
+    reply = '{"activity": "Add retry backoff", "steps": ["Wire client", "Add tests"]}'
+    monkeypatch.setattr(litellm, "completion", _fake_completion(reply))
+    titles = ActivityApiProvider(ActivityTitlingApiConfig())(_span(2))
+    assert titles.activity == "Add retry backoff"
+    assert titles.steps == ["Wire client", "Add tests"]
+
+
+def test_activity_provider_cleans_titles(monkeypatch):
+    import litellm
+
+    reply = '{"activity": "  Add retry backoff.  ", "steps": ["  wire client.  "]}'
+    monkeypatch.setattr(litellm, "completion", _fake_completion(reply))
+    titles = ActivityApiProvider(ActivityTitlingApiConfig())(_span(1))
+    # clean_title trims whitespace + trailing punctuation and caps the first char.
+    assert titles.activity == "Add retry backoff"
+    assert titles.steps == ["Wire client"]
+
+
+def test_activity_provider_tolerates_prose_wrapped_json(monkeypatch):
+    import litellm
+
+    reply = 'Sure! Here you go:\n```json\n{"activity": "Fix bug", "steps": ["Patch it"]}\n```'
+    monkeypatch.setattr(litellm, "completion", _fake_completion(reply))
+    titles = ActivityApiProvider(ActivityTitlingApiConfig())(_span(1))
+    assert titles.activity == "Fix bug"
+    assert titles.steps == ["Patch it"]
+
+
+def test_activity_provider_pads_missing_steps_with_none(monkeypatch):
+    import litellm
+
+    # Reply covers only the first of two steps -> the second stays None so its
+    # packaged-model title is kept.
+    reply = '{"activity": "Add retry backoff", "steps": ["Wire client"]}'
+    monkeypatch.setattr(litellm, "completion", _fake_completion(reply))
+    titles = ActivityApiProvider(ActivityTitlingApiConfig())(_span(2))
+    assert titles.steps == ["Wire client", None]
+
+
+def test_activity_provider_returns_empty_on_exception(monkeypatch):
+    import litellm
+
+    def _boom(**_kw):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(litellm, "completion", _boom)
+    titles = ActivityApiProvider(ActivityTitlingApiConfig())(_span(2))
+    # Any provider/network error -> all-None so the caller keeps packaged titles.
+    assert titles == ActivityTitles(None, [None, None])
+
+
+def test_activity_provider_unparseable_reply_returns_empty(monkeypatch):
+    import litellm
+
+    monkeypatch.setattr(litellm, "completion", _fake_completion("not json at all"))
+    titles = ActivityApiProvider(ActivityTitlingApiConfig())(_span(2))
+    assert titles == ActivityTitles(None, [None, None])
+
+
+def test_activity_provider_missing_key_env_returns_empty(monkeypatch):
+    # api_key_env names an absent var -> decline (all-None) rather than call the
+    # API keyless; the caller falls back to packaged titles.
+    monkeypatch.delenv("MY_KEY", raising=False)
+    titles = ActivityApiProvider(ActivityTitlingApiConfig(api_key_env="MY_KEY"))(_span(2))
+    assert titles == ActivityTitles(None, [None, None])

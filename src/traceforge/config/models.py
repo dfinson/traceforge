@@ -344,15 +344,16 @@ class SessionNamingHeuristicConfig(StrictModel):
     max_chars: int = Field(default=60, ge=8)
 
 
-class SessionNamingApiConfig(StrictModel):
-    """Opt-in LLM API tier for session naming, served via LiteLLM.
+class TitleApiConfig(StrictModel):
+    """Shared opt-in LiteLLM API-tier settings for title generation.
 
-    The API key is **never** stored here. LiteLLM reads it from the provider's
-    conventional environment variable (``OPENAI_API_KEY``, ``ANTHROPIC_API_KEY``,
-    ``AZURE_API_KEY`` …). Set ``api_key_env`` only to name a *different* env var
-    to read from. ``model`` is any LiteLLM model string, so OpenAI, Azure,
-    Anthropic, Gemini, and local runtimes (``ollama/…``, ``vllm/…`` via
-    ``api_base``) are all reachable through one code path.
+    Both session naming and activity/step titling reach any LLM provider through
+    this one typed surface. The API key is **never** stored here. LiteLLM reads it
+    from the provider's conventional environment variable (``OPENAI_API_KEY``,
+    ``ANTHROPIC_API_KEY``, ``AZURE_API_KEY`` …). Set ``api_key_env`` only to name
+    a *different* env var to read from. ``model`` is any LiteLLM model string, so
+    OpenAI, Azure, Anthropic, Gemini, and local runtimes (``ollama/…``, ``vllm/…``
+    via ``api_base``) are all reachable through one code path.
     """
 
     model: str = "gpt-4o-mini"
@@ -360,6 +361,14 @@ class SessionNamingApiConfig(StrictModel):
     api_key_env: str | None = None
     timeout: float = Field(default=10.0, gt=0)
     max_tokens: int = Field(default=24, ge=1)
+
+
+class SessionNamingApiConfig(TitleApiConfig):
+    """Opt-in LLM API tier for session naming, served via LiteLLM.
+
+    Inherits the shared :class:`TitleApiConfig` surface unchanged: session titles
+    are short, so the base ``max_tokens`` default is sufficient.
+    """
 
 
 class SessionNamingConfig(StrictModel):
@@ -391,16 +400,68 @@ class SessionNamingConfig(StrictModel):
     api: SessionNamingApiConfig = Field(default_factory=SessionNamingApiConfig)
 
 
+class ActivityTitlingApiConfig(TitleApiConfig):
+    """Opt-in LLM API tier for activity/step (span) titling, served via LiteLLM.
+
+    One call per closed activity returns the activity title **and** all of its
+    step titles together (as JSON), so the default ``max_tokens`` is larger than
+    session naming's to fit a multi-title response.
+    """
+
+    max_tokens: int = Field(default=256, ge=1)
+
+
+class ActivityTitlingConfig(StrictModel):
+    """How activity/step (span) titles are generated for a closed activity.
+
+        # traceforge.yaml
+        title:
+          activity_titling:
+            strategy: model            # model | api  (DEFAULT: model)
+            api:
+              model: gpt-4o-mini       # any LiteLLM model string
+              api_base: null           # azure / ollama / vllm / openai-compatible
+              api_key_env: null        # override env var name (else LiteLLM default)
+              timeout: 10
+              max_tokens: 256
+
+    ``model`` (default) titles each closed activity and its steps with the
+    packaged, offline ONNX ``traceforge-title-model`` — free, no key, no network,
+    byte-for-byte the shipped behavior. ``api`` engages LiteLLM to *refine* those
+    titles and takes effect **only** when the provider's API key is present in the
+    environment; otherwise it silently keeps the packaged-model titles, so a
+    missing key never errors or blocks.
+
+    The packaged title is always emitted the instant an activity closes; when the
+    API tier is configured and keyed the abstractive upgrade arrives **later** as
+    an append-only title update, computed off the hot path so live event emission
+    is never delayed by the network.
+    """
+
+    strategy: Literal["model", "api"] = "model"
+    api: ActivityTitlingApiConfig = Field(default_factory=ActivityTitlingApiConfig)
+
+
 class TitleConfig(StrictModel):
     """Titling configuration.
 
-    Activity/step (span) titles always use the packaged ``traceforge-title-model``
-    (the seq-KD flan-t5-small, proven strong at that task and shipped with every
-    install). Only *session naming* is configurable, because the tiny model was
-    proven weak at it; see :class:`SessionNamingConfig`.
+    Two title surfaces, each a free/offline floor with an opt-in LiteLLM API tier
+    that engages only when a provider key is present in the environment:
+
+    * ``session_naming`` — the session title derived from the first substantive
+      user message. Floor: a zero-cost extractive heuristic over the user's own
+      words; see :class:`SessionNamingConfig`.
+    * ``activity_titling`` — the activity/step (span) titles. Floor: the packaged,
+      offline ONNX ``traceforge-title-model`` (proven strong at that task and
+      shipped with every install); see :class:`ActivityTitlingConfig`.
+
+    In both cases the offline floor is emitted immediately and the API upgrade
+    (when configured and keyed) is applied later, off the hot path, as an
+    append-only title update — never blocking live event emission.
     """
 
     session_naming: SessionNamingConfig = Field(default_factory=SessionNamingConfig)
+    activity_titling: ActivityTitlingConfig = Field(default_factory=ActivityTitlingConfig)
 
 
 # ─── Root Config ─────────────────────────────────────────────────────────────

@@ -24,6 +24,18 @@ The model is loaded lazily on first close and runs CPU-only with a capped thread
 count, so an inactive session costs nothing and an active one runs the heavy
 model once per *segment*, never per event.
 
+Activity/step titles default to that packaged model alone, but are also
+configurable (mirroring session naming): when ``title.activity_titling.strategy``
+is ``api`` *and* a provider key is present, each closed activity's packaged
+titles are additionally queued for an **off-hot-path** LiteLLM refinement
+(:meth:`TitleInferencer.refine_activity`, backed by
+:mod:`traceforge.title.naming`). The pipeline upgrades the activity title and all
+its step titles in one call in a worker thread and emits them as later
+append-only :class:`~traceforge.types.TitleUpdate` records on the *same* segment
+ids. Absent a key, or on any API failure/timeout, the packaged titles stand, so
+the default (``strategy=model``) path is byte-for-byte unchanged and never blocks
+live emission.
+
 The same machinery also titles the **session** itself: fed the first substantive
 user message (:meth:`TitleInferencer.request_title`), it emits a ``kind="session"``
 :class:`~traceforge.types.TitleUpdate` keyed by the session id -- the session label,
@@ -35,6 +47,8 @@ opt-in LiteLLM API tier engaged only when a key is configured.
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass, field
 
 from traceforge.phase.event_rows import event_to_feature_row
 from traceforge.types import EventKind, SessionEvent, TitleUpdate
@@ -57,7 +71,12 @@ class TitleInferencer:
     """
 
     def __init__(
-        self, model=None, model_dir=None, session_titler=None, session_refiner=None
+        self,
+        model=None,
+        model_dir=None,
+        session_titler=None,
+        session_refiner=None,
+        activity_refiner=None,
     ) -> None:
         self._model = model
         self._model_dir = model_dir
@@ -70,6 +89,13 @@ class TitleInferencer:
         self._titler_built = False
         self._session_heuristic = None
         self._session_refiner = None
+        # Optional off-hot-path activity/step-title API refiner. ``None`` (the
+        # default) means the packaged ONNX titles are final. Injected directly in
+        # tests; otherwise built lazily from ``title.activity_titling`` on first
+        # use, so a pipeline that never refines a span pays nothing.
+        self._activity_refiner_override = activity_refiner
+        self._activity_titler_built = False
+        self._activity_refiner = None
 
     @property
     def model(self):
@@ -135,6 +161,71 @@ class TitleInferencer:
             return ""
         return self._session_refiner(text)
 
+    def _ensure_activity_titler(self) -> None:
+        if self._activity_titler_built:
+            return
+        if self._activity_refiner_override is not None:
+            self._activity_refiner = self._activity_refiner_override
+        else:
+            from .naming import build_activity_refiner
+
+            self._activity_refiner = build_activity_refiner()
+        self._activity_titler_built = True
+
+    @property
+    def has_activity_refiner(self) -> bool:
+        """Whether an off-hot-path API activity/step-title refiner is configured."""
+        self._ensure_activity_titler()
+        return self._activity_refiner is not None
+
+    def refine_activity(self, closed: "_ClosedActivity") -> list["TitleRefinement"]:
+        """Abstractive activity/step-title upgrades for the opt-in API tier.
+
+        Distils the just-closed activity and each of its steps, asks the
+        configured API refiner for better titles in **one** call, and returns a
+        per-segment :class:`TitleRefinement` for the activity and every step the
+        API usefully covered. Returns ``[]`` when no refiner is configured or the
+        API returns nothing usable (missing key, provider error, timeout, or an
+        unparseable reply), so the packaged-model titles already emitted stand.
+
+        This blocks on the network and MUST run off the hot path (the pipeline
+        runs it in a worker thread and emits each result as a later
+        ``TitleUpdate`` on the same segment id). Step titles are kept distinct
+        from the (effective) activity title and one another via
+        :func:`traceforge.title.hygiene.norm_key`; any API step title that
+        collides is dropped so that step keeps its distinct packaged-model title.
+        """
+        self._ensure_activity_titler()
+        if self._activity_refiner is None:
+            return []
+        from .naming import ActivitySpan
+
+        step_contexts = [distilled_context(rows) for _sid, rows in closed.steps]
+        activity_rows = [r for _sid, rows in closed.steps for r in rows]
+        activity_context = distilled_context(activity_rows)
+        # Nothing extractable anywhere -> no useful API call (parity with the
+        # packaged path, which emits no updates for a signal-less span).
+        if activity_context == "(no signal)" and all(c == "(no signal)" for c in step_contexts):
+            return []
+        titles = self._activity_refiner(ActivitySpan(activity_context, step_contexts))
+
+        refinements: list["TitleRefinement"] = []
+        used: set = set()
+        if titles.activity:
+            refinements.append(TitleRefinement(closed.activity_id, "activity", titles.activity))
+        effective_activity = titles.activity or closed.activity_title
+        if effective_activity:
+            used.add(norm_key(effective_activity))
+        for (step_id, _rows), step_title in zip(closed.steps, titles.steps):
+            if not step_title:
+                continue
+            key = norm_key(step_title)
+            if not key or key in used:
+                continue  # collides with the activity/a sibling -> keep packaged title
+            used.add(key)
+            refinements.append(TitleRefinement(step_id, "step", step_title, closed.activity_id))
+        return refinements
+
     def _title(self, rows: list[dict]) -> str:
         ctx = distilled_context(rows)
         if ctx == "(no signal)":
@@ -151,6 +242,37 @@ class TitleInferencer:
         """Open a live per-session titling stream."""
 
         return SessionTitleStream(self, session_id, source)
+
+
+@dataclass(frozen=True)
+class TitleRefinement:
+    """One off-hot-path title upgrade for a closed activity or one of its steps.
+
+    Produced by :meth:`TitleInferencer.refine_activity` and turned into a later
+    append-only :class:`~traceforge.types.TitleUpdate` (same ``segment_id`` /
+    ``kind``) by the pipeline, superseding the packaged-model title.
+    """
+
+    segment_id: str
+    kind: str  # "activity" | "step"
+    title: str
+    parent_id: str | None = None
+
+
+@dataclass
+class _ClosedActivity:
+    """A just-closed activity queued for off-hot-path API title refinement.
+
+    Carries the segment ids and the raw feature rows (already built on the hot
+    path) so the worker thread can distil + call the API without touching the
+    live stream. ``activity_title`` is the packaged-model activity title (or
+    ``None``); it only seeds step-title distinctness when the API leaves the
+    activity title unchanged.
+    """
+
+    activity_id: str
+    activity_title: str | None
+    steps: list[tuple[str, list[dict]]] = field(default_factory=list)  # (step_id, rows), in order
 
 
 class _Step:
@@ -187,6 +309,12 @@ class SessionTitleStream:
         # pipeline pops it via :meth:`take_session_refinement` and refines in a
         # worker thread, so the network never blocks live emission.
         self._pending_refine_text: str | None = None
+        # Closed activities queued for off-hot-path API activity/step-title
+        # refinement, appended by :meth:`_close_activity` when an activity refiner
+        # is configured. The pipeline pops them via
+        # :meth:`take_activity_refinements` and refines each in a worker thread,
+        # emitting the upgraded titles as later append-only ``TitleUpdate``s.
+        self._pending_activity_refinements: list[_ClosedActivity] = []
 
     def push(self, event: SessionEvent) -> tuple[SessionEvent, list[TitleUpdate]]:
         """Ingest one event; stamp its segment ids and emit it now, returning
@@ -268,7 +396,17 @@ class SessionTitleStream:
         return self._close_activity()
 
     def _close_activity(self) -> list[TitleUpdate]:
-        """Title the just-closed activity + its steps as append-only updates."""
+        """Title the just-closed activity + its steps as append-only updates.
+
+        The packaged-model titles are computed and returned immediately (the
+        pipeline emits them the instant the activity closes). When an API
+        activity refiner is configured *and* this activity produced at least one
+        packaged title, the closed activity (ids + raw rows) is also queued for
+        off-hot-path API refinement via :meth:`take_activity_refinements`; the
+        pipeline upgrades the titles in a worker thread and emits them as later
+        append-only updates. Queueing is skipped entirely by default
+        (``strategy=model``), so the packaged path is unchanged.
+        """
 
         steps = self._steps
         activity_id = self._activity_id
@@ -303,7 +441,30 @@ class SessionTitleStream:
                         parent_id=activity_id,
                     )
                 )
+
+        # Queue this activity for an off-hot-path API upgrade only when a refiner
+        # is configured and there is at least one packaged title to upgrade.
+        if updates and self._inf.has_activity_refiner:
+            self._pending_activity_refinements.append(
+                _ClosedActivity(
+                    activity_id=activity_id,
+                    activity_title=activity_title,
+                    steps=[(s.step_id, s.rows) for s in steps],
+                )
+            )
         return updates
+
+    def take_activity_refinements(self) -> list["_ClosedActivity"]:
+        """Pop the closed activities queued for off-hot-path API refinement.
+
+        Returns them once (then empties the queue). The pipeline calls this right
+        after :meth:`push` / :meth:`flush` and, for each returned activity,
+        refines its titles in a worker thread (:meth:`TitleInferencer.refine_activity`)
+        and emits the upgrades as later append-only :class:`TitleUpdate`s.
+        """
+        out = self._pending_activity_refinements
+        self._pending_activity_refinements = []
+        return out
 
     @staticmethod
     def _stamp(event: SessionEvent, activity_id: str | None, step_id: str | None) -> SessionEvent:
@@ -313,4 +474,4 @@ class SessionTitleStream:
         return event.model_copy(update={"metadata": new_md})
 
 
-__all__ = ["TitleInferencer", "SessionTitleStream"]
+__all__ = ["TitleInferencer", "SessionTitleStream", "TitleRefinement"]

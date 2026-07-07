@@ -22,7 +22,7 @@ today:
 
 ### MappedJsonAdapter
 
-The workhorse. Construct it from a YAML mapping:
+Construct it from a YAML mapping:
 
 ```python
 adapter = MappedJsonAdapter.from_yaml("mappings/copilot.yaml", session_id="s1")

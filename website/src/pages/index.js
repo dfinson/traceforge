@@ -30,7 +30,7 @@ const FEATURES = [
   },
   {
     title: 'Observation-first',
-    body: 'Observes, enriches, and recommends by default. Enforcement is a separate, opt-in gate layer you switch on when you want it.',
+    body: 'Observes, enriches, and recommends by default. Enforcement is a separate, opt-in gate layer.',
   },
 ];
 

@@ -1,6 +1,6 @@
 # Contributing to TraceForge
 
-Thanks for your interest in improving TraceForge! This guide covers local setup, the test and lint
+This guide covers local setup, the test and lint
 workflow, how to add support for a new agent framework, and our commit/PR conventions.
 
 TraceForge is a **docs-and-code** project with a strict scope discipline: by default it

@@ -31,57 +31,88 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          lfs: true
 
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
+      - uses: astral-sh/setup-uv@v7
+
+      # traceforge depends on traceforge-title-model, resolved from the in-repo
+      # path via [tool.uv.sources] (uv-only); plain pip ignores that and 404s, so
+      # install with uv sync like ci-test.yml. The matrix SDK is then upgraded
+      # INTO the same venv to test against its latest release; --no-sync on the
+      # subsequent uv run steps keeps uv from reverting that upgrade.
       - name: Install traceforge + framework SDK
         run: |
-          pip install -e ".[dev]"
-          pip install "${{ matrix.framework.package }}" --upgrade
+          uv sync --group dev
+          uv pip install "${{ matrix.framework.package }}" --upgrade
 
       - name: Run adapter tests
         id: test
         continue-on-error: true
         run: |
-          pytest tests/ -q --tb=short \
+          uv run --no-sync pytest tests/ -q --tb=short \
             -k "${{ matrix.framework.name }}" \
             2>&1 | tee test-output.txt
 
       - name: Check for breaking SDK changes
         id: check
+        continue-on-error: true
         run: |
-          python scripts/check_framework_compat.py \
+          uv run --no-sync python scripts/check_framework_compat.py \
             --framework "${{ matrix.framework.name }}" \
             --package "${{ matrix.framework.package }}" \
             2>&1 | tee compat-output.txt
 
+      # Both steps above are continue-on-error so they always run and capture
+      # output; this step turns any failure into a red job so it is not silent.
+      - name: Fail job if any compatibility check failed
+        if: always()
+        run: |
+          if [ "${{ steps.test.outcome }}" = "failure" ] || [ "${{ steps.check.outcome }}" = "failure" ]; then
+            echo "Compatibility check failed (adapter tests: ${{ steps.test.outcome }}, compat check: ${{ steps.check.outcome }})"
+            exit 1
+          fi
+          echo "All compatibility checks passed"
+
       - name: File issue on failure
-        if: steps.test.outcome == 'failure'
+        if: failure()
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const testOutput = fs.readFileSync('test-output.txt', 'utf8');
+            const read = (p) => fs.existsSync(p)
+              ? fs.readFileSync(p, 'utf8')
+              : '(not captured — failure occurred before this step ran, e.g. during install/setup)';
+            const testOutput = read('test-output.txt');
+            const compatOutput = read('compat-output.txt');
             const framework = '${{ matrix.framework.name }}';
             const pkg = '${{ matrix.framework.package }}';
-            const title = `[Compat] ${framework}: tests failing against latest ${pkg}`;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const title = `[Compat] ${framework}: audit failing against latest ${pkg}`;
             const body = [
               `## Framework Compatibility Failure`,
               ``,
               `**Framework:** ${framework}`,
               `**Package:** ${pkg}`,
               `**Detected:** ${new Date().toISOString().split('T')[0]}`,
-              `**Workflow run:** ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              `**Workflow run:** ${runUrl}`,
               ``,
-              `### Test Output`,
+              `### Adapter Test Output`,
               '```',
               testOutput.slice(-3000),
               '```',
               ``,
+              `### Compat Check Output`,
+              '```',
+              compatOutput.slice(-1500),
+              '```',
+              ``,
               `### Action Required`,
-              `Update the adapter/mapping for \`${framework}\` to handle the breaking change.`,
+              `Investigate the failure above (install/setup, adapter tests, or the compat check) and update the adapter/mapping for \`${framework}\` as needed.`,
             ].join('\n');
 
             // Check if an open issue already exists
@@ -106,17 +137,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          lfs: true
 
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
+      - uses: astral-sh/setup-uv@v7
+
       - name: Install traceforge
-        run: pip install -e ".[dev]"
+        run: uv sync --group dev
 
       - name: Validate all YAML mappings load
         run: |
-          python -c "
+          uv run python -c "
           from pathlib import Path
           from traceforge.adapters.mapped_json import MappedJsonAdapter
           from traceforge.adapters.otel import OtelSpanAdapter, _SPAN_KIND_MAP
@@ -145,14 +180,14 @@ jobs:
 
           if failures:
               raise SystemExit(f'{len(failures)} mapping(s) failed to load')
-          "
+          " 2>&1 | tee -a mappings-output.txt
 
       - name: Run mapping integration tests
-        run: pytest tests/integration/test_new_mappings.py tests/integration/test_pipeline_e2e.py tests/integration/test_aider_contract.py -q --tb=short
+        run: uv run pytest tests/integration/test_new_mappings.py tests/integration/test_pipeline_e2e.py tests/integration/test_aider_contract.py -q --tb=short 2>&1 | tee -a mappings-output.txt
 
       - name: Check event kind coverage
         run: |
-          python -c "
+          uv run python -c "
           from pathlib import Path
           import yaml
           from traceforge.types import KNOWN_KINDS
@@ -175,4 +210,53 @@ jobs:
           print(f'Event kind coverage: {covered}/{total} ({100*covered/total:.0f}%)')
           if unmapped:
               print(f'Unmapped canonical kinds: {sorted(unmapped)[:20]}')
-          "
+          " 2>&1 | tee -a mappings-output.txt
+
+      - name: File issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const output = fs.existsSync('mappings-output.txt')
+              ? fs.readFileSync('mappings-output.txt', 'utf8')
+              : '(no step output was captured before the failure — check the workflow logs)';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const title = 'YAML mappings audit is failing';
+            const body = [
+              `## YAML Mappings Audit Failure`,
+              ``,
+              `**Detected:** ${new Date().toISOString().split('T')[0]}`,
+              `**Workflow run:** ${runUrl}`,
+              ``,
+              `### Captured Output`,
+              '```',
+              output.slice(-4000),
+              '```',
+              ``,
+              `This is an automated tracking issue; it is updated (not duplicated) on subsequent failures and should be closed once the audit is green again.`,
+            ].join('\n');
+
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'compat-failure',
+            });
+            const match = existing.data.find(i => i.title.includes('YAML mappings'));
+            if (match) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: match.number,
+                body: `Still failing as of ${new Date().toISOString()}.\n\n**Run:** ${runUrl}\n\n\`\`\`\n${output.slice(-3000)}\n\`\`\``,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['compat-failure', 'automated'],
+              });
+            }

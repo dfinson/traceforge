@@ -15,17 +15,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          lfs: true
 
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
+      - uses: astral-sh/setup-uv@v7
+
+      # traceforge depends on traceforge-title-model, which is resolved from the
+      # in-repo path via [tool.uv.sources] (uv-only) rather than PyPI. Plain pip
+      # ignores that source and 404s, so this audit uses uv sync like ci-test.yml.
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: uv sync --group dev
 
       - name: Validate YAML data files
         run: |
-          python -c "
+          uv run python -c "
           import sys
           import yaml
           from pathlib import Path
@@ -50,11 +57,11 @@ jobs:
               sys.exit(1)
           else:
               print('\n✅ All YAML files valid')
-          "
+          " 2>&1 | tee -a audit-output.txt
 
       - name: Validate enum dimensions in YAML
         run: |
-          python -c "
+          uv run python -c "
           import sys
           from traceforge.classify.coding import CodingRole, CodingScope, CodingAction
           from traceforge.classify.config import load_config
@@ -62,25 +69,27 @@ jobs:
           config = load_config()
           errors = []
 
+          # load_config() returns a typed ClassifyConfig: binary_info values are
+          # BinaryInfoConfig models (attribute access) and mcp_profiles is a list
+          # of McpProfileConfig — NOT the raw dicts this check once assumed.
+
           # Validate binary_info roles
           valid_role_prefixes = {r.value.split('.')[0] for r in CodingRole}
           for name, info in config.binary_info.items():
-              role = info.get('role', '')
+              role = info.role or ''
               if '.' in role:
                   prefix = role.split('.')[0]
                   if prefix not in valid_role_prefixes:
                       errors.append(f'binary_info[{name}].role={role} — invalid prefix')
 
           # Validate MCP profile dimensions
-          for profile_name, profile in config.mcp_profiles.items():
-              for dim_key in ('role', 'scope', 'action'):
-                  values = profile.get(dim_key, [])
-                  if isinstance(values, list):
-                      for v in values:
-                          if '.' in str(v):
-                              prefix = str(v).split('.')[0]
-                              if dim_key == 'role' and prefix not in valid_role_prefixes:
-                                  errors.append(f'mcp_profiles[{profile_name}].{dim_key}={v} — invalid')
+          for profile in config.mcp_profiles:
+              profile_name = profile.id or ','.join(profile.namespace_aliases)
+              for v in profile.role:
+                  if '.' in str(v):
+                      prefix = str(v).split('.')[0]
+                      if prefix not in valid_role_prefixes:
+                          errors.append(f'mcp_profiles[{profile_name}].role={v} — invalid')
 
           if errors:
               print(f'❌ {len(errors)} dimension validation errors:')
@@ -89,11 +98,11 @@ jobs:
               sys.exit(1)
           else:
               print('✅ All dimensions valid')
-          "
+          " 2>&1 | tee -a audit-output.txt
 
       - name: Run classification engine smoke test
         run: |
-          python -c "
+          uv run python -c "
           from traceforge.classify import get_default_engine, classify_shell, classify_tool
           from traceforge.classify.mcp import classify_mcp_tool
           from functools import partial
@@ -115,15 +124,15 @@ jobs:
           print(f'   {len(engine.mcp_alias_index)} MCP profile aliases')
           print(f'   {len(engine.canonical_tools)} canonical tools')
           print('✅ All smoke tests passed')
-          "
+          " 2>&1 | tee -a audit-output.txt
 
       - name: Run full test suite
-        run: python -m pytest tests/ -q --tb=short
+        run: uv run pytest tests/ -q --tb=short 2>&1 | tee -a audit-output.txt
 
       - name: Report summary
         if: always()
         run: |
-          python -c "
+          uv run python -c "
           from traceforge.classify import get_default_engine
           engine = get_default_engine()
           print('## Tool Surface Summary')
@@ -133,3 +142,53 @@ jobs:
           print(f'- **Canonical tools**: {len(engine.canonical_tools)}')
           print(f'- **Risk config keys**: {len(engine.risk_config)}')
           " >> "$GITHUB_STEP_SUMMARY"
+
+      - name: File issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const output = fs.existsSync('audit-output.txt')
+              ? fs.readFileSync('audit-output.txt', 'utf8')
+              : '(no step output was captured before the failure — check the workflow logs)';
+            const title = 'Weekly Tool Surface Audit is failing';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              `## Tool Surface Audit Failure`,
+              ``,
+              `**Detected:** ${new Date().toISOString().split('T')[0]}`,
+              `**Workflow run:** ${runUrl}`,
+              ``,
+              `### Captured Output`,
+              '```',
+              output.slice(-4000),
+              '```',
+              ``,
+              `This is an automated tracking issue. It is updated (not duplicated) on each subsequent failure and should be closed once the audit is green again.`,
+            ].join('\n');
+
+            // Dedup against any open tracking issue with our label.
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'tool-surface-failure',
+            });
+            const match = existing.data.find(i => i.title.includes('Tool Surface Audit'));
+            if (match) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: match.number,
+                body: `Still failing as of ${new Date().toISOString()}.\n\n**Run:** ${runUrl}\n\n\`\`\`\n${output.slice(-3000)}\n\`\`\``,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['tool-surface-failure', 'automated'],
+              });
+            }

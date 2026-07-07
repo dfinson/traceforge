@@ -1,7 +1,9 @@
-"""Config command group — init, show, validate."""
+"""Config command group — init, show, validate, dump."""
 
 from __future__ import annotations
 
+import json
+import os
 import sys
 from pathlib import Path
 
@@ -69,10 +71,51 @@ def validate(config_path: str | None) -> None:
     click.echo(f"✓ Config valid: {path}")
 
 
+@config.command()
+@click.option("--config", "config_path", type=click.Path(exists=True), default=None)
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["yaml", "json"]),
+    default="yaml",
+    help="Serialization format for the resolved config.",
+)
+def dump(config_path: str | None, output_format: str) -> None:
+    """Print the fully-resolved, effective configuration.
+
+    Unlike `show` (which prints the raw config file), `dump` runs the real
+    loader — applying the full precedence chain kwargs > env > project YAML >
+    user YAML > defaults — and serializes the typed `TraceforgeConfig` it
+    produces. With no config file present, the resolved defaults are dumped.
+    """
+    from traceforge.config.loader import load_config
+
+    if config_path:
+        # Point the real loader at the requested file via its runtime path
+        # override (TRACEFORGE_CONFIG), so the full precedence chain still
+        # applies — env vars and defaults still layer around the file.
+        previous = os.environ.get("TRACEFORGE_CONFIG")
+        os.environ["TRACEFORGE_CONFIG"] = str(Path(config_path))
+        try:
+            cfg = load_config()
+        finally:
+            if previous is None:
+                os.environ.pop("TRACEFORGE_CONFIG", None)
+            else:
+                os.environ["TRACEFORGE_CONFIG"] = previous
+    else:
+        cfg = load_config()
+
+    resolved = cfg.model_dump(mode="json")
+
+    if output_format == "json":
+        click.echo(json.dumps(resolved, indent=2))
+    else:
+        click.echo(yaml.safe_dump(resolved, sort_keys=False))
+
+
 def _resolve_config_path() -> Path | None:
     """Find config file via env var, local, or default location."""
-    import os
-
     env = os.environ.get("TRACEFORGE_CONFIG")
     if env:
         return Path(env)

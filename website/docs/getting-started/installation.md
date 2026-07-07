@@ -10,7 +10,7 @@ description: "Install TraceForge with pip or uv: one install, no extras."
 TraceForge runs on **Python 3.11, 3.12, and 3.13**.
 
 ```bash
-pip install traceforge      # or: uv add traceforge
+pip install traceforge-toolkit   # or: uv add traceforge-toolkit
 ```
 
 Everything ships with a single install, **no extras to choose**. The pipeline, enricher,
@@ -21,7 +21,7 @@ included.
 ## The titler model weights
 
 The activity/step titler model weights (~90 MB) live in a separate
-`traceforge-title-model` package that `traceforge` depends on, so `pip install traceforge`
+`traceforge-title-model` package that `traceforge` depends on, so `pip install traceforge-toolkit`
 pulls them automatically. The weights are hosted on PyPI (primary) and mirrored on this
 repo's `title-model-v*` GitHub releases.
 
@@ -48,7 +48,7 @@ that sink:
 
 | Sink | Extra | Install |
 | --- | --- | --- |
-| `S3Sink` | `boto3` | `pip install traceforge[s3]` |
+| `S3Sink` | `boto3` | `pip install traceforge-toolkit[s3]` |
 
 Every other sink works out of the box. `ParquetSink` is built on `pyarrow`, which ships with the
 base package, so no separate install is needed.

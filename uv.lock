@@ -4133,7 +4133,12 @@ wheels = [
 ]
 
 [[package]]
-name = "traceforge"
+name = "traceforge-title-model"
+version = "0.2.0"
+source = { editable = "packages/traceforge-title-model" }
+
+[[package]]
+name = "traceforge-toolkit"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
@@ -4237,11 +4242,6 @@ dev = [
     { name = "semantic-kernel", specifier = ">=1.20" },
     { name = "smolagents", specifier = ">=1.0" },
 ]
-
-[[package]]
-name = "traceforge-title-model"
-version = "0.2.0"
-source = { editable = "packages/traceforge-title-model" }
 
 [[package]]
 name = "tree-sitter"

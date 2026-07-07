@@ -42,7 +42,7 @@ mapping file**: no code.
 ## Quickstart
 
 ```bash
-pip install traceforge      # or: uv add traceforge
+pip install traceforge-toolkit   # or: uv add traceforge-toolkit
 ```
 
 Everything ships in a single install, with no extras. Describe a pipeline in

@@ -1365,7 +1365,7 @@ traceforge/
 
 | Item | Priority | Dependencies | Notes |
 |------|----------|--------------|-------|
-| **PyPI release** | Medium | None | Publish `traceforge` + `traceforge-title-model` to PyPI. Packaging and CI publish workflow are already in place. |
+| **PyPI release** | Medium | None | Publish `traceforge-toolkit` + `traceforge-title-model` to PyPI. Packaging and CI publish workflow are already in place. |
 
 > **Delivered since this table was first written:** the live structuring subsystem
 > (`phase/` + `boundary/` + `title/`, formerly PR #35, now specified in §23) and the
@@ -1376,7 +1376,7 @@ traceforge/
 ### Implementation Order (Recommended)
 
 `
-1. PyPI release → publish traceforge + traceforge-title-model
+1. PyPI release → publish traceforge-toolkit + traceforge-title-model
 `
 
 ---
@@ -2078,5 +2078,5 @@ The library is "done" when:
 6. **Risk scoring** produces meaningful differentiation (not all-50s)
 7. **End-to-end latency** from event ingestion to sink write is < 10ms p99 for in-memory sinks
 8. **Zero-crash guarantee**: malformed input, failed sinks, and unexpected data never crash the pipeline
-9. **Config bootstrap**: first `pip install traceforge` + any config access creates `~/.traceforge/` with working defaults
+9. **Config bootstrap**: first `pip install traceforge-toolkit` + any config access creates `~/.traceforge/` with working defaults
 10. **CI green**: lint + tests pass on Python 3.11, 3.12, 3.13

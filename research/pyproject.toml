@@ -15,7 +15,7 @@ dependencies = [
     "datasets>=3.0",
     "huggingface-hub>=0.25",
     # Traceforge itself (editable, from parent repo)
-    "traceforge",
+    "traceforge-toolkit",
     # Misc
     "pydantic>=2",
     "pyyaml",
@@ -34,7 +34,7 @@ embeddings = [
 notebook = ["jupyterlab", "matplotlib", "seaborn"]
 
 [tool.uv.sources]
-traceforge = { path = "..", editable = true }
+traceforge-toolkit = { path = "..", editable = true }
 
 [build-system]
 requires = ["hatchling"]

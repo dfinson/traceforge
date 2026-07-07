@@ -28,7 +28,7 @@ def _require_boto3():
         return boto3
     except ImportError:
         raise ImportError(
-            "boto3 is required for S3Sink. Install it with: pip install traceforge[s3]"
+            "boto3 is required for S3Sink. Install it with: pip install traceforge-toolkit[s3]"
         ) from None
 
 
@@ -37,7 +37,7 @@ class S3Sink(StorageSink):
 
     Object key format: {prefix}{session_id}/{date}/{timestamp}-{uuid_short}.jsonl
 
-    Requires boto3 (optional dependency). Install via ``pip install traceforge[s3]``.
+    Requires boto3 (optional dependency). Install via ``pip install traceforge-toolkit[s3]``.
     """
 
     def __init__(

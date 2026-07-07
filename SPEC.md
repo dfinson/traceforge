@@ -1171,10 +1171,11 @@ traceforge/
 │   │   ├── gate_policy.py       # GatePolicy, preflight / postflight gates
 │   │   ├── gate_types.py        # GateContext, ToolCallRequest / Result
 │   │   └── verdict.py           # Verdict, Decision
-│   ├── gate/                    # Cross-process gate IPC
+│   ├── gate/                    # Cross-process gate IPC + external PDP gates
 │   │   ├── __init__.py
 │   │   ├── client.py
 │   │   ├── server.py
+│   │   ├── external.py          # HttpGate / SubprocessGate (out-of-process PDP)
 │   │   └── registry.py
 │   ├── gates/                   # Bundled gate detectors
 │   │   ├── __init__.py
@@ -1729,6 +1730,35 @@ pipeline.gate_maf()                    # Microsoft Agent Framework middleware
 The `Shield` enforces the returned `Verdict` using each framework's native blocking mechanism.
 The optional postflight callback receives the tool output for audit. (The `gate_*` helpers also
 exist directly on `GovernancePipeline` for gating-only use.)
+
+#### External gates (out-of-process PDP)
+
+When the ALLOW/DENY decision should be made *outside* the Python process, `gate/external.py`
+ships two drop-in preflight gates. Both implement the same synchronous `PreflightGate` protocol
+(`(ToolCallRequest, GateContext) -> Verdict`) as an in-process callback, so they compose straight
+into `GatePolicy().preflight(...)` with no adapter changes: the gate serializes a flat, redacted
+JSON projection of the call (never the in-process `EventTrace` escape hatch) and maps the decider's
+`{"decision": "deny", "reason": ...}` reply to a `Verdict` (an OPA-style `{"result": {...}}`
+envelope is unwrapped automatically).
+
+* **`HttpGate`** — POSTs the request to a persistent HTTP **Policy Decision Point** (e.g. an OPA
+  REST server). Use for a centralized, org-wide PDP where policy lives outside the codebase.
+* **`SubprocessGate`** — spawns a decider command per call and exchanges JSON over stdin/stdout.
+  Use for air-gapped or non-Python gating (OPA `eval`, a shell script) with no long-lived server.
+
+Both are **fail-closed by default** (`fail_open=False`): any error, timeout, non-2xx response,
+non-zero exit, or unparseable output DENIES the call, so a broken decider never silently disables
+enforcement. Both are **dependency-free** — stdlib `urllib` / `subprocess` only — and thread-safe.
+
+```python
+from traceforge.sdk import Pipeline, GatePolicy
+from traceforge.gate.external import HttpGate
+
+# Delegate every preflight decision to an external OPA PDP; fail closed on any error.
+policy = GatePolicy().preflight(HttpGate(endpoint="http://localhost:8181/v1/data/traceforge/gate"))
+pipeline = Pipeline.create(policy=policy)
+pipeline.gate_crewai()   # same framework binding as an in-process gate
+```
 
 #### Shell hook (Copilot / Claude Code CLI)
 

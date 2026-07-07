@@ -32,6 +32,14 @@ session **phase** stays `implementation`. Activities are *input signals* to phas
 not phases themselves. Both use the project's dot-path convention (e.g. `retrieval.search`,
 `implementation.coding`).
 
+:::caution Design status
+This page describes the phase tracker's **target model**. In the current release the per-event
+signal ships as `metadata.phases` (a `frozenset[Phase]`); the single-string `metadata.activity`
+form shown here is the design's proposed consolidation of that field. The session-level
+`metadata.phase` field and the `PhaseBlock` / `PhaseTimeline` / `PhaseSummary` types described
+below are shipped today.
+:::
+
 ## Data model
 
 All output types are frozen. The tracker emits three shapes:

@@ -54,7 +54,7 @@ TraceForge exposes the same classification and rules through two paths:
 
 ```text
 Observation: Source → [Parser] → Adapter → Enricher → Pipeline (SessionMonitor) → Sink(s)
-Gate:        Hook Payload → Adapter.parse_one() → Enricher.classify() → Shield (GatePolicy) → Verdict
+Gate:        Hook Payload → Adapter.parse_dict() → Enricher.process() → Shield (GatePolicy) → Verdict
                                     ↑ same classify / rules ↑
 ```
 

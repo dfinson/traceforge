@@ -21,9 +21,9 @@ To react to events in your own code instead of writing a full sink, use
 | `CallbackSink` | n/a (SDK only) | Delegates to user-provided async callables. |
 | `ConsoleSink` | `console` | Pretty-printed events / assessments to the terminal. |
 | `JsonlSink` | `jsonl` | Append-only JSONL files, optional size-based rotation. |
-| `SqliteSink` | `sqlite` | Local SQLite with WAL mode, schema migration, batch inserts. |
+| `SqliteOutputSink` | `sqlite` | Local SQLite with WAL mode, schema migration, batch inserts. |
 | `S3Sink` | `s3` | Cloud object storage with buffered upload and key formatting (requires `boto3`). |
-| `ParquetSink` | n/a (SDK only) | One columnar Parquet file per session for analytics (requires `pyarrow`). |
+| `ParquetSink` | n/a (SDK only) | One columnar Parquet file per session for analytics (built on `pyarrow`, included in the base install). |
 | `OtelExporterSink` | `otel` | Export events / spans / usage as OTLP/HTTP JSON to an OpenTelemetry collector. |
 | `WebhookSink` | `webhook` | POST events / assessments to a webhook URL. |
 

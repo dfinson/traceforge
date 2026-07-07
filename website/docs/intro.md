@@ -89,7 +89,7 @@ trace = pipeline.score_tool_call({
     "tool_input": {"command": "rm -rf build/"},
     "session_id": "demo",
 })
-print(trace.risk_score, trace.suggested_action)   # e.g. 82 deny
+print(trace.risk_score, trace.suggested_action)   # e.g. 66 escalate
 ```
 
 ## Where to go next

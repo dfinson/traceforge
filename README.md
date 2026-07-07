@@ -83,7 +83,7 @@ print(trace.risk_score, trace.suggested_action)   # e.g. 72 escalate
 ```
 
 See the **[Getting Started guide](https://dfinson.github.io/traceforge/docs/getting-started/installation)**
-for the full CLI (`watch`, `replay`, `score`, `gate`, `init`, `detect`, `status`, `download-model`).
+for the full CLI (`watch`, `replay`, `score`, `gate`, `init`, `detect`, `status`, `config`, `download-model`).
 
 ## Features
 

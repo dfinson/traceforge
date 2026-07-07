@@ -43,12 +43,15 @@ runtime.** All ML subsystems load lazily, so an unused subsystem costs nothing.
 
 ## Optional sink dependencies
 
-A few sinks require optional third-party packages, installed separately when you use them:
+Only the S3 sink needs an extra third-party package. Install it with the `s3` extra when you use
+that sink:
 
-| Sink | Extra dependency |
-| --- | --- |
-| `S3Sink` | `boto3` |
-| `ParquetSink` | `pyarrow` |
+| Sink | Extra | Install |
+| --- | --- | --- |
+| `S3Sink` | `boto3` | `pip install traceforge[s3]` |
+
+Every other sink works out of the box. `ParquetSink` is built on `pyarrow`, which ships with the
+base package, so no separate install is needed.
 
 ## Verify the install
 

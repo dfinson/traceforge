@@ -150,19 +150,14 @@ back to the heuristic, a missing key never errors or blocks.
 ## Custom tool & MCP classifications
 
 TraceForge classifies by **trace-native structure** — the shape of each tool call and, for
-shell, its parsed AST — and ships only a small, *general* set of tool and MCP-server
-classifications as built-in defaults. It deliberately does **not** hard-code any one consumer's
-tool catalog. If you run bespoke native tools or private MCP servers, you attach your own
-taxonomy as an **overlay**: TraceForge merges your entries on top of its generic defaults,
-per key, so you own your vocabulary with no change to — and no fork of — TraceForge itself.
+shell, its parsed AST — and ships a small, general set of tool and MCP-server classifications
+as built-in defaults. Consumers overlay their own native tools and MCP servers on top of those
+defaults through the config chain.
 
-:::note Separate discovery chain from the root config
-The classification overlay is loaded by `traceforge.classify.config.load_config()`, a
-**different** discovery chain from the [root config precedence](#loading-precedence) above. It
-shares the `TRACEFORGE_CONFIG` environment variable (each subsystem reads only the keys it
-owns from a shared file), but its project- and user-level files live at their own paths (listed
-below). Put classification sections in one of those files — not in `./traceforge.yaml`.
-:::
+The classification overlay is loaded by `traceforge.classify.config.load_config()`, a separate
+discovery chain that shares only the `TRACEFORGE_CONFIG` environment variable with the [root
+config](#loading-precedence) above. Put classification sections in the classify config file
+(its own project- and user-level paths are listed below), not in `./traceforge.yaml`.
 
 ### The override surfaces
 
@@ -229,12 +224,10 @@ mcp_profiles:
         effect: destructive
 ```
 
-:::tip `tool_display` rides the same chain
 The overlay chain also carries `tool_display` — a `dict[str, str]` mapping a canonical tool
-identity to a human-facing label. It's how you relabel tools without touching their
-classification. See [Bring your own classifications](reference/classification.md#bring-your-own-classifications)
+identity to a human-facing label, so you can relabel tools without touching their classification.
+See [Bring your own classifications](reference/classification.md#bring-your-own-classifications)
 and the `tool_display` field on the [event model](architecture/event-model.md).
-:::
 
 ### Supplying an overlay
 
@@ -249,8 +242,7 @@ one below:
 6. TraceForge's built-in generic defaults (`classify/data/*.yaml`).
 
 The three you'll typically reach for are **2, 3, and 5** — all of which overlay the built-in
-defaults (6). Mind the precedence: a `TRACEFORGE_CONFIG` file overrides a project
-`.traceforge/config.yaml`, which overrides an entry-point profile.
+defaults (6).
 
 **Merge semantics.** Dict sections (`tool_classifications`, `tool_display`) merge **per key** —
 your key wins, untouched defaults survive. `mcp_profiles` is a list where higher-priority layers

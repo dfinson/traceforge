@@ -112,10 +112,8 @@ Classification behavior is governed entirely by YAML in `classify/data/`:
 
 ## Bring your own classifications
 
-The tables above are TraceForge's **built-in generic defaults**. Because the engine keys off
-trace-native structure, it ships only a general vocabulary and never hard-codes a specific
-consumer's tool catalog. To add your own native tools or private MCP servers, overlay them
-through the config chain — don't edit these bundled files or fork the package.
+The tables above are TraceForge's **built-in generic defaults**. To add your own native tools or
+private MCP servers, overlay them through the config chain instead of editing these bundled files.
 
 Three overlay surfaces cover the common cases:
 

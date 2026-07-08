@@ -116,3 +116,64 @@
   max-width: 100%;
   height: auto;
 }
+
+/* ============================================================
+ * Responsive / mobile layout
+ * ------------------------------------------------------------
+ * These docs are table- and code-dense (the CLI, adapters, and
+ * architecture pages carry very wide tables). By default those
+ * tables and long code lines overflow the viewport horizontally
+ * on a phone. The rules below keep them inside their own scroll
+ * region and tighten typography on narrow screens.
+ * No brand color tokens are changed here.
+ * ============================================================ */
+
+/* Wide markdown tables scroll within their own region instead of
+ * forcing the whole page sideways. Docusaurus renders bare <table>
+ * elements inside .markdown; the .table-wrapper selector covers the
+ * case where a table is wrapped. This is the GitHub-markdown pattern:
+ * the table sizes to its content but is capped at the column width. */
+.markdown table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.markdown .table-wrapper {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* Code blocks scroll horizontally rather than overflow the page. */
+.markdown pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+@media (max-width: 768px) {
+  /* Denser tables: smaller type + tighter cells so more columns fit
+   * before the horizontal scroll kicks in. */
+  .markdown table {
+    font-size: 0.85rem;
+  }
+  .markdown table th,
+  .markdown table td {
+    padding: 0.35rem 0.5rem;
+  }
+
+  /* Slightly smaller code so long YAML / CLI lines are easier to read
+   * while scrolling. */
+  .markdown pre code {
+    font-size: 0.82rem;
+  }
+
+  /* Keep the largest headings from wrapping awkwardly on phones. */
+  .markdown h1 {
+    font-size: 1.75rem;
+  }
+  .markdown h2 {
+    font-size: 1.4rem;
+  }
+}

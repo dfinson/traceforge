@@ -70,6 +70,12 @@ dev = [
 s3 = [
     "boto3>=1.28",
 ]
+copilot = [
+    "github-copilot-sdk>=0.3,<0.4",
+]
+claude = [
+    "claude-agent-sdk>=0.1",
+]
 
 [project.scripts]
 traceforge = "traceforge.cli:main"

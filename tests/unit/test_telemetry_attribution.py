@@ -368,8 +368,9 @@ class TestPipelineIntegration:
         assert rollup.total_cost_usd == pytest.approx(0.03)
 
     async def test_flush_does_not_emit_rollups_as_sink_writes(self) -> None:
-        # Rollups are read off ``pipeline.attribution`` — persisting them is the
-        # stacked follow-up's job, so flush must add no extra span / usage writes.
+        # Rollups persist through the dedicated ``on_attribution`` channel (U13), so
+        # flush must add no extra span / usage writes — the rollup hand-off must not
+        # double-count as span / usage rows.
         recording = RecordingSink()
         pipeline = _plain_pipeline(sinks=[recording.sink], attribution=_enabled())
 

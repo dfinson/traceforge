@@ -1,0 +1,185 @@
+# LangChain callback-handler event mapping for MappedJsonAdapter.
+# Targets: langchain-core >= 0.3 (BaseCallbackHandler contract; confirmed against 1.4.7)
+# Source: langchain-ai/langchain libs/core/langchain_core/callbacks/base.py
+#         (BaseCallbackHandler) — the classic in-process observation surface that
+#         wraps chains, chat/LLM models, tools, agents and retrievers. This is the
+#         same channel pipeline.gate_langchain(tool) hooks into.
+#
+# This mapping consumes ONE flat JSON object per callback, as emitted by
+# scripts/capture_traces/capture_langchain.py. Each row is the verbatim callback
+# arguments flattened under an "event" discriminator, e.g.
+#   {"event": "on_tool_start", "run_id": "..", "name": "search",
+#    "serialized": {..}, "input_str": "..", "inputs": {..}, "tags": [..],
+#    "metadata": {..}, "timestamp": ".."}
+# The capture handler also forward-fills "name" onto end/error rows (the raw
+# on_tool_end/on_llm_end callbacks carry only run_id, not the name) by keying on
+# run_id, so downstream mapping can rely on a stable "name" field.
+#
+# NB: this is DISTINCT from mappings/langgraph.yaml. LangGraph's mapping targets
+# astream_events(version="v2"), whose flat rows nest tool/LLM I/O under `data`.
+# Here the shape is the raw callback arguments (serialized/input_str/inputs/
+# output/prompts/response...), which is what the callback handler actually sees.
+#
+# Real callback argument names (langchain_core.callbacks.BaseCallbackHandler):
+#   on_chain_start(serialized, inputs, *, run_id, parent_run_id, tags, metadata)
+#   on_chain_end(outputs, *, run_id, parent_run_id)
+#   on_chat_model_start(serialized, messages, *, run_id, tags, metadata)
+#   on_llm_start(serialized, prompts, *, run_id, tags, metadata)
+#   on_llm_end(response: LLMResult, *, run_id, ...)   # chat models END here too
+#   on_llm_new_token(token, *, chunk, run_id, ...)
+#   on_tool_start(serialized, input_str, *, run_id, tags, metadata, inputs)
+#   on_tool_end(output, *, run_id, ...)
+#   on_agent_action(action: AgentAction{tool, tool_input, log}, *, run_id)
+#   on_agent_finish(finish: AgentFinish{return_values, log}, *, run_id)
+#   on_retriever_start(serialized, query, *, run_id, ...)
+#   on_retriever_end(documents, *, run_id, ...)
+# Model name: metadata.ls_model_name (LangSmithParams, merged into callback metadata).
+# Token usage (on_llm_end, OpenAI shape):
+#   response.llm_output.token_usage = {prompt_tokens, completion_tokens, total_tokens}
+#   response.llm_output.model_name
+
+framework: langchain
+framework_version: ">=0.3"
+ingestion_mode: file_watch
+type_field: event
+timestamp_field: timestamp
+
+motivation:
+  sources:
+    # AgentAction.log is the ReAct "Thought:"/tool-selection rationale that
+    # immediately precedes the tool call — the intent behind the invocation.
+    - events: ["on_agent_action"]
+      field: content
+      role: intent
+
+events:
+  # ── Chain / runnable lifecycle ──
+  on_chain_start:
+    kind: workflow.started
+    payload:
+      run_id: run_id
+      name: name
+      inputs: inputs
+  on_chain_end:
+    kind: workflow.completed
+    payload:
+      run_id: run_id
+      name: name
+      output: outputs
+  on_chain_error:
+    kind: workflow.failed
+    payload:
+      run_id: run_id
+      name: name
+      error: error
+
+  # ── LLM calls (string-completion models) ──
+  on_llm_start:
+    kind: llm.call.started
+    payload:
+      run_id: run_id
+      model: metadata.ls_model_name
+      prompts: prompts
+  on_llm_new_token:
+    kind: llm.output.chunk
+    payload:
+      run_id: run_id
+      content: token
+  # on_llm_end fires for BOTH completion LLMs and chat models (there is no
+  # on_chat_model_end in the callback contract).
+  on_llm_end:
+    kind: llm.call.completed
+    payload:
+      run_id: run_id
+      model: response.llm_output.model_name
+      output: response.generations.0.0.text
+      input_tokens: response.llm_output.token_usage.prompt_tokens
+      output_tokens: response.llm_output.token_usage.completion_tokens
+      total_tokens: response.llm_output.token_usage.total_tokens
+  on_llm_error:
+    kind: llm.call.failed
+    payload:
+      run_id: run_id
+      error: error
+
+  # ── Chat-model calls (primary path for modern LangChain) ──
+  on_chat_model_start:
+    kind: llm.call.started
+    payload:
+      run_id: run_id
+      model: metadata.ls_model_name
+
+  # ── Tool calls ──
+  on_tool_start:
+    kind: tool.call.started
+    payload:
+      tool_name: name
+      tool_call_id: run_id
+      arguments: inputs
+      input: input_str
+  on_tool_end:
+    kind: tool.call.completed
+    payload:
+      tool_name: name
+      tool_call_id: run_id
+      result: output
+  on_tool_error:
+    kind: tool.call.failed
+    payload:
+      tool_name: name
+      tool_call_id: run_id
+      error: error
+
+  # ── Agent reasoning / actions (classic AgentExecutor / ReAct loop) ──
+  on_agent_action:
+    kind: message.assistant
+    payload:
+      run_id: run_id
+      content: log
+      tool: tool
+      tool_input: tool_input
+  on_agent_finish:
+    kind: agent.completed
+    payload:
+      run_id: run_id
+      output: return_values.output
+      log: log
+
+  # ── Retriever (RAG) ──
+  on_retriever_start:
+    kind: knowledge.query.started
+    payload:
+      run_id: run_id
+      name: name
+      query: query
+  on_retriever_end:
+    kind: knowledge.query.completed
+    payload:
+      run_id: run_id
+      results: documents
+  on_retriever_error:
+    kind: knowledge.query.failed
+    payload:
+      run_id: run_id
+      error: error
+
+  # ── Freeform agent text / scratchpad ──
+  on_text:
+    kind: message.assistant
+    payload:
+      run_id: run_id
+      content: text
+
+  # ── Retry (tenacity RetryCallState) ──
+  on_retry:
+    kind: session.warning
+    payload:
+      run_id: run_id
+
+  # ── Custom user events (adispatch_custom_event) ──
+  on_custom_event:
+    kind: custom.event
+    payload:
+      run_id: run_id
+      name: name
+      data: data

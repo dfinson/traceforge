@@ -1,0 +1,129 @@
+# Semantic Kernel filter event mapping for MappedJsonAdapter.
+# Targets: semantic-kernel >= 1.0 (filter contract; confirmed against 1.36.0)
+# Source: microsoft/semantic-kernel python/semantic_kernel/filters/
+#         (FUNCTION_INVOCATION, AUTO_FUNCTION_INVOCATION, PROMPT_RENDERING).
+#         Filters are the in-process observation surface SK exposes via
+#         @kernel.filter(...); it is the same channel pipeline.gate_semantic_kernel(kernel)
+#         registers its auto-function-invocation gate on.
+#
+# This mapping consumes ONE flat JSON object per filter tick, as emitted by
+# scripts/capture_traces/capture_semantic_kernel.py. SK filters are "around"
+# callbacks (they run code, `await next(context)`, then run more code), so the
+# capture emits a started row before next() and a completed/failed row after.
+# A capture-generated invocation_id pairs the two halves.
+#
+# Real filter context fields (python/semantic_kernel/filters/...):
+#   FunctionInvocationContext:     function, kernel, arguments, is_streaming, result
+#   AutoFunctionInvocationContext: function, arguments, chat_history, function_result,
+#                                  request_sequence_index, function_sequence_index,
+#                                  function_count, terminate
+#   PromptRenderContext:           function, arguments, rendered_prompt, function_result
+#   context.function is a KernelFunction whose .metadata (KernelFunctionMetadata) has
+#   {name, plugin_name, description, parameters, is_prompt, ...}.
+#   FunctionResult: {function, value, rendered_prompt, metadata}. For a prompt
+#   function the metadata carries usage (CompletionUsage{prompt_tokens,
+#   completion_tokens, ...}).
+#
+# The FUNCTION_INVOCATION filter splits on KernelFunctionMetadata.is_prompt:
+#   is_prompt == True  -> prompt_function.* (a model call)   -> llm.call.*
+#   is_prompt == False -> native_function.* (a tool/plugin)  -> tool.call.*
+# AUTO_FUNCTION_INVOCATION wraps each tool auto-invoked during chat completion
+#   -> auto_function.* -> tool.call.*
+# PROMPT_RENDERING wraps template rendering -> prompt_rendering.* -> prompt.render.*
+
+framework: semantic_kernel
+framework_version: ">=1.0"
+ingestion_mode: file_watch
+type_field: type
+timestamp_field: timestamp
+
+motivation:
+  sources:
+    # The fully rendered prompt is the instruction/context the model acts on —
+    # the intent behind the tool calls it subsequently emits.
+    - events: ["prompt_rendering.completed"]
+      field: content
+      role: intent
+
+events:
+  # ── Prompt (LLM) function invocations: KernelFunctionMetadata.is_prompt == True ──
+  prompt_function.started:
+    kind: llm.call.started
+    payload:
+      function_name: function_name
+      plugin_name: plugin_name
+      tool_call_id: invocation_id
+      arguments: arguments
+  prompt_function.completed:
+    kind: llm.call.completed
+    payload:
+      function_name: function_name
+      plugin_name: plugin_name
+      tool_call_id: invocation_id
+      model: model
+      output: result
+      input_tokens: usage.prompt_tokens
+      output_tokens: usage.completion_tokens
+  prompt_function.failed:
+    kind: llm.call.failed
+    payload:
+      function_name: function_name
+      plugin_name: plugin_name
+      tool_call_id: invocation_id
+      error: error
+
+  # ── Native (tool/plugin) function invocations: is_prompt == False ──
+  native_function.started:
+    kind: tool.call.started
+    payload:
+      tool_name: function_name
+      plugin_name: plugin_name
+      tool_call_id: invocation_id
+      arguments: arguments
+  native_function.completed:
+    kind: tool.call.completed
+    payload:
+      tool_name: function_name
+      plugin_name: plugin_name
+      tool_call_id: invocation_id
+      result: result
+  native_function.failed:
+    kind: tool.call.failed
+    payload:
+      tool_name: function_name
+      plugin_name: plugin_name
+      tool_call_id: invocation_id
+      error: error
+
+  # ── Auto function invocation (tool calling inside chat completion) ──
+  auto_function.started:
+    kind: tool.call.started
+    payload:
+      tool_name: function_name
+      plugin_name: plugin_name
+      tool_call_id: invocation_id
+      arguments: arguments
+      function_count: function_count
+      request_sequence_index: request_sequence_index
+      function_sequence_index: function_sequence_index
+  auto_function.completed:
+    kind: tool.call.completed
+    payload:
+      tool_name: function_name
+      plugin_name: plugin_name
+      tool_call_id: invocation_id
+      result: result
+      terminate: terminate
+
+  # ── Prompt rendering (template -> final prompt string) ──
+  prompt_rendering.started:
+    kind: prompt.render.started
+    payload:
+      function_name: function_name
+      plugin_name: plugin_name
+  prompt_rendering.completed:
+    kind: prompt.render.completed
+    payload:
+      function_name: function_name
+      plugin_name: plugin_name
+      content: rendered_prompt

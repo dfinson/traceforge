@@ -48,6 +48,23 @@ def _import_dotted(dotted_path: str):
     return getattr(module, attr_name)
 
 
+# Sentinel for "attribute absent" checks where ``None`` is itself a meaningful value.
+_UNSET = object()
+
+# Module-global idempotency guard for the CrewAI adapter (audit S2-2).
+#
+# CrewAI's ``before_tool_call`` / ``after_tool_call`` hooks register into a
+# PROCESS-GLOBAL registry, so a per-Pipeline-instance guard is insufficient: a
+# second ``GovernancePipeline`` would re-register the same global hooks and every
+# tool call would then be gated twice. This module-level flag ensures the global
+# hooks are installed exactly once per process, regardless of how many pipelines
+# call ``gate_crewai``.
+#
+# TEARDOWN CONTRACT: the follow-up ungate/teardown PR resets this flag (and calls
+# CrewAI's hook-clearing API) to permit re-installation. Keep the name stable.
+_CREWAI_HOOKS_INSTALLED = False
+
+
 class GovernancePipeline:
     """Composition-root facade for the governance subsystem.
 
@@ -343,12 +360,15 @@ class GovernancePipeline:
         Blocking: returns False to CrewAI when preflight returns DENY.
         Session ID: extracted from CrewAI's ctx.crew.fingerprint or generated.
 
-        WARNING: CrewAI hooks are global. Calling this multiple times registers
-        duplicate hooks. Use once per process.
+        Idempotent across Pipeline instances: CrewAI's hooks are process-global,
+        so a module-level guard (``_CREWAI_HOOKS_INSTALLED``) ensures the global
+        hooks are registered exactly once per process, even if a second
+        ``GovernancePipeline`` also calls ``gate_crewai``.
         """
-        if getattr(self, "_crewai_gated", False):
+        global _CREWAI_HOOKS_INSTALLED
+        if _CREWAI_HOOKS_INSTALLED:
             return
-        self._crewai_gated = True
+        _CREWAI_HOOKS_INSTALLED = True
 
         from crewai.hooks.decorators import after_tool_call, before_tool_call
 
@@ -403,7 +423,7 @@ class GovernancePipeline:
                 ctx.output = pipeline._apply_postflight_to_output(pv, output)
 
     def gate_langchain(self, tool):
-        """Wrap a LangChain tool's _run with traceforge gating.
+        """Wrap a LangChain tool's ``_run`` and ``_arun`` with traceforge gating.
 
         Blocking: raises ToolException when preflight returns DENY.
         Session ID: uses tool invocation config's configurable.thread_id or "langchain".
@@ -413,7 +433,7 @@ class GovernancePipeline:
             return tool
         tool._traceforge_gated = True
 
-        from langchain_core.tools.base import ToolException
+        from langchain_core.tools.base import BaseTool, ToolException
 
         pipeline = self
         original_run = tool._run
@@ -474,6 +494,87 @@ class GovernancePipeline:
             return result
 
         tool._run = _guarded_run
+
+        # --- Async gating (audit S2-3) --------------------------------------
+        # Previously only ``_run`` was wrapped, so async tool calls (``_arun`` /
+        # ``ainvoke``) failed OPEN. Mirror the sync guard onto the async path:
+        # preflight before the call, postflight after, fail CLOSED on deny.
+        #
+        # Skip wrapping ``_arun`` for *sync-only* tools whose async entrypoints
+        # already route through the gated ``_run`` (e.g. a ``StructuredTool`` with
+        # ``coroutine is None``: ``ainvoke`` -> ``invoke`` -> ``_run`` and
+        # ``_arun`` -> ``super()._arun()`` -> ``_run``). Wrapping those would
+        # double-gate. A tool is "native async" if it has a non-None ``coroutine``
+        # slot, or (lacking that slot) it overrides ``_arun`` itself.
+        _coroutine = getattr(tool, "coroutine", _UNSET)
+        if _coroutine is not _UNSET:
+            _native_async = _coroutine is not None
+        else:
+            _native_async = type(tool)._arun is not BaseTool._arun
+        if _native_async and hasattr(tool, "_arun"):
+            original_arun = tool._arun
+
+            async def _guarded_arun(*args, config=None, run_manager=None, **kwargs):
+                import time
+
+                sid = "langchain"
+                if config and isinstance(config, dict):
+                    configurable = config.get("configurable", {})
+                    if isinstance(configurable, dict):
+                        sid = configurable.get("thread_id", sid)
+                elif hasattr(config, "configurable"):
+                    sid = config.configurable.get("thread_id", sid)
+
+                # Extract tool-relevant input (exclude LangChain internal keys)
+                _INTERNAL_KEYS = {"config", "run_manager", "callbacks", "tags", "metadata"}
+                if kwargs:
+                    tool_input = {k: v for k, v in kwargs.items() if k not in _INTERNAL_KEYS}
+                elif args:
+                    tool_input = {"input": args[0]}
+                else:
+                    tool_input = {}
+                payload = {
+                    "tool_name": tool.name,
+                    "tool_input": tool_input,
+                    "session_id": sid,
+                }
+                trace, verdict = await asyncio.to_thread(
+                    pipeline._score_and_gate_preflight, payload
+                )
+                if verdict.denied:
+                    raise ToolException(f"Denied: {verdict.reason}")
+
+                t0 = time.monotonic()
+                error = None
+                result = None
+                try:
+                    result = await original_arun(
+                        *args, config=config, run_manager=run_manager, **kwargs
+                    )
+                except Exception as exc:
+                    error = str(exc)
+                    raise
+                finally:
+                    duration_ms = int((time.monotonic() - t0) * 1000)
+                    pv = pipeline._enforce_postflight(
+                        trace,
+                        session_id=sid,
+                        output={"result": result} if error is None else None,
+                        duration_ms=duration_ms,
+                        error=error,
+                    )
+                from traceforge.sdk.gate_types import PostflightAction
+
+                if pv.action == PostflightAction.TERMINATE:
+                    raise RuntimeError(f"Session terminated by policy: {pv.reason}")
+                if pv.action == PostflightAction.SUPPRESS:
+                    return "[output suppressed by policy]"
+                if pv.action == PostflightAction.REDACT and isinstance(result, str):
+                    return pipeline._apply_postflight_to_output(pv, result)
+                return result
+
+            tool._arun = _guarded_arun
+
         tool.handle_tool_error = True
         return tool
 
@@ -569,7 +670,14 @@ class GovernancePipeline:
 
         Blocking: skips next_handler and injects denial FunctionResult.
         Session ID: from kernel's service_id or "semantic_kernel".
+        Idempotent: calling twice on the same kernel is a no-op.
         """
+        # Idempotency guard (audit S2-1): without this, a second call registers
+        # the auto-function-invocation filter twice and double-gates every call.
+        # The teardown/ungate PR clears ``kernel._traceforge_gated``.
+        if getattr(kernel, "_traceforge_gated", False):
+            return
+        kernel._traceforge_gated = True
 
         pipeline = self
 
@@ -797,44 +905,83 @@ class GovernancePipeline:
         agent._traceforge_gated = True
 
     def gate_openai_agents(self, agent):
-        """Register traceforge as an OpenAI Agents SDK input guardrail.
+        """Gate an OpenAI Agents SDK agent's tool calls per-tool.
 
-        Blocking: raises GuardrailTripwireTriggered which rejects the entire turn.
-        Session ID: from agent.name or "openai_agents".
-        Idempotent: calling twice on same agent is a no-op.
+        Blocking: preflight DENY raises ``RuntimeError('Denied: ...')`` from the
+            tool's ``on_invoke_tool``, so the tool body never executes (fail-closed).
+        Session ID: from ``agent.name`` or "openai_agents".
+        Postflight: SUPPRESS/REDACT rewrite the tool's string output; TERMINATE raises.
+        Idempotent: calling twice on the same agent is a no-op; a per-``FunctionTool``
+            marker also makes tools shared across agents wrap exactly once.
 
-        NOTE: Input guardrails fire on the agent's input message, NOT on individual
-        tool calls. For per-tool-call gating, use needs_approval=True on tools and
-        integrate via the approval handler pattern (see gating spec §5b).
+        Rework (audit S2-4): the previous implementation registered an *input
+        guardrail*, which fires once on the agent's input message rather than per
+        tool call. The real tool name was never available there (it resolved to
+        ``'unknown'``) and postflight never ran. Each OpenAI ``FunctionTool`` exposes
+        a reassignable ``on_invoke_tool(ctx, input_json)`` coroutine, so we wrap it:
+        the REAL tool name reaches the gate, postflight runs on the tool's result,
+        and a scorer/gate error fails CLOSED (deny). Apply after tools are attached.
         """
         if getattr(agent, "_traceforge_gated", False):
             return agent
-        agent._traceforge_gated = True
 
         pipeline = self
+        sid = getattr(agent, "name", None) or "openai_agents"
 
-        from agents import input_guardrail, GuardrailFunctionOutput
+        def _wrap_tool(tool):
+            # Per-tool marker: a FunctionTool may be shared across agents/pipelines;
+            # wrap its invoker exactly once. The teardown PR clears this marker.
+            if getattr(tool, "_traceforge_gated", False):
+                return
+            original_invoke = tool.on_invoke_tool
+            tool_name = getattr(tool, "name", None) or "unknown"
 
-        @input_guardrail
-        async def traceforge_guardrail(ctx, agent_instance, input_data):
-            sid = getattr(agent_instance, "name", None) or "openai_agents"
-            payload = {
-                "tool_name": getattr(input_data, "tool_name", "unknown"),
-                "tool_input": getattr(input_data, "tool_input", {}),
-                "session_id": sid,
-            }
-            trace, verdict = await asyncio.to_thread(pipeline._score_and_gate_preflight, payload)
-            if verdict.denied:
-                return GuardrailFunctionOutput(
-                    output_info=verdict.reason,
-                    tripwire_triggered=True,
+            async def _guarded_invoke(ctx, input_str):
+                import json
+
+                try:
+                    parsed = json.loads(input_str) if input_str else {}
+                except (TypeError, ValueError):
+                    parsed = {"raw": input_str}
+                tool_input = parsed if isinstance(parsed, dict) else {"raw": parsed}
+                payload = {
+                    "tool_name": tool_name,
+                    "tool_input": tool_input,
+                    "session_id": sid,
+                }
+                trace, verdict = await asyncio.to_thread(
+                    pipeline._score_and_gate_preflight, payload
                 )
-            return GuardrailFunctionOutput(
-                output_info="allowed",
-                tripwire_triggered=False,
-            )
+                if verdict.denied:
+                    raise RuntimeError(f"Denied: {verdict.reason}")
 
-        if not hasattr(agent, "input_guardrails"):
-            agent.input_guardrails = []
-        agent.input_guardrails.append(traceforge_guardrail)
+                result = await original_invoke(ctx, input_str)
+
+                pv = pipeline._enforce_postflight(
+                    trace,
+                    session_id=sid,
+                    output={"result": str(result)} if result is not None else None,
+                )
+                from traceforge.sdk.gate_types import PostflightAction
+
+                if pv.action == PostflightAction.TERMINATE:
+                    raise RuntimeError(f"Session terminated by policy: {pv.reason}")
+                if pv.action == PostflightAction.SUPPRESS:
+                    return "[output suppressed by policy]"
+                if pv.action == PostflightAction.REDACT and isinstance(result, str):
+                    return pipeline._apply_postflight_to_output(pv, result)
+                return result
+
+            tool.on_invoke_tool = _guarded_invoke
+            tool._traceforge_gated = True
+
+        # Only FunctionTools expose ``on_invoke_tool``; skip other tool types
+        # (hosted tools, handoffs) the SDK executes server-side. Iterate a copy so
+        # concurrent mutation of ``agent.tools`` can't disturb the loop.
+        for tool in list(getattr(agent, "tools", None) or []):
+            if hasattr(tool, "on_invoke_tool"):
+                _wrap_tool(tool)
+
+        # Mark gated only after wrapping succeeds (no half-gated state on failure).
+        agent._traceforge_gated = True
         return agent

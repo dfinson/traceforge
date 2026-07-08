@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
 
 from traceforge.governance.pipeline import GovernancePipeline
 from traceforge.sdk.gate_policy import GatePolicy
@@ -252,9 +253,13 @@ class TestCrewAIRealAgent:
     """Run CrewAI tool execution with gate hooks firing in the real path."""
 
     def setup_method(self):
+        import traceforge.governance.pipeline as gp
         from crewai.hooks import clear_all_tool_call_hooks
 
         clear_all_tool_call_hooks()
+        # gate_crewai installs CrewAI's PROCESS-GLOBAL hooks once, guarded by a
+        # module-global flag; reset it so each test re-registers the hooks.
+        gp._CREWAI_HOOKS_INSTALLED = False
 
     def test_gate_fires_on_real_tool_object(self):
         """Register gate → create a real CrewAI tool → verify gate intercepts."""
@@ -444,34 +449,45 @@ class TestSmolagentsRealAgent:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# OpenAI Agents SDK: Real agent with input guardrail
+# OpenAI Agents SDK: Real agent with per-tool gating
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 class TestOpenAIAgentsRealAgent:
-    """Real OpenAI Agents SDK agent with traceforge input guardrail."""
+    """Real OpenAI Agents SDK agent with traceforge per-tool gating."""
 
-    def test_guardrail_registered_on_agent(self):
-        """Gate registers an input_guardrail on the Agent."""
-        from agents import Agent
+    def _gated_agent(self, preflight):
+        from agents import Agent, function_tool
 
-        pipeline = make_pipeline(preflight=deny_all)
-        agent = Agent(name="test-agent", instructions="You are a test agent.")
+        @function_tool
+        def rm(path: str) -> str:
+            """Remove a file."""
+            return f"removed {path}"
+
+        pipeline = make_pipeline(preflight=preflight)
+        agent = Agent(
+            name="test-agent",
+            instructions="You are a test agent.",
+            tools=[rm],
+        )
         pipeline.gate_openai_agents(agent)
+        return agent, rm
 
-        assert len(agent.input_guardrails) >= 1
+    def test_tool_invoker_wrapped_on_agent(self):
+        """Gate wraps each FunctionTool's on_invoke_tool on the Agent."""
+        agent, tool = self._gated_agent(deny_all)
 
-    def test_guardrail_blocks_dangerous_input(self):
-        """Guardrail detects and blocks dangerous prompts."""
-        from agents import Agent
+        assert agent._traceforge_gated is True
+        assert tool._traceforge_gated is True
 
-        pipeline = make_pipeline(preflight=deny_all)
-        agent = Agent(name="gated-agent", instructions="You are a test agent.")
-        pipeline.gate_openai_agents(agent)
+    def test_gate_blocks_dangerous_tool_call(self):
+        """The wrapped invoker denies a blocked tool call (fail-closed)."""
+        import asyncio
 
-        # The guardrail is registered — verify it exists
-        guardrail = agent.input_guardrails[0]
-        assert guardrail is not None
+        agent, tool = self._gated_agent(deny_all)
+
+        with pytest.raises(RuntimeError, match="Denied"):
+            asyncio.run(tool.on_invoke_tool(None, '{"path": "/etc/passwd"}'))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

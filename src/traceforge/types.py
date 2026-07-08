@@ -313,3 +313,35 @@ class TitleUpdate(FrozenModel):
     title: str
     version: int = Field(default=1, ge=1)
     parent_id: str | None = None  # a step's activity_id, so a flat stream can rebuild the tree
+
+
+# ─── Progress Update ─────────────────────────────────────────────────────────
+
+
+class ProgressUpdate(FrozenModel):
+    """A live, incremental headline announced the instant a segment *opens*.
+
+    Where :class:`TitleUpdate` is the faithful title computed when a segment
+    *closes* (it needs the whole segment), a ``ProgressUpdate`` is the cheap,
+    deterministic headline emitted the moment an activity or step *opens* — so a
+    consumer can show "what the agent is doing right now" without waiting for the
+    segment to finish. It is derived by the existing heuristic namer
+    (:func:`traceforge.title.heuristics.heuristic_title`) over the opening
+    event's payload text: no model, no network, fully deterministic.
+
+    It is keyed to the event log exactly like a title: ``segment_id`` is the
+    opening event's id (the same id the titler stamps as ``activity_id`` /
+    ``step_id``), and a step carries its parent activity's segment id in
+    ``parent_id`` so a flat stream can rebuild the tree. Because ``headline`` is
+    a distinct field from :attr:`TitleUpdate.title`, a consumer can show the live
+    headline immediately and swap in the faithful title once the segment closes.
+    ``sequence`` is a 0-based per-session monotonic counter over the updates
+    emitted for that session, giving a total order without timestamps.
+    """
+
+    session_id: str
+    segment_id: str
+    kind: Literal["activity", "step"]
+    headline: str
+    sequence: int = Field(default=0, ge=0)
+    parent_id: str | None = None  # a step's activity segment id, for tree rebuild

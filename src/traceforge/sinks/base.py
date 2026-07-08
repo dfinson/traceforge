@@ -6,7 +6,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, ClassVar
 
-from traceforge.types import SessionEvent, TelemetrySpan, TitleUpdate, UsageRecord
+from traceforge.types import ProgressUpdate, SessionEvent, TelemetrySpan, TitleUpdate, UsageRecord
 
 if TYPE_CHECKING:
     from traceforge.governance.envelope import EnrichedEvent
@@ -64,6 +64,16 @@ class StorageSink(ABC):
 
     async def on_usage(self, usage: UsageRecord) -> None:
         """Handle a usage record. Default no-op."""
+
+    async def on_progress(self, update: ProgressUpdate) -> None:
+        """Handle a live incremental progress headline. Default no-op.
+
+        Emitted the instant an activity/step *opens*, carrying the deterministic
+        heuristic ``headline`` for that just-opened segment (keyed to the event
+        log by ``segment_id``). Like ``on_span``/``on_usage`` this is an optional
+        live signal, so the base default silently drops it — a sink opts in by
+        overriding. See :class:`traceforge.types.ProgressUpdate`.
+        """
 
     async def on_title_update(self, update: TitleUpdate) -> None:
         """Handle an out-of-band title for a closed activity/step segment.

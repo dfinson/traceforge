@@ -20,6 +20,7 @@ from typing import Annotated, Literal
 from pydantic import Field, field_validator, model_validator
 
 from traceforge.models import StrictModel
+from traceforge.types import TRACE_NATIVE_DIMENSIONS
 
 
 # ─── Source Configs ──────────────────────────────────────────────────────────
@@ -568,6 +569,61 @@ class TitleConfig(StrictModel):
     activity_titling: ActivityTitlingConfig = Field(default_factory=ActivityTitlingConfig)
 
 
+# ─── Attribution Config ──────────────────────────────────────────────────────
+
+
+class ModelPricing(StrictModel):
+    """Per-model token pricing for deriving a cost breakdown.
+
+    Used when a :class:`~traceforge.types.UsageRecord` lacks ``cost_usd``, or when
+    explicit per-token rates are preferred over proportionally splitting a known
+    cost. Rates are USD per 1,000 tokens.
+    """
+
+    input_per_1k_usd: float = Field(ge=0)
+    output_per_1k_usd: float = Field(ge=0)
+
+
+class AttributionConfig(StrictModel):
+    """Opt-in cost/latency attribution (off by default).
+
+    When ``enabled`` is False (the default) nothing is attached to the pipeline and
+    the hot path pays nothing — spans and usage records flow through byte-identical.
+    When True, they are enriched and rolled up per trace-native dimension
+    (:data:`~traceforge.types.TRACE_NATIVE_DIMENSIONS`), with optional threshold /
+    z-score anomaly flags. Every rollup / attribute / anomaly key stays a
+    trace-native dimension — consumer taxonomies are rejected at validation.
+    """
+
+    enabled: bool = False
+    #: Which trace-native dimensions to attribute against. Restricted to
+    #: ``TRACE_NATIVE_DIMENSIONS`` — a consumer taxonomy name is rejected.
+    dimensions: list[str] = Field(default_factory=lambda: list(TRACE_NATIVE_DIMENSIONS))
+    #: Optional per-model token pricing, keyed by model name. Empty = derive each
+    #: breakdown by splitting the record's own ``cost_usd`` by token share.
+    pricing: dict[str, ModelPricing] = Field(default_factory=dict)
+    #: Flag a dimension bucket whose total duration exceeds this many milliseconds.
+    duration_threshold_ms: float | None = Field(default=None, ge=0)
+    #: Flag a dimension bucket whose total cost exceeds this many USD.
+    cost_threshold_usd: float | None = Field(default=None, ge=0)
+    #: Flag a bucket whose metric is at least this many standard deviations above
+    #: its dimension's mean. ``None`` disables z-score anomaly detection.
+    zscore_threshold: float | None = Field(default=None, gt=0)
+    #: Minimum number of buckets in a dimension before z-score detection runs.
+    min_samples: int = Field(default=3, ge=2)
+
+    @field_validator("dimensions")
+    @classmethod
+    def _known_dimensions(cls, v: list[str]) -> list[str]:
+        unknown = [d for d in v if d not in TRACE_NATIVE_DIMENSIONS]
+        if unknown:
+            raise ValueError(
+                f"unknown attribution dimension(s) {unknown}; "
+                f"allowed trace-native dimensions: {list(TRACE_NATIVE_DIMENSIONS)}"
+            )
+        return v
+
+
 # ─── Root Config ─────────────────────────────────────────────────────────────
 
 
@@ -609,6 +665,9 @@ class TraceforgeConfig(StrictModel):
 
     # Titling (span titles + configurable session naming)
     title: TitleConfig = Field(default_factory=TitleConfig)
+
+    # Cost/latency attribution (opt-in; off by default)
+    attribution: AttributionConfig = Field(default_factory=AttributionConfig)
 
     @field_validator("pipelines")
     @classmethod

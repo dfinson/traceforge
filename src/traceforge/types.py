@@ -265,15 +265,61 @@ class SessionEvent(FrozenModel):
     metadata: EventMetadata = Field(default_factory=EventMetadata)
 
 
+# ─── Trace-native attribution dimensions ────────────────────────────────────
+#
+# The closed vocabulary of dimensions cost/latency can be attributed against.
+# Every one is intrinsic to the *trace itself* — the shape a coding-agent run
+# already has — never a consumer taxonomy (team, cost-center, product, …). These
+# are the only keys the attribution framework (``telemetry/attribution.py``) rolls
+# up, stamps, or flags by, and the only values accepted in an
+# ``AttributionConfig.dimensions`` list. Attributed units carry their dimension
+# values in ``TelemetrySpan.attributes`` / ``UsageRecord.attributes`` under these
+# exact keys.
+
+PHASE: Final = "phase"  # workflow phase (e.g. explore / implement / verify)
+TURN: Final = "turn"  # conversational turn id/index
+SEGMENT: Final = "segment"  # activity/step segment id
+TOOL: Final = "tool"  # normalized tool name
+FILE: Final = "file"  # file path touched
+RETRY: Final = "retry"  # retry marker/count for the attempted unit
+
+#: The complete, ordered set of trace-native attribution dimensions.
+TRACE_NATIVE_DIMENSIONS: Final[tuple[str, ...]] = (PHASE, TURN, SEGMENT, TOOL, FILE, RETRY)
+
+
 # ─── Telemetry Span ──────────────────────────────────────────────────────────
 
 
 class TelemetrySpan(FrozenModel):
+    """A timed unit of work.
+
+    ``attributes`` is an open bag. When attribution is enabled it is enriched with
+    a derived ``duration_ms`` and read for any trace-native dimension keys present
+    (see :data:`TRACE_NATIVE_DIMENSIONS`); when attribution is off the span flows
+    through untouched.
+    """
+
     name: str
     session_id: str
     start_time: datetime
     end_time: datetime
     attributes: dict[str, Any] = Field(default_factory=dict)
+
+
+# ─── Cost Breakdown ──────────────────────────────────────────────────────────
+
+
+class CostBreakdown(FrozenModel):
+    """Decomposition of a :class:`UsageRecord`'s cost into input vs. output.
+
+    Produced by the attribution framework (never on the hot path unless enabled)
+    and attached to :attr:`UsageRecord.cost_breakdown`. ``total_cost_usd`` always
+    equals ``input_cost_usd + output_cost_usd`` (subject to float rounding).
+    """
+
+    input_cost_usd: float = Field(ge=0)
+    output_cost_usd: float = Field(ge=0)
+    total_cost_usd: float = Field(ge=0)
 
 
 # ─── Usage Record ────────────────────────────────────────────────────────────
@@ -286,6 +332,15 @@ class UsageRecord(FrozenModel):
     input_tokens: int = Field(ge=0)
     output_tokens: int = Field(ge=0)
     cost_usd: float | None = Field(default=None, ge=0)
+    # Trace-native dimension context for cost attribution (symmetric with
+    # ``TelemetrySpan.attributes``). Empty by default; populated by the producer
+    # with keys from ``TRACE_NATIVE_DIMENSIONS`` so cost/tokens can roll up per
+    # tool / phase / turn / segment / file / retry.
+    attributes: dict[str, Any] = Field(default_factory=dict)
+    # Input/output cost decomposition, filled in by the attribution framework when
+    # enabled; ``None`` (the default) otherwise — a usage record is unchanged when
+    # attribution is off.
+    cost_breakdown: CostBreakdown | None = None
 
 
 # ─── Title Update ────────────────────────────────────────────────────────────

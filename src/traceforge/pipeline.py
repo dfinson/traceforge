@@ -22,6 +22,7 @@ from traceforge.types import EventMetadata, SessionEvent, TelemetrySpan, TitleUp
 if TYPE_CHECKING:
     from traceforge.governance.results import SessionMeta
     from traceforge.telemetry import PipelineMetrics
+    from traceforge.telemetry.attribution import Attributor
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,7 @@ class EventPipeline:
         max_sessions: int | None = _DEFAULT_MAX_SESSIONS,
         governance=None,
         metrics: PipelineMetrics | None = None,
+        attribution: Attributor | None = None,
     ) -> None:
         self._sinks = list(sinks)
         self._enricher = enricher
@@ -171,6 +173,24 @@ class EventPipeline:
         self._sink_labels: list[str] | None = (
             _sink_labels_for(self._sinks) if metrics is not None else None
         )
+
+        # Opt-in cost/latency attribution (U11). ``None`` (the default) means the
+        # hot path never enriches, times, or accumulates: ``push_span`` /
+        # ``push_usage`` are guarded on ``self._attribution is not None`` and the
+        # span / usage object flows through byte-identical. Attaching an
+        # :class:`~traceforge.telemetry.attribution.Attributor` (via
+        # ``build_attributor(config.attribution)``) is the only way to turn it on.
+        self._attribution = attribution
+
+    @property
+    def attribution(self) -> Attributor | None:
+        """The attached :class:`~traceforge.telemetry.attribution.Attributor`, or ``None``.
+
+        Rollups and anomalies update live as spans / usage are pushed; read a stable
+        view after :meth:`flush` / :meth:`close` via ``pipeline.attribution.rollups()``
+        and ``pipeline.attribution.anomalies()``. ``None`` when attribution is off.
+        """
+        return self._attribution
 
     @property
     def metrics(self) -> PipelineMetrics | None:
@@ -750,11 +770,25 @@ class EventPipeline:
         )
 
     async def push_span(self, span: TelemetrySpan) -> None:
-        """Fan-out span to all registered sinks."""
+        """Fan-out span to all registered sinks.
+
+        When attribution is enabled the span is first enriched (stamped with a
+        derived ``duration_ms`` and folded into the per-dimension rollups); when it
+        is off (the default) the original span object flows through untouched.
+        """
+        if self._attribution is not None:
+            span = self._attribution.enrich_span(span)
         await self._fanout((sink.on_span(span) for sink in self._sinks), f"span {span.name}")
 
     async def push_usage(self, usage: UsageRecord) -> None:
-        """Fan-out usage record to all registered sinks."""
+        """Fan-out usage record to all registered sinks.
+
+        When attribution is enabled the record is first enriched (a derived
+        ``cost_breakdown`` and its cost folded into the per-dimension rollups); when
+        it is off (the default) the original usage object flows through untouched.
+        """
+        if self._attribution is not None:
+            usage = self._attribution.enrich_usage(usage)
         await self._fanout((sink.on_usage(usage) for sink in self._sinks), "usage record")
 
     async def flush(self) -> None:
@@ -806,6 +840,15 @@ class EventPipeline:
 
         if self._metrics is not None:
             logger.debug("EventPipeline self-metrics at flush: %s", self._metrics.snapshot())
+
+        # Attribution rollups are computed at flush from the accumulated spans /
+        # usage and read back off ``pipeline.attribution`` (no sink emission here —
+        # persisting them is the stacked follow-up's concern). Off = nothing runs.
+        if self._attribution is not None:
+            logger.debug(
+                "EventPipeline attribution at flush: %d rollup(s)",
+                len(self._attribution.rollups()),
+            )
 
     async def _push_to_sinks(self, event: SessionEvent) -> None:
         """Push event to sinks, stamping governance first if a stage is wired in.

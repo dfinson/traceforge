@@ -901,7 +901,12 @@ On first config access, `~/.traceforge/` is auto-created with:
 - `config.yaml` (default configuration template)
 - `mappings/` (directory for user custom mappings)
 
-No separate `traceforge init` command needed.
+This config bootstrap is automatic and is **not** what `traceforge init` does. `traceforge init
+<agent>` is a separate command that injects the blocking **preflight gate hook** into a supported
+agent's own native hook configuration — for Claude Code it writes/merges a `PreToolUse` hook into
+`.claude/settings.json` whose command runs `traceforge gate --stdin`. It does not scaffold or touch
+`~/.traceforge/`. Which agents are hook-capable, and which currently ship an `init` injector, is
+tracked in the [Framework Compatibility](#framework-compatibility) matrix below.
 
 ### Environment Variables
 
@@ -1197,7 +1202,7 @@ traceforge/
 │       ├── detect.py            # traceforge detect         (framework auto-detection)
 │       ├── config_cmd.py        # traceforge config         (inspect / emit config)
 │       ├── status.py            # traceforge status         (environment / model status)
-│       ├── init_cmd.py          # traceforge init           (scaffold ~/.traceforge)
+│       ├── init_cmd.py          # traceforge init <agent>   (inject the preflight gate hook into an agent's native config)
 │       ├── runner.py            # Shared pipeline runner
 │       └── factory.py           # Source / adapter / sink construction from config
 ├── tests/

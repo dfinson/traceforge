@@ -144,3 +144,54 @@ Two ship today:
 
 Both use tree-sitter for AST-based parsing, support full-file and incremental (chunked)
 modes, and hold back the final event until the next chunk confirms structural closure.
+
+## Gating adapters (`gate_*`)
+
+The adapters above are **ingestion** adapters (raw input → `SessionEvent`). TraceForge ships a second,
+unrelated family of adapters on the enforcement side: the in-process **gating adapters**. Each one
+binds a registered [`GatePolicy`](../governance/gate.md) into one agent framework's *native* blocking
+mechanism, so a preflight `Verdict.deny(...)` actually stops the tool call. They are surfaced on the
+SDK facade (`Pipeline.gate_*`) and also live directly on `GovernancePipeline` for gating-only use
+(the facade methods just delegate). They enforce nothing until a `GatePolicy` is registered
+(`Pipeline.create(policy=...)`); with no gates the shield allows by default.
+
+| Adapter | Returns | Framework binding & how DENY blocks | Session id source |
+| --- | --- | --- | --- |
+| `gate_crewai()` | `None` | CrewAI `before_tool_call` / `after_tool_call` hooks (global — call once per process). DENY → the before-hook returns `False`. | `ctx.crew.fingerprint`, else `"crewai"` |
+| `gate_langchain(tool)` | the same `tool` (its `_run` is wrapped) | Wraps the tool's `_run`. DENY → raises `ToolException`. Idempotent. | invocation `config["configurable"]["thread_id"]`, else `"langchain"` |
+| `gate_langgraph(tools)` | a `ToolNode` | Built with `wrap_tool_call`. DENY → returns a denial `ToolMessage` (status `error`) without executing. | request `config.configurable.thread_id`, else `"langgraph"` |
+| `gate_semantic_kernel(kernel)` | `None` | Registers an `auto_function_invocation` filter. DENY → skips `next_handler` and injects a denial `FunctionResult`. | `kernel.service_id`, else `"semantic_kernel"` |
+| `gate_maf()` | a `FunctionMiddleware` instance | Microsoft Agent Framework middleware. DENY → raises `MiddlewareTermination`. | `context.session.conversation_id`, else `"maf"` |
+| `gate_smolagents(agent_cls=None)` | a gated subclass of `agent_cls` (default `ToolCallingAgent`) | Overrides `execute_tool_call`. DENY → returns `"[BLOCKED] <reason>"` as the observation without executing. | `agent.session_id`, else `"smolagents"` |
+| `gate_pydantic_ai(agent)` | `None` (wraps the agent's toolsets in place) | Wraps each leaf toolset's `call_tool`. DENY → raises `RuntimeError("Denied: …")`. Idempotent. | `ctx.run_id`, else `"pydantic_ai"` |
+| `gate_openai_agents(agent)` | the `agent` (an input guardrail is appended) | Registers an input guardrail. DENY → trips `GuardrailTripwireTriggered`, rejecting the turn. Idempotent. Note: input guardrails fire on the agent's **input message**, not per tool call. | `agent.name`, else `"openai_agents"` |
+
+Every adapter runs the same two-step chain per call: **preflight** scores the pending call and runs the
+policy's preflight gate, returning a `Verdict` (`ALLOW` / `DENY` — see the
+[escalate limitation](../governance/gate.md#read-only-scoring-interpret-it-yourself)); if allowed, the
+tool runs and **postflight** returns a `PostflightVerdict` whose `action` is enforced with the same
+framework-native signal — `SUPPRESS` replaces the output with a placeholder, `REDACT` rewrites it, and
+`TERMINATE` raises/ends the run.
+
+### Session identity
+
+`session_id` is the correlation key that ties observation and gating to **one** `SessionState` — the
+per-session record holding the single tool-call counter, budget, taint ledger, drift window, and gate
+history. To share that state between an observed stream and the gate, use the **same** `session_id` on
+both; different ids create independent sessions.
+
+- **Observation.** The ingestion adapter stamps `SessionEvent.session_id` (e.g.
+  `MappedJsonAdapter.from_yaml(mapping, session_id="s1")`). The governance monitor keys `SessionState`
+  by it and is the single writer that advances state.
+- **In-process gating.** Each `gate_*` adapter derives the session id from the framework's own run/thread
+  context (the *Session id source* column above), falling back to a framework-named literal when absent.
+  That id is threaded into the scored payload and surfaces on `ToolCallRequest.session_id` and
+  `GateContext.session_id`; the `Shield` builds the `GateContext` from that session's live state
+  (`tool_call_count`, `denied_count`, `prior_verdicts`, `prior_tool_call_ids`).
+- **Cross-process (shell-hook) gating.** `traceforge gate --stdin` reads `session_id` from the incoming
+  hook event and routes the request to the pipeline that registered it in the gate registry
+  (`lookup_session`), falling back to the `_default` session that `traceforge watch` registers. A missing
+  `session_id` **fails closed** (deny).
+
+See [The Gate](../governance/gate.md) for the enforcement model and [SDK reference](./sdk.md) for the
+`Verdict` / `GateContext` / `ToolCallRequest` object model.

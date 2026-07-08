@@ -85,6 +85,11 @@ print(trace.risk_score, trace.suggested_action)   # e.g. 72 escalate
 See the **[Getting Started guide](https://dfinson.github.io/traceforge/docs/getting-started/installation)**
 for the full CLI (`watch`, `replay`, `score`, `gate`, `init`, `detect`, `status`, `config`).
 
+`traceforge init <agent>` injects the blocking preflight gate hook into a supported agent's own
+native config — for Claude Code, a `PreToolUse` hook in `.claude/settings.json` that runs
+`traceforge gate --stdin`. It does not scaffold `~/.traceforge/` (that config bootstrap happens
+automatically on first config access).
+
 ## Features
 
 | | |

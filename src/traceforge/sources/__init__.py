@@ -3,6 +3,7 @@ from traceforge.sources.file_poll import FilePollSource
 from traceforge.sources.file_watch import FileWatchSource
 from traceforge.sources.http_poll import HttpPollSource
 from traceforge.sources.replay import ReplaySource
+from traceforge.sources.sdk_live import SdkClaudeSource, SdkCopilotSource
 from traceforge.sources.sqlite import SqliteSource
 from traceforge.sources.sse import SSESource
 
@@ -12,6 +13,8 @@ __all__ = [
     "HttpPollSource",
     "RawRecord",
     "ReplaySource",
+    "SdkClaudeSource",
+    "SdkCopilotSource",
     "SqliteSource",
     "SSESource",
     "Source",

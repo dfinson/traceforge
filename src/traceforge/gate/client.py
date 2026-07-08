@@ -12,8 +12,15 @@ import struct
 import sys
 
 
-def send_gate_request(sock_path: str, payload: dict) -> dict:
-    """Send a gate request to the IPC server and return the verdict dict."""
+def send_gate_request(sock_path: str, payload: dict, *, token: str | None = None) -> dict:
+    """Send a gate request to the IPC server and return the verdict dict.
+
+    ``token`` is the per-server auth secret read from the registry row (see
+    :func:`traceforge.gate.registry.lookup_endpoint`). It is attached to the
+    request *envelope* only — the scored ``payload`` is unchanged — so the server
+    can authenticate the caller. A missing/invalid token makes the server reply
+    with a deny verdict, i.e. the relay fails closed.
+    """
     if sock_path.startswith("tcp://"):
         # Windows TCP fallback
         addr = sock_path[len("tcp://") :]
@@ -26,7 +33,7 @@ def send_gate_request(sock_path: str, payload: dict) -> dict:
 
     try:
         conn.settimeout(30.0)
-        data = json.dumps(payload).encode("utf-8")
+        data = json.dumps({"payload": payload, "token": token}).encode("utf-8")
         conn.sendall(struct.pack("!I", len(data)) + data)
 
         # Read length-prefixed response
@@ -89,7 +96,7 @@ def _gate_from_stdin_impl(*, format: str = "claude-code") -> None:
     Wrapped by :func:`gate_from_stdin`, which converts any unexpected exception
     into a fail-closed deny.
     """
-    from traceforge.gate.registry import lookup_session
+    from traceforge.gate.registry import lookup_endpoint
 
     # Read event from stdin
     event_raw = sys.stdin.read()
@@ -112,15 +119,16 @@ def _gate_from_stdin_impl(*, format: str = "claude-code") -> None:
         _output_deny(format, "no session_id in event")
         return
 
-    # Look up socket
-    sock_path = lookup_session(session_id)
-    if not sock_path:
+    # Look up socket + auth token for this session
+    endpoint = lookup_endpoint(session_id)
+    if endpoint is None:
         # Fall back to default session (traceforge watch registers as "_default")
-        sock_path = lookup_session("_default")
-    if not sock_path:
+        endpoint = lookup_endpoint("_default")
+    if endpoint is None:
         # Session not registered = deny (fail-closed)
         _output_deny(format, f"session {session_id} not registered with any pipeline")
         return
+    sock_path, token = endpoint
 
     # Build payload for score_tool_call
     payload = {
@@ -135,9 +143,10 @@ def _gate_from_stdin_impl(*, format: str = "claude-code") -> None:
     if event.get("mcp_server_name"):
         payload["mcp_server_name"] = event["mcp_server_name"]
 
-    # Send to Pipeline IPC
+    # Send to Pipeline IPC (the per-request token authenticates us to the server;
+    # a missing/invalid token makes the server deny → the relay fails closed).
     try:
-        verdict = send_gate_request(sock_path, payload)
+        verdict = send_gate_request(sock_path, payload, token=token)
     except (ConnectionRefusedError, FileNotFoundError, OSError) as exc:
         _output_deny(format, f"pipeline unreachable: {exc}")
         return

@@ -31,8 +31,10 @@ _REASON = "blocked: rm -rf / is not allowed"
 
 def _drive(monkeypatch, capsys, dialect: str, verdict: dict) -> tuple[int, str, str]:
     """Run the relay once with a stubbed IPC ``verdict`` and capture exit/out/err."""
-    monkeypatch.setattr("traceforge.gate.registry.lookup_session", lambda sid: "fake-sock")
-    monkeypatch.setattr(gate_client, "send_gate_request", lambda sock, payload: verdict)
+    monkeypatch.setattr(
+        "traceforge.gate.registry.lookup_endpoint", lambda sid: ("fake-sock", "tok")
+    )
+    monkeypatch.setattr(gate_client, "send_gate_request", lambda sock, payload, token=None: verdict)
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(_EVENT)))
 
     code = 0
@@ -136,7 +138,7 @@ def test_agent_dialect_preserves_fail_closed(monkeypatch, capsys) -> None:
     def boom(session_id):
         raise RuntimeError("registry database is locked")
 
-    monkeypatch.setattr("traceforge.gate.registry.lookup_session", boom)
+    monkeypatch.setattr("traceforge.gate.registry.lookup_endpoint", boom)
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(_EVENT)))
 
     with pytest.raises(SystemExit) as excinfo:

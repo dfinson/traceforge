@@ -31,6 +31,132 @@ if TYPE_CHECKING:
     from traceforge.trace import EventTrace
 
 
+# ── Config → GatePolicy (declarative, enforce-by-default) ───────────────────────
+
+
+def build_policy_from_config(config: dict | None) -> "GatePolicy | None":
+    """Build a full :class:`GatePolicy` from a raw config mapping.
+
+    ``config`` is the plain dict produced by ``yaml.safe_load`` (what ``traceforge
+    watch`` holds), so this reads it directly rather than a Pydantic model. It lets
+    a config declare a *complete* policy — an ordered preflight CHAIN, a postflight
+    chain, and external out-of-process gates — under ``governance.gate_policy``::
+
+        governance:
+          gate_policy:
+            preflight:                         # ordered chain (first DENY wins)
+              - myapp.policies.block_rm_rf     # dotted in-process PreflightGate
+              - type: http                     # external decider (OPA/PDP)
+                endpoint: http://127.0.0.1:8181/v1/data/traceforge/gate
+              - type: subprocess
+                command: opa eval -I -f raw 'data.gate.deny'
+            postflight:                        # ordered chain (dotted PostflightGate)
+              - myapp.policies.redact_secrets
+            external:                          # convenience alias, appended to preflight
+              - type: subprocess
+                command: ./decider.sh
+
+    Each preflight entry is either a dotted import path to an in-process gate
+    callable, or an inline external-gate mapping (``type: http`` / ``subprocess``)
+    validated through the same Pydantic models the YAML config uses. Postflight
+    entries are dotted import paths.
+
+    Back-compat: when no ``gate_policy`` block is present, the legacy single-field
+    forms ``governance.tool_preflight_gate`` (dotted) and ``governance.preflight_gate``
+    (one external decider) are still honored — same semantics as
+    :meth:`GovernancePipeline.from_config`.
+
+    Returns ``None`` when nothing is declared, so the caller can warn that gating
+    enforcement is inactive. Raises on a *declared but malformed* policy (bad dotted
+    path or invalid external-gate config) — a broken policy must fail loudly at
+    startup rather than silently degrade to allow-all.
+    """
+    if not config:
+        return None
+    governance = config.get("governance")
+    if not isinstance(governance, dict):
+        return None
+
+    from traceforge.sdk.gate_policy import GatePolicy
+
+    policy = GatePolicy()
+    declared = False
+
+    gate_policy = governance.get("gate_policy")
+    if isinstance(gate_policy, dict):
+        preflight_entries = list(gate_policy.get("preflight") or [])
+        # `external:` is a convenience bucket appended to the preflight chain.
+        preflight_entries += list(gate_policy.get("external") or [])
+        for entry in preflight_entries:
+            policy.preflight(_preflight_gate_from_entry(entry))
+            declared = True
+        for entry in gate_policy.get("postflight") or []:
+            policy.postflight(_dotted_gate(entry))
+            declared = True
+
+    # Legacy single-field forms — only when no explicit gate_policy chain was set.
+    if not declared:
+        dotted = governance.get("tool_preflight_gate")
+        external = governance.get("preflight_gate")
+        if dotted:
+            policy.preflight(_dotted_gate(dotted))
+            declared = True
+        elif isinstance(external, dict):
+            policy.preflight(_external_gate_from_mapping(external))
+            declared = True
+
+    return policy if declared else None
+
+
+def _dotted_gate(entry: object):
+    """Import an in-process gate callable from a dotted path string."""
+    if not isinstance(entry, str) or not entry.strip():
+        raise TypeError(f"expected a dotted import path string, got {entry!r}")
+    from traceforge.governance.pipeline import _import_dotted
+
+    return _import_dotted(entry)
+
+
+def _preflight_gate_from_entry(entry: object):
+    """Build one preflight gate from a config entry.
+
+    A string is a dotted in-process gate; a mapping is an inline external decider.
+    """
+    if isinstance(entry, str):
+        return _dotted_gate(entry)
+    if isinstance(entry, dict):
+        return _external_gate_from_mapping(entry)
+    raise TypeError(f"invalid preflight gate entry: {entry!r}")
+
+
+def _external_gate_from_mapping(entry: dict):
+    """Validate + build an external (http/subprocess) gate from a raw mapping.
+
+    Reuses the YAML config's Pydantic models so validation, defaults, and the
+    fail-closed posture match ``governance.preflight_gate`` exactly.
+    """
+    from pydantic import TypeAdapter
+
+    from traceforge.config.models import ExternalGateConfig
+    from traceforge.gate.external import HttpGate, SubprocessGate
+
+    gate_cfg = TypeAdapter(ExternalGateConfig).validate_python(entry)
+    if gate_cfg.type == "http":
+        return HttpGate(
+            endpoint=gate_cfg.endpoint,
+            timeout=gate_cfg.timeout,
+            fail_open=gate_cfg.fail_open,
+            headers=dict(gate_cfg.headers) if gate_cfg.headers else None,
+            max_input_bytes=gate_cfg.max_input_bytes,
+        )
+    return SubprocessGate(
+        command=gate_cfg.command,
+        timeout=gate_cfg.timeout,
+        fail_open=gate_cfg.fail_open,
+        max_input_bytes=gate_cfg.max_input_bytes,
+    )
+
+
 class Shield:
     """Runtime enforcement checkpoint — preflight gating + postflight action.
 
@@ -270,29 +396,39 @@ class Shield:
     def _observe_completed_call(self, trace: "EventTrace", *, session_id: str) -> None:
         """Advance the single tool-call counter for a shield-allowed call that
         has now executed. The trace only ever observes what the gate allowed, so
-        this is the one writer of the counter in the gate channel."""
+        this is the one writer of the counter in the gate channel.
+
+        Concurrency: the gate IPC server handles each request on its own thread,
+        so concurrent calls on one session share a SessionState whose counters are
+        not self-synchronized. Serialize the read-modify-write under the shield
+        lock so no increment is lost."""
         state = self._ensure_gate_state(session_id)
-        phase_window = state.snapshot().phase_window
-        state.increment_budget(
-            mechanism=trace.mechanism,
-            effect=trace.effect,
-            scope=frozenset(trace.scope),
-            role=frozenset(trace.role),
-            action=frozenset(trace.action),
-            capability=frozenset(trace.capability),
-            structure=frozenset(trace.structure),
-            phase=phase_window[-1] if phase_window else None,
-        )
+        with self._lock:
+            phase_window = state.snapshot().phase_window
+            state.increment_budget(
+                mechanism=trace.mechanism,
+                effect=trace.effect,
+                scope=frozenset(trace.scope),
+                role=frozenset(trace.role),
+                action=frozenset(trace.action),
+                capability=frozenset(trace.capability),
+                structure=frozenset(trace.structure),
+                phase=phase_window[-1] if phase_window else None,
+            )
 
     def _record_denial(self, session_id: str, verdict: "Verdict") -> None:
         """Record a shield denial. Does not touch the tool-call counter."""
-        self._ensure_gate_state(session_id).record_denial(verdict)
+        state = self._ensure_gate_state(session_id)
+        with self._lock:
+            state.record_denial(verdict)
 
     def _record_allow(self, session_id: str, *, tool_call_id: str | None = None) -> None:
         """Record a shield allow. The tool-call counter is NOT advanced here —
         it advances only when the allowed call is observed at completion
         (see _observe_completed_call). The shield only reads the counter."""
-        self._ensure_gate_state(session_id).record_allow(tool_call_id=tool_call_id)
+        state = self._ensure_gate_state(session_id)
+        with self._lock:
+            state.record_allow(tool_call_id=tool_call_id)
 
     def _ensure_gate_state(self, session_id: str):
         """Return session state for gate context tracking (thread-safe, ephemeral)."""
@@ -310,13 +446,17 @@ class Shield:
         if state is None:
             return GateContext(session_id=session_id, tool_call_count=0, denied_count=0)
 
-        return GateContext(
-            session_id=session_id,
-            tool_call_count=state.tool_call_count,
-            denied_count=state.denied_count,
-            prior_verdicts=state.prior_verdicts(),
-            prior_tool_call_ids=state.prior_tool_call_ids(),
-        )
+        # Snapshot under the shield lock: concurrent gate threads may be appending
+        # to the same bounded deques, and reading them (prior_verdicts /
+        # prior_tool_call_ids materialize tuples) must not race a mutation.
+        with self._lock:
+            return GateContext(
+                session_id=session_id,
+                tool_call_count=state.tool_call_count,
+                denied_count=state.denied_count,
+                prior_verdicts=state.prior_verdicts(),
+                prior_tool_call_ids=state.prior_tool_call_ids(),
+            )
 
     def _to_tool_call_request(self, trace: "EventTrace") -> "ToolCallRequest":
         """Convert a fully-assessed EventTrace into a gate-facing ToolCallRequest."""

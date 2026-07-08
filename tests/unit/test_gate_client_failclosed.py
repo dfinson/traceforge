@@ -54,8 +54,10 @@ def _assert_deny(verdict: dict, fmt: str) -> str:
 def test_missing_decision_key_denies(monkeypatch, capsys, fmt: str) -> None:
     """An IPC verdict with no ``decision`` key must DENY, not default to allow."""
     event = {"tool_name": "rm", "tool_input": {"path": "/"}, "session_id": "s1"}
-    monkeypatch.setattr("traceforge.gate.registry.lookup_session", lambda sid: "fake-sock")
-    monkeypatch.setattr(gate_client, "send_gate_request", lambda sock, payload: {})
+    monkeypatch.setattr(
+        "traceforge.gate.registry.lookup_endpoint", lambda sid: ("fake-sock", "tok")
+    )
+    monkeypatch.setattr(gate_client, "send_gate_request", lambda sock, payload, token=None: {})
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(event)))
 
     gate_from_stdin(format=fmt)
@@ -74,7 +76,7 @@ def test_registry_lookup_error_denies(monkeypatch, capsys, fmt: str) -> None:
         raise RuntimeError("registry database is locked")
 
     event = {"tool_name": "rm", "tool_input": {}, "session_id": "s1"}
-    monkeypatch.setattr("traceforge.gate.registry.lookup_session", boom)
+    monkeypatch.setattr("traceforge.gate.registry.lookup_endpoint", boom)
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(event)))
 
     gate_from_stdin(format=fmt)  # must not raise
@@ -90,11 +92,13 @@ def test_unexpected_send_error_denies(monkeypatch, capsys) -> None:
     fail-closed wrapper, which emits a deny verdict.
     """
 
-    def boom(sock, payload):
+    def boom(sock, payload, token=None):
         raise ValueError("unexpected relay failure")
 
     event = {"tool_name": "rm", "tool_input": {}, "session_id": "s1"}
-    monkeypatch.setattr("traceforge.gate.registry.lookup_session", lambda sid: "fake-sock")
+    monkeypatch.setattr(
+        "traceforge.gate.registry.lookup_endpoint", lambda sid: ("fake-sock", "tok")
+    )
     monkeypatch.setattr(gate_client, "send_gate_request", boom)
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(event)))
 

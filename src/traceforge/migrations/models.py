@@ -81,6 +81,7 @@ gate_endpoints = Table(
     Column("session_id", Text, primary_key=True),
     Column("sock_path", Text, nullable=False),
     Column("pid", Integer, nullable=False),
+    Column("token", Text),
     Column("registered_at", Text, nullable=False, server_default="(datetime('now'))"),
 )
 

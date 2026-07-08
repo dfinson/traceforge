@@ -45,6 +45,12 @@ def init(agent: str, project: str) -> None:
     """
     project_root = Path(project).resolve()
     _WRITERS[agent](project_root)
+    # Enforce-by-default hint: the hook only *relays* to the gate, which ALLOWS
+    # every call until a policy is configured. Point operators at the missing step.
+    click.echo(
+        "  Note: configure a gate policy (governance.gate_policy) and run "
+        "`traceforge watch` — until then the gate allows every call."
+    )
 
 
 # ─── Command / path helpers ──────────────────────────────────────────────────

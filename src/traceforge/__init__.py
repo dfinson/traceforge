@@ -23,9 +23,18 @@ from traceforge.pipeline import EventPipeline
 from traceforge.progress import ProgressEmitter
 from traceforge.sinks.base import StorageSink
 from traceforge.sinks.callback import CallbackSink
+from traceforge.telemetry.attribution import (
+    DURATION_MS_ATTR,
+    Anomaly,
+    AttributionRollup,
+    Attributor,
+    build_attributor,
+)
 from traceforge.trace import EventTrace
 from traceforge.types import (
     KNOWN_KINDS,
+    TRACE_NATIVE_DIMENSIONS,
+    CostBreakdown,
     EventKind,
     EventMetadata,
     IngestionMode,
@@ -73,4 +82,12 @@ __all__ = [
     "is_known_kind",
     "load_config",
     "normalize_tool_name",
+    # Attribution (U11)
+    "Anomaly",
+    "AttributionRollup",
+    "Attributor",
+    "CostBreakdown",
+    "DURATION_MS_ATTR",
+    "TRACE_NATIVE_DIMENSIONS",
+    "build_attributor",
 ]

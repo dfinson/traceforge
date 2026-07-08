@@ -158,6 +158,7 @@ def upgrade() -> None:
             session_id TEXT PRIMARY KEY,
             sock_path TEXT NOT NULL,
             pid INTEGER NOT NULL,
+            token TEXT,
             registered_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)

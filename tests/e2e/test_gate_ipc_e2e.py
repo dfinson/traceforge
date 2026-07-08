@@ -100,6 +100,7 @@ def test_send_gate_request_round_trip_allow(tmp_traceforge_home: Path) -> None:
         verdict = send_gate_request(
             server.sock_path,
             {"tool_name": "read_file", "tool_input": {"path": "a.txt"}, "session_id": "s"},
+            token=server.token,
         )
     finally:
         server.stop()
@@ -118,6 +119,7 @@ def test_send_gate_request_round_trip_deny(tmp_traceforge_home: Path) -> None:
         verdict = send_gate_request(
             server.sock_path,
             {"tool_name": "rm", "tool_input": {}, "session_id": "s"},
+            token=server.token,
         )
     finally:
         server.stop()
@@ -138,6 +140,7 @@ def test_windows_tcp_transport_round_trip(tmp_traceforge_home: Path) -> None:
         verdict = send_gate_request(
             server.sock_path,
             {"tool_name": "rm", "tool_input": {"path": "/"}, "session_id": "win"},
+            token=server.token,
         )
     finally:
         server.stop()

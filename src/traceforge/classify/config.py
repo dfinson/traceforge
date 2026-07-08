@@ -142,6 +142,11 @@ class ClassifyConfig(StrictModel):
     verification_role_actions: dict[str, str] = Field(default_factory=dict)
     transparent_wrappers: list[str] = Field(default_factory=list)
     activity_defaults: dict[str, dict[str, str]] = Field(default_factory=dict)
+    # Canonical tool identity -> human-facing display label. Populates
+    # EventMetadata.tool_display at enrichment. Small generic default set; a
+    # consumer supplies its own vocabulary as an overlay via the config-override /
+    # traceforge.profiles entry-point chain (per-key override wins).
+    tool_display: dict[str, str] = Field(default_factory=dict)
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> ClassifyConfig:
@@ -226,6 +231,7 @@ def _load_builtin_defaults() -> dict[str, Any]:
         "mcp_profiles.yaml",
         "shell_rules.yaml",
         "tool_classifications.yaml",
+        "tool_display.yaml",
     ):
         resource = data_dir / filename
         try:
@@ -387,6 +393,7 @@ class ClassificationEngine:
     __slots__ = (
         "canonical_tools",
         "tool_classifications",
+        "tool_display",
         "verb_inference",
         "effect_overrides",
         "shell_rules",
@@ -412,6 +419,12 @@ class ClassificationEngine:
         # Canonical tool aliases — normalize all keys to lowercase for lookup
         self.canonical_tools: dict[str, str] = {
             k.lower().replace("-", "_"): v for k, v in config.canonical_tools.items()
+        }
+
+        # Tool display labels — canonical tool identity -> human-facing label.
+        # Keys normalized like canonical_tools so lookup matches normalize_tool_name.
+        self.tool_display: dict[str, str] = {
+            k.lower().replace("-", "_"): v for k, v in config.tool_display.items()
         }
 
         # Tool classifications (with phase_map derived)

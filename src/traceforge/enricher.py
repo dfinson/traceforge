@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from traceforge.classify.core import Classification, PhaseSegment
 from traceforge.classify.coding import CodingMechanism, CodingScope
 from traceforge.classify.powershell import classify_powershell_command
 from traceforge.classify.risk import assess_risk, assess_tool_risk
+from traceforge.classify.tool_display import ToolDisplayProvider, ToolDisplayResolver
 from traceforge.classify.tools import normalize_tool_name
 from traceforge.classify.workflow import Phase, Visibility
 from traceforge.types import EventKind, EventMetadata, SessionEvent
@@ -39,6 +41,7 @@ class Enricher:
         pairing_ttl_s: float | None = None,
         max_pending: int | None = _DEFAULT_MAX_PENDING,
         flush_on_session_end: bool = True,
+        tool_display_providers: Sequence[ToolDisplayProvider] | None = None,
     ) -> None:
         """
         Args:
@@ -63,6 +66,12 @@ class Enricher:
                 orphans before the session-ended event is emitted. When False the
                 starts stay buffered (still subject to the bounds above and the final
                 :meth:`flush`) and are never dropped.
+            tool_display_providers: Optional programmatic
+                :class:`~traceforge.classify.tool_display.ToolDisplayProvider` objects
+                consulted before the config-driven display map when populating
+                ``metadata.tool_display``. The first non-empty result wins; when all
+                defer, the static map (built-in defaults + config overrides) is used,
+                then ``None``.
 
         Raises:
             ValueError: if ``pairing_ttl_s`` is set and not > 0, or if
@@ -86,6 +95,11 @@ class Enricher:
             self._engine = ClassificationEngine(load_config(Path(config_path)))
         else:
             self._engine = get_default_engine()
+
+        # Resolver for metadata.tool_display: config-driven display map (built-in
+        # generic defaults + consumer overrides via the entry-point chain) plus any
+        # programmatic providers passed in (consulted first).
+        self._tool_display = ToolDisplayResolver(self._engine.tool_display, tool_display_providers)
 
     def process(self, event: SessionEvent) -> SessionEvent | list[SessionEvent] | None:
         """Enrich a single event. Returns None if event is buffered (tool_start waiting
@@ -298,7 +312,15 @@ class Enricher:
         # Refine scope from file paths in payload
         cls = _refine_scope_from_payload(cls, event.payload)
 
-        new_metadata = event.metadata.model_copy(update={"classification": cls})
+        metadata_update: dict[str, object] = {"classification": cls}
+        # Populate the tool_display stub from the resolver. Only set it when the
+        # resolver has an answer, so unknown tools degrade gracefully (stub stays
+        # as-is — None by default) rather than clobbering any pre-set value.
+        display = self._tool_display.resolve(canonical=canonical, raw=tool_name)
+        if display is not None:
+            metadata_update["tool_display"] = display
+
+        new_metadata = event.metadata.model_copy(update=metadata_update)
         event = event.model_copy(update={"metadata": new_metadata})
 
         # Risk scoring

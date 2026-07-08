@@ -60,6 +60,15 @@ def _framework_layout(home: Path) -> dict[str, tuple[Path, bool, str, str]]:
         ),
         "goose": (goose_dir / "sessions", False, "goose", "poll"),
         "amazonq": (amazonq_dir / "data.sqlite3", True, "amazonq", "sqlite"),
+        # OpenCode uses the same ~/.local/share layout on every platform (on
+        # Windows this resolves under %USERPROFILE%, since tmp_traceforge_home
+        # redirects HOME/USERPROFILE here), so it is not OS-branched above.
+        "opencode": (
+            home / ".local" / "share" / "opencode" / "opencode.db",
+            True,
+            "opencode",
+            "sqlite",
+        ),
     }
 
 
@@ -159,3 +168,31 @@ def test_aider_detected_from_cwd(
     assert detected[0].adapter == "aider_markdown"
     assert detected[0].ingestion_mode == "file_watch"
     assert _same_path(detected[0].path, history)
+
+
+def test_opencode_detected_at_verified_sqlite_path(tmp_traceforge_home: Path) -> None:
+    """OpenCode is detected at its verified host path with the sqlite mode.
+
+    The event-sourced store lives at ``~/.local/share/opencode/opencode.db`` on
+    every platform (on Windows that expands under ``%USERPROFILE%``, not
+    ``%LOCALAPPDATA%``). The opencode mapping + preprocessor already ship; this
+    asserts the detector wires that existing ingestion support in.
+    """
+    db = tmp_traceforge_home / ".local" / "share" / "opencode" / "opencode.db"
+    db.parent.mkdir(parents=True)
+    db.write_bytes(b"")
+
+    detected = detect_frameworks(["opencode"])
+
+    assert len(detected) == 1
+    found = detected[0]
+    assert found.name == "opencode"
+    assert found.adapter == "opencode"
+    assert found.ingestion_mode == "sqlite"
+    assert _same_path(found.path, db)
+
+
+def test_opencode_missing_store_is_clean_no_match(tmp_traceforge_home: Path) -> None:
+    # No opencode.db on disk → the detector returns no match rather than
+    # fabricating a detection for an absent store.
+    assert detect_frameworks(["opencode"]) == []

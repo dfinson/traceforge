@@ -253,6 +253,43 @@ class Pipeline:
         """Gate an OpenAI Agents SDK agent."""
         return self._governance.gate_openai_agents(agent)
 
+    # ---- teardown / ungate layer (PR-L; reverses the gate_* installs) ------
+    # Each ungate_* is a thin lazy delegator to the governance engine, mirroring
+    # the gate_* facade above. All are idempotent + safe: calling one when the
+    # target was never gated (or twice) is a harmless no-op and never raises.
+
+    def ungate_crewai(self) -> None:
+        """Remove the process-global CrewAI gating hooks."""
+        return self._governance.ungate_crewai()
+
+    def ungate_langchain(self, tool):
+        """Restore a LangChain tool's original ``_run``/``_arun``. Returns the tool."""
+        return self._governance.ungate_langchain(tool)
+
+    def ungate_langgraph(self, tool_node=None) -> None:
+        """Neutralize a gated LangGraph tool node produced by ``gate_langgraph``."""
+        return self._governance.ungate_langgraph(tool_node)
+
+    def ungate_semantic_kernel(self, kernel) -> None:
+        """Remove the Semantic Kernel gating filter."""
+        return self._governance.ungate_semantic_kernel(kernel)
+
+    def ungate_maf(self) -> None:
+        """Reverse of ``gate_maf`` (documented no-op; drop the returned middleware)."""
+        return self._governance.ungate_maf()
+
+    def ungate_smolagents(self) -> None:
+        """Reverse of ``gate_smolagents`` (documented no-op; use the original class)."""
+        return self._governance.ungate_smolagents()
+
+    def ungate_pydantic_ai(self, agent) -> None:
+        """Unwrap a Pydantic AI agent's gated toolsets."""
+        return self._governance.ungate_pydantic_ai(agent)
+
+    def ungate_openai_agents(self, agent):
+        """Restore an OpenAI Agents SDK agent's original tool invokers. Returns the agent."""
+        return self._governance.ungate_openai_agents(agent)
+
     # ---- in-process observation auto-subscriber (PR-J phase 1) -------------
     # Additive, self-contained facade over ``traceforge.sdk.observe``: subscribe to a
     # framework's NATIVE global bus/processor, map native events through the existing

@@ -64,6 +64,12 @@ _UNSET = object()
 # CrewAI's hook-clearing API) to permit re-installation. Keep the name stable.
 _CREWAI_HOOKS_INSTALLED = False
 
+# Handle to the exact ``(before_hook, after_hook)`` traceforge registered, so
+# ``ungate_crewai`` can deregister just those (via CrewAI's targeted
+# ``unregister_*_tool_call_hook``) rather than clearing every hook in the process.
+# ``None`` when CrewAI gating is not installed.
+_CREWAI_INSTALLED_HOOKS: tuple | None = None
+
 
 class GovernancePipeline:
     """Composition-root facade for the governance subsystem.
@@ -365,7 +371,7 @@ class GovernancePipeline:
         hooks are registered exactly once per process, even if a second
         ``GovernancePipeline`` also calls ``gate_crewai``.
         """
-        global _CREWAI_HOOKS_INSTALLED
+        global _CREWAI_HOOKS_INSTALLED, _CREWAI_INSTALLED_HOOKS
         if _CREWAI_HOOKS_INSTALLED:
             return
         _CREWAI_HOOKS_INSTALLED = True
@@ -422,6 +428,43 @@ class GovernancePipeline:
             elif pv.action == PostflightAction.REDACT and isinstance(output, str):
                 ctx.output = pipeline._apply_postflight_to_output(pv, output)
 
+        # Stash the exact hooks we registered so ``ungate_crewai`` can deregister
+        # only these. CrewAI's bare ``@before/after_tool_call`` register and return
+        # the original function object, so these references match the registry.
+        _CREWAI_INSTALLED_HOOKS = (_traceforge_hook, _traceforge_postflight)
+
+    def ungate_crewai(self) -> None:
+        """Reverse :meth:`gate_crewai`: deregister the process-global hooks.
+
+        Removes exactly the before/after tool-call hooks traceforge registered (via
+        CrewAI's targeted ``unregister_*_tool_call_hook``) and resets the module-level
+        ``_CREWAI_HOOKS_INSTALLED`` guard so a later :meth:`gate_crewai` re-installs.
+        Idempotent + safe: a harmless no-op when CrewAI gating was never installed,
+        and never raises.
+        """
+        global _CREWAI_HOOKS_INSTALLED, _CREWAI_INSTALLED_HOOKS
+        if not _CREWAI_HOOKS_INSTALLED:
+            return
+        hooks = _CREWAI_INSTALLED_HOOKS
+        # Reset the module state up front so a second call (or a failed unregister)
+        # is a clean no-op and a later re-gate re-installs.
+        _CREWAI_INSTALLED_HOOKS = None
+        _CREWAI_HOOKS_INSTALLED = False
+        if hooks is None:
+            return
+        before_hook, after_hook = hooks
+        try:
+            from crewai.hooks import (
+                unregister_after_tool_call_hook,
+                unregister_before_tool_call_hook,
+            )
+
+            unregister_before_tool_call_hook(before_hook)
+            unregister_after_tool_call_hook(after_hook)
+        except Exception:
+            # Best-effort: the module guard is already reset, so re-gate still works.
+            pass
+
     def gate_langchain(self, tool):
         """Wrap a LangChain tool's ``_run`` and ``_arun`` with traceforge gating.
 
@@ -437,6 +480,8 @@ class GovernancePipeline:
 
         pipeline = self
         original_run = tool._run
+        # Stash the true original so ``ungate_langchain`` can restore it (teardown).
+        tool._traceforge_original_run = original_run
 
         def _guarded_run(*args, config=None, run_manager=None, **kwargs):
             import time
@@ -513,6 +558,8 @@ class GovernancePipeline:
             _native_async = type(tool)._arun is not BaseTool._arun
         if _native_async and hasattr(tool, "_arun"):
             original_arun = tool._arun
+            # Stash so ``ungate_langchain`` restores the async path too (teardown).
+            tool._traceforge_original_arun = original_arun
 
             async def _guarded_arun(*args, config=None, run_manager=None, **kwargs):
                 import time
@@ -575,7 +622,47 @@ class GovernancePipeline:
 
             tool._arun = _guarded_arun
 
+        # Stash the prior ``handle_tool_error`` so teardown restores it exactly
+        # (a ``_UNSET`` stash value means "was absent" -> ungate deletes it).
+        tool._traceforge_prev_handle_tool_error = getattr(tool, "handle_tool_error", _UNSET)
         tool.handle_tool_error = True
+        return tool
+
+    def ungate_langchain(self, tool):
+        """Reverse :meth:`gate_langchain`: restore the tool's original callables.
+
+        Restores both the sync (``_run``) and async (``_arun``, when it was wrapped)
+        callables from the stashes recorded at gate time, restores the prior
+        ``handle_tool_error`` value, and clears ``tool._traceforge_gated`` so a later
+        :meth:`gate_langchain` re-wraps cleanly. Idempotent + safe: a no-op when the
+        tool was never gated, and never raises. Returns the tool.
+        """
+        if not getattr(tool, "_traceforge_gated", False):
+            return tool
+
+        original_run = getattr(tool, "_traceforge_original_run", _UNSET)
+        if original_run is not _UNSET:
+            tool._run = original_run
+            del tool._traceforge_original_run
+
+        original_arun = getattr(tool, "_traceforge_original_arun", _UNSET)
+        if original_arun is not _UNSET:
+            tool._arun = original_arun
+            del tool._traceforge_original_arun
+
+        if hasattr(tool, "_traceforge_prev_handle_tool_error"):
+            prev = tool._traceforge_prev_handle_tool_error
+            if prev is _UNSET:
+                # The attribute did not exist before gating -> remove what we added.
+                try:
+                    del tool.handle_tool_error
+                except AttributeError:
+                    pass
+            else:
+                tool.handle_tool_error = prev
+            del tool._traceforge_prev_handle_tool_error
+
+        tool._traceforge_gated = False
         return tool
 
     def gate_langgraph(self, tools):
@@ -663,7 +750,34 @@ class GovernancePipeline:
                 )
             return result
 
-        return ToolNode(tools, wrap_tool_call=_traceforge_wrapper)
+        node = ToolNode(tools, wrap_tool_call=_traceforge_wrapper)
+        # Mark the produced node so ``ungate_langgraph`` can detect and neutralize
+        # it. This adapter installs nothing on a caller-owned object -- the gate
+        # lives inside the returned node's ``wrap_tool_call`` -- so teardown operates
+        # on the node itself.
+        node._traceforge_gated = True
+        return node
+
+    def ungate_langgraph(self, tool_node=None) -> None:
+        """Reverse :meth:`gate_langgraph` on a produced ``ToolNode``.
+
+        Unlike the in-place adapters, ``gate_langgraph`` installs nothing on a
+        caller-owned object: it *returns* a fresh gated ``ToolNode``. Teardown
+        therefore operates on that returned node -- it clears the traceforge
+        tool-call wrapper (``_wrap_tool_call`` / ``_awrap_tool_call``), after which
+        the node executes tools ungated -- and clears the node's guard flag.
+        Idempotent + safe: a no-op when ``tool_node`` is ``None`` or was not produced
+        by :meth:`gate_langgraph`, and never raises.
+        """
+        if tool_node is None or not getattr(tool_node, "_traceforge_gated", False):
+            return
+        # In LangGraph's ToolNode, ``_wrap_tool_call``/``_awrap_tool_call`` being
+        # ``None`` means "execute the tool directly" (ungated).
+        if hasattr(tool_node, "_wrap_tool_call"):
+            tool_node._wrap_tool_call = None
+        if hasattr(tool_node, "_awrap_tool_call"):
+            tool_node._awrap_tool_call = None
+        tool_node._traceforge_gated = False
 
     def gate_semantic_kernel(self, kernel) -> None:
         """Register traceforge as a Semantic Kernel auto function invocation filter.
@@ -726,6 +840,35 @@ class GovernancePipeline:
                     value=redacted,
                 )
 
+        # Stash the registered filter so ``ungate_semantic_kernel`` can remove
+        # exactly it. ``kernel.filter`` registers and returns the same function
+        # object, keyed in the kernel by ``id(filter)``.
+        kernel._traceforge_sk_filter = _traceforge_filter
+
+    def ungate_semantic_kernel(self, kernel) -> None:
+        """Reverse :meth:`gate_semantic_kernel`: remove the registered filter.
+
+        Removes the auto-function-invocation filter traceforge registered (matched by
+        ``id(filter)`` via ``kernel.remove_filter``) and clears
+        ``kernel._traceforge_gated`` so a later :meth:`gate_semantic_kernel`
+        re-registers. Idempotent + safe: a no-op when the kernel was never gated, and
+        never raises.
+        """
+        if not getattr(kernel, "_traceforge_gated", False):
+            return
+        filt = getattr(kernel, "_traceforge_sk_filter", _UNSET)
+        if filt is not _UNSET:
+            try:
+                kernel.remove_filter(
+                    filter_type="auto_function_invocation",
+                    filter_id=id(filt),
+                )
+            except Exception:
+                # Best-effort: still clear the guard below so re-gate works.
+                pass
+            del kernel._traceforge_sk_filter
+        kernel._traceforge_gated = False
+
     def gate_maf(self):
         """Return a FunctionMiddleware for Microsoft Agent Framework (MAF).
 
@@ -785,6 +928,18 @@ class GovernancePipeline:
 
         return TraceforgeMiddleware()
 
+    def ungate_maf(self) -> None:
+        """Reverse of :meth:`gate_maf` -- a documented no-op.
+
+        LIMITATION: ``gate_maf`` installs nothing on a shared/caller object and sets
+        no guard flag -- it *returns* a standalone ``FunctionMiddleware`` instance the
+        caller attaches to their own agent. traceforge holds no handle to that
+        attachment point, so there is genuinely no process/global state to reverse
+        here. To remove MAF gating, drop the returned middleware from your agent's
+        middleware list. Provided for API symmetry; idempotent and always safe.
+        """
+        return None
+
     def gate_smolagents(self, agent_cls=None):
         """Return a TraceforgeAgent subclass that gates tool calls for smolagents.
 
@@ -840,6 +995,17 @@ class GovernancePipeline:
                 return result
 
         return _TraceforgeAgent
+
+    def ungate_smolagents(self) -> None:
+        """Reverse of :meth:`gate_smolagents` -- a documented no-op.
+
+        LIMITATION: ``gate_smolagents`` installs nothing on a shared object and sets
+        no guard flag -- it *returns* a gated agent *subclass*. There is no per-object
+        install to reverse; to stop gating, instantiate the original agent class
+        instead of the returned subclass. Provided for API symmetry; idempotent and
+        always safe.
+        """
+        return None
 
     def gate_pydantic_ai(self, agent) -> None:
         """Gate a Pydantic AI agent's tool calls via a wrapping toolset.
@@ -899,10 +1065,42 @@ class GovernancePipeline:
 
         # Wrap every leaf toolset the agent will assemble into its run toolset, then
         # mark gated only after wrapping succeeds (no half-gated state on failure).
+        # Stash the originals first so ``ungate_pydantic_ai`` restores them exactly.
+        # Stash the list *references* (not copies): the gate reassigns each attribute
+        # to a fresh list below, so the originals are otherwise dropped, and restoring
+        # the exact original objects is the truest teardown.
+        agent._traceforge_original_function_toolset = agent._function_toolset
+        agent._traceforge_original_user_toolsets = agent._user_toolsets
+        agent._traceforge_original_dynamic_toolsets = agent._dynamic_toolsets
         agent._function_toolset = _TraceforgeGateToolset(agent._function_toolset)
         agent._user_toolsets = [_TraceforgeGateToolset(ts) for ts in agent._user_toolsets]
         agent._dynamic_toolsets = [_TraceforgeGateToolset(ts) for ts in agent._dynamic_toolsets]
         agent._traceforge_gated = True
+
+    def ungate_pydantic_ai(self, agent) -> None:
+        """Reverse :meth:`gate_pydantic_ai`: unwrap the agent's leaf toolsets.
+
+        Restores ``_function_toolset`` / ``_user_toolsets`` / ``_dynamic_toolsets``
+        from the stashes recorded at gate time (removing the ``WrapperToolset`` gate
+        layer) and clears ``agent._traceforge_gated`` so a later
+        :meth:`gate_pydantic_ai` re-wraps cleanly. Idempotent + safe: a no-op when the
+        agent was never gated, and never raises.
+        """
+        if not getattr(agent, "_traceforge_gated", False):
+            return
+        orig_fn = getattr(agent, "_traceforge_original_function_toolset", _UNSET)
+        if orig_fn is not _UNSET:
+            agent._function_toolset = orig_fn
+            del agent._traceforge_original_function_toolset
+        orig_user = getattr(agent, "_traceforge_original_user_toolsets", _UNSET)
+        if orig_user is not _UNSET:
+            agent._user_toolsets = orig_user
+            del agent._traceforge_original_user_toolsets
+        orig_dyn = getattr(agent, "_traceforge_original_dynamic_toolsets", _UNSET)
+        if orig_dyn is not _UNSET:
+            agent._dynamic_toolsets = orig_dyn
+            del agent._traceforge_original_dynamic_toolsets
+        agent._traceforge_gated = False
 
     def gate_openai_agents(self, agent):
         """Gate an OpenAI Agents SDK agent's tool calls per-tool.
@@ -934,6 +1132,8 @@ class GovernancePipeline:
             if getattr(tool, "_traceforge_gated", False):
                 return
             original_invoke = tool.on_invoke_tool
+            # Stash so ``ungate_openai_agents`` restores each tool's invoker (teardown).
+            tool._traceforge_original_on_invoke_tool = original_invoke
             tool_name = getattr(tool, "name", None) or "unknown"
 
             async def _guarded_invoke(ctx, input_str):
@@ -984,4 +1184,30 @@ class GovernancePipeline:
 
         # Mark gated only after wrapping succeeds (no half-gated state on failure).
         agent._traceforge_gated = True
+        return agent
+
+    def ungate_openai_agents(self, agent):
+        """Reverse :meth:`gate_openai_agents`: restore each tool's ``on_invoke_tool``.
+
+        For every ``FunctionTool`` traceforge wrapped, restores the original
+        ``on_invoke_tool`` from its per-tool stash and clears the per-tool
+        ``_traceforge_gated`` marker, then clears ``agent._traceforge_gated`` so a
+        later :meth:`gate_openai_agents` re-wraps cleanly. Idempotent + safe: a no-op
+        when the agent was never gated, and never raises. Returns the agent.
+
+        Mirrors the gate's shared-tool model: a ``FunctionTool`` shared across agents
+        is wrapped exactly once, so restoring it here ungates it for every agent that
+        shares it (there is no per-agent refcount to consult).
+        """
+        if not getattr(agent, "_traceforge_gated", False):
+            return agent
+        for tool in list(getattr(agent, "tools", None) or []):
+            if not getattr(tool, "_traceforge_gated", False):
+                continue
+            original_invoke = getattr(tool, "_traceforge_original_on_invoke_tool", _UNSET)
+            if original_invoke is not _UNSET:
+                tool.on_invoke_tool = original_invoke
+                del tool._traceforge_original_on_invoke_tool
+            tool._traceforge_gated = False
+        agent._traceforge_gated = False
         return agent

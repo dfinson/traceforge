@@ -2,7 +2,7 @@
 id: cli
 title: CLI Reference
 sidebar_label: CLI
-description: Every TraceForge command, watch, replay, score, gate, detect, init, status, config, and download-model.
+description: Every TraceForge command, watch, replay, score, gate, detect, init, status, config.
 ---
 
 # CLI Reference
@@ -20,7 +20,6 @@ inline help. All commands are also reachable as `python -m traceforge <command>`
 | [`init`](#init) | Auto-inject hook config for a supported agent. |
 | [`status`](#status) | Show system state from the governance database. |
 | [`config`](#config) | Manage configuration (`init` / `show` / `validate`). |
-| [`download-model`](#download-model) | (Re)fetch the titler weights. |
 
 ## `watch`
 
@@ -148,19 +147,3 @@ traceforge config validate         # validate without running
 | `init` | `--force` | Write default config to `~/.traceforge/config.yaml`. |
 | `show` | `--config PATH` | Print the resolved configuration. |
 | `validate` | `--config PATH` | Validate a config file's YAML shape. |
-
-## `download-model`
-
-(Re)install the titler weights (`traceforge-title-model`). Normally already present as a
-dependency; use this to repair a broken install or fetch from the GitHub mirror when PyPI is
-unreachable.
-
-```bash
-traceforge download-model                 # from PyPI (default)
-traceforge download-model --source gh      # from the GitHub-release mirror
-```
-
-| Option | Default | Description |
-| --- | --- | --- |
-| `--source` | `pypi` | `pypi` or `gh` (GitHub-release mirror). |
-| `--version V` | `0.2.0` | Mirror version to fetch (ignored for `--source pypi`). |

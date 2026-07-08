@@ -25,12 +25,15 @@ The activity/step titler model weights (~90 MB) live in a separate
 pulls them automatically. The weights are hosted on PyPI (primary) and mirrored on this
 repo's `title-model-v*` GitHub releases.
 
-If PyPI is ever unavailable, or a checkout left the weights as Git-LFS pointer stubs, repair
-the install from the GitHub mirror:
+Because the weights are a hard dependency they install automatically. If a checkout left them as
+Git-LFS pointer stubs, or the install is otherwise broken, repair it with:
 
 ```bash
-traceforge download-model --source gh
+pip install --force-reinstall traceforge-title-model
 ```
+
+To serve a relocated or custom titler, set `TRACEFORGE_TITLE_MODEL` to a directory containing the
+`encoder.onnx` / `decoder.onnx` / `tokenizer.json` triad.
 
 The phase and boundary models ship **inside** the base wheel, so only the larger titler is
 split out.

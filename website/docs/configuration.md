@@ -39,6 +39,8 @@ config explicitly.
 | `TRACEFORGE_LOG_LEVEL` | Scalar override (`DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL`). |
 | `TRACEFORGE_SDK__BATCH_SIZE` | Nested override, double underscore denotes nesting. |
 | `TRACEFORGE_PHASE_MODEL` | Path override for the phase classifier model bundle. |
+| `TRACEFORGE_BOUNDARY_MODEL` | Path override for the boundary classifier model bundle. |
+| `TRACEFORGE_TITLE_MODEL` | Directory override for the titler (span) weights — must contain encoder.onnx / decoder.onnx / tokenizer.json. |
 
 The double-underscore convention maps to nested config keys, so
 `TRACEFORGE_SDK__BATCH_SIZE=128` sets `sdk.batch_size`.

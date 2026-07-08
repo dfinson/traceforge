@@ -12,8 +12,10 @@ Uses the same policy chain as all gate_* methods for consistent behavior.
 from __future__ import annotations
 
 import atexit
+import hmac
 import json
 import os
+import secrets
 import socket
 import struct
 import sys
@@ -45,16 +47,31 @@ class GateServer:
         self._server: socket.socket | None = None
         self._thread: threading.Thread | None = None
         self._running = False
+        # Per-server auth secret. Stored in this session's registry row at
+        # registration and required (constant-time compared) on every request, so
+        # another local user cannot poison the registry or hijack the session's row.
+        self._token = secrets.token_hex(32)
 
     @staticmethod
     def _default_sock_path() -> str:
         gates_dir = Path.home() / ".traceforge" / "gates"
         gates_dir.mkdir(parents=True, exist_ok=True)
+        if sys.platform != "win32":
+            # Owner-only gates dir (defense in depth alongside the 0600 socket).
+            try:
+                os.chmod(gates_dir, 0o700)
+            except OSError:
+                pass
         return str(gates_dir / f"{os.getpid()}.sock")
 
     @property
     def sock_path(self) -> str:
         return self._sock_path
+
+    @property
+    def token(self) -> str:
+        """The per-server auth token required on every gate request."""
+        return self._token
 
     def start(self) -> None:
         """Start the IPC server in a background daemon thread."""
@@ -76,6 +93,10 @@ class GateServer:
         else:
             self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             self._server.bind(self._sock_path)
+            # Owner-only socket (0600): block another local user from connecting
+            # to poison the registry or hijack this session's gate. POSIX-only —
+            # the win32 branch above uses loopback TCP, which has no file mode.
+            os.chmod(self._sock_path, 0o600)
 
         self._server.listen(16)
         self._server.settimeout(1.0)  # allow periodic check of _running
@@ -109,7 +130,7 @@ class GateServer:
         """Register a session_id → this server's socket in the registry."""
         from traceforge.gate.registry import register_session
 
-        register_session(session_id, self._sock_path)
+        register_session(session_id, self._sock_path, token=self._token)
 
     def _serve_loop(self) -> None:
         while self._running:
@@ -130,6 +151,15 @@ class GateServer:
                 return
 
             request = json.loads(data)
+            # Auth: every request must carry this server's token. Reject (deny)
+            # anything without it BEFORE touching gate state, so a poisoned/foreign
+            # row or an unauthenticated local caller cannot drive enforcement.
+            if not self._verify_token(request.get("token") if isinstance(request, dict) else None):
+                deny = json.dumps(
+                    {"decision": "deny", "reason": "unauthorized gate request (fail-closed)"}
+                ).encode("utf-8")
+                conn.sendall(struct.pack("!I", len(deny)) + deny)
+                return
             payload = request.get("payload", request)
             response = self._process_gate_request(payload)
             resp_bytes = json.dumps(response).encode("utf-8")
@@ -142,6 +172,12 @@ class GateServer:
                 pass
         finally:
             conn.close()
+
+    def _verify_token(self, token: object) -> bool:
+        """Constant-time check that a request carries this server's auth token."""
+        if not isinstance(token, str) or not token:
+            return False
+        return hmac.compare_digest(token, self._token)
 
     def _process_gate_request(self, payload: dict) -> dict:
         """Score and gate a tool call using the pipeline's policy chain."""

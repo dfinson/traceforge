@@ -25,6 +25,45 @@ from traceforge.sources.auto_detect import detect_frameworks
 logger = logging.getLogger(__name__)
 
 
+def _policy_is_enforcing(policy) -> bool:
+    """True if ``policy`` actually gates anything (a preflight or postflight gate).
+
+    ``None`` or an empty :class:`~traceforge.sdk.gate_policy.GatePolicy` means the
+    gate runs in allow-all mode.
+    """
+    return policy is not None and (policy.has_preflight or policy.has_postflight)
+
+
+def _warn_gating_inactive() -> None:
+    """Emit a LOUD warning that the gate is running in allow-all mode.
+
+    The gate IPC server and the injected agent hooks are up, but with no policy
+    every tool call is ALLOWED — enforcement is inactive. Operators must not
+    mistake "hooks installed" for "protected", so this is a prominent stderr
+    banner (plus a WARNING log), not a quiet line.
+    """
+    banner = (
+        "\n"
+        "  ============================================================\n"
+        "  WARNING: gating enforcement is INACTIVE (allow-all).\n"
+        "  No gate policy is configured, so EVERY tool call is ALLOWED.\n"
+        "  The gate IPC server and agent hooks are running, but they\n"
+        "  enforce nothing until you declare a policy.\n"
+        "\n"
+        "  Enable enforcement by declaring a policy in your config, e.g.:\n"
+        "    governance:\n"
+        "      gate_policy:\n"
+        "        preflight:\n"
+        "          - myapp.policies.block_destructive   # dotted gate, or\n"
+        "          - type: http                          # external decider\n"
+        "            endpoint: http://127.0.0.1:8181/v1/data/traceforge/gate\n"
+        "  then re-run:  traceforge watch --config <your-config>.yaml\n"
+        "  ============================================================\n"
+    )
+    click.echo(banner, err=True)
+    logger.warning("Gating enforcement INACTIVE (allow-all): no gate policy configured.")
+
+
 @click.command()
 @click.option("--config", "config_path", type=click.Path(exists=True), default=None)
 @click.option(
@@ -72,16 +111,16 @@ def watch(
     db_path.parent.mkdir(parents=True, exist_ok=True)
     store = SystemStore(db_path)
 
-    # Load policy from config if available
-    policy = None
-    if config and config.get("governance", {}).get("tool_preflight_gate"):
-        from traceforge.sdk.gate_policy import GatePolicy
+    # Load a full gate policy (preflight chain + postflight + external gates) from
+    # config. A declared-but-broken policy fails loudly below rather than silently
+    # degrading to allow-all.
+    from traceforge.governance.shield import build_policy_from_config
 
-        dotted = config["governance"]["tool_preflight_gate"]
-        from traceforge.governance.pipeline import _import_dotted
-
-        gate_fn = _import_dotted(dotted)
-        policy = GatePolicy().preflight(gate_fn)
+    try:
+        policy = build_policy_from_config(config)
+    except Exception as exc:  # noqa: BLE001 - refuse to start on a broken policy
+        click.echo(f"ERROR: gate policy failed to load — refusing to start: {exc}", err=True)
+        sys.exit(1)
 
     pipeline = create_default_pipeline(store, policy=policy)
 
@@ -91,6 +130,11 @@ def watch(
     gate_server = GateServer(pipeline)
     gate_server.start()
     click.echo(f"Gate IPC server listening on {gate_server.sock_path}")
+
+    # Enforce-by-default UX: the server is up, but with no policy it ALLOWS every
+    # call. Make that unmistakable so operators don't believe they're protected.
+    if not _policy_is_enforcing(policy):
+        _warn_gating_inactive()
 
     # Register a default session so CLI clients can find us without knowing session_id upfront.
     # Detected framework sessions are also registered individually.

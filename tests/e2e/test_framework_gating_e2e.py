@@ -102,9 +102,14 @@ class TestCrewAIGating:
     """E2E: CrewAI before_tool_call / after_tool_call hooks."""
 
     def _reset_hooks(self):
+        import traceforge.governance.pipeline as gp
         from crewai.hooks import clear_all_tool_call_hooks
 
         clear_all_tool_call_hooks()
+        # The adapter installs CrewAI's PROCESS-GLOBAL hooks exactly once per
+        # process, guarded by a module-global flag. Clearing the real hooks must
+        # also reset that flag so the next gate_crewai() re-registers them.
+        gp._CREWAI_HOOKS_INSTALLED = False
 
     def _make_ctx(self, tool_name, tool_input, output=None):
         from unittest.mock import MagicMock
@@ -510,28 +515,50 @@ class TestSmolagentsGating:
 
 
 class TestOpenAIAgentsGating:
-    """E2E: OpenAI Agents SDK input_guardrail registration."""
+    """E2E: OpenAI Agents SDK per-tool gating (real FunctionTool.on_invoke_tool)."""
 
-    def test_guardrail_registered(self):
-        """gate_openai_agents adds a guardrail to the agent."""
-        from agents import Agent
+    def _make_agent(self):
+        from agents import Agent, function_tool
 
+        @function_tool
+        def rm(path: str) -> str:
+            """Remove a file."""
+            return f"removed {path}"
+
+        return Agent(name="test_agent", tools=[rm]), rm
+
+    def test_per_tool_invoker_wrapped(self):
+        """gate_openai_agents wraps each FunctionTool's on_invoke_tool."""
         pipeline = make_pipeline(preflight=deny_rm_gate)
-        agent = Agent(name="test_agent")
+        agent, tool = self._make_agent()
+        original_invoke = tool.on_invoke_tool
+
         pipeline.gate_openai_agents(agent)
 
-        assert len(agent.input_guardrails) == 1
+        assert tool.on_invoke_tool is not original_invoke  # invoker was wrapped
+        assert tool._traceforge_gated is True
+        assert agent._traceforge_gated is True
 
     def test_idempotent_registration(self):
-        """Calling twice doesn't duplicate guardrails."""
-        from agents import Agent
-
+        """Calling twice doesn't re-wrap the tool invoker."""
         pipeline = make_pipeline(preflight=deny_rm_gate)
-        agent = Agent(name="test_agent")
+        agent, tool = self._make_agent()
+
         pipeline.gate_openai_agents(agent)
+        wrapped = tool.on_invoke_tool
         pipeline.gate_openai_agents(agent)
 
-        assert len(agent.input_guardrails) == 1
+        assert tool.on_invoke_tool is wrapped
+
+    def test_named_tool_denied(self):
+        """A named tool call is blocked by preflight — the REAL tool name reaches
+        the gate (the old input-guardrail saw only 'unknown')."""
+        pipeline = make_pipeline(preflight=deny_rm_gate)
+        agent, tool = self._make_agent()
+        pipeline.gate_openai_agents(agent)
+
+        with pytest.raises(RuntimeError, match="Denied"):
+            asyncio.run(tool.on_invoke_tool(None, '{"path": "/etc/passwd"}'))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

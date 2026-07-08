@@ -75,12 +75,25 @@ async def can_use_tool(tool_name, input_data, session_id):
         "tool_input": input_data,
         "session_id": session_id,
     })
-    return trace.suggested_action not in ("deny", "escalate", "transform")
+    return trace.suggested_action not in ("deny", "escalate")
 ```
 
 `score_tool_call()` is read-only: it scores against accumulated state but does **not** advance
 the counter, budget, taint, or drift. State changes only when the monitor observes an event from
 its source, so blocked calls never corrupt budget or taint.
+
+:::warning Known limitation — an `escalate` verdict collapses to deny
+
+Enforcement is **binary today**: a gate `Verdict` carries only `Decision.ALLOW` or `Decision.DENY`
+— there is no `ESCALATE` decision. A risk **recommendation** of `escalate` (surfaced above as a
+`suggested_action`, and as `RecommendedAction.ESCALATE` on a `SessionMeta`) therefore has **no
+distinct enforcement path**. An in-process `GatePolicy` that wants to escalate has to return
+`Verdict.deny(...)`, and the cross-process relay (`traceforge gate --stdin`) maps an `escalate`
+verdict to **deny** as well. In practice an "escalate" outcome currently **blocks the tool exactly
+like a deny** — there is no human-in-the-loop approval/hold step yet. Read-only scoring still
+exposes `escalate` as a recommendation (see above), so a consumer that interprets recommendations
+itself can distinguish it; the **gate** cannot.
+:::
 
 ## The two servers
 

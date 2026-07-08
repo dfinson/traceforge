@@ -107,7 +107,7 @@ class EventTrace:
     structure: tuple[Structure, ...]
     risk_score: int | None
     risk_band: RiskBand | None
-    suggested_action: Recommendation | None   # allow/warn/escalate/deny/transform
+    suggested_action: Recommendation | None   # allow/warn/escalate/deny
     reason: str | None
     stage: TraceStage                          # adapted -> classified -> assessed
 ```

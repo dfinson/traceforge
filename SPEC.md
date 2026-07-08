@@ -1910,18 +1910,20 @@ adapter that wraps the framework's native hook. Today `traceforge init` ships an
 
 "Hook-capable" = the agent exposes a **user-injectable, preflight, shell-out hook whose deny
 blocks the tool**. Verified against each agent's primary first-party docs/source and
-independently reconciled (5 verification passes). **7 of 10 are hook-capable**; only Continue,
-Goose, and Aider are observe-only.
+independently reconciled. **9 of 12 are hook-capable**; only Continue, Goose, and Aider are not
+(static policy / no tool-call lifecycle). SWE-agent is the sole pure observe-only CLI agent.
 
 | Agent | Capable? | Event | Config location | Deny contract | `init` injector |
 |-------|:--------:|-------|-----------------|---------------|:---------------:|
 | **Claude Code** | ✓ | `PreToolUse` | `~/.claude/settings.json` or `.claude/settings.json` | exit 2 OR stdout `hookSpecificOutput.permissionDecision:"deny"` | ✓ **shipped** |
-| **GitHub Copilot CLI** | ✓ | `preToolUse` (+ earlier `permissionRequest`) | `~/.copilot/hooks/*.json`, `.github/hooks/*.json`, or `.github/copilot/settings.json` | stdout `{"permissionDecision":"deny",...}` OR non-zero exit **≠ 2** (exit 2 reserved → use **exit 1**) | ✗ |
+| **GitHub Copilot CLI** (+ **Copilot Cloud**, same hook) | ✓ | `preToolUse` (+ earlier `permissionRequest`) | `~/.copilot/hooks/*.json`, `.github/hooks/*.json`, or `.github/copilot/settings.json` | stdout `{"permissionDecision":"deny",...}` OR non-zero exit **≠ 2** (exit 2 reserved → use **exit 1**) | ✗ |
 | **OpenAI Codex CLI** | ✓ | `PreToolUse` (`[hooks]` system, **not** `notify`) | `~/.codex/hooks.json` or `[hooks]` in `~/.codex/config.toml` | exit 2 (stderr) OR `hookSpecificOutput.permissionDecision:"deny"` OR legacy `{"decision":"block"}` | ✗ |
 | **Cursor** | ✓ (v1.7+) | `preToolUse` / `beforeShellExecution` / `beforeMCPExecution` | `~/.cursor/hooks.json` or `<project>/.cursor/hooks.json` | exit 2 OR `{"permission":"deny","user_message":...,"agent_message":...}`; per-hook `"failClosed":true` | ✗ |
 | **Gemini CLI** | ✓ | `BeforeTool` | `~/.gemini/settings.json` or `.gemini/settings.json` | exit 2 (stderr) OR `{"decision":"deny","reason":...}` (`"block"` alias) | ✗ |
 | **Cline** | ✓ (v4.0.0+) | `PreToolUse` | **script file** named `PreToolUse` in `<workspace>/.clinerules/hooks/` or `~/Documents/Cline/Hooks/` | stdout `{"cancel":true,"errorMessage":...}` **only** (no exit-2) | ✗ |
 | **Amazon Q Developer CLI** | ✓ (v1.16.2+) | `preToolUse` | agent-config JSON: `~/.aws/amazonq/cli-agents/<name>.json` or `.amazonq/cli-agents/<name>.json` | **exit 2 only** (stderr → reason) | ✗ |
+| **OpenCode** | ✓ (v1.17.15+) | `tool.execute.before` (plugin hook) | **JS/TS plugin** at `.opencode/plugins/*.ts` or `~/.config/opencode/plugins/*.ts` (or the `opencode.json` `"plugin"` array) | `throw new Error(reason)` in the plugin (throw when the gate exits non-zero); plugin gets Bun `$` to shell out to `traceforge gate --stdin` | ✗ |
+| **OpenHands** | ✓ (sdk 1.33.0+) | `pre_tool_use` | `.openhands/hooks.json` (project) or `~/.openhands/hooks.json` (global) | exit 2 OR stdout `{"decision":"deny","reason":...}` OR `{"continue":false}`; stdin = `{event_type,tool_name,tool_input,session_id,working_dir}` | ✗ |
 | **Continue** | ✗ | — | static tool-policy (allow/ask/exclude) in `config.yaml` | no shell-out lifecycle hook | — |
 | **Goose** | ✗ | — | internal `permission_manager` / YAML + LLM "SmartApprove" | no external shell-out hook | — |
 | **Aider** | ✗ | — | `--yes-always` / `--auto-commits` only | no tool-call lifecycle | — |
@@ -1931,17 +1933,26 @@ Goose, and Aider are observe-only.
 `permissionDecisionReason` fails **OPEN**. Gemini requires "silence" — the hook must print nothing
 to stdout except the final JSON. Cline is a VS Code extension, so its init target (a dropped script
 file) differs from the CLI agents. Amazon Q treats any non-zero exit **other than 2** as
-warning-only (the tool still runs).
+warning-only (the tool still runs). **OpenHands** hooks run **inside the agent sandbox**
+(traceforge must be installed there; commit `.openhands/hooks.json` to the repo for cloud runs),
+and an `async:true` hook **cannot block** — keep the gate hook sync. **OpenCode** is injected as a
+**JS/TS plugin** that throws to deny, not a settings shell-hook. **Copilot Cloud** runs the hook in
+the cloud runner, so traceforge must be present there (committed `.github/hooks/*.json` or machine
+policy `policy.d`).
 
-**Unified contract (PR-K design note):** all 7 converge on one shape — a command fed tool-call
-JSON on stdin (`tool_name` + `tool_input`/`toolArgs` + `cwd` + session id) that denies via exit-2
-and/or a deny-JSON. **Claude Code's schema is the de facto standard** — Cursor and Codex both
-implement `hookSpecificOutput.permissionDecision`, and Gemini aliases `CLAUDE_PROJECT_DIR` — so
-`gate --stdin` can target a near-universal contract behind a thin per-agent adapter selected by an
-`--agent <name>` tag the injector writes into the hook command. **exit-2 = deny is a clean
-universal fallback for 5 of 7** (Claude, Codex, Gemini, Cursor, Amazon Q). The divergences that
-matter: **Cline** has no exit-2 and drops a script file (not JSON settings); **Amazon Q** is
-exit-2-only; **Copilot** reserves exit-2 (use exit 1).
+**Unified contract (PR-K design note):** the hook-capable agents converge on one shape — a command
+fed tool-call JSON on stdin (`tool_name` + `tool_input`/`toolArgs` + `cwd` + session id) that
+denies via exit-2 and/or a deny-JSON. **Claude Code's schema is the de facto standard** — Cursor
+and Codex both implement `hookSpecificOutput.permissionDecision`, and Gemini aliases
+`CLAUDE_PROJECT_DIR` — so `gate --stdin` can target a near-universal contract behind a thin
+per-agent adapter selected by an `--agent <name>` tag the injector writes into the hook command.
+**exit-2 = deny is a clean universal fallback for 7 of 9** (Claude, Codex, Gemini, Cursor,
+Amazon Q, OpenHands; Copilot uses exit 1). The two that use no exit code at all: **Cline** (a JSON
+`{"cancel":true}` script file) and **OpenCode** (a JS/TS plugin that throws to deny). Other
+divergences: **Amazon Q** is exit-2-only, and **OpenHands** runs in-sandbox and must stay
+`async:false` to block. PR-K adds **8 injectors** (Copilot CLI, Codex, Gemini, Cline, Cursor,
+Amazon Q, OpenCode, OpenHands; Claude Code already ships; Copilot Cloud rides Copilot CLI's
+injector).
 
 #### In-process SDK frameworks (`gate_*` adapters)
 
@@ -1957,8 +1968,9 @@ exit-2-only; **Copilot** reserves exit-2 (use exit 1).
 | **OpenAI Agents** | `pipeline.gate_openai_agents(agent)` → gated agent | input-guardrail today (per-tool gating + postflight pending) |
 
 Read-only scoring for any surface is available via `pipeline.score_tool_call(...)` without
-registering a `GatePolicy`. SWE-agent and OpenHands have no injectable pre-execution hook today:
-traceforge observes and scores their events, but no consumer can block their tool calls.
+registering a `GatePolicy` — this is how the Copilot and Claude Code SDKs fold in (read-only, not
+blocking). **SWE-agent** is the sole pure observe-only CLI agent: no injectable pre-execution hook
+today, so traceforge observes and scores its events but no consumer can block its tool calls.
 
 ### File Structure
 

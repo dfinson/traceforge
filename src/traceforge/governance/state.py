@@ -6,9 +6,14 @@ import json
 import sqlite3
 import threading
 from collections import Counter, deque
+from collections.abc import Iterable
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from traceforge.governance.types import TrustGrant
 
 _BUDGET_DIMENSIONS = (
     "effect",
@@ -76,6 +81,7 @@ class SessionStateSnapshot:
     budget: BudgetSnapshot
     phase_window: tuple[str, ...] = ()
     taint_ledger: tuple[TaintEntry, ...] = ()
+    trust_grants: tuple[TrustGrant, ...] = ()
     last_assistant_event_id: str | None = None
     last_user_event_id: str | None = None
     event_count: int = 0
@@ -112,6 +118,9 @@ class SessionState:
     _denied_count: int = 0
     _prior_verdicts: deque = field(default_factory=lambda: deque(maxlen=100))
     _prior_tool_call_ids: deque = field(default_factory=lambda: deque(maxlen=100))
+    # Time-boxed trust grants for this session. Initialized in __post_init__ so
+    # the default is a fresh, independent store per instance (not a shared one).
+    _trust_grants: TrustGrantStore | None = None
 
     PHASE_WINDOW_SIZE: int = 20
     TAINT_LEDGER_MAX: int = 200
@@ -128,6 +137,14 @@ class SessionState:
                 "action": Counter(),
                 "structure": Counter(),
             }
+        if self._trust_grants is None:
+            self._trust_grants = TrustGrantStore()
+
+    @property
+    def trust_grants(self) -> TrustGrantStore:
+        """The session's trust-grant store (empty by default)."""
+        assert self._trust_grants is not None  # established in __post_init__
+        return self._trust_grants
 
     def attach_db(
         self, db: sqlite3.Connection | None, lock: "threading.Lock | None" = None
@@ -274,6 +291,7 @@ class SessionState:
             _dropped_events=self._dropped_events,
             _last_sequence=self._last_sequence,
             _gap_ordinal=self._gap_ordinal,
+            _trust_grants=TrustGrantStore(self.trust_grants.all_grants()),
             _db=None,
         )
 
@@ -297,6 +315,7 @@ class SessionState:
             budget=budget,
             phase_window=tuple(self._phase_window),
             taint_ledger=tuple(self._taint_ledger),
+            trust_grants=self.trust_grants.all_grants(),
             last_assistant_event_id=self._last_assistant_event_id,
             last_user_event_id=self._last_user_event_id,
             event_count=self._event_count,
@@ -365,6 +384,23 @@ class SessionState:
                     t.payload_pointer,
                 ),
             )
+        # Normalized trust grants: ordinal preserves insert order and permits
+        # duplicate keys. Expiry is derived at read time from granted_at + ttl,
+        # so no "active" flag is stored. Full rewrite mirrors the taint ledger.
+        self._db.execute("DELETE FROM trust_grants WHERE session_id = ?", (self.session_id,))
+        for ordinal, g in enumerate(self.trust_grants.all_grants()):
+            self._db.execute(
+                "INSERT INTO trust_grants (session_id, ordinal, key, granted_at, "
+                "ttl_seconds, reason) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    self.session_id,
+                    ordinal,
+                    g.key,
+                    g.granted_at.isoformat(),
+                    g.ttl_seconds,
+                    g.reason,
+                ),
+            )
 
     def persist(self) -> None:
         """Write-through to SQLite (self-committing, single-writer safe).
@@ -422,6 +458,31 @@ class SessionState:
             for r in rows
         ]
 
+    @staticmethod
+    def _read_trust_grants(db: sqlite3.Connection, session_id: str) -> list["TrustGrant"]:
+        """Read the persisted trust grants, ordered by insert ordinal.
+
+        ``granted_at`` round-trips through ISO-8601 (``datetime.fromisoformat``),
+        preserving whatever tz-awareness the grant was created with. Expiry is
+        recomputed from ``granted_at`` + ``ttl_seconds`` at query time.
+        """
+        from traceforge.governance.types import TrustGrant
+
+        rows = db.execute(
+            "SELECT key, granted_at, ttl_seconds, reason "
+            "FROM trust_grants WHERE session_id = ? ORDER BY ordinal",
+            (session_id,),
+        ).fetchall()
+        return [
+            TrustGrant(
+                key=r[0],
+                granted_at=datetime.fromisoformat(r[1]),
+                ttl_seconds=r[2],
+                reason=r[3] or "",
+            )
+            for r in rows
+        ]
+
     @classmethod
     def load_from_db(
         cls,
@@ -460,7 +521,65 @@ class SessionState:
             state._last_assistant_event_id = row[5]
             state._last_user_event_id = row[6]
             state._taint_ledger = cls._read_taint_entries(db, session_id)
+            state._trust_grants = TrustGrantStore(cls._read_trust_grants(db, session_id))
             state._event_count = row[7] or 0
             state._dropped_events = row[8] or 0
             state._last_sequence = row[9]
         return state
+
+
+class TrustGrantStore:
+    """In-memory collection of :class:`TrustGrant`\\ s with lazy TTL expiry.
+
+    A general governance primitive: it holds opaque-keyed grants and answers
+    "is there an active grant for key *K* at time *now*?". Grants carry no
+    consumer-specific meaning here — ``key`` is an opaque token whose vocabulary
+    the consumer owns. Expiry is by TTL only and is always evaluated against an
+    explicit ``now`` (never a wall clock), so the store is fully deterministic
+    and testable.
+
+    The store is not internally locked; callers that share it across threads
+    should serialize mutation the same way :class:`SessionState` does. Query
+    methods are pure and take a snapshot of ``now``, so a grant "auto-expires"
+    the instant ``now`` reaches its ``expires_at`` — no background sweep needed.
+    :meth:`prune` is an optional convenience to drop permanently-expired grants
+    (e.g. before persisting).
+    """
+
+    __slots__ = ("_grants",)
+
+    def __init__(self, grants: Iterable[TrustGrant] = ()) -> None:
+        self._grants: list[TrustGrant] = list(grants)
+
+    def add(self, grant: TrustGrant) -> None:
+        """Append a grant to the store."""
+        self._grants.append(grant)
+
+    def all_grants(self) -> tuple[TrustGrant, ...]:
+        """Return every stored grant (active, pending, or expired) in insert order."""
+        return tuple(self._grants)
+
+    def active(self, now: datetime) -> tuple[TrustGrant, ...]:
+        """Return the grants active at ``now`` (in insert order)."""
+        return tuple(g for g in self._grants if g.is_active(now))
+
+    def active_keys(self, now: datetime) -> frozenset[str]:
+        """Return the set of keys with at least one active grant at ``now``."""
+        return frozenset(g.key for g in self._grants if g.is_active(now))
+
+    def has_active(self, key: str, now: datetime) -> bool:
+        """Whether any grant for ``key`` is active at ``now``."""
+        return any(g.key == key and g.is_active(now) for g in self._grants)
+
+    def prune(self, now: datetime) -> int:
+        """Drop grants permanently expired at ``now``; return the number removed.
+
+        A grant is dropped only when ``now >= expires_at`` (it can never be active
+        again). Not-yet-active future grants are retained.
+        """
+        before = len(self._grants)
+        self._grants = [g for g in self._grants if now < g.expires_at]
+        return before - len(self._grants)
+
+    def __len__(self) -> int:
+        return len(self._grants)

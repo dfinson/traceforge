@@ -116,6 +116,23 @@ def upgrade() -> None:
         )
     """)
 
+    # ── Time-boxed trust grants ──
+    # One row per grant; ordinal preserves insert order and lets multiple grants
+    # for the same opaque key coexist. Activeness/expiry is computed from
+    # granted_at + ttl_seconds at read time — no stored "active" flag to keep in
+    # sync. ``key`` carries no schema-level meaning (a consumer-owned token).
+    conn.exec_driver_sql("""
+        CREATE TABLE IF NOT EXISTS trust_grants (
+            session_id TEXT NOT NULL,
+            ordinal INTEGER NOT NULL,
+            key TEXT NOT NULL,
+            granted_at TEXT NOT NULL,
+            ttl_seconds REAL NOT NULL,
+            reason TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (session_id, ordinal)
+        )
+    """)
+
     conn.exec_driver_sql("""
         CREATE TABLE IF NOT EXISTS drift_baselines (
             agent_model TEXT NOT NULL,
@@ -169,6 +186,7 @@ def downgrade() -> None:
     op.drop_table("session_summaries")
     op.drop_table("content_hashes")
     op.drop_table("drift_baselines")
+    op.drop_table("trust_grants")
     op.drop_table("taint_entries")
     op.drop_table("budget_counters")
     op.drop_table("mcp_profile_attributes")

@@ -67,8 +67,11 @@ def gate_from_stdin(*, format: str = "claude-code") -> None:
     only if even that fails do we exit 2 as a last-resort hard block.
 
     Args:
-        format: Output format. "claude-code" outputs Claude Code hook JSON.
-                "json" outputs raw verdict JSON.
+        format: Output *dialect*. "claude-code"/"json" are the original formats;
+                the per-agent dialects ("copilot-cli", "codex", "gemini", "cline",
+                "cursor", "amazon-q", "opencode", "openhands") translate the same
+                verdict into that agent's native deny contract (JSON shape + exit
+                code). See :func:`_output_deny`.
     """
     try:
         _gate_from_stdin_impl(format=format)
@@ -150,27 +153,103 @@ def _gate_from_stdin_impl(*, format: str = "claude-code") -> None:
 
 
 def _output_allow(format: str) -> None:
-    """Output an allow verdict in the specified format."""
-    if format == "claude-code":
-        # Empty JSON = pass to normal permission flow
-        print("{}")
-    else:
+    """Emit a non-blocking (allow) verdict in the target agent's dialect.
+
+    The gate only ever *blocks* on deny; on allow it steps aside and defers to the
+    agent's own permission flow. For every hook dialect that means a neutral/empty
+    JSON object on stdout and a clean exit 0 — no ``deny`` field, no ``cancel``, no
+    non-zero exit. The raw ``json`` debug format is the sole exception: it prints an
+    explicit ``{"decision": "allow"}``.
+    """
+    if format == "json":
         print(json.dumps({"decision": "allow"}))
+    else:
+        # {} == "no decision" == defer to the agent's normal permission flow. This
+        # is identical in meaning across every hook dialect (Claude Code, Copilot,
+        # Codex, Gemini, Cline, Cursor, Amazon Q, OpenCode, OpenHands).
+        print("{}")
 
 
 def _output_deny(format: str, reason: str) -> None:
-    """Output a deny verdict in the specified format."""
-    if format == "claude-code":
+    """Emit a DENY verdict translated into the target agent's deny contract.
+
+    Only the *output shape and exit code* are per-agent — the allow/deny decision
+    itself is made upstream (fail-closed) and passed in here unchanged. Every branch
+    below is the verified contract from SPEC.md "Framework Compatibility". exit-2 is
+    the universal hard-deny for the exit-code agents, except **Copilot CLI** (exit 2
+    is reserved there → exit 1) and **Amazon Q** (exit-2-only, no stdout contract).
+    **Cline** (JSON ``{"cancel": true}`` script) and **OpenCode** (a plugin that
+    throws) carry no exit-code contract of their own; OpenCode's plugin keys off the
+    non-zero exit. A non-empty reason is guaranteed because an *empty* deny reason
+    fails **OPEN** on Codex.
+    """
+    reason = reason or "denied by traceforge policy"
+
+    if format == "json":
+        print(json.dumps({"decision": "deny", "reason": reason}))
+        return
+
+    if format in ("claude-code", "codex"):
+        # Claude Code's schema is the de facto standard, and Codex implements the
+        # same ``hookSpecificOutput.permissionDecision``. Claude Code reads stdout
+        # at exit 0 (unchanged bytes); Codex additionally hard-denies on exit 2 with
+        # the reason on stderr.
         print(
             json.dumps(
                 {
                     "hookSpecificOutput": {
                         "hookEventName": "PreToolUse",
                         "permissionDecision": "deny",
-                        "permissionDecisionReason": reason or "denied by traceforge policy",
+                        "permissionDecisionReason": reason,
                     }
                 }
             )
         )
-    else:
+        if format == "codex":
+            print(reason, file=sys.stderr)
+            raise SystemExit(2)
+        return
+
+    if format == "copilot-cli":
+        # Copilot CLI (+ Copilot Cloud, same hook): deny via stdout permissionDecision
+        # OR a non-zero exit *other than 2* (exit 2 is reserved) → use exit 1.
+        print(json.dumps({"permissionDecision": "deny", "permissionDecisionReason": reason}))
+        raise SystemExit(1)
+
+    if format == "gemini":
+        # Gemini BeforeTool: stdout must be JSON only ("silence"); the reason goes to
+        # stderr to feed the exit-2 path without polluting stdout.
         print(json.dumps({"decision": "deny", "reason": reason}))
+        print(reason, file=sys.stderr)
+        raise SystemExit(2)
+
+    if format == "cursor":
+        print(json.dumps({"permission": "deny", "user_message": reason, "agent_message": reason}))
+        raise SystemExit(2)
+
+    if format == "cline":
+        # Cline PreToolUse script: cancel via JSON only — no exit-2 contract.
+        print(json.dumps({"cancel": True, "errorMessage": reason}))
+        return
+
+    if format == "amazon-q":
+        # Amazon Q treats any non-zero exit OTHER than 2 as warning-only and has no
+        # stdout deny contract: exit 2 with the reason on stderr.
+        print(reason, file=sys.stderr)
+        raise SystemExit(2)
+
+    if format == "openhands":
+        print(json.dumps({"decision": "deny", "reason": reason}))
+        print(reason, file=sys.stderr)
+        raise SystemExit(2)
+
+    if format == "opencode":
+        # The OpenCode plugin shells out to the gate and throws when it exits
+        # non-zero; it reads the reason from stdout (JSON) or stderr.
+        print(json.dumps({"decision": "deny", "reason": reason}))
+        print(reason, file=sys.stderr)
+        raise SystemExit(2)
+
+    # Unknown dialect — fail closed hard rather than silently allowing.
+    print(json.dumps({"decision": "deny", "reason": reason}))
+    raise SystemExit(2)

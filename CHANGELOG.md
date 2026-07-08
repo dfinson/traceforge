@@ -15,6 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `traceforge init` now injects the preflight gate hook for 8 more CLI/editor agents —
+  `copilot-cli`, `codex`, `gemini`, `cline`, `cursor`, `amazon-q`, `opencode`, and
+  `openhands` — in addition to `claude-code`. Each writer lands the agent's native hook
+  config (a merged JSON hook, a Cline hook script, or an OpenCode TS plugin) and is
+  idempotent on re-run.
+- `traceforge gate --stdin --agent <name>` option that renders the gate verdict in the
+  target agent's native deny contract (JSON shape + exit code). The internal allow/deny
+  decision and fail-closed behavior are unchanged; only the output formatting is
+  per-agent. `--format` is retained for backward compatibility.
 - `TRACEFORGE_TITLE_MODEL` environment variable to override the titler (span) weights
   directory, matching `TRACEFORGE_PHASE_MODEL` / `TRACEFORGE_BOUNDARY_MODEL`.
 

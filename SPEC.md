@@ -1900,27 +1900,65 @@ enforcement decisions.
 
 ### Framework Compatibility
 
-| # | Platform | Hook type | Consumer entry point | Gateable? |
-|---|----------|-----------|----------------------|-----------|
-| 1 | **Copilot CLI** | Shell script | `traceforge gate --stdin` | ✓ |
-| 2 | **Copilot Cloud** | Shell script | `traceforge gate --stdin` | ✓ |
-| 3 | **Copilot SDK** | In-process | `pipeline.score_tool_call(...)` | ✓ |
-| 4 | **Claude Code CLI** | Shell script | `traceforge gate --stdin --format claude-code` | ✓ |
-| 5 | **Claude Code SDK** | In-process | `pipeline.score_tool_call(...)` | ✓ |
-| 6 | **Cline** | Shell script | `traceforge gate --stdin` | ✓ |
-| 7 | **OpenHands** | Shell script | `traceforge gate --stdin` | ✓ |
-| 8 | **Goose** | In-process | `pipeline.score_tool_call(...)` | ✓ |
-| 9 | **OpenCode** | In-process | `pipeline.score_tool_call(...)` | ✓ |
-| 10 | **LangGraph / LangChain** | In-process | `pipeline.gate_langchain(tool)` | ✓ |
-| 11 | **CrewAI** | In-process | `pipeline.gate_crewai()` | ✓ |
-| 12 | **PydanticAI** | In-process | `pipeline.gate_pydantic_ai(agent)` | ✓ |
-| 13 | **MAF / Semantic Kernel** | In-process | `pipeline.gate_maf()` | ✓ |
-| 14 | **Aider** | None | — | ✗ (observation only) |
-| 15 | **smolagents** | Class wrap | `pipeline.gate_smolagents()` | ✓ |
-| 16 | **SWE-agent** | None | — | ✗ (observation only) |
+traceforge gates across two surfaces. **CLI / editor agents** wire a shell hook that shells out
+to `traceforge gate --stdin`, which relays the tool call to the running pipeline's IPC server and
+prints a verdict in the agent's native hook dialect. **In-process SDK frameworks** bind a `gate_*`
+adapter that wraps the framework's native hook. Today `traceforge init` ships an injector for
+**only Claude Code**; every other hook-capable agent must be wired manually (see PR-K).
 
-Rows 14 and 16 have no pre-execution hook. traceforge observes and scores their events, but no
-consumer can block their tool calls.
+#### CLI / editor agents (shell-hook gating)
+
+"Hook-capable" = the agent exposes a **user-injectable, preflight, shell-out hook whose deny
+blocks the tool**. Verified against each agent's primary first-party docs/source and
+independently reconciled (5 verification passes). **7 of 10 are hook-capable**; only Continue,
+Goose, and Aider are observe-only.
+
+| Agent | Capable? | Event | Config location | Deny contract | `init` injector |
+|-------|:--------:|-------|-----------------|---------------|:---------------:|
+| **Claude Code** | ✓ | `PreToolUse` | `~/.claude/settings.json` or `.claude/settings.json` | exit 2 OR stdout `hookSpecificOutput.permissionDecision:"deny"` | ✓ **shipped** |
+| **GitHub Copilot CLI** | ✓ | `preToolUse` (+ earlier `permissionRequest`) | `~/.copilot/hooks/*.json`, `.github/hooks/*.json`, or `.github/copilot/settings.json` | stdout `{"permissionDecision":"deny",...}` OR non-zero exit **≠ 2** (exit 2 reserved → use **exit 1**) | ✗ |
+| **OpenAI Codex CLI** | ✓ | `PreToolUse` (`[hooks]` system, **not** `notify`) | `~/.codex/hooks.json` or `[hooks]` in `~/.codex/config.toml` | exit 2 (stderr) OR `hookSpecificOutput.permissionDecision:"deny"` OR legacy `{"decision":"block"}` | ✗ |
+| **Cursor** | ✓ (v1.7+) | `preToolUse` / `beforeShellExecution` / `beforeMCPExecution` | `~/.cursor/hooks.json` or `<project>/.cursor/hooks.json` | exit 2 OR `{"permission":"deny","user_message":...,"agent_message":...}`; per-hook `"failClosed":true` | ✗ |
+| **Gemini CLI** | ✓ | `BeforeTool` | `~/.gemini/settings.json` or `.gemini/settings.json` | exit 2 (stderr) OR `{"decision":"deny","reason":...}` (`"block"` alias) | ✗ |
+| **Cline** | ✓ (v4.0.0+) | `PreToolUse` | **script file** named `PreToolUse` in `<workspace>/.clinerules/hooks/` or `~/Documents/Cline/Hooks/` | stdout `{"cancel":true,"errorMessage":...}` **only** (no exit-2) | ✗ |
+| **Amazon Q Developer CLI** | ✓ (v1.16.2+) | `preToolUse` | agent-config JSON: `~/.aws/amazonq/cli-agents/<name>.json` or `.amazonq/cli-agents/<name>.json` | **exit 2 only** (stderr → reason) | ✗ |
+| **Continue** | ✗ | — | static tool-policy (allow/ask/exclude) in `config.yaml` | no shell-out lifecycle hook | — |
+| **Goose** | ✗ | — | internal `permission_manager` / YAML + LLM "SmartApprove" | no external shell-out hook | — |
+| **Aider** | ✗ | — | `--yes-always` / `--auto-commits` only | no tool-call lifecycle | — |
+
+**Caveats to encode in the injectors/adapters:** Codex does **not** intercept the newer
+`unified_exec` background-terminal path, and a Codex deny with an **empty**
+`permissionDecisionReason` fails **OPEN**. Gemini requires "silence" — the hook must print nothing
+to stdout except the final JSON. Cline is a VS Code extension, so its init target (a dropped script
+file) differs from the CLI agents. Amazon Q treats any non-zero exit **other than 2** as
+warning-only (the tool still runs).
+
+**Unified contract (PR-K design note):** all 7 converge on one shape — a command fed tool-call
+JSON on stdin (`tool_name` + `tool_input`/`toolArgs` + `cwd` + session id) that denies via exit-2
+and/or a deny-JSON. **Claude Code's schema is the de facto standard** — Cursor and Codex both
+implement `hookSpecificOutput.permissionDecision`, and Gemini aliases `CLAUDE_PROJECT_DIR` — so
+`gate --stdin` can target a near-universal contract behind a thin per-agent adapter selected by an
+`--agent <name>` tag the injector writes into the hook command. **exit-2 = deny is a clean
+universal fallback for 5 of 7** (Claude, Codex, Gemini, Cursor, Amazon Q). The divergences that
+matter: **Cline** has no exit-2 and drops a script file (not JSON settings); **Amazon Q** is
+exit-2-only; **Copilot** reserves exit-2 (use exit 1).
+
+#### In-process SDK frameworks (`gate_*` adapters)
+
+| Framework | Consumer entry point | Notes |
+|-----------|----------------------|-------|
+| **CrewAI** | `pipeline.gate_crewai()` | global hooks; preflight + postflight |
+| **LangChain** | `pipeline.gate_langchain(tool)` → wrapped tool | sync `_run` only today (async `_arun` pending) |
+| **LangGraph** | `pipeline.gate_langgraph(tools)` → gated tool node | preflight + postflight |
+| **Semantic Kernel** | `pipeline.gate_semantic_kernel(kernel)` | installs a gating filter |
+| **MAF (agent-framework)** | `pipeline.gate_maf()` → middleware | preflight + postflight |
+| **smolagents** | `pipeline.gate_smolagents(agent_cls=None)` → gated class | preflight + postflight |
+| **PydanticAI** | `pipeline.gate_pydantic_ai(agent)` | per-agent toolset wrap; `ctx.run_id` session id |
+| **OpenAI Agents** | `pipeline.gate_openai_agents(agent)` → gated agent | input-guardrail today (per-tool gating + postflight pending) |
+
+Read-only scoring for any surface is available via `pipeline.score_tool_call(...)` without
+registering a `GatePolicy`. SWE-agent and OpenHands have no injectable pre-execution hook today:
+traceforge observes and scores their events, but no consumer can block their tool calls.
 
 ### File Structure
 

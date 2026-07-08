@@ -110,6 +110,27 @@ Classification behavior is governed entirely by YAML in `classify/data/`:
 | `risk.yaml` | Risk weights, flag modifiers, injection patterns, taint rules. |
 | `recommendation_rules.yaml` | Governance rule set → `RecommendedAction` (consumed by the [Assessor](sdk.md)). |
 
+## Bring your own classifications
+
+The tables above are TraceForge's **built-in generic defaults**. Because the engine keys off
+trace-native structure, it ships only a general vocabulary and never hard-codes a specific
+consumer's tool catalog. To add your own native tools or private MCP servers, overlay them
+through the config chain — don't edit these bundled files or fork the package.
+
+Three overlay surfaces cover the common cases:
+
+- `tool_classifications` — full classifications for your native tools.
+- `mcp_profiles` — profiles for your MCP servers, with nested `tool_overrides` for per-tool refinement.
+- `tool_display` — human-facing labels for the `tool_display` field stamped at enrichment (see the [event model](../architecture/event-model.md)).
+
+Your entries **overlay** the defaults per key; nothing is replaced wholesale. Give an
+`mcp_profiles` entry the same `id` as a built-in to supersede it, or set `disabled: true` to
+drop one. Supply the overlay via (highest priority first) the `TRACEFORGE_CONFIG` env var, a
+project `.traceforge/config.yaml`, or a `traceforge.profiles` entry point in your own package —
+each overlaying the bundled defaults. See
+[Custom tool & MCP classifications](../configuration.md#custom-tool--mcp-classifications) for the full
+schema, YAML examples, and an entry-point walkthrough.
+
 ## Workflow dimensions
 
 Derived presentation concerns are kept separate from semantic classification:

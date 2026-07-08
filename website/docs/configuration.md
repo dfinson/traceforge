@@ -2,7 +2,7 @@
 id: configuration
 title: Configuration
 sidebar_label: Configuration
-description: traceforge.yaml, ~/.traceforge/config.yaml, TRACEFORGE_* environment variables, and loading precedence.
+description: traceforge.yaml, ~/.traceforge/config.yaml, TRACEFORGE_* environment variables, loading precedence, and custom tool & MCP classification overlays.
 ---
 
 # Configuration
@@ -146,3 +146,154 @@ title:
 
 When `strategy: api` but no key is present (or a call fails/times out), naming silently falls
 back to the heuristic, a missing key never errors or blocks.
+
+## Custom tool & MCP classifications
+
+TraceForge classifies by **trace-native structure** — the shape of each tool call and, for
+shell, its parsed AST — and ships only a small, *general* set of tool and MCP-server
+classifications as built-in defaults. It deliberately does **not** hard-code any one consumer's
+tool catalog. If you run bespoke native tools or private MCP servers, you attach your own
+taxonomy as an **overlay**: TraceForge merges your entries on top of its generic defaults,
+per key, so you own your vocabulary with no change to — and no fork of — TraceForge itself.
+
+:::note Separate discovery chain from the root config
+The classification overlay is loaded by `traceforge.classify.config.load_config()`, a
+**different** discovery chain from the [root config precedence](#loading-precedence) above. It
+shares the `TRACEFORGE_CONFIG` environment variable (each subsystem reads only the keys it
+owns from a shared file), but its project- and user-level files live at their own paths (listed
+below). Put classification sections in one of those files — not in `./traceforge.yaml`.
+:::
+
+### The override surfaces
+
+These are top-level keys in a classification config (a `ClassifyConfig`). Supply only the
+sections you want to overlay; everything else falls through to the defaults. Dimension values
+are dot-path strings drawn from the [classification dimensions](reference/classification.md#dimensions).
+
+#### `tool_classifications` — native tools
+
+Maps a canonical tool name to a full classification. `mechanism` is required; every other
+dimension is optional (`ToolClassificationConfig`: `mechanism: str`, `effect: str | None`, and
+`scope` / `role` / `action` / `capability` as string lists).
+
+```yaml
+# .traceforge/config.yaml
+tool_classifications:
+  deploy_service:              # your bespoke native tool
+    mechanism: network.http    # required
+    effect: mutating           # read_only | mutating | destructive
+    scope: [state.repository]
+    role: [orchestrator.ci_cd]
+    action: [deliver.push]
+    capability: [network_outbound]
+```
+
+#### `mcp_profiles` — MCP servers
+
+A list of profiles, each matched against the `mcp__<server>__<tool>` namespace by its
+`namespace_aliases`. The profile classifies every tool from that server. Required fields are
+`namespace_aliases: list[str]` and `mechanism: str`; `id`, `default_effect`, `role`, `scope`,
+`action`, `capability`, `tool_overrides`, and `disabled` are optional (`McpProfileConfig`).
+
+```yaml
+mcp_profiles:
+  - id: acme                                   # optional; reuse a built-in id to replace it
+    namespace_aliases: [acme, acme_platform]   # required — matches mcp__acme__*
+    mechanism: network.http                    # required
+    role: [retriever.api_client]
+    scope: [state.repository]
+    capability: [network_outbound]
+    default_effect: read_only
+```
+
+#### `tool_overrides` — per-tool refinement inside a profile
+
+`tool_overrides` is **nested inside an `mcp_profiles` entry**, not a top-level section. It maps
+a tool name to a partial classification that refines the server-level defaults for just that
+tool. Every field is optional — set only what differs (`McpToolOverrideConfig`: `effect`,
+`mechanism`, `role`, `action`, `scope`, `capability`).
+
+```yaml
+mcp_profiles:
+  - id: acme
+    namespace_aliases: [acme]
+    mechanism: network.http
+    role: [retriever.api_client]
+    default_effect: read_only
+    tool_overrides:
+      create_deployment:
+        effect: mutating
+        role: [orchestrator.ci_cd]
+        scope: [configuration.ci_cd]
+      delete_deployment:
+        effect: destructive
+```
+
+:::tip `tool_display` rides the same chain
+The overlay chain also carries `tool_display` — a `dict[str, str]` mapping a canonical tool
+identity to a human-facing label. It's how you relabel tools without touching their
+classification. See [Bring your own classifications](reference/classification.md#bring-your-own-classifications)
+and the `tool_display` field on the [event model](architecture/event-model.md).
+:::
+
+### Supplying an overlay
+
+The classification loader merges these layers, **highest priority first**, each overlaying the
+one below:
+
+1. An explicit `config_path=` passed to `load_config()` (programmatic; wins over everything).
+2. **`TRACEFORGE_CONFIG`** — an env var pointing at a YAML file.
+3. **`.traceforge/config.yaml`** — a project file, searched from the cwd upward (`config.yml` also accepted).
+4. `~/.config/traceforge/config.yaml` — a user-global file (`$XDG_CONFIG_HOME` honored).
+5. **`traceforge.profiles`** — entry points contributed by installed packages.
+6. TraceForge's built-in generic defaults (`classify/data/*.yaml`).
+
+The three you'll typically reach for are **2, 3, and 5** — all of which overlay the built-in
+defaults (6). Mind the precedence: a `TRACEFORGE_CONFIG` file overrides a project
+`.traceforge/config.yaml`, which overrides an entry-point profile.
+
+**Merge semantics.** Dict sections (`tool_classifications`, `tool_display`) merge **per key** —
+your key wins, untouched defaults survive. `mcp_profiles` is a list where higher-priority layers
+are prepended; give a profile the same `id` as a built-in to **replace** it, or set
+`disabled: true` to drop one.
+
+#### Ship classifications from your own package
+
+For a reusable overlay, register a `traceforge.profiles` entry point. TraceForge calls each
+entry point, expecting a **callable that returns a `dict`** (a `ClassifyConfig` shape) — or a
+path to a YAML file.
+
+```toml
+# your package's pyproject.toml
+[project.entry-points."traceforge.profiles"]
+acme = "acme_traceforge.profiles:classifications"
+```
+
+```python
+# acme_traceforge/profiles.py
+def classifications() -> dict:
+    """Return an overlay of Acme's tools and MCP servers."""
+    return {
+        "tool_classifications": {
+            "deploy_service": {
+                "mechanism": "network.http",
+                "effect": "mutating",
+                "capability": ["network_outbound"],
+            },
+        },
+        "mcp_profiles": [
+            {
+                "id": "acme",
+                "namespace_aliases": ["acme"],
+                "mechanism": "network.http",
+                "role": ["retriever.api_client"],
+                "capability": ["network_outbound"],
+            },
+        ],
+    }
+```
+
+Install that package alongside TraceForge and its classifications load automatically — no config
+file required, and still overridable by a project's `.traceforge/config.yaml`. TraceForge ships
+its own defaults as bundled data (not as an entry point), so your profiles never collide with a
+built-in registration.

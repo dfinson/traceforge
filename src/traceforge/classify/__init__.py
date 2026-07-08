@@ -43,6 +43,7 @@ from traceforge.classify.shell import (
     classify_shell,
 )
 from traceforge.classify.tools import classify_tool, normalize_tool_name
+from traceforge.classify.tool_display import ToolDisplayProvider, ToolDisplayResolver
 from traceforge.classify.workflow import Phase, Visibility
 
 __all__ = [
@@ -87,6 +88,9 @@ __all__ = [
     "McpServerProfile",
     "McpToolOverride",
     "normalize_tool_name",
+    # Tool display
+    "ToolDisplayProvider",
+    "ToolDisplayResolver",
     # Risk scoring
     "Confidence",
     "RiskAssessment",

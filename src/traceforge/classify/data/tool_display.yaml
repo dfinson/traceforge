@@ -1,0 +1,30 @@
+# Tool display names — maps a canonical tool identity to a human-facing label.
+#
+# This populates ``EventMetadata.tool_display`` at enrichment time. Keys are the
+# CANONICAL tool identity (the normalized form produced by ``normalize_tool_name``,
+# e.g. every shell-family alias collapses to ``shell``, every read alias to
+# ``view``), NOT the raw per-harness tool name.
+#
+# This is a SMALL, GENERAL default set covering the universal coding-agent tool
+# taxonomy. It is an extension point: supply your own ``tool_display:`` section via
+# the standard config-override chain (``.traceforge/config.yaml``, a
+# ``TRACEFORGE_CONFIG`` file, or a ``traceforge.profiles`` entry point) to add or
+# override labels with your own vocabulary. Per-key overrides win over these
+# defaults; unknown tools resolve to None (the stub stays empty, unchanged).
+
+tool_display:
+  shell: shell
+  view: read file
+  edit: edit file
+  create: create file
+  delete_file: delete file
+  grep: search
+  glob: find files
+  codebase_search: search codebase
+  web_fetch: fetch url
+  web_search: web search
+  web_browse: browse web
+  task: delegate task
+  ask_user: ask user
+  report_intent: report intent
+  think: think

@@ -56,6 +56,7 @@ const config = {
       image: 'img/og-card.png',
       colorMode: {
         defaultMode: 'dark',
+        disableSwitch: true,
         respectPrefersColorScheme: false,
       },
       navbar: {

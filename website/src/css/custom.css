@@ -64,12 +64,7 @@
   --docusaurus-highlighted-code-line-bg: rgba(255, 153, 33, 0.18);
 }
 
-/* ---- light theme (kept usable via the toggle) ---- */
-[data-theme='light'] {
-  --ifm-background-color: #ffffff;
-  --ifm-heading-color: #0b1020;
-  --ifm-blockquote-border-color: var(--tf-orange);
-}
+/* ---- dark theme is the only theme (the light/dark toggle is disabled) ---- */
 
 [data-theme='dark'] .navbar {
   border-bottom: 1px solid #12182a;

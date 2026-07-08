@@ -10,14 +10,24 @@ from collections.abc import Awaitable, Iterable
 from typing import TYPE_CHECKING
 
 from traceforge.enricher import Enricher
+from traceforge.progress import ProgressEmitter
 from traceforge.sinks.base import StorageSink
 from traceforge.sinks.callback import (
     CallbackSink,
     EventCallback,
     KindFilter,
+    ProgressCallback,
     as_async_event_callback,
+    as_async_progress_callback,
 )
-from traceforge.types import EventMetadata, SessionEvent, TelemetrySpan, TitleUpdate, UsageRecord
+from traceforge.types import (
+    EventMetadata,
+    ProgressUpdate,
+    SessionEvent,
+    TelemetrySpan,
+    TitleUpdate,
+    UsageRecord,
+)
 
 if TYPE_CHECKING:
     from traceforge.governance.results import SessionMeta
@@ -135,6 +145,12 @@ class EventPipeline:
         self._boundary_streams: dict[str, object] = {}
         self._title_inferencer = title_inferencer
         self._title_streams: dict[str, object] = {}
+        # Live progress-headline emitter (SPEC U7). Created lazily the first time
+        # a caller subscribes with ``on_progress`` (see :meth:`subscribe`); stays
+        # ``None`` otherwise, so every progress site on the hot path is a single
+        # ``is not None`` check that is False on the default path — no emitter, no
+        # per-session state, byte-identical emission when unused.
+        self._progress: ProgressEmitter | None = None
         # In-flight off-hot-path session-title API refinements, keyed by session
         # so eviction can cancel a session's pending refinement (a stale refine
         # must never emit after the session was evicted and its title stream
@@ -183,33 +199,55 @@ class EventPipeline:
 
     def subscribe(
         self,
-        on_event: EventCallback,
+        on_event: EventCallback | None = None,
         *,
+        on_progress: ProgressCallback | None = None,
         kind: KindFilter = None,
         to_thread: bool = False,
     ) -> CallbackSink:
-        """Register a lightweight event subscriber (SPEC §15 / #47).
+        """Register a lightweight event and/or progress subscriber (SPEC §15 / #47, U7).
 
-        One-line sugar over the sink model: wraps ``on_event`` in a
+        One-line sugar over the sink model: wraps the given callback(s) in a
         :class:`~traceforge.sinks.callback.CallbackSink` and appends it, so the
         subscriber joins the pipeline's existing error-isolated fan-out — a
         failing subscriber never blocks other sinks or the pipeline. This *is* the
         publish/subscribe story: no sink subclassing, no flush/close lifecycle, no
         persistence contract.
 
-        ``on_event`` may be async *or* a plain sync callable (adapted via
-        :func:`~traceforge.sinks.callback.as_async_event_callback`); pass
+        ``on_event`` receives every (post-structuring) :class:`SessionEvent`;
+        ``on_progress`` receives a live :class:`~traceforge.types.ProgressUpdate`
+        — a deterministic heuristic headline emitted the instant an activity/step
+        opens (U7). Pass either or both; at least one is required. Subscribing to
+        ``on_progress`` lazily arms the progress emitter; not subscribing to it
+        leaves the pipeline byte-identical to before (the emitter stays ``None``).
+
+        Each callback may be async *or* a plain sync callable (adapted via
+        :func:`~traceforge.sinks.callback.as_async_event_callback` /
+        :func:`~traceforge.sinks.callback.as_async_progress_callback`); pass
         ``to_thread=True`` to run a blocking sync callback off the event loop.
-        ``kind`` optionally filters which events reach this subscriber — an exact
+        ``kind`` optionally filters which *events* reach ``on_event`` — an exact
         kind, a ``"prefix.*"`` wildcard (e.g. ``"tool.*"``), an iterable of those,
-        or a predicate over the event — checked before dispatch.
+        or a predicate — checked before dispatch. It does not apply to progress
+        updates, which describe segment openings rather than events.
 
         Returns the created :class:`CallbackSink`, which doubles as the handle for
         :meth:`unsubscribe`.
         """
-        sink = CallbackSink(
-            on_event=as_async_event_callback(on_event, kind=kind, to_thread=to_thread)
+        if on_event is None and on_progress is None:
+            raise ValueError("subscribe requires at least one of on_event or on_progress")
+        event_cb = (
+            as_async_event_callback(on_event, kind=kind, to_thread=to_thread)
+            if on_event is not None
+            else None
         )
+        progress_cb = (
+            as_async_progress_callback(on_progress, to_thread=to_thread)
+            if on_progress is not None
+            else None
+        )
+        sink = CallbackSink(on_event=event_cb, on_progress=progress_cb)
+        if on_progress is not None and self._progress is None:
+            self._progress = ProgressEmitter()
         self._sinks.append(sink)
         if self._sink_labels is not None:
             self._sink_labels.append(_sink_label(len(self._sinks) - 1, sink))
@@ -368,6 +406,8 @@ class EventPipeline:
                 # no API task running after the stream is gone. Normally-completing
                 # sessions refine their trailing activity in _flush_title_streams.
         self._boundary_streams.pop(session_id, None)
+        if self._progress is not None:
+            self._progress.forget(session_id)
 
     async def _push_locked(self, event: SessionEvent) -> None:
         if self._enricher is not None:
@@ -452,6 +492,11 @@ class EventPipeline:
             if self._boundary_inferencer is not None:
                 event = self._boundary_stamp(event)
             await self._title_emit(event)
+            # Progress rides the same boundary-stamped event straight after it
+            # reaches the sinks. Gated: on the default path ``_progress`` is None,
+            # so this is a single bool check and nothing else runs (U7).
+            if self._progress is not None:
+                await self._emit_progress(event)
 
     async def _title_emit(self, event: SessionEvent) -> None:
         """Stamp the event's live segment ids, emit it immediately, then emit
@@ -749,6 +794,37 @@ class EventPipeline:
             f"title update for segment {update.segment_id}",
         )
 
+    async def _emit_progress(self, event: SessionEvent) -> None:
+        """Derive and fan-out a live progress headline for a just-emitted event.
+
+        Only reached when a progress subscriber is armed (the caller guards on
+        ``self._progress is not None``), so the default path never runs this. The
+        emitter is synchronous and error-isolated here: a failure naming one event
+        must never break live emission — it is logged and the event stands.
+        """
+        progress = self._progress
+        if progress is None:
+            return
+        try:
+            update = progress.observe(event)
+        except Exception as exc:
+            logger.error(
+                "Live progress inference failed for event %s: %s — skipping",
+                event.id,
+                exc,
+                exc_info=True,
+            )
+            return
+        if update is not None:
+            await self._push_progress_update(update)
+
+    async def _push_progress_update(self, update: ProgressUpdate) -> None:
+        """Fan-out a live incremental progress headline to all sinks. Error-isolated."""
+        await self._fanout(
+            (sink.on_progress(update) for sink in self._sinks),
+            f"progress update for segment {update.segment_id}",
+        )
+
     async def push_span(self, span: TelemetrySpan) -> None:
         """Fan-out span to all registered sinks."""
         await self._fanout((sink.on_span(span) for sink in self._sinks), f"span {span.name}")
@@ -801,6 +877,8 @@ class EventPipeline:
         self._boundary_streams.clear()
         self._session_locks.clear()
         self._session_order.clear()
+        if self._progress is not None:
+            self._progress.clear()
 
         await self._fanout((sink.flush() for sink in self._sinks), "flush")
 

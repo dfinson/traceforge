@@ -175,3 +175,61 @@ class TestEndToEndZeroChange:
     def test_default_pipeline_builds_no_policy_assessors(self):
         cfg = GovernanceConfig()
         assert _build_policy_assessors(cfg.policy) == ()
+
+
+# A battery of diverse tool calls that do NOT touch a protected path, spanning
+# several rule-engine outcomes (benign read, destructive shell, network egress,
+# ordinary write). Session ids are pipeline-local (each pipeline has its own
+# in-memory DB), so reuse across pipelines is isolated.
+_NONMATCHING_PAYLOADS = [
+    {"tool_name": "read_file", "tool_input": {"path": "/repo/src/main.py"}, "session_id": "z1"},
+    {"tool_name": "bash", "tool_input": {"command": "rm -rf /tmp/build"}, "session_id": "z2"},
+    {"tool_name": "bash", "tool_input": {"command": "curl http://example.com"}, "session_id": "z3"},
+    {"tool_name": "write_file", "tool_input": {"path": "/repo/src/app.py"}, "session_id": "z4"},
+    {"tool_name": "bash", "tool_input": {"command": "ls -la"}, "session_id": "z5"},
+]
+
+
+def _decision(trace):
+    """The gating-relevant decision surface of an EventTrace."""
+    return (trace.suggested_action, trace.risk_score, trace.reason)
+
+
+class TestConfiguredPolicyInertOnNonMatchingEvents:
+    """The single most important regression guard.
+
+    A pipeline with a *configured* policy must produce byte-identical decisions to
+    a default (no-policy) pipeline for every event that does not match the policy.
+    This proves the overlay is completely inert except on the events it targets —
+    the strongest form of "default-off = zero behavior change".
+    """
+
+    def _configured(self):
+        cfg = GovernanceConfig(
+            policy=PolicyConfig(
+                protected_paths=ProtectedPathsPolicyConfig(
+                    patterns=["**/secrets/**"], action="escalate"
+                ),
+                cost_ceiling=CostCeilingPolicyConfig(
+                    pressure_action="escalate", hard_max_tool_calls=10_000
+                ),
+            )
+        )
+        return GovernancePipeline.create(cfg)
+
+    def test_configured_policy_matches_default_on_nonmatching_events(self):
+        default_pipe = GovernancePipeline.create()
+        policy_pipe = self._configured()
+        for payload in _NONMATCHING_PAYLOADS:
+            base = default_pipe.score_tool_call(dict(payload))
+            with_policy = policy_pipe.score_tool_call(dict(payload))
+            assert _decision(with_policy) == _decision(base), payload["tool_name"]
+
+    def test_empty_policyconfig_matches_omitted_policy(self):
+        # Supplying an explicit empty PolicyConfig() is identical to omitting it.
+        omitted = GovernancePipeline.create(GovernanceConfig())
+        explicit = GovernancePipeline.create(GovernanceConfig(policy=PolicyConfig()))
+        for payload in _NONMATCHING_PAYLOADS + [dict(_SECRETS_PAYLOAD)]:
+            a = omitted.score_tool_call(dict(payload))
+            b = explicit.score_tool_call(dict(payload))
+            assert _decision(a) == _decision(b), payload["tool_name"]

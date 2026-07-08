@@ -60,13 +60,68 @@ class Shield:
 
         Returns (trace, verdict) tuple. Verdict is ALLOW or DENY.
         Session ID is derived from the trace (which normalizes from payload).
+
+        Fail-closed: the scorer is a security-critical collaborator. If it raises
+        (a bug, a persistence error, or a malformed payload that escapes the
+        scorer's own internal fail-closed handling), we DENY rather than let the
+        tool run. Without this guard a scorer exception escapes into each
+        framework hook, where whether the call is blocked is framework-dependent
+        and untested — the enforcement equivalent of a fail-OPEN.
         """
-        with self._lock:
-            trace = self._scorer(payload)
-        # Use trace.session_id for consistency — it normalizes empty/missing values
-        session_id = trace.session_id
+        from traceforge.sdk.verdict import Verdict
+
+        try:
+            with self._lock:
+                trace = self._scorer(payload)
+            # Use trace.session_id for consistency — it normalizes empty/missing values
+            session_id = trace.session_id
+        except Exception as exc:
+            session_id = self._session_id_from_payload(payload)
+            deny = Verdict.deny(f"scoring error (fail-closed): {type(exc).__name__}: {exc}")
+            try:
+                self._record_denial(session_id, deny)
+            except Exception:
+                pass  # never let denial bookkeeping turn a fail-closed deny into a crash
+            try:
+                fallback = self._fallback_trace(payload, session_id)
+            except Exception:
+                fallback = None  # last resort; callers check verdict.denied before trace
+            return fallback, deny
+
         verdict = self.run_preflight(trace, session_id=session_id)
         return trace, verdict
+
+    @staticmethod
+    def _session_id_from_payload(payload: dict) -> str:
+        """Best-effort session id for the fail-closed path when scoring raised."""
+        sid = payload.get("session_id") if isinstance(payload, dict) else None
+        return sid if isinstance(sid, str) and sid else "unknown"
+
+    @staticmethod
+    def _fallback_trace(payload: dict, session_id: str) -> "EventTrace":
+        """Build a minimal sentinel EventTrace for the fail-closed deny path.
+
+        Callers that read ``trace`` fields on a deny — notably the gate IPC
+        server's verdict response, which reports ``trace.risk_score`` /
+        ``trace.risk_band`` unconditionally — need a valid trace even when the
+        scorer never produced one. Assessment fields are left ``None``.
+        """
+        import uuid
+        from datetime import datetime, timezone
+
+        from traceforge.trace import EventTrace
+
+        raw = payload if isinstance(payload, dict) else {}
+        tool_call_id = raw.get("tool_call_id") or str(uuid.uuid4())
+        return EventTrace(
+            id=str(uuid.uuid4()),
+            kind="tool.call.started",
+            session_id=session_id,
+            tool_call_id=str(tool_call_id),
+            timestamp=datetime.now(timezone.utc),
+            source_key="",
+            raw_event=raw,
+        )
 
     def enforce_postflight(
         self,

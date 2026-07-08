@@ -429,3 +429,47 @@ class TestFailClosed:
         payload = {"tool_name": "x", "tool_input": {}, "session_id": "s1"}
         _, verdict = pipeline._score_and_gate_preflight(payload)
         assert verdict.allowed
+
+    def test_scorer_exception_denies(self):
+        """If the scorer itself raises, the result is DENY (fail-closed).
+
+        The scorer is a security-critical collaborator injected into the shield.
+        A scoring bug or persistence error must never fall through to the tool
+        running: ``score_and_gate_preflight`` wraps the scorer and returns DENY.
+        Without this guard the exception escapes into each framework hook, where
+        whether the call is blocked is framework-dependent and untested.
+        """
+
+        def exploding_scorer(payload):
+            raise RuntimeError("scorer blew up")
+
+        pipeline = _make_pipeline(preflight=_allow_all)
+        pipeline._shield._scorer = exploding_scorer
+
+        payload = {"tool_name": "rm", "tool_input": {"path": "/"}, "session_id": "s1"}
+        trace, verdict = pipeline._score_and_gate_preflight(payload)
+
+        assert verdict.denied
+        assert "fail-closed" in verdict.reason
+        assert "RuntimeError" in verdict.reason
+        # A sentinel trace preserves the (trace, verdict) contract for callers
+        # that read trace fields on a deny (e.g. the gate IPC server, which
+        # reports trace.risk_score/risk_band unconditionally).
+        assert trace is not None
+        assert trace.session_id == "s1"
+        assert trace.risk_score is None  # scorer never ran; assessment fields unset
+
+    def test_scorer_exception_records_denial(self):
+        """A scorer failure is booked as a denial in session state (fail-closed)."""
+
+        def exploding_scorer(payload):
+            raise ValueError("nope")
+
+        pipeline = _make_pipeline(preflight=_allow_all)
+        pipeline._shield._scorer = exploding_scorer
+
+        payload = {"tool_name": "x", "tool_input": {}, "session_id": "s-rec"}
+        pipeline._score_and_gate_preflight(payload)
+
+        state = pipeline._shield._ensure_gate_state("s-rec")
+        assert state.denied_count >= 1

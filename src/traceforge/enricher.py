@@ -19,6 +19,14 @@ from traceforge.types import EventKind, EventMetadata, SessionEvent
 
 logger = logging.getLogger(__name__)
 
+#: Default cap on the number of simultaneously buffered unpaired tool-starts the
+#: Enricher retains while awaiting their matching completion. When exceeded, the
+#: oldest buffered start is evicted as an orphan (never dropped) so a stream with
+#: many never-completed starts cannot grow the pairing buffer without bound.
+#: Generous enough that realistic workloads never evict a live start; pass
+#: ``max_pending=None`` to disable the size cap.
+_DEFAULT_MAX_PENDING = 4096
+
 
 class Enricher:
     """Stateful per-session enricher that pairs tool events and classifies them."""
@@ -28,6 +36,9 @@ class Enricher:
         custom_classifications: dict[str, Classification] | None = None,
         config: ClassifyConfig | None = None,
         config_path: Path | str | None = None,
+        pairing_ttl_s: float | None = None,
+        max_pending: int | None = _DEFAULT_MAX_PENDING,
+        flush_on_session_end: bool = True,
     ) -> None:
         """
         Args:
@@ -36,9 +47,37 @@ class Enricher:
             config: Optional pre-built ClassifyConfig (takes priority over config_path).
             config_path: Optional path to a YAML config file. If neither config nor
                 config_path is provided, the default discovery chain is used.
+            pairing_ttl_s: Bounded-buffer policy — evict a buffered tool-start as an
+                orphan once it is older than this many seconds in *stream time*
+                (age measured against the timestamp of the event being processed,
+                not wallclock, so eviction stays deterministic). ``None`` (default)
+                disables TTL eviction. Must be > 0 when set.
+            max_pending: Bounded-buffer policy — cap on the number of simultaneously
+                buffered unpaired tool-starts. When exceeded, the oldest start is
+                evicted as an orphan until the buffer is back within the cap.
+                ``None`` disables the size cap. Must be >= 1 when set. Defaults to
+                ``_DEFAULT_MAX_PENDING`` so a stream of never-completed starts cannot
+                grow the buffer without bound.
+            flush_on_session_end: When True (default — the historical behavior), a
+                SESSION_ENDED event drains that session's still-buffered starts as
+                orphans before the session-ended event is emitted. When False the
+                starts stay buffered (still subject to the bounds above and the final
+                :meth:`flush`) and are never dropped.
+
+        Raises:
+            ValueError: if ``pairing_ttl_s`` is set and not > 0, or if
+                ``max_pending`` is set and not >= 1.
         """
+        if pairing_ttl_s is not None and pairing_ttl_s <= 0:
+            raise ValueError(f"pairing_ttl_s must be > 0 when set, got {pairing_ttl_s!r}")
+        if max_pending is not None and max_pending < 1:
+            raise ValueError(f"max_pending must be >= 1 when set, got {max_pending!r}")
+
         self._custom_classifications = custom_classifications
         self._pending: dict[tuple[str, str], SessionEvent] = {}
+        self._pairing_ttl_s = pairing_ttl_s
+        self._max_pending = max_pending
+        self._flush_on_session_end = flush_on_session_end
 
         # Build engine eagerly so config errors surface at construction time
         if config is not None:
@@ -51,7 +90,9 @@ class Enricher:
     def process(self, event: SessionEvent) -> SessionEvent | list[SessionEvent] | None:
         """Enrich a single event. Returns None if event is buffered (tool_start waiting
         for its tool_complete pair). Returns enriched event when ready. May return a list
-        if a displaced orphan start needs to be emitted alongside buffering a new start."""
+        when unpaired starts are flushed as orphans alongside the primary result — either a
+        displaced duplicate start, or starts evicted by the bounded-buffer policy
+        (``pairing_ttl_s`` / ``max_pending``)."""
         if event.metadata is None:
             # Defensive: SessionEvent defaults metadata to EventMetadata(), but a
             # model_construct-built event may carry None. Normalize up front so the
@@ -59,6 +100,13 @@ class Enricher:
             # push the raw event straight to sinks and bypass the exactly-once
             # tool-call pairing guarantee the downstream governance stage relies on.
             event = event.model_copy(update={"metadata": EventMetadata()})
+
+        # Stream time drives TTL eviction: the timestamp of the event currently
+        # being processed is "now". Using stream time (not wallclock) keeps bounded
+        # eviction deterministic and lets callers control it purely via timestamps.
+        now = event.timestamp
+
+        result: SessionEvent | list[SessionEvent] | None
         if event.kind == EventKind.TOOL_CALL_STARTED:
             event = self._classify(event)
             event = self._set_visibility(event)
@@ -80,12 +128,13 @@ class Enricher:
                         event.session_id,
                         tool_call_id,
                     )
-                    orphan_metadata = displaced.metadata.model_copy(update={"duration_ms": None})
-                    return [displaced.model_copy(update={"metadata": orphan_metadata})]
-                return None
-            return event
+                    result = [_as_orphan(displaced)]
+                else:
+                    result = None
+            else:
+                result = event
 
-        if event.kind == EventKind.TOOL_CALL_COMPLETED:
+        elif event.kind == EventKind.TOOL_CALL_COMPLETED:
             tool_call_id = _extract_tool_call_id(event)
             start_event = (
                 self._pending.get((event.session_id, tool_call_id)) if tool_call_id else None
@@ -113,9 +162,9 @@ class Enricher:
                 event = self._set_visibility(event)
 
             event = self._set_phase(event)
-            return event
+            result = event
 
-        if event.kind == EventKind.SESSION_ENDED:
+        elif event.kind == EventKind.SESSION_ENDED:
             # Flush this session's still-buffered tool starts as orphans BEFORE the
             # session-ended event. A governance stage finalizes and evicts session
             # state on session.ended; without this, buffered unpaired starts would
@@ -129,24 +178,27 @@ class Enricher:
             # flushed+scored here, so the late completion would be observed a second
             # time into a resurrected state. We do not carry per-session tombstones
             # to dedup that case — it does not occur in well-formed input.
-            orphans = self._flush_session(event.session_id)
+            #
+            # ``flush_on_session_end`` (default True) gates this drain; disabling it
+            # leaves the starts pending, subject only to the size/TTL bounds and the
+            # final Enricher.flush — they are still never dropped.
+            orphans = self._flush_session(event.session_id) if self._flush_on_session_end else []
             event = self._set_visibility(event)
             event = self._set_phase(event)
-            return [*orphans, event] if orphans else event
+            result = [*orphans, event] if orphans else event
 
-        # Non-tool events: set visibility and phase, pass through
-        event = self._set_visibility(event)
-        event = self._set_phase(event)
-        return event
+        else:
+            # Non-tool events: set visibility and phase, pass through
+            event = self._set_visibility(event)
+            event = self._set_phase(event)
+            result = event
+
+        return self._enforce_bounds(now, result)
 
     def flush(self) -> list[SessionEvent]:
         """Emit any buffered events (unpaired tool_starts) with duration_ms=None.
         Call at session end."""
-        buffered = list(self._pending.values())
-        result: list[SessionEvent] = []
-        for event in buffered:
-            new_metadata = event.metadata.model_copy(update={"duration_ms": None})
-            result.append(event.model_copy(update={"metadata": new_metadata}))
+        result = [_as_orphan(event) for event in self._pending.values()]
         self._pending.clear()
         return result
 
@@ -159,10 +211,67 @@ class Enricher:
         result: list[SessionEvent] = []
         for key, event in list(self._pending.items()):
             if event.session_id == session_id:
-                new_metadata = event.metadata.model_copy(update={"duration_ms": None})
-                result.append(event.model_copy(update={"metadata": new_metadata}))
+                result.append(_as_orphan(event))
                 del self._pending[key]
         return result
+
+    def _enforce_bounds(
+        self, now: datetime, result: SessionEvent | list[SessionEvent] | None
+    ) -> SessionEvent | list[SessionEvent] | None:
+        """Apply the bounded-buffer policy after an event is handled and splice any
+        evicted starts (as orphans) ahead of ``result``.
+
+        Runs *after* the per-kind handling above, so a completion has already
+        consumed (and removed) its matching start and a just-buffered start is both
+        the newest entry and age-zero — with ``pairing_ttl_s > 0`` / ``max_pending
+        >= 1`` neither bound can evict the very start being processed, so pairing is
+        never broken by same-tick eviction. Both bounds *emit* — never drop — an
+        unpaired start through the same orphan path as session-end flush, preserving
+        the downstream governance pairing guarantee within the configured bounds.
+        When nothing is evicted the original ``result`` is returned unchanged, so an
+        unbounded/under-cap stream behaves exactly as before.
+        """
+        orphans = self._evict_expired(now)
+        orphans.extend(self._evict_over_cap())
+        if not orphans:
+            return result
+        if result is None:
+            return orphans
+        if isinstance(result, list):
+            return [*orphans, *result]
+        return [*orphans, result]
+
+    def _evict_expired(self, now: datetime) -> list[SessionEvent]:
+        """Evict pending starts whose stream-time age exceeds ``pairing_ttl_s``.
+
+        Age is ``now - start.timestamp`` where ``now`` is the timestamp of the
+        event currently being processed. Each evicted start is returned as an
+        orphan (``duration_ms=None``); returns an empty list when TTL is disabled.
+        """
+        if self._pairing_ttl_s is None:
+            return []
+        orphans: list[SessionEvent] = []
+        for key, start_event in list(self._pending.items()):
+            if (now - start_event.timestamp).total_seconds() > self._pairing_ttl_s:
+                orphans.append(_as_orphan(start_event))
+                del self._pending[key]
+        return orphans
+
+    def _evict_over_cap(self) -> list[SessionEvent]:
+        """Evict oldest pending starts (insertion order) beyond ``max_pending``.
+
+        Each evicted start is returned as an orphan; returns an empty list when the
+        size cap is disabled or not exceeded. The buffer preserves insertion order,
+        so ``next(iter(...))`` is the oldest start and the just-buffered start (the
+        newest) survives any eviction as long as the cap is at least 1.
+        """
+        if self._max_pending is None:
+            return []
+        orphans: list[SessionEvent] = []
+        while len(self._pending) > self._max_pending:
+            oldest_key = next(iter(self._pending))
+            orphans.append(_as_orphan(self._pending.pop(oldest_key)))
+        return orphans
 
     # --- Private helpers ---
 
@@ -518,6 +627,18 @@ def _refine_scope_from_payload(cls: Classification, payload: dict) -> Classifica
         binaries=cls.binaries,
         phase_map=new_phase_map,
     )
+
+
+def _as_orphan(event: SessionEvent) -> SessionEvent:
+    """Re-stamp a still-buffered tool-start as an orphan (``duration_ms=None``).
+
+    Every exit that flushes an unpaired start — duplicate displacement,
+    session-end flush, pipeline-close flush, and bounded (TTL / size) eviction —
+    routes through this one shape, so the downstream governance stage sees an
+    identical orphan regardless of why the start was flushed.
+    """
+    orphan_metadata = event.metadata.model_copy(update={"duration_ms": None})
+    return event.model_copy(update={"metadata": orphan_metadata})
 
 
 def _compute_duration_ms(start: datetime, end: datetime) -> float:

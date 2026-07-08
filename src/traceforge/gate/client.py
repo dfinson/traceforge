@@ -43,7 +43,14 @@ def send_gate_request(sock_path: str, payload: dict) -> dict:
             if not chunk:
                 break
             resp_data += chunk
-        return json.loads(resp_data)
+        if len(resp_data) < length:
+            # Truncated response (e.g. server died mid-write) — fail closed.
+            return {"decision": "deny", "reason": "truncated gate response (fail-closed)"}
+        try:
+            return json.loads(resp_data)
+        except json.JSONDecodeError:
+            # Malformed response body — fail closed rather than crash the relay.
+            return {"decision": "deny", "reason": "malformed gate response (fail-closed)"}
     finally:
         conn.close()
 
@@ -51,9 +58,33 @@ def send_gate_request(sock_path: str, payload: dict) -> dict:
 def gate_from_stdin(*, format: str = "claude-code") -> None:
     """Read event JSON from stdin, relay to Pipeline, output verdict to stdout.
 
+    Fail-closed wrapper: this is a security gate, so *any* unexpected error
+    (registry/sqlite failure, socket edge case, or an outright bug) must DENY the
+    tool call rather than crash the relay. A crash exits non-zero with no verdict
+    on stdout, which Claude Code and other hook-aware agents treat as a
+    non-blocking hook failure — i.e. the tool would run (fail-OPEN). We instead
+    emit a deny verdict in the requested format (the stdout JSON is the contract);
+    only if even that fails do we exit 2 as a last-resort hard block.
+
     Args:
         format: Output format. "claude-code" outputs Claude Code hook JSON.
                 "json" outputs raw verdict JSON.
+    """
+    try:
+        _gate_from_stdin_impl(format=format)
+    except Exception as exc:  # noqa: BLE001 - a security gate must fail closed
+        try:
+            _output_deny(format, f"gate error (fail-closed): {type(exc).__name__}: {exc}")
+        except Exception:
+            # stdout unusable — exit 2 so hook-aware agents still hard-block.
+            raise SystemExit(2) from exc
+
+
+def _gate_from_stdin_impl(*, format: str = "claude-code") -> None:
+    """Relay one stdin tool-call event to the pipeline and print the verdict.
+
+    Wrapped by :func:`gate_from_stdin`, which converts any unexpected exception
+    into a fail-closed deny.
     """
     from traceforge.gate.registry import lookup_session
 
@@ -109,7 +140,7 @@ def gate_from_stdin(*, format: str = "claude-code") -> None:
         return
 
     # Output verdict
-    decision = verdict.get("decision", "allow")
+    decision = verdict.get("decision", "deny")
     if decision == "deny":
         _output_deny(format, verdict.get("reason", ""))
     elif decision == "escalate":

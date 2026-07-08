@@ -44,3 +44,35 @@ def test_complete_false_when_file_missing(tmp_path):
 
 def test_complete_false_for_none():
     assert _resolve._complete(None) is False
+
+
+def test_span_dir_honors_env_override(tmp_path, monkeypatch):
+    # $TRACEFORGE_TITLE_MODEL pointing at a complete triad wins outright.
+    d = _write_triad(tmp_path / "custom")
+    monkeypatch.setenv("TRACEFORGE_TITLE_MODEL", str(d))
+    assert _resolve.span_dir() == d
+
+
+def test_span_dir_ignores_incomplete_env_override(tmp_path, monkeypatch):
+    # A set-but-incomplete override must NOT be returned; it falls through.
+    d = _write_triad(tmp_path / "custom")
+    (d / "tokenizer.json").unlink()  # now missing a triad member
+    monkeypatch.setenv("TRACEFORGE_TITLE_MODEL", str(d))
+    monkeypatch.setattr(_resolve, "_pkg_dir", lambda: None)
+    monkeypatch.setattr(_resolve, "_DEV_SPAN", tmp_path / "nonexistent")
+    assert _resolve.span_dir() is None
+
+
+def test_span_dir_unset_env_uses_package(tmp_path, monkeypatch):
+    # Unset override preserves prior behavior: package precedence.
+    monkeypatch.delenv("TRACEFORGE_TITLE_MODEL", raising=False)
+    monkeypatch.setattr(_resolve, "_pkg_dir", lambda: tmp_path / "pkg-span")
+    assert _resolve.span_dir() == tmp_path / "pkg-span"
+
+
+def test_env_override_precedes_package(tmp_path, monkeypatch):
+    # A complete override outranks an available package dir.
+    d = _write_triad(tmp_path / "custom")
+    monkeypatch.setenv("TRACEFORGE_TITLE_MODEL", str(d))
+    monkeypatch.setattr(_resolve, "_pkg_dir", lambda: tmp_path / "pkg-span")
+    assert _resolve.span_dir() == d

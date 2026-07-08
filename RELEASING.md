@@ -181,12 +181,17 @@ never bundles the titler weights and never approaches PyPI's 100 MiB per-file ca
 ## 8. Fallback: GitHub-release model mirror
 
 `publish-title-model.yml` also uploads the model wheel as a GitHub Release asset
-under the `title-model-v*` tag. If PyPI is unavailable, users repair/fetch the
-weights with:
+under the `title-model-v*` tag, as a **manual disaster-recovery copy**. There is no
+customer-facing command for it: the weights are a hard dependency and normally
+arrive straight from PyPI. If PyPI is ever unavailable, install the wheel directly
+from the release asset URL:
 
 ```bash
-traceforge download-model --source gh
+pip install https://github.com/dfinson/traceforge/releases/download/title-model-vX.Y.Z/traceforge_title_model-X.Y.Z-py3-none-any.whl
 ```
 
-The mirror URL that `download-model` targets is exactly the asset the workflow
-uploads, so the primary (PyPI) and fallback (GitHub) paths stay in lockstep.
+Alternatively, point `$TRACEFORGE_TITLE_MODEL` at a directory containing an unpacked
+`encoder.onnx` / `decoder.onnx` / `tokenizer.json` triad.
+
+The release asset is the same wheel published to PyPI, so both channels stay in
+lockstep.

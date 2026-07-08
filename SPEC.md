@@ -1198,7 +1198,6 @@ traceforge/
 │       ├── config_cmd.py        # traceforge config         (inspect / emit config)
 │       ├── status.py            # traceforge status         (environment / model status)
 │       ├── init_cmd.py          # traceforge init           (scaffold ~/.traceforge)
-│       ├── download_cmd.py      # traceforge download-model
 │       ├── runner.py            # Shared pipeline runner
 │       └── factory.py           # Source / adapter / sink construction from config
 ├── tests/
@@ -1353,7 +1352,7 @@ traceforge/
 | Storage sinks (8) | ✅ Complete | Callback, Console, Jsonl, Sqlite, S3, Parquet, OtelExporter, Webhook |
 | Telemetry self-metrics | ✅ Complete | `traceforge.telemetry.PipelineMetrics`: opt-in `EventPipeline(metrics=...)` accumulator — throughput, enrichment latency, per-sink write time, dropped / failed-sink counts, immutable `MetricsSnapshot`. Disabled path is a true no-op (no timers/allocs on the hot path); no `opentelemetry-sdk` / `prometheus` dep. §14. Closed #48 |
 | EventBus subscribe / pub-sub | ✅ Complete | `EventPipeline.subscribe(on_event, *, kind=None, to_thread=False)` + `unsubscribe()` over the error-isolated fan-out; sync-or-async callbacks, optional per-subscriber `kind` filter. §15. Closed #47 |
-| CLI | ✅ Complete | `cli/` (Click): watch, replay, score, gate, detect, config, status, init, download-model |
+| CLI | ✅ Complete | `cli/` (Click): watch, replay, score, gate, detect, config, status, init |
 | Gate module | ✅ Complete | Sync scoring path + PII gate + registry (`gate/`, `gates/`) |
 | Live structuring (phase / boundary / title) | ✅ Complete | CPU-only, torch-free. Phase + boundary sklearn heads (joblib) over a frozen model2vec embedder, default-on, stamp `metadata.phase` / `metadata.boundary` live; T5 titler (int8 split-ONNX, opt-in) emits out-of-band `TitleUpdate`. Titler weights ship in the separate `traceforge-title-model` package. See §23 |
 | Governance / assessment engine | ✅ Complete | `governance/` monitor + shield object model (SOLID): `SessionMonitor` (single writer), `Scorer` (read-only preview), `SessionRegistry`, `Assessor`, `Shield`, one-counter `SessionState`, `GovernancePipeline` facade; plus labeler, rules, PII, IFC, integrity, drift, budget, observer, emitter, persistence. Epic #7 (stories #9–#27) fully delivered and closed. See §22 |
@@ -2038,6 +2037,8 @@ Produces human-readable activity / step titles, emitted **out-of-band**.
   (~96 MB total). It is served CPU-only through `onnxruntime` + `tokenizers` + `numpy` — **no torch, no
   transformers** (resident set ~250 MB versus ~1 GB for a torch runtime). ONNX Runtime is pinned to a
   single thread (`CPUExecutionProvider`).
+- **Model resolution.** `$TRACEFORGE_TITLE_MODEL` → packaged `traceforge_title_model` → in-tree
+  `title/data/` dev fallback.
 - **Decoding.** Single-pass beam search (`num_beams = 5`, `max_new_tokens = 32`,
   `no_repeat_ngram_size = 2`, `repetition_penalty = 1.3`, `length_penalty = 0.8`) under the task prefix
   `"summarize agent step: "`, guarded by a grounding gate (`TITLE_GROUND`, default on) with adaptive beam
@@ -2090,8 +2091,9 @@ artifacts — `phase/data/*.joblib`, `phase/data/potion-base-8M/*`, `boundary/da
 the base wheel.** Only the large T5 titler weights are split out, into a separate distribution
 **`traceforge-title-model`** (`encoder.onnx` / `decoder.onnx` / `tokenizer.json`). That distribution is a
 **hard runtime dependency** (`traceforge-title-model >= 0.2` in `[project.dependencies]`), **not** an
-optional extra. `title/_resolve.py::span_dir()` resolves the weights as: installed `traceforge_title_model`
-package → in-tree `title/data/` dev fallback → raise with an install hint. Git-LFS pointer stubs are
+optional extra. `title/_resolve.py::span_dir()` resolves the weights as: `$TRACEFORGE_TITLE_MODEL` (if set)
+→ installed `traceforge_title_model` package → in-tree `title/data/` dev fallback → raise with an install
+hint. Git-LFS pointer stubs are
 rejected via a minimum-byte-size guard, so a partial checkout fails loudly instead of loading a stub.
 
 ---

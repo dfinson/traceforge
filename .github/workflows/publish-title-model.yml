@@ -6,8 +6,8 @@ name: Publish title model
 # `v*` tag handled by publish.yml.
 #
 # Primary: PyPI (trusted publishing). `traceforge` depends on it and resolves it
-# from there. Mirror: the same wheel is uploaded to the GitHub release so
-# `traceforge download-model --source gh` can fetch it when PyPI is unavailable.
+# from there. Mirror: the same wheel is also uploaded to the GitHub release as a
+# manual disaster-recovery copy for when PyPI is unavailable.
 
 on:
   push:
@@ -43,4 +43,4 @@ jobs:
           dist/*.whl
           --repo "${{ github.repository }}"
           --title "${{ github.ref_name }}"
-          --notes "traceforge-title-model wheel — GitHub-release mirror of the PyPI package. Install: traceforge download-model --source gh"
+          --notes "traceforge-title-model wheel — GitHub-release mirror of the PyPI package. Manual fallback: pip install this release asset's URL if PyPI is unavailable."

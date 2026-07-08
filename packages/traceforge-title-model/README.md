@@ -35,8 +35,9 @@ m.span_dir()      # -> .../data/span
 
 - **Primary:** PyPI (`traceforge-title-model`), resolved automatically by `traceforge`.
 - **Mirror / fallback:** the same wheel is published as a GitHub release asset under the
-  `title-model-v*` tags. `traceforge download-model --source gh` installs it from there when
-  PyPI is unavailable.
+  `title-model-v*` tags — a manual disaster-recovery copy. If PyPI is unavailable, install it
+  directly from the release asset URL. `traceforge` also honors `$TRACEFORGE_TITLE_MODEL` (a
+  directory holding the `encoder.onnx` / `decoder.onnx` / `tokenizer.json` triad) as an override.
 
 ## License
 

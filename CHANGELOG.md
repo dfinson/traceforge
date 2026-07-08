@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+
+- `traceforge download-model` CLI command. The titler weights are a hard dependency
+  (`traceforge-title-model`) and install automatically; repair a broken install with
+  `pip install --force-reinstall traceforge-title-model`.
+
+### Added
+
+- `TRACEFORGE_TITLE_MODEL` environment variable to override the titler (span) weights
+  directory, matching `TRACEFORGE_PHASE_MODEL` / `TRACEFORGE_BOUNDARY_MODEL`.
+
 ## [0.1.0] - 2026-07-07
 
 Initial release of `traceforge` (published to PyPI as `traceforge-toolkit`). A

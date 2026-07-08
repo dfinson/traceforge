@@ -86,6 +86,7 @@ def detect_frameworks(frameworks: list[str] | None = None) -> list[DetectedFrame
         "cline": _detect_cline,
         "goose": _detect_goose,
         "amazonq": _detect_amazonq,
+        "opencode": _detect_opencode,
         "aider": _detect_aider,
     }
 
@@ -161,6 +162,20 @@ def _detect_amazonq() -> DetectedFramework | None:
     path = _amazonq_data_dir() / "data.sqlite3"
     if path.is_file():
         return DetectedFramework("amazonq", path, "amazonq", "sqlite")
+    return None
+
+
+def _detect_opencode() -> DetectedFramework | None:
+    # OpenCode (>=1.17) persists its event-sourced session store as a single
+    # SQLite database under the XDG data dir. It uses the same ~/.local/share
+    # layout on every platform — on Windows this expands to
+    # %USERPROFILE%\.local\share\opencode\opencode.db, not %LOCALAPPDATA% —
+    # verified against a real harvested artifact (tests/fixtures/raw_traces/
+    # opencode/meta.yaml). The opencode mapping + preprocessor already ship;
+    # this only wires the existing ingestion support into auto-detection.
+    path = _expand("~/.local/share/opencode/opencode.db")
+    if path.is_file():
+        return DetectedFramework("opencode", path, "opencode", "sqlite")
     return None
 
 

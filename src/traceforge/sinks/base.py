@@ -10,6 +10,7 @@ from traceforge.types import ProgressUpdate, SessionEvent, TelemetrySpan, TitleU
 
 if TYPE_CHECKING:
     from traceforge.governance.envelope import EnrichedEvent
+    from traceforge.telemetry.attribution import Anomaly, AttributionRollup
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,23 @@ class StorageSink(ABC):
 
     async def on_usage(self, usage: UsageRecord) -> None:
         """Handle a usage record. Default no-op."""
+
+    async def on_attribution(
+        self,
+        rollups: "list[AttributionRollup]",
+        anomalies: "list[Anomaly]",
+    ) -> None:
+        """Handle the terminal cost/latency attribution roll-up. Default no-op.
+
+        Emitted once at :meth:`traceforge.pipeline.EventPipeline.flush` when — and
+        only when — attribution is enabled, carrying the per-``(dimension, key)``
+        :class:`~traceforge.telemetry.attribution.AttributionRollup` list and the
+        :class:`~traceforge.telemetry.attribution.Anomaly` flags accumulated from
+        the run's spans / usage. Like ``on_span``/``on_usage`` this is an optional
+        signal, so the base default silently drops it — a sink opts in by
+        overriding (``SqliteOutputSink`` does). When attribution is off the pipeline
+        never calls this, so a no-attribution run is unaffected.
+        """
 
     async def on_progress(self, update: ProgressUpdate) -> None:
         """Handle a live incremental progress headline. Default no-op.

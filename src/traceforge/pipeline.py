@@ -920,13 +920,24 @@ class EventPipeline:
             logger.debug("EventPipeline self-metrics at flush: %s", self._metrics.snapshot())
 
         # Attribution rollups are computed at flush from the accumulated spans /
-        # usage and read back off ``pipeline.attribution`` (no sink emission here —
-        # persisting them is the stacked follow-up's concern). Off = nothing runs.
+        # usage and read back off ``pipeline.attribution``. When attribution is off
+        # (``self._attribution is None``) nothing here runs — a no-attribution run
+        # is byte-identical. When on, the terminal roll-up + anomaly flags fan out
+        # once to every sink via ``on_attribution`` (opt-in; the base hook is a
+        # no-op, so only sinks that persist them — e.g. ``SqliteOutputSink`` — act).
         if self._attribution is not None:
+            rollups = self._attribution.rollups()
+            anomalies = self._attribution.anomalies()
             logger.debug(
-                "EventPipeline attribution at flush: %d rollup(s)",
-                len(self._attribution.rollups()),
+                "EventPipeline attribution at flush: %d rollup(s), %d anomaly(ies)",
+                len(rollups),
+                len(anomalies),
             )
+            if rollups or anomalies:
+                await self._fanout(
+                    (sink.on_attribution(rollups, anomalies) for sink in self._sinks),
+                    "attribution rollups",
+                )
 
     async def _push_to_sinks(self, event: SessionEvent) -> None:
         """Push event to sinks, stamping governance first if a stage is wired in.

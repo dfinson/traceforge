@@ -20,6 +20,7 @@ from traceforge.classify import (
 from traceforge.enricher import Enricher
 from traceforge.parsers.aider import AiderPreParser
 from traceforge.pipeline import EventPipeline
+from traceforge.progress import ProgressEmitter
 from traceforge.sinks.base import StorageSink
 from traceforge.sinks.callback import CallbackSink
 from traceforge.telemetry.attribution import (
@@ -37,6 +38,7 @@ from traceforge.types import (
     EventKind,
     EventMetadata,
     IngestionMode,
+    ProgressUpdate,
     SessionEvent,
     TelemetrySpan,
     TitleUpdate,
@@ -63,6 +65,8 @@ __all__ = [
     "IngestionMode",
     "KNOWN_KINDS",
     "Phase",
+    "ProgressEmitter",
+    "ProgressUpdate",
     "SessionEvent",
     "StorageSink",
     "TelemetrySpan",

@@ -54,6 +54,7 @@ from traceforge.pipeline import EventPipeline
 if TYPE_CHECKING:
     from traceforge.config.models import GovernanceConfig
     from traceforge.sdk.gate_policy import GatePolicy
+    from traceforge.sdk.observe import ObservationHandle
     from traceforge.sinks.base import StorageSink
     from traceforge.trace import EventTrace
     from traceforge.types import SessionEvent, TelemetrySpan, UsageRecord
@@ -251,6 +252,47 @@ class Pipeline:
     def gate_openai_agents(self, agent):
         """Gate an OpenAI Agents SDK agent."""
         return self._governance.gate_openai_agents(agent)
+
+    # ---- in-process observation auto-subscriber (PR-J phase 1) -------------
+    # Additive, self-contained facade over ``traceforge.sdk.observe``: subscribe to a
+    # framework's NATIVE global bus/processor, map native events through the existing
+    # mappings/*.yaml, and push the results via ``push`` above. Each returns an
+    # ObservationHandle whose ``stop()`` unsubscribes with no residual global state.
+    # observe.py is imported lazily so this module never pulls in a native framework.
+
+    def observe_crewai(
+        self,
+        *,
+        session_id: str = "crewai",
+        event_bus=None,
+        event_types=None,
+    ) -> "ObservationHandle":
+        """Subscribe to CrewAI's global event bus; stream mapped events into this pipeline."""
+        from traceforge.sdk.observe import observe_crewai
+
+        return observe_crewai(
+            self, session_id=session_id, event_bus=event_bus, event_types=event_types
+        )
+
+    def observe_openai_agents(
+        self,
+        *,
+        session_id: str = "openai_agents",
+        register=None,
+        unregister=None,
+    ) -> "ObservationHandle":
+        """Register an OpenAI Agents SDK trace processor that streams into this pipeline."""
+        from traceforge.sdk.observe import observe_openai_agents
+
+        return observe_openai_agents(
+            self, session_id=session_id, register=register, unregister=unregister
+        )
+
+    def observe(self, framework: str, **kwargs) -> "ObservationHandle":
+        """Subscribe to ``framework``'s native bus by name (phase 1: crewai / openai_agents)."""
+        from traceforge.sdk.observe import observe
+
+        return observe(self, framework, **kwargs)
 
     # ---- escape hatches ----------------------------------------------------
 

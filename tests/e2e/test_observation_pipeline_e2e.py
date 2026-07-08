@@ -11,6 +11,7 @@ Also covers the 5 YAML mappings that had zero test coverage:
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -18,6 +19,7 @@ import pytest
 
 from traceforge.adapters.mapped_json import MappedJsonAdapter
 from traceforge.governance.pipeline import GovernancePipeline
+from traceforge.sdk import Pipeline
 from traceforge.types import EventKind
 
 MAPPINGS_DIR = Path(__file__).resolve().parent.parent.parent / "src" / "traceforge" / "mappings"
@@ -781,3 +783,406 @@ class TestAiderFullPipelineE2E:
 
         assert len(all_metas) == 3
         assert all(m is not None for m in all_metas)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# In-process observe_* auto-subscriber (PR-J phase 1: crewai + openai_agents)
+#
+# These exercise the shipped SDK feature end to end: subscribe to a framework's
+# NATIVE global bus/processor, map native events through the existing YAML mappings,
+# and push the resulting SessionEvents through Pipeline.push into a RecordingSink.
+# The native frameworks aren't installed in the test env, so the bus / processor
+# registration seams are injected with faithful fakes (CrewAI dispatches by EXACT
+# event type; OpenAI Agents exposes Trace.export()/Span.export()).
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+class _FakeCrewBus:
+    """Stand-in for ``crewai.events.crewai_event_bus``.
+
+    Dispatches to handlers keyed by the EXACT event type (CrewAI does no MRO walk),
+    exposing the ``register_handler`` / ``off`` pair the observer subscribes through.
+    """
+
+    def __init__(self) -> None:
+        self._handlers: dict[type, list] = {}
+
+    def register_handler(self, event_type: type, handler) -> None:
+        self._handlers.setdefault(event_type, []).append(handler)
+
+    def off(self, event_type: type, handler) -> None:
+        handlers = self._handlers.get(event_type)
+        if not handlers:
+            return
+        remaining = [h for h in handlers if h is not handler]
+        if remaining:
+            self._handlers[event_type] = remaining
+        else:
+            del self._handlers[event_type]
+
+    def emit(self, event, source=None) -> None:
+        for handler in list(self._handlers.get(type(event), [])):
+            handler(source, event)
+
+    @property
+    def total_handlers(self) -> int:
+        return sum(len(handlers) for handlers in self._handlers.values())
+
+
+class _FakeCrewEvent:
+    """A native-style CrewAI event: plain object whose ``__dict__`` is the payload.
+
+    It deliberately has no ``model_dump`` / ``dict`` so the observer's ``_jsonable``
+    serializer walks ``vars()`` — the same shape the ``crewai`` YAML mapping expects.
+    """
+
+    def __init__(self, **fields) -> None:
+        self.__dict__.update(fields)
+
+
+class _ToolUsageStarted(_FakeCrewEvent):
+    pass
+
+
+class _ToolUsageFinished(_FakeCrewEvent):
+    pass
+
+
+class _CrewKickoffStarted(_FakeCrewEvent):
+    pass
+
+
+class _LlmCallCompleted(_FakeCrewEvent):
+    pass
+
+
+_CREWAI_EVENT_TYPES = [
+    _ToolUsageStarted,
+    _ToolUsageFinished,
+    _CrewKickoffStarted,
+    _LlmCallCompleted,
+]
+
+
+class _FakeExport:
+    """Native-style OpenAI Agents trace/span: exposes ``export()`` returning a dict."""
+
+    def __init__(self, data: dict) -> None:
+        self._data = data
+
+    def export(self) -> dict:
+        return self._data
+
+
+class _FakeProcessorRegistry:
+    """Injected register/unregister seam for the OpenAI Agents observer."""
+
+    def __init__(self) -> None:
+        self.processors: list = []
+
+    def register(self, processor) -> None:
+        self.processors.append(processor)
+
+    def unregister(self, processor) -> None:
+        self.processors = [p for p in self.processors if p is not processor]
+
+
+def _fake_trace(trace_id: str = "trace_1", workflow_name: str = "demo_wf") -> _FakeExport:
+    return _FakeExport(
+        {
+            "object": "trace",
+            "id": trace_id,
+            "workflow_name": workflow_name,
+            "group_id": None,
+            "metadata": None,
+        }
+    )
+
+
+def _fake_function_span(
+    span_id: str = "span_1",
+    trace_id: str = "trace_1",
+    name: str = "read_file",
+    arguments: str = '{"path": "main.py"}',
+    output: str = "file contents",
+    error=None,
+) -> _FakeExport:
+    return _FakeExport(
+        {
+            "object": "trace.span",
+            "id": span_id,
+            "trace_id": trace_id,
+            "parent_id": None,
+            "started_at": "2025-06-01T10:00:00Z",
+            "ended_at": "2025-06-01T10:00:01Z",
+            "error": error,
+            "span_data": {"type": "function", "name": name, "input": arguments, "output": output},
+        }
+    )
+
+
+def _new_pipeline(recording_sink) -> Pipeline:
+    """A deterministic observation-only pipeline (no ML structuring, no governance)."""
+    return Pipeline.create(sinks=[recording_sink.sink], enable_structure=False, governance=False)
+
+
+class TestObserveCrewAiE2E:
+    """observe_crewai: subscribe to the CrewAI bus and stream mapped SessionEvents."""
+
+    async def test_subscribe_and_push_mapped_events(self, recording_sink):
+        # observe's contract is "map native events and push the resulting SessionEvents".
+        # Assert that at the push seam: spy the facade's push so the mapping check is exact
+        # and deterministic. (Downstream enrichment may coalesce/reorder related tool events;
+        # that is the pipeline's concern and is covered by the real-sink wiring test below.)
+        pipeline = _new_pipeline(recording_sink)
+        pushed: list = []
+
+        async def _spy_push(event):
+            pushed.append(event)
+
+        pipeline.push = _spy_push
+        bus = _FakeCrewBus()
+        handle = pipeline.observe_crewai(
+            session_id="crew-sess", event_bus=bus, event_types=_CREWAI_EVENT_TYPES
+        )
+        try:
+            assert handle.active is True
+            assert handle.framework == "crewai"
+            # subscribe registers exactly one handler per concrete event type
+            assert bus.total_handlers == len(_CREWAI_EVENT_TYPES)
+
+            bus.emit(
+                _CrewKickoffStarted(
+                    type="crew_kickoff_started",
+                    crew_name="demo-crew",
+                    event_id="evt-kick",
+                    timestamp="2025-06-01T10:00:00Z",
+                )
+            )
+            bus.emit(
+                _ToolUsageStarted(
+                    type="tool_usage_started",
+                    tool_name="read_file",
+                    tool_args={"path": "main.py"},
+                    event_id="call-1",
+                    timestamp="2025-06-01T10:00:01Z",
+                )
+            )
+            bus.emit(
+                _ToolUsageFinished(
+                    type="tool_usage_finished",
+                    tool_name="read_file",
+                    output="file contents",
+                    timestamp="2025-06-01T10:00:02Z",
+                )
+            )
+            await handle.drain()
+        finally:
+            handle.stop()
+            await pipeline.close()
+
+        kinds = [event.kind for event in pushed]
+        assert kinds == ["session.started", "tool.call.started", "tool.call.completed"]
+
+        started = pushed[1]
+        assert started.session_id == "crew-sess"
+        assert started.payload["tool_name"] == "read_file"
+        assert started.payload["tool_call_id"] == "call-1"
+        assert started.payload["arguments"] == {"path": "main.py"}
+        # the verbatim native event is preserved as raw_event
+        assert started.raw_event is not None
+        assert started.raw_event["type"] == "tool_usage_started"
+
+        finished = pushed[2]
+        assert finished.payload["tool_name"] == "read_file"
+        assert finished.payload["result"] == "file contents"
+
+    async def test_cross_thread_callback_push(self, recording_sink):
+        """CrewAI runs sync handlers on a worker thread; pushes must marshal to the loop."""
+        pipeline = _new_pipeline(recording_sink)
+        bus = _FakeCrewBus()
+        handle = pipeline.observe_crewai(
+            session_id="crew-sess", event_bus=bus, event_types=_CREWAI_EVENT_TYPES
+        )
+        event = _ToolUsageStarted(
+            type="tool_usage_started",
+            tool_name="read_file",
+            tool_args={"path": "a.py"},
+            event_id="call-9",
+            timestamp="2025-06-01T10:00:00Z",
+        )
+        # emit from OFF the event loop thread, exactly like CrewAI's ThreadPoolExecutor
+        await asyncio.to_thread(bus.emit, event)
+        await handle.drain()
+        await pipeline.flush()
+        handle.stop()
+        await pipeline.close()
+
+        assert [e.kind for e in recording_sink.events] == ["tool.call.started"]
+        assert recording_sink.events[0].payload["tool_call_id"] == "call-9"
+
+    async def test_teardown_leaves_no_subscription(self, recording_sink):
+        pipeline = _new_pipeline(recording_sink)
+        bus = _FakeCrewBus()
+        handle = pipeline.observe_crewai(
+            session_id="crew-sess", event_bus=bus, event_types=_CREWAI_EVENT_TYPES
+        )
+        assert bus.total_handlers == len(_CREWAI_EVENT_TYPES)
+
+        handle.stop()
+        assert handle.active is False
+        assert bus.total_handlers == 0  # no residual global subscription
+
+        # events emitted after teardown are ignored
+        bus.emit(
+            _ToolUsageStarted(
+                type="tool_usage_started",
+                tool_name="x",
+                tool_args={},
+                event_id="c",
+                timestamp="2025-06-01T10:00:00Z",
+            )
+        )
+        await handle.drain()
+        await pipeline.flush()
+        assert recording_sink.events == []
+
+        handle.stop()  # idempotent
+        await pipeline.close()
+
+    def test_requires_running_loop(self, recording_sink):
+        """Called outside a running loop it fails fast, without touching the bus."""
+        pipeline = _new_pipeline(recording_sink)
+        bus = _FakeCrewBus()
+        with pytest.raises(RuntimeError, match="running asyncio event loop"):
+            pipeline.observe_crewai(event_bus=bus, event_types=_CREWAI_EVENT_TYPES)
+        assert bus.total_handlers == 0
+
+
+class TestObserveOpenAiAgentsE2E:
+    """observe_openai_agents: register a trace processor and stream mapped SessionEvents."""
+
+    async def test_subscribe_and_push_mapped_events(self, recording_sink):
+        # Assert observe's mapping contract at the push seam (see the crewai test): spy push so
+        # a function span's fan-out to started+completed is checked exactly, without the
+        # downstream enricher coalescing the pair.
+        pipeline = _new_pipeline(recording_sink)
+        pushed: list = []
+
+        async def _spy_push(event):
+            pushed.append(event)
+
+        pipeline.push = _spy_push
+        registry = _FakeProcessorRegistry()
+        handle = pipeline.observe_openai_agents(
+            session_id="oai-sess", register=registry.register, unregister=registry.unregister
+        )
+        try:
+            assert handle.active is True
+            assert handle.framework == "openai_agents"
+            assert len(registry.processors) == 1
+            processor = registry.processors[0]
+
+            processor.on_trace_start(_fake_trace(trace_id="trace_1", workflow_name="demo_wf"))
+            # a single function span export fans out to started + completed events
+            processor.on_span_end(_fake_function_span(span_id="span_1", name="read_file"))
+            await handle.drain()
+        finally:
+            handle.stop()
+            await pipeline.close()
+
+        kinds = [event.kind for event in pushed]
+        assert kinds == ["session.started", "tool.call.started", "tool.call.completed"]
+
+        session_started = pushed[0]
+        assert session_started.session_id == "oai-sess"
+        assert session_started.payload["trace_id"] == "trace_1"
+        assert session_started.payload["workflow_name"] == "demo_wf"
+
+        tool_started = pushed[1]
+        assert tool_started.payload["tool_name"] == "read_file"
+        assert tool_started.payload["tool_call_id"] == "span_1"
+
+        tool_completed = pushed[2]
+        assert tool_completed.payload["result"] == "file contents"
+        assert tool_completed.raw_event is not None
+
+    async def test_processor_pushes_through_real_pipeline(self, recording_sink):
+        """Wiring check: a registered processor's export reaches the real pipeline's sink."""
+        pipeline = _new_pipeline(recording_sink)
+        registry = _FakeProcessorRegistry()
+        handle = pipeline.observe_openai_agents(
+            session_id="oai-sess", register=registry.register, unregister=registry.unregister
+        )
+        processor = registry.processors[0]
+        # a lone lifecycle event flows straight through (no start/end pair to coalesce)
+        processor.on_trace_start(_fake_trace(trace_id="trace_9", workflow_name="wf"))
+        await handle.drain()
+        await pipeline.flush()
+        handle.stop()
+        await pipeline.close()
+
+        started = [e for e in recording_sink.events if e.kind == "session.started"]
+        assert len(started) == 1
+        assert started[0].session_id == "oai-sess"
+        assert started[0].payload["trace_id"] == "trace_9"
+
+    async def test_teardown_unregisters_processor(self, recording_sink):
+        pipeline = _new_pipeline(recording_sink)
+        registry = _FakeProcessorRegistry()
+        handle = pipeline.observe_openai_agents(
+            session_id="oai-sess", register=registry.register, unregister=registry.unregister
+        )
+        assert len(registry.processors) == 1
+        processor = registry.processors[0]
+
+        handle.stop()
+        assert handle.active is False
+        assert registry.processors == []  # processor removed — no residual subscription
+
+        # driving the detached processor after teardown pushes nothing
+        processor.on_trace_start(_fake_trace())
+        processor.on_span_end(_fake_function_span())
+        await handle.drain()
+        await pipeline.flush()
+        assert recording_sink.events == []
+
+        handle.stop()  # idempotent
+        await pipeline.close()
+
+
+class TestObserveDispatch:
+    """The unified pipeline.observe(framework) dispatcher and its phase-1 scope fence."""
+
+    async def test_observe_by_name_crewai(self, recording_sink):
+        pipeline = _new_pipeline(recording_sink)
+        bus = _FakeCrewBus()
+        handle = pipeline.observe(
+            "crewai", session_id="x", event_bus=bus, event_types=_CREWAI_EVENT_TYPES
+        )
+        assert handle.framework == "crewai"
+        assert bus.total_handlers == len(_CREWAI_EVENT_TYPES)
+        handle.stop()
+        assert bus.total_handlers == 0
+        await pipeline.close()
+
+    async def test_observe_by_name_openai_agents(self, recording_sink):
+        pipeline = _new_pipeline(recording_sink)
+        registry = _FakeProcessorRegistry()
+        handle = pipeline.observe(
+            "openai_agents",
+            session_id="x",
+            register=registry.register,
+            unregister=registry.unregister,
+        )
+        assert handle.framework == "openai_agents"
+        assert len(registry.processors) == 1
+        handle.stop()
+        assert registry.processors == []
+        await pipeline.close()
+
+    def test_unsupported_framework_rejected(self, recording_sink):
+        """Phase 1 is crewai + openai_agents only; other frameworks raise (no silent no-op)."""
+        pipeline = _new_pipeline(recording_sink)
+        with pytest.raises(ValueError, match="unsupported framework"):
+            pipeline.observe("langchain")

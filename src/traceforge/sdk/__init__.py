@@ -29,6 +29,7 @@ from traceforge.sdk.gate_types import (  # noqa: E402
     ToolCallRequest,
     ToolCallResult,
 )
+from traceforge.sdk.observe import ObservationHandle  # noqa: E402
 from traceforge.sdk.verdict import (  # noqa: E402
     Decision,
     PostflightGate,
@@ -44,6 +45,7 @@ from traceforge.sdk.pipeline import Pipeline  # noqa: E402
 
 __all__ = [
     "Pipeline",
+    "ObservationHandle",
     "EventTrace",
     "TraceStage",
     "Verdict",

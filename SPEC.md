@@ -1198,7 +1198,6 @@ traceforge/
 │       ├── config_cmd.py        # traceforge config         (inspect / emit config)
 │       ├── status.py            # traceforge status         (environment / model status)
 │       ├── init_cmd.py          # traceforge init           (scaffold ~/.traceforge)
-│       ├── download_cmd.py      # traceforge download-model
 │       ├── runner.py            # Shared pipeline runner
 │       └── factory.py           # Source / adapter / sink construction from config
 ├── tests/
@@ -1353,7 +1352,7 @@ traceforge/
 | Storage sinks (8) | ✅ Complete | Callback, Console, Jsonl, Sqlite, S3, Parquet, OtelExporter, Webhook |
 | Telemetry self-metrics | ✅ Complete | `traceforge.telemetry.PipelineMetrics`: opt-in `EventPipeline(metrics=...)` accumulator — throughput, enrichment latency, per-sink write time, dropped / failed-sink counts, immutable `MetricsSnapshot`. Disabled path is a true no-op (no timers/allocs on the hot path); no `opentelemetry-sdk` / `prometheus` dep. §14. Closed #48 |
 | EventBus subscribe / pub-sub | ✅ Complete | `EventPipeline.subscribe(on_event, *, kind=None, to_thread=False)` + `unsubscribe()` over the error-isolated fan-out; sync-or-async callbacks, optional per-subscriber `kind` filter. §15. Closed #47 |
-| CLI | ✅ Complete | `cli/` (Click): watch, replay, score, gate, detect, config, status, init, download-model |
+| CLI | ✅ Complete | `cli/` (Click): watch, replay, score, gate, detect, config, status, init |
 | Gate module | ✅ Complete | Sync scoring path + PII gate + registry (`gate/`, `gates/`) |
 | Live structuring (phase / boundary / title) | ✅ Complete | CPU-only, torch-free. Phase + boundary sklearn heads (joblib) over a frozen model2vec embedder, default-on, stamp `metadata.phase` / `metadata.boundary` live; T5 titler (int8 split-ONNX, opt-in) emits out-of-band `TitleUpdate`. Titler weights ship in the separate `traceforge-title-model` package. See §23 |
 | Governance / assessment engine | ✅ Complete | `governance/` monitor + shield object model (SOLID): `SessionMonitor` (single writer), `Scorer` (read-only preview), `SessionRegistry`, `Assessor`, `Shield`, one-counter `SessionState`, `GovernancePipeline` facade; plus labeler, rules, PII, IFC, integrity, drift, budget, observer, emitter, persistence. Epic #7 (stories #9–#27) fully delivered and closed. See §22 |
@@ -1901,27 +1900,77 @@ enforcement decisions.
 
 ### Framework Compatibility
 
-| # | Platform | Hook type | Consumer entry point | Gateable? |
-|---|----------|-----------|----------------------|-----------|
-| 1 | **Copilot CLI** | Shell script | `traceforge gate --stdin` | ✓ |
-| 2 | **Copilot Cloud** | Shell script | `traceforge gate --stdin` | ✓ |
-| 3 | **Copilot SDK** | In-process | `pipeline.score_tool_call(...)` | ✓ |
-| 4 | **Claude Code CLI** | Shell script | `traceforge gate --stdin --format claude-code` | ✓ |
-| 5 | **Claude Code SDK** | In-process | `pipeline.score_tool_call(...)` | ✓ |
-| 6 | **Cline** | Shell script | `traceforge gate --stdin` | ✓ |
-| 7 | **OpenHands** | Shell script | `traceforge gate --stdin` | ✓ |
-| 8 | **Goose** | In-process | `pipeline.score_tool_call(...)` | ✓ |
-| 9 | **OpenCode** | In-process | `pipeline.score_tool_call(...)` | ✓ |
-| 10 | **LangGraph / LangChain** | In-process | `pipeline.gate_langchain(tool)` | ✓ |
-| 11 | **CrewAI** | In-process | `pipeline.gate_crewai()` | ✓ |
-| 12 | **PydanticAI** | In-process | `pipeline.gate_pydantic_ai(agent)` | ✓ |
-| 13 | **MAF / Semantic Kernel** | In-process | `pipeline.gate_maf()` | ✓ |
-| 14 | **Aider** | None | — | ✗ (observation only) |
-| 15 | **smolagents** | Class wrap | `pipeline.gate_smolagents()` | ✓ |
-| 16 | **SWE-agent** | None | — | ✗ (observation only) |
+traceforge gates across two surfaces. **CLI / editor agents** wire a shell hook that shells out
+to `traceforge gate --stdin`, which relays the tool call to the running pipeline's IPC server and
+prints a verdict in the agent's native hook dialect. **In-process SDK frameworks** bind a `gate_*`
+adapter that wraps the framework's native hook. Today `traceforge init` ships an injector for
+**only Claude Code**; every other hook-capable agent must be wired manually (see PR-K).
 
-Rows 14 and 16 have no pre-execution hook. traceforge observes and scores their events, but no
-consumer can block their tool calls.
+#### CLI / editor agents (shell-hook gating)
+
+"Hook-capable" = the agent exposes a **user-injectable, preflight, shell-out hook whose deny
+blocks the tool**. Verified against each agent's primary first-party docs/source and
+independently reconciled. **9 of 12 are hook-capable**; only Continue, Goose, and Aider are not
+(static policy / no tool-call lifecycle). SWE-agent is the sole pure observe-only CLI agent.
+
+| Agent | Capable? | Event | Config location | Deny contract | `init` injector |
+|-------|:--------:|-------|-----------------|---------------|:---------------:|
+| **Claude Code** | ✓ | `PreToolUse` | `~/.claude/settings.json` or `.claude/settings.json` | exit 2 OR stdout `hookSpecificOutput.permissionDecision:"deny"` | ✓ **shipped** |
+| **GitHub Copilot CLI** (+ **Copilot Cloud**, same hook) | ✓ | `preToolUse` (+ earlier `permissionRequest`) | `~/.copilot/hooks/*.json`, `.github/hooks/*.json`, or `.github/copilot/settings.json` | stdout `{"permissionDecision":"deny",...}` OR non-zero exit **≠ 2** (exit 2 reserved → use **exit 1**) | ✗ |
+| **OpenAI Codex CLI** | ✓ | `PreToolUse` (`[hooks]` system, **not** `notify`) | `~/.codex/hooks.json` or `[hooks]` in `~/.codex/config.toml` | exit 2 (stderr) OR `hookSpecificOutput.permissionDecision:"deny"` OR legacy `{"decision":"block"}` | ✗ |
+| **Cursor** | ✓ (v1.7+) | `preToolUse` / `beforeShellExecution` / `beforeMCPExecution` | `~/.cursor/hooks.json` or `<project>/.cursor/hooks.json` | exit 2 OR `{"permission":"deny","user_message":...,"agent_message":...}`; per-hook `"failClosed":true` | ✗ |
+| **Gemini CLI** | ✓ | `BeforeTool` | `~/.gemini/settings.json` or `.gemini/settings.json` | exit 2 (stderr) OR `{"decision":"deny","reason":...}` (`"block"` alias) | ✗ |
+| **Cline** | ✓ (v4.0.0+) | `PreToolUse` | **script file** named `PreToolUse` in `<workspace>/.clinerules/hooks/` or `~/Documents/Cline/Hooks/` | stdout `{"cancel":true,"errorMessage":...}` **only** (no exit-2) | ✗ |
+| **Amazon Q Developer CLI** | ✓ (v1.16.2+) | `preToolUse` | agent-config JSON: `~/.aws/amazonq/cli-agents/<name>.json` or `.amazonq/cli-agents/<name>.json` | **exit 2 only** (stderr → reason) | ✗ |
+| **OpenCode** | ✓ (v1.17.15+) | `tool.execute.before` (plugin hook) | **JS/TS plugin** at `.opencode/plugins/*.ts` or `~/.config/opencode/plugins/*.ts` (or the `opencode.json` `"plugin"` array) | `throw new Error(reason)` in the plugin (throw when the gate exits non-zero); plugin gets Bun `$` to shell out to `traceforge gate --stdin` | ✗ |
+| **OpenHands** | ✓ (sdk 1.33.0+) | `pre_tool_use` | `.openhands/hooks.json` (project) or `~/.openhands/hooks.json` (global) | exit 2 OR stdout `{"decision":"deny","reason":...}` OR `{"continue":false}`; stdin = `{event_type,tool_name,tool_input,session_id,working_dir}` | ✗ |
+| **Continue** | ✗ | — | static tool-policy (allow/ask/exclude) in `config.yaml` | no shell-out lifecycle hook | — |
+| **Goose** | ✗ | — | internal `permission_manager` / YAML + LLM "SmartApprove" | no external shell-out hook | — |
+| **Aider** | ✗ | — | `--yes-always` / `--auto-commits` only | no tool-call lifecycle | — |
+
+**Caveats to encode in the injectors/adapters:** Codex does **not** intercept the newer
+`unified_exec` background-terminal path, and a Codex deny with an **empty**
+`permissionDecisionReason` fails **OPEN**. Gemini requires "silence" — the hook must print nothing
+to stdout except the final JSON. Cline is a VS Code extension, so its init target (a dropped script
+file) differs from the CLI agents. Amazon Q treats any non-zero exit **other than 2** as
+warning-only (the tool still runs). **OpenHands** hooks run **inside the agent sandbox**
+(traceforge must be installed there; commit `.openhands/hooks.json` to the repo for cloud runs),
+and an `async:true` hook **cannot block** — keep the gate hook sync. **OpenCode** is injected as a
+**JS/TS plugin** that throws to deny, not a settings shell-hook. **Copilot Cloud** runs the hook in
+the cloud runner, so traceforge must be present there (committed `.github/hooks/*.json` or machine
+policy `policy.d`).
+
+**Unified contract (PR-K design note):** the hook-capable agents converge on one shape — a command
+fed tool-call JSON on stdin (`tool_name` + `tool_input`/`toolArgs` + `cwd` + session id) that
+denies via exit-2 and/or a deny-JSON. **Claude Code's schema is the de facto standard** — Cursor
+and Codex both implement `hookSpecificOutput.permissionDecision`, and Gemini aliases
+`CLAUDE_PROJECT_DIR` — so `gate --stdin` can target a near-universal contract behind a thin
+per-agent adapter selected by an `--agent <name>` tag the injector writes into the hook command.
+**exit-2 = deny is a clean universal fallback for 7 of 9** (Claude, Codex, Gemini, Cursor,
+Amazon Q, OpenHands; Copilot uses exit 1). The two that use no exit code at all: **Cline** (a JSON
+`{"cancel":true}` script file) and **OpenCode** (a JS/TS plugin that throws to deny). Other
+divergences: **Amazon Q** is exit-2-only, and **OpenHands** runs in-sandbox and must stay
+`async:false` to block. PR-K adds **8 injectors** (Copilot CLI, Codex, Gemini, Cline, Cursor,
+Amazon Q, OpenCode, OpenHands; Claude Code already ships; Copilot Cloud rides Copilot CLI's
+injector).
+
+#### In-process SDK frameworks (`gate_*` adapters)
+
+| Framework | Consumer entry point | Notes |
+|-----------|----------------------|-------|
+| **CrewAI** | `pipeline.gate_crewai()` | global hooks; preflight + postflight |
+| **LangChain** | `pipeline.gate_langchain(tool)` → wrapped tool | sync `_run` only today (async `_arun` pending) |
+| **LangGraph** | `pipeline.gate_langgraph(tools)` → gated tool node | preflight + postflight |
+| **Semantic Kernel** | `pipeline.gate_semantic_kernel(kernel)` | installs a gating filter |
+| **MAF (agent-framework)** | `pipeline.gate_maf()` → middleware | preflight + postflight |
+| **smolagents** | `pipeline.gate_smolagents(agent_cls=None)` → gated class | preflight + postflight |
+| **PydanticAI** | `pipeline.gate_pydantic_ai(agent)` | per-agent toolset wrap; `ctx.run_id` session id |
+| **OpenAI Agents** | `pipeline.gate_openai_agents(agent)` → gated agent | input-guardrail today (per-tool gating + postflight pending) |
+
+Read-only scoring for any surface is available via `pipeline.score_tool_call(...)` without
+registering a `GatePolicy` — this is how the Copilot and Claude Code SDKs fold in (read-only, not
+blocking). **SWE-agent** is the sole pure observe-only CLI agent: no injectable pre-execution hook
+today, so traceforge observes and scores its events but no consumer can block its tool calls.
 
 ### File Structure
 
@@ -2038,6 +2087,8 @@ Produces human-readable activity / step titles, emitted **out-of-band**.
   (~96 MB total). It is served CPU-only through `onnxruntime` + `tokenizers` + `numpy` — **no torch, no
   transformers** (resident set ~250 MB versus ~1 GB for a torch runtime). ONNX Runtime is pinned to a
   single thread (`CPUExecutionProvider`).
+- **Model resolution.** `$TRACEFORGE_TITLE_MODEL` → packaged `traceforge_title_model` → in-tree
+  `title/data/` dev fallback.
 - **Decoding.** Single-pass beam search (`num_beams = 5`, `max_new_tokens = 32`,
   `no_repeat_ngram_size = 2`, `repetition_penalty = 1.3`, `length_penalty = 0.8`) under the task prefix
   `"summarize agent step: "`, guarded by a grounding gate (`TITLE_GROUND`, default on) with adaptive beam
@@ -2090,8 +2141,9 @@ artifacts — `phase/data/*.joblib`, `phase/data/potion-base-8M/*`, `boundary/da
 the base wheel.** Only the large T5 titler weights are split out, into a separate distribution
 **`traceforge-title-model`** (`encoder.onnx` / `decoder.onnx` / `tokenizer.json`). That distribution is a
 **hard runtime dependency** (`traceforge-title-model >= 0.2` in `[project.dependencies]`), **not** an
-optional extra. `title/_resolve.py::span_dir()` resolves the weights as: installed `traceforge_title_model`
-package → in-tree `title/data/` dev fallback → raise with an install hint. Git-LFS pointer stubs are
+optional extra. `title/_resolve.py::span_dir()` resolves the weights as: `$TRACEFORGE_TITLE_MODEL` (if set)
+→ installed `traceforge_title_model` package → in-tree `title/data/` dev fallback → raise with an install
+hint. Git-LFS pointer stubs are
 rejected via a minimum-byte-size guard, so a partial checkout fails loudly instead of loading a stub.
 
 ---

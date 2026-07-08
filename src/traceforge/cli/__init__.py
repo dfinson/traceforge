@@ -14,7 +14,6 @@ from traceforge.cli.replay import replay
 from traceforge.cli.status import status
 from traceforge.cli.gate_cmd import gate
 from traceforge.cli.init_cmd import init
-from traceforge.cli.download_cmd import download_model
 
 
 @click.group()
@@ -39,4 +38,3 @@ main.add_command(config)
 main.add_command(status)
 main.add_command(gate)
 main.add_command(init)
-main.add_command(download_model)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Literal
 
 from traceforge.classify.core import Classification
@@ -174,3 +174,37 @@ class EnrichmentContext:
     engine: Literal["shell", "mcp", "coding"]
     drift_baseline: tuple[tuple[str, float], ...] | None
     mcp_profile_key: str | None
+
+
+@dataclass(frozen=True)
+class TrustGrant:
+    """A time-boxed trust grant — a general governance primitive.
+
+    While active (``granted_at <= now < expires_at``), a grant lets a consumer
+    waive a policy escalation it would otherwise incur. TraceForge assigns *no*
+    meaning to ``key``: it is an opaque token whose vocabulary the consumer owns
+    (e.g. a policy label it wants to waive, a tool name, a capability). The
+    governance layer only checks activeness by TTL and matches ``key`` equality —
+    the mechanism is general; the values are supplied by the consumer via config.
+
+    Time is always passed in explicitly (never read from a wall clock inside this
+    type), so grant activeness — and therefore TTL expiry — is fully deterministic
+    and testable.
+
+    A non-positive ``ttl_seconds`` yields ``expires_at == granted_at``, i.e. an
+    inert grant that is never active — a safe default for a mis-supplied value.
+    """
+
+    key: str
+    granted_at: datetime
+    ttl_seconds: float
+    reason: str = ""
+
+    @property
+    def expires_at(self) -> datetime:
+        """Instant at (and after) which the grant is no longer active."""
+        return self.granted_at + timedelta(seconds=max(self.ttl_seconds, 0.0))
+
+    def is_active(self, now: datetime) -> bool:
+        """Whether the grant is active at ``now`` (half-open ``[granted_at, expires_at)``)."""
+        return self.granted_at <= now < self.expires_at

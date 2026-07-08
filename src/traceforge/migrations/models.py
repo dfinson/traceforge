@@ -118,6 +118,21 @@ taint_entries = Table(
     PrimaryKeyConstraint("session_id", "ordinal"),
 )
 
+# One row per time-boxed trust grant. ``ordinal`` preserves insert order and
+# lets multiple grants for the same opaque ``key`` coexist. Activeness is derived
+# from granted_at + ttl_seconds at read time; there is no stored active flag.
+trust_grants = Table(
+    "trust_grants",
+    metadata,
+    Column("session_id", Text, nullable=False),
+    Column("ordinal", Integer, nullable=False),
+    Column("key", Text, nullable=False),
+    Column("granted_at", Text, nullable=False),
+    Column("ttl_seconds", Float, nullable=False),
+    Column("reason", Text, nullable=False, server_default=""),
+    PrimaryKeyConstraint("session_id", "ordinal"),
+)
+
 # Scalar MCP tool fingerprint. The many-valued role/capability/scope attributes
 # live in mcp_profile_attributes below (1NF), one row per value.
 mcp_profiles = Table(

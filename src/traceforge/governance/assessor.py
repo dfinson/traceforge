@@ -26,9 +26,11 @@ from traceforge.governance.results import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from traceforge.classify.config import ClassificationEngine
     from traceforge.governance.labeler import GovernanceLabeler, GovernanceResult
-    from traceforge.governance.rules import Rule
+    from traceforge.governance.rules import PolicyAssessor, Rule
     from traceforge.governance.state import SessionStateSnapshot
     from traceforge.governance.types import EnrichmentContext
 
@@ -68,10 +70,14 @@ class DefaultAssessor:
         labeler: "GovernanceLabeler",
         rules: "list[Rule]",
         engine: "ClassificationEngine",
+        policy_assessors: "Sequence[PolicyAssessor]" = (),
     ) -> None:
         self._labeler = labeler
         self._rules = rules
         self._engine = engine
+        # Pluggable, deterministic (non-LLM) policy checks. Empty by default so a
+        # consumer that registers nothing sees the exact base rule-engine behavior.
+        self._policy_assessors: tuple[PolicyAssessor, ...] = tuple(policy_assessors)
 
     def assess(self, ctx: "EnrichmentContext", snapshot: "SessionStateSnapshot") -> Assessment:
         """Label (Phase 2) then score/evaluate/evidence (Phase 3) against ``snapshot``."""
@@ -118,7 +124,11 @@ class DefaultAssessor:
         """Phase 3: risk assessment + rule evaluation + evidence + escalation context."""
         from traceforge.governance.canonical import compute_canonical_hash
         from traceforge.governance.risk_wrapper import assess_governance_risk
-        from traceforge.governance.rules import evaluate_rules
+        from traceforge.governance.rules import (
+            active_grant_keys,
+            apply_policy_overlay,
+            evaluate_rules,
+        )
 
         # Compute risk
         risk = assess_governance_risk(
@@ -131,6 +141,18 @@ class DefaultAssessor:
 
         # Evaluate rules
         rule_match = evaluate_rules(self._rules, result.classification, risk)
+
+        # Policy overlay (default-off extension point): fold in any registered
+        # PolicyAssessor decisions (protected paths, cost ceilings, consumer
+        # checks) and waive escalate/deny outcomes covered by an active trust
+        # grant. ``now`` comes from the event timestamp so TTL evaluation is fully
+        # deterministic. With no assessors and no active grants this returns the
+        # base ``rule_match`` unchanged — a guaranteed no-op for the empty policy.
+        now = ctx.event.timestamp
+        grant_keys = (
+            active_grant_keys(snapshot.trust_grants, now) if snapshot is not None else frozenset()
+        )
+        rule_match = apply_policy_overlay(rule_match, ctx, now, self._policy_assessors, grant_keys)
 
         if rule_match is None:
             return Phase3Result(risk_assessment=risk, recommendation_result=None)

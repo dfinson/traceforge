@@ -21,12 +21,15 @@ from traceforge.governance.results import SessionMeta
 
 if TYPE_CHECKING:
     import traceforge.types
+    from collections.abc import Sequence
+    from datetime import datetime
 
     from traceforge.classify.config import ClassificationEngine
+    from traceforge.config.models import PolicyConfig
     from traceforge.governance.budget import BudgetTracker
     from traceforge.governance.labeler import GovernanceLabeler
     from traceforge.governance.persistence import SystemStore
-    from traceforge.governance.rules import Rule
+    from traceforge.governance.rules import PolicyAssessor, Rule
     from traceforge.governance.state import SessionState
     from traceforge.governance.types import (
         EnrichmentContext,
@@ -46,6 +49,46 @@ def _import_dotted(dotted_path: str):
 
     module = importlib.import_module(module_path)
     return getattr(module, attr_name)
+
+
+def _build_policy_assessors(policy_cfg: "PolicyConfig") -> "tuple[PolicyAssessor, ...]":
+    """Build the default-off policy assessors from a :class:`PolicyConfig`.
+
+    Returns an empty tuple when nothing is configured (no protected-path patterns
+    and no cost ceiling), so a default policy adds zero behavior. Each assessor is
+    a general primitive parameterized purely by consumer-supplied config values.
+    """
+    from traceforge.governance.budget import CostCeiling, CostCeilingAssessor
+    from traceforge.governance.rules import ProtectedPathAssessor, RecommendedAction
+
+    assessors: list[PolicyAssessor] = []
+
+    protected = policy_cfg.protected_paths
+    if protected.patterns:
+        assessors.append(
+            ProtectedPathAssessor(
+                patterns=tuple(protected.patterns),
+                action=RecommendedAction(protected.action),
+            )
+        )
+
+    ceiling_cfg = policy_cfg.cost_ceiling
+    if ceiling_cfg.pressure_action is not None or ceiling_cfg.hard_max_tool_calls is not None:
+        assessors.append(
+            CostCeilingAssessor(
+                ceiling=CostCeiling(
+                    pressure_action=(
+                        RecommendedAction(ceiling_cfg.pressure_action)
+                        if ceiling_cfg.pressure_action is not None
+                        else None
+                    ),
+                    hard_max_tool_calls=ceiling_cfg.hard_max_tool_calls,
+                    hard_action=RecommendedAction(ceiling_cfg.hard_action),
+                )
+            )
+        )
+
+    return tuple(assessors)
 
 
 # Sentinel for "attribute absent" checks where ``None`` is itself a meaningful value.
@@ -96,6 +139,7 @@ class GovernancePipeline:
         engine: "ClassificationEngine",
         project_root: str | None = None,
         policy: "GatePolicy | None" = None,
+        policy_assessors: "Sequence[PolicyAssessor]" = (),
     ) -> None:
         # ── Facade-observable state ──
         self._store = store
@@ -104,7 +148,7 @@ class GovernancePipeline:
 
         # ── Collaborator object graph (composition root; DIP wiring) ──
         self._registry = SessionRegistry(store)
-        self._assessor = DefaultAssessor(labeler, rules, engine)
+        self._assessor = DefaultAssessor(labeler, rules, engine, policy_assessors=policy_assessors)
         self._phase1 = Phase1(budget_tracker, labeler)
         self._codec = MetaCodec()
         self._context = ContextBuilder(engine, project_root)
@@ -208,6 +252,7 @@ class GovernancePipeline:
             rules=rules,
             engine=engine,
             policy=policy,
+            policy_assessors=_build_policy_assessors(config.policy),
         )
         instance._project_root = config.project_root
         return instance
@@ -278,6 +323,37 @@ class GovernancePipeline:
     def score_tool_call(self, payload: dict) -> "EventTrace":
         """Score a pending tool call against current session state (delegates to Scorer)."""
         return self._scorer.score_tool_call(payload)
+
+    def grant_trust(
+        self,
+        session_id: str,
+        key: str,
+        ttl_seconds: float,
+        *,
+        now: "datetime | None" = None,
+        reason: str = "",
+    ) -> None:
+        """Record a time-boxed trust grant for a session — a general primitive.
+
+        While active (for ``ttl_seconds`` from ``now``), a grant whose ``key`` equals
+        a policy decision's reason code waives that escalate/deny in the assessment
+        overlay (see :class:`~traceforge.governance.types.TrustGrant`). ``key`` is
+        opaque — TraceForge assigns it no meaning, so the consumer owns the
+        vocabulary (a policy label to waive, a tool name, a capability). ``now``
+        defaults to the current UTC time; pass it explicitly for deterministic
+        tests. The grant is written through to the durable store, so it survives a
+        reload and is consulted on both the observation and preflight-scoring paths.
+        """
+        from datetime import datetime, timezone
+
+        from traceforge.governance.types import TrustGrant
+
+        granted_at = now if now is not None else datetime.now(timezone.utc)
+        state = self._registry.get_or_create(session_id)
+        state.trust_grants.add(
+            TrustGrant(key=key, granted_at=granted_at, ttl_seconds=ttl_seconds, reason=reason)
+        )
+        state.persist()
 
     # ─── Central gate execution helpers ───────────────────────────────────────
 

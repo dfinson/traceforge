@@ -270,6 +270,46 @@ ExternalGateConfig = Annotated[
 ]
 
 
+class ProtectedPathsPolicyConfig(StrictModel):
+    """Policy-driven protected-path globs (general primitive; consumer supplies globs).
+
+    When a tool call touches a path matching any ``patterns`` glob, the configured
+    ``action`` is applied. This is an *explicit* policy matcher, distinct from the
+    IFC clearance heuristics: TraceForge infers nothing here — the consumer states
+    which path shapes are protected. Empty ``patterns`` (the default) never fires.
+    """
+
+    patterns: list[str] = Field(default_factory=list)
+    action: Literal["escalate", "deny"] = "escalate"
+
+
+class CostCeilingPolicyConfig(StrictModel):
+    """Policy-driven mapping from budget pressure to a governance action.
+
+    Budget tracking already computes a ``pressure`` flag from ``BudgetConfig``
+    thresholds but takes no action. This supplies the missing policy: the action
+    to take on pressure, plus an optional independent hard ceiling on the total
+    tool-call count. All fields default to off — with ``pressure_action`` unset
+    and ``hard_max_tool_calls`` unset the ceiling never fires.
+    """
+
+    pressure_action: Literal["escalate", "deny"] | None = None
+    hard_max_tool_calls: int | None = Field(default=None, ge=1)
+    hard_action: Literal["escalate", "deny"] = "deny"
+
+
+class PolicyConfig(StrictModel):
+    """General, default-off governance policy primitives (consumer supplies values).
+
+    Each nested primitive is a generic agent-governance mechanism whose *values*
+    (which globs, which ceilings, which action) the consumer configures. With the
+    defaults (no patterns, no ceiling) nothing here changes existing behavior.
+    """
+
+    protected_paths: ProtectedPathsPolicyConfig = Field(default_factory=ProtectedPathsPolicyConfig)
+    cost_ceiling: CostCeilingPolicyConfig = Field(default_factory=CostCeilingPolicyConfig)
+
+
 class GovernanceConfig(StrictModel):
     """Governance pipeline configuration.
 
@@ -311,6 +351,7 @@ class GovernanceConfig(StrictModel):
     pii_scanning: bool = True
     integrity_verification: bool = True  # content-hash tamper detection (baseline + drift)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
+    policy: PolicyConfig = Field(default_factory=PolicyConfig)
     tool_preflight_gate: str | None = None  # dotted import path (e.g. "myapp.policies.my_policy")
     preflight_gate: ExternalGateConfig | None = (
         None  # out-of-process external decider (http/subprocess)

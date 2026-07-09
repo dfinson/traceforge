@@ -29,7 +29,7 @@ export const G = {
   session_id:
     "Grouped by session_id|The stable id every event carries. TraceForge groups a run by it — no external run-tracking needed.",
   identity:
-    "Identity ← system.db|repo + agent·model are cross-session memory (system.db → session_summaries). On the SDK-embed path with no db_path they read 'unknown'.",
+    "Identity|repo + agent·model. With system.db they come from session_summaries (cross-session memory); on the SDK-embed path they fall back to per-event metadata + usage_records, so they stay available.",
   enriched_events:
     "enriched_events|Output-sink table — one row per tool event, with risk, action, cost and duration hoisted into columns plus the full governance metadata_json.",
   segment_titles:

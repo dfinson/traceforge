@@ -86,12 +86,8 @@ def get_runs(
         return []
     limit = _runs_limit(query)
     offset = _runs_offset(query)
-    runs: list[dict[str, Any]] = []
-    for session_id in repo.list_run_ids(limit=limit, offset=offset):
-        run = repo.build_run(session_id)
-        if run is not None:
-            runs.append(run)
-    return runs
+    session_ids = repo.list_run_ids(limit=limit, offset=offset)
+    return repo.build_runs(session_ids)
 
 
 def get_run(

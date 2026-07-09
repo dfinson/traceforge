@@ -182,9 +182,60 @@ class DashboardRepository:
         """Lightweight per-session summaries for the Fleet table (no event bodies)."""
         return [s for s in (self._run_summary(sid) for sid in self.list_run_ids()) if s]
 
-    def build_run(self, session_id: str) -> dict[str, Any] | None:
-        """Assemble the full ``Run`` shape for one session, or ``None`` if unknown."""
-        conn = _connect_ro(self._paths.output_db)
+    def build_runs(self, session_ids: list[str]) -> list[dict[str, Any]]:
+        """Assemble full ``Run`` shapes for many sessions with O(1) DB connections.
+
+        Opens one read-only ``output.db`` connection and (when governance memory
+        is present) one read-only ``system.db`` connection, then threads both
+        through :meth:`build_run` and its identity/taint/trust/model helpers, so a
+        fleet of N runs costs a small constant number of connection opens instead
+        of ~8*N. Read-only throughout; the client ``Run[]`` contract is unchanged.
+        """
+        if not session_ids:
+            return []
+        out_conn = _connect_ro(self._paths.output_db)
+        sys_available = self.has_system_memory()
+        sys_conn: sqlite3.Connection | None = None
+        if sys_available:
+            try:
+                sys_conn = _connect_ro(self._paths.system_db)
+            except sqlite3.OperationalError:
+                sys_available = False
+        try:
+            runs: list[dict[str, Any]] = []
+            for session_id in session_ids:
+                run = self.build_run(
+                    session_id,
+                    out_conn=out_conn,
+                    sys_conn=sys_conn,
+                    sys_available=sys_available,
+                )
+                if run is not None:
+                    runs.append(run)
+            return runs
+        finally:
+            out_conn.close()
+            if sys_conn is not None:
+                sys_conn.close()
+
+    def build_run(
+        self,
+        session_id: str,
+        *,
+        out_conn: sqlite3.Connection | None = None,
+        sys_conn: sqlite3.Connection | None = None,
+        sys_available: bool | None = None,
+    ) -> dict[str, Any] | None:
+        """Assemble the full ``Run`` shape for one session, or ``None`` if unknown.
+
+        When ``out_conn``/``sys_conn`` are supplied (the fleet path via
+        :meth:`build_runs`) they are reused for every query instead of opening
+        fresh read-only connections, keeping ``GET /api/runs`` at O(1) connection
+        opens rather than ~8 per run. When omitted (the single-run
+        ``/api/runs/{id}`` path) connections are opened and closed locally.
+        """
+        own_out = out_conn is None
+        conn = _connect_ro(self._paths.output_db) if own_out else out_conn
         try:
             event_rows = conn.execute(
                 """SELECT id, session_id, kind, timestamp, tool_name, risk_level,
@@ -218,47 +269,50 @@ class DashboardRepository:
                     ORDER BY gap_ordinal ASC""",
                 (session_id,),
             ).fetchall()
+
+            metas = [_loads(r["metadata_json"]) for r in event_rows]
+            events = [_map_event(r, m) for r, m in zip(event_rows, metas)]
+            seg_risk = _segment_risk(events)
+            segments = _map_segments(seg_rows, events, seg_risk)
+            peak = max((e["risk"] for e in events), default=0)
+
+            starts = [t for t in (_parse_ts(r["timestamp"]) for r in event_rows) if t]
+            dur_ms = (
+                (max(starts) - min(starts)).total_seconds() * 1000.0 if len(starts) >= 2 else 0.0
+            )
+
+            identity = self._identity(session_id, sys_conn=sys_conn, sys_available=sys_available)
+            return {
+                "id": session_id,
+                "repo": identity["repo"] or _first_meta(metas, "repo") or "",
+                "agent": identity["agent"] or _first_meta(metas, "source_framework") or "",
+                "model": identity["model"] or _dominant_model(conn, session_id),
+                "title": _session_title(seg_rows) or identity["repo"] or session_id,
+                "live": identity["live"],
+                "segs": segments,
+                "events": events,
+                "usage": {
+                    "in": int(usage["in_tok"]),
+                    "out": int(usage["out_tok"]),
+                    "cost": float(usage["cost"]),
+                },
+                "started": event_rows[0]["timestamp"],
+                "durMs": dur_ms,
+                "drift": identity["drift"],
+                "peak": peak,
+                "taint": self._taint(session_id, sys_conn=sys_conn, sys_available=sys_available),
+                "trust": self._trust(session_id, sys_conn=sys_conn, sys_available=sys_available),
+                "mcp": _mcp_alerts(metas),
+                # Additive (not in the mock's Run type): raw context gaps for the
+                # Coverage list + RunView banner, wired in D6/D8.
+                "gaps": [
+                    {"t": g["timestamp"], "dropped": g["dropped_count"], "reason": g["reason"]}
+                    for g in gap_rows
+                ],
+            }
         finally:
-            conn.close()
-
-        metas = [_loads(r["metadata_json"]) for r in event_rows]
-        events = [_map_event(r, m) for r, m in zip(event_rows, metas)]
-        seg_risk = _segment_risk(events)
-        segments = _map_segments(seg_rows, events, seg_risk)
-        peak = max((e["risk"] for e in events), default=0)
-
-        starts = [t for t in (_parse_ts(r["timestamp"]) for r in event_rows) if t]
-        dur_ms = (max(starts) - min(starts)).total_seconds() * 1000.0 if len(starts) >= 2 else 0.0
-
-        identity = self._identity(session_id)
-        return {
-            "id": session_id,
-            "repo": identity["repo"] or _first_meta(metas, "repo") or "",
-            "agent": identity["agent"] or _first_meta(metas, "source_framework") or "",
-            "model": identity["model"] or _dominant_model(self._paths.output_db, session_id),
-            "title": _session_title(seg_rows) or identity["repo"] or session_id,
-            "live": identity["live"],
-            "segs": segments,
-            "events": events,
-            "usage": {
-                "in": int(usage["in_tok"]),
-                "out": int(usage["out_tok"]),
-                "cost": float(usage["cost"]),
-            },
-            "started": event_rows[0]["timestamp"],
-            "durMs": dur_ms,
-            "drift": identity["drift"],
-            "peak": peak,
-            "taint": self._taint(session_id),
-            "trust": self._trust(session_id),
-            "mcp": _mcp_alerts(metas),
-            # Additive (not in the mock's Run type): raw context gaps for the
-            # Coverage list + RunView banner, wired in D6/D8.
-            "gaps": [
-                {"t": g["timestamp"], "dropped": g["dropped_count"], "reason": g["reason"]}
-                for g in gap_rows
-            ],
-        }
+            if own_out:
+                conn.close()
 
     def _run_summary(self, session_id: str) -> dict[str, Any] | None:
         conn = _connect_ro(self._paths.output_db)
@@ -295,6 +349,7 @@ class DashboardRepository:
                     WHERE session_id = ? AND metadata_json IS NOT NULL LIMIT 1""",
                 (session_id,),
             ).fetchone()
+            dominant_model = _dominant_model(conn, session_id)
         finally:
             conn.close()
 
@@ -308,7 +363,7 @@ class DashboardRepository:
             "id": session_id,
             "repo": identity["repo"] or meta.get("repo") or "",
             "agent": identity["agent"] or meta.get("source_framework") or "",
-            "model": identity["model"] or _dominant_model(self._paths.output_db, session_id),
+            "model": identity["model"] or dominant_model,
             "title": (title_row["title"] if title_row else None) or session_id,
             "live": identity["live"],
             "usage": {
@@ -325,15 +380,26 @@ class DashboardRepository:
 
     # -- system.db (governance memory) — optional -----------------------------
 
-    def _identity(self, session_id: str) -> dict[str, Any]:
+    def _identity(
+        self,
+        session_id: str,
+        *,
+        sys_conn: sqlite3.Connection | None = None,
+        sys_available: bool | None = None,
+    ) -> dict[str, Any]:
         """repo / agent / model / live / drift from system.db, when present."""
         blank = {"repo": None, "agent": None, "model": None, "live": False, "drift": None}
-        if not self.has_system_memory():
+        available = sys_available if sys_available is not None else self.has_system_memory()
+        if not available:
             return blank
-        try:
-            conn = _connect_ro(self._paths.system_db)
-        except sqlite3.OperationalError:
-            return blank
+        own = sys_conn is None
+        if own:
+            try:
+                conn = _connect_ro(self._paths.system_db)
+            except sqlite3.OperationalError:
+                return blank
+        else:
+            conn = sys_conn
         try:
             summ = conn.execute(
                 """SELECT repo, agent_model, ended_at, drift_max
@@ -346,7 +412,8 @@ class DashboardRepository:
                     "SELECT 1 FROM session_state WHERE session_id = ?", (session_id,)
                 ).fetchone()
         finally:
-            conn.close()
+            if own:
+                conn.close()
         if not summ:
             # Live sessions may not have a summary yet; still detect liveness.
             return {**blank, "live": active is not None}
@@ -359,24 +426,40 @@ class DashboardRepository:
             "drift": summ["drift_max"],
         }
 
-    def _taint(self, session_id: str) -> list[dict[str, Any]]:
+    def _taint(
+        self,
+        session_id: str,
+        *,
+        sys_conn: sqlite3.Connection | None = None,
+        sys_available: bool | None = None,
+    ) -> list[dict[str, Any]]:
         rows = self._system_rows(
             "taint_entries",
             """SELECT clearance, source, payload_pointer FROM taint_entries
                 WHERE session_id = ? ORDER BY ordinal ASC""",
             session_id,
+            sys_conn=sys_conn,
+            sys_available=sys_available,
         )
         return [
             {"flow": f"{r['source']} → {r['clearance']}", "det": r["payload_pointer"], "lvl": 1}
             for r in rows
         ]
 
-    def _trust(self, session_id: str) -> list[dict[str, Any]]:
+    def _trust(
+        self,
+        session_id: str,
+        *,
+        sys_conn: sqlite3.Connection | None = None,
+        sys_available: bool | None = None,
+    ) -> list[dict[str, Any]]:
         rows = self._system_rows(
             "trust_grants",
             """SELECT key, granted_at, ttl_seconds, reason FROM trust_grants
                 WHERE session_id = ? ORDER BY ordinal ASC""",
             session_id,
+            sys_conn=sys_conn,
+            sys_available=sys_available,
         )
         return [
             {
@@ -388,19 +471,33 @@ class DashboardRepository:
             for r in rows
         ]
 
-    def _system_rows(self, table: str, sql: str, session_id: str) -> list[sqlite3.Row]:
-        if not self.has_system_memory():
+    def _system_rows(
+        self,
+        table: str,
+        sql: str,
+        session_id: str,
+        *,
+        sys_conn: sqlite3.Connection | None = None,
+        sys_available: bool | None = None,
+    ) -> list[sqlite3.Row]:
+        available = sys_available if sys_available is not None else self.has_system_memory()
+        if not available:
             return []
-        try:
-            conn = _connect_ro(self._paths.system_db)
-        except sqlite3.OperationalError:
-            return []
+        own = sys_conn is None
+        if own:
+            try:
+                conn = _connect_ro(self._paths.system_db)
+            except sqlite3.OperationalError:
+                return []
+        else:
+            conn = sys_conn
         try:
             if not _has_table(conn, table):
                 return []
             return conn.execute(sql, (session_id,)).fetchall()
         finally:
-            conn.close()
+            if own:
+                conn.close()
 
 
 # --- pure mapping helpers ----------------------------------------------------
@@ -568,19 +665,12 @@ def _first_meta(metas: list[dict[str, Any]], key: str) -> str | None:
     return None
 
 
-def _dominant_model(output_db: Path, session_id: str) -> str:
-    try:
-        conn = _connect_ro(output_db)
-    except sqlite3.OperationalError:
-        return ""
-    try:
-        row = conn.execute(
-            """SELECT model, COUNT(*) c FROM usage_records
-                WHERE session_id = ? GROUP BY model ORDER BY c DESC LIMIT 1""",
-            (session_id,),
-        ).fetchone()
-    finally:
-        conn.close()
+def _dominant_model(conn: sqlite3.Connection, session_id: str) -> str:
+    row = conn.execute(
+        """SELECT model, COUNT(*) c FROM usage_records
+            WHERE session_id = ? GROUP BY model ORDER BY c DESC LIMIT 1""",
+        (session_id,),
+    ).fetchone()
     return row["model"] if row else ""
 
 

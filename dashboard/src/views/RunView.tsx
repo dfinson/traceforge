@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowLeft, ChevronRight, FileText } from "lucide-react";
 import { useRuns } from "@/lib/queries";
 import type { TEvent } from "@/lib/types";
 import { useApp } from "@/store";
-import { dmin, hhmm, money, money3 } from "@/lib/format";
+import { dmin, hhmm, money, money3, fmtVal } from "@/lib/format";
 import { G, mtip } from "@/data/tips";
 import { Tip } from "@/components/Tip";
 import { RiskBadge, RiskDot } from "@/components/RiskBadge";
@@ -308,7 +308,7 @@ function Inspector({ e, idx }: { e: TEvent; idx: number }) {
             {payload.map(([k, v]) => (
               <div key={k} className="flex gap-2">
                 <span className="shrink-0 text-muted-foreground">{k}:</span>
-                <span className="min-w-0 break-all">{String(v)}</span>
+                <span className="min-w-0 whitespace-pre-wrap break-all">{fmtVal(v)}</span>
               </div>
             ))}
           </div>

@@ -12,6 +12,14 @@ export const dmin = (ms: number) =>
 export const rlab = (l: RiskLevel) => RISK[l];
 export const riskVar = (l: number) => `var(--risk-${l})`;
 
+/** Render a payload value for display: objects/arrays as pretty JSON, primitives
+ * as-is, and null/undefined as an empty string (never "[object Object]"). */
+export function fmtVal(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "object") return JSON.stringify(v, null, 2);
+  return String(v);
+}
+
 export function peakOf(evs: TEvent[]): RiskLevel {
   return Math.max(0, ...evs.map((e) => e.risk)) as RiskLevel;
 }

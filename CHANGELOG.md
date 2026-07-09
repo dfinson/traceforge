@@ -7,14 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Removed
-
-- `traceforge download-model` CLI command. The titler weights are a hard dependency
-  (`traceforge-title-model`) and install automatically; repair a broken install with
-  `pip install --force-reinstall traceforge-title-model`.
+## [0.1.1] - 2026-07-09
 
 ### Added
 
+- In-memory `QueueSource` for programmatically pushing trace events into the pipeline.
+- Managed live-SDK sources that stream observations directly from the Copilot and
+  Claude SDKs.
+- `tool_display` resolution at enrichment: a `ToolDisplayResolver` (plus a
+  `ToolDisplayProvider` extension point) mapping canonical tool identities to
+  human-facing labels, overlaid through the classify config chain.
+- Live `ProgressUpdate` emitter (`ProgressEmitter`) that yields incremental
+  activity/step updates over the existing sink subscription, reusing the heuristic
+  titler naming. Opt-in; no behavior change unless subscribed.
+- Cost/latency attribution engine (`Attributor`, opt-in `AttributionConfig`) that
+  rolls up spend and duration across trace-native dimensions (phase, turn, segment,
+  tool, file, retry).
+- SQLite sink now persists spans, usage records, and attribution rollups alongside
+  enriched events.
+- Governance policy primitives: trust grants, protected paths, a cost-ceiling action,
+  and an `Assessor` for rule-driven recommendations.
+- In-process observation auto-subscriber in the SDK.
+- Observation mappings for LangChain and Semantic Kernel.
+- `opencode` recognized by ingest auto-detection.
+- Symmetric `ungate_*` teardown for in-process gating.
 - `traceforge init` now injects the preflight gate hook for 8 more CLI/editor agents —
   `copilot-cli`, `codex`, `gemini`, `cline`, `cursor`, `amazon-q`, `opencode`, and
   `openhands` — in addition to `claude-code`. Each writer lands the agent's native hook
@@ -26,6 +42,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-agent. `--format` is retained for backward compatibility.
 - `TRACEFORGE_TITLE_MODEL` environment variable to override the titler (span) weights
   directory, matching `TRACEFORGE_PHASE_MODEL` / `TRACEFORGE_BOUNDARY_MODEL`.
+
+### Changed
+
+- Preflight gating is enforce-by-default with config-driven policy and hardened IPC
+  authentication.
+- Risk gating escalates destructive and exfiltration command patterns.
+
+### Removed
+
+- `traceforge download-model` CLI command. The titler weights are a hard dependency
+  (`traceforge-title-model`) and install automatically; repair a broken install with
+  `pip install --force-reinstall traceforge-title-model`.
+
+### Fixed
+
+- Preflight gating is now fail-closed airtight.
+- The tool-pairing buffer is bounded with a TTL and max size to prevent unbounded
+  growth.
+- Adapter installs are idempotent; async LangChain and real `openai_agents` gating are
+  fixed.
 
 ## [0.1.0] - 2026-07-07
 
@@ -69,4 +105,6 @@ risk-scored, governed event streams with opt-in tool-call gating.
 - The gate IPC server binds a POSIX `AF_UNIX` socket; on Windows that path is skipped
   and a localhost TCP socket is used instead.
 
+[Unreleased]: https://github.com/dfinson/traceforge/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/dfinson/traceforge/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/dfinson/traceforge/releases/tag/v0.1.0

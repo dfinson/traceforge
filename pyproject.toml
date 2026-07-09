@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "traceforge-toolkit"
-version = "0.1.0"
+version = "0.1.1"
 description = "Framework-agnostic, CPU-only pipeline that forges AI agent traces into classified, risk-scored, governed output"
 readme = "README.md"
 license = "MIT"

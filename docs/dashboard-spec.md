@@ -1,13 +1,37 @@
 # TraceForge Local Dashboard — Specification
 
-Status: approved (build in progress). This is the authoritative spec for the local
-"trace the traces" dashboard portal. It ports the user-approved design mock verbatim and
-replaces its synthetic data layer with a read-only local API over TraceForge's real SQLite
-storage, launched by a new `traceforge dashboard` CLI subcommand.
+Status: built (tasks D0–D10 complete on branch `dfinson-dashboard-spec-build`). This is the
+authoritative spec for the local "trace the traces" dashboard portal. It ports the user-approved
+design mock verbatim and replaces its synthetic data layer with a read-only local API over
+TraceForge's real SQLite storage, launched by a new `traceforge dashboard` CLI subcommand.
 
 Product axis: **observability / cost & latency attribution**. Risk/governance is an opt-in
 lens, never the landing tone. The Fleet landing is accounting-first
 (Active / Runs / Spend / Tokens / Classified%); loud severity treatment lives only in Triage.
+
+---
+
+## Implementation status (as-built)
+
+**Shipped and verified.** `traceforge dashboard` serves the ported SPA and renders live from a
+seeded output-sink DB; `tsc -b` + `corepack pnpm build` are clean and the backend suite (38
+tests across mappers, repository, server, API, CLI) is green. Degraded and no-output modes were
+smoke-tested against the real server.
+
+**API surface actually built (thin backend — see §5 fork 2):**
+
+- `GET /api/health` → `{output_db, system_db, has_output_db, has_system_memory}`
+- `GET /api/runs` → every run fully assembled (identity + events + usage + segs + governance memory)
+- `GET /api/runs/{id}` → one run (drill-in)
+
+The per-view aggregate endpoints sketched in §2 (`/api/fleet`, `/api/triage`, `/api/cost`,
+`/api/coverage`) were **not** built as separate routes. Every view instead aggregates
+client-side over the shared `Run[]` from the `useRuns()` React Query hook — faithful to how the
+approved mock drove its synthetic `RUNS` generator, and the fastest path to visual parity. The
+§2 "Endpoint" lines below therefore describe *what data each view consumes*, not distinct HTTP
+routes. Promoting any of them to a real aggregate endpoint later is additive and non-breaking:
+the client hook is the only seam. This decision was reported to the coordinator at the D5
+milestone.
 
 ---
 
@@ -74,6 +98,11 @@ changes:
 ## 2. Screen-by-screen
 
 For each view: components kept from the mock → real data → endpoint.
+
+> **As-built transport:** the per-view "Endpoint" lines below name the *data each view needs*;
+> the shipped transport is a single shared `GET /api/runs` that every view aggregates
+> client-side (see "Implementation status" above). `/api/runs/{id}` and `/api/health` are the
+> only other routes.
 
 ### Fleet (landing — accounting-first)
 - **Keeps**: 5 `KpiCard`s (Active / Runs / Spend / Tokens / Classified%), quiet
@@ -203,7 +232,7 @@ degraded modes + the data-source indicator.
 | condition | what shows |
 |---|---|
 | **Full** (output DB + system.db present) | everything |
-| **Output-DB only** (SDK-embed, no system.db) | identity (repo/model/framework from `metadata_json`+`usage_records`) + all per-event governance stamps (in `metadata_json`) **remain**; **LOST**: taint ledger, trust grants, MCP drift, cross-session drift → Triage shows "Governance memory unavailable" card, RunView drift = "n/a", drift KPI hidden |
+| **Output-DB only** (SDK-embed, no system.db) | identity (repo/model/framework from `metadata_json`+`usage_records`) + all per-event governance stamps (in `metadata_json`) **remain**; **LOST**: taint ledger, trust grants, cross-session MCP/drift memory → Triage shows "Governance memory unavailable" card, RunView drift = "n/a" |
 | **No output DB** | global empty state with a one-liner to configure the `sqlite` sink |
 
 `GET /api/health` exposes `has_system_memory` / `has_output_db`; the mock's `DataSourceToggle`
@@ -220,8 +249,11 @@ These were presented as product-taste forks and approved with the recommended de
 1. **sysdb toggle semantics** — auto-detected "governance memory present?" (identity stays
    available in both modes). Keep a manual override for teaching/demo. *(diverges from the mock's
    "identity unknown on SDK-embed")*
-2. **API shape** — fat-backend aggregate endpoints per view (scalable), with `/api/runs/{id}` for
-   the drill-in.
+2. **API shape** — **resolved to the thin backend**: `GET /api/runs` returns every run fully
+   assembled and each view aggregates client-side, plus `/api/runs/{id}` for the drill-in. This
+   keeps the mock's presentational components verbatim and was the fastest path to parity;
+   reported to the coordinator at D5. Fat per-view aggregate endpoints remain a non-breaking
+   future option (the `useRuns()` hook is the only seam).
 3. **Read-API stack** — stdlib `http.server` (zero deps, matches ScoreServer).
 4. **Live updates** — interval poll-refetch for v1; SSE later.
 5. **Classification confidence** — categorical→numeric bands.

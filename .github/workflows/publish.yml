@@ -18,6 +18,14 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: corepack enable
+      # The dashboard SPA (src/traceforge/dashboard/static/**) is a gitignored build
+      # output that the wheel force-includes (pyproject artifacts). Build + stage it
+      # before `python -m build` so the published wheel ships a real dashboard.
+      - run: python scripts/build_dashboard.py
       - run: pip install build
       - run: python -m build
       - name: Verify weights are real (not LFS pointers)

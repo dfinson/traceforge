@@ -14,6 +14,7 @@ from traceforge.cli.replay import replay
 from traceforge.cli.status import status
 from traceforge.cli.gate_cmd import gate
 from traceforge.cli.init_cmd import init
+from traceforge.cli.dashboard_cmd import dashboard
 
 
 @click.group()
@@ -38,3 +39,4 @@ main.add_command(config)
 main.add_command(status)
 main.add_command(gate)
 main.add_command(init)
+main.add_command(dashboard)

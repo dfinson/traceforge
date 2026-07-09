@@ -90,6 +90,23 @@ native config — for Claude Code, a `PreToolUse` hook in `.claude/settings.json
 `traceforge gate --stdin`. It does not scaffold `~/.traceforge/` (that config bootstrap happens
 automatically on first config access).
 
+## Dashboard
+
+`traceforge dashboard` opens a local, read-only web console over your SQLite output sink — the
+"trace the traces" view. It leads with cost/latency accounting (fleet spend, tokens, run
+volume, classification coverage), drills into any run (rewind ribbon, chapters tree, event
+timeline, inspector), and keeps a risk **Triage** lens plus **Cost**/**Coverage** attribution a
+click away. A bundled single-page app and a small read-only JSON API are served from one stdlib
+HTTP server, so there are no extra runtime dependencies, and it degrades gracefully when only
+the output sink is present (governance memory panels fill in when `system.db` exists too).
+
+```bash
+traceforge dashboard                                   # serve on 127.0.0.1:7788 and open a browser
+traceforge dashboard --output-db ./output/traceforge.db --no-open
+```
+
+See [`docs/dashboard-spec.md`](docs/dashboard-spec.md) for the full design and data contract.
+
 ## Features
 
 | | |

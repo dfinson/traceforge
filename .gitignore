@@ -10,6 +10,10 @@ build/
 .coverage
 research/labeling-run.log
 
+# Dashboard SPA build output (staged by scripts/build_dashboard.py; force-included
+# into the wheel via [tool.hatch.build.targets.wheel].artifacts, never committed).
+src/traceforge/dashboard/static/
+
 # Run artifacts from agent-trace / golden-run harnesses
 *.log
 *.pid

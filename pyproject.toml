@@ -115,8 +115,10 @@ ignore = [
 packages = ["src/traceforge"]
 # The titler ONNX weights ship in the separate `traceforge-title-model` package
 # (a hard dependency), NOT in this wheel. Only the tiny non-model data files
-# (boilerplate list, phase/boundary heads) are force-included here.
-artifacts = ["src/traceforge/phase/data/*.joblib", "src/traceforge/phase/data/potion-base-8M/*", "src/traceforge/boundary/data/*.joblib", "src/traceforge/title/data/*.json"]
+# (boilerplate list, phase/boundary heads) are force-included here. The dashboard
+# SPA (src/traceforge/dashboard/static/**) is a build output — gitignored, produced
+# by scripts/build_dashboard.py — so it is force-included here to ship in the wheel.
+artifacts = ["src/traceforge/phase/data/*.joblib", "src/traceforge/phase/data/potion-base-8M/*", "src/traceforge/boundary/data/*.joblib", "src/traceforge/title/data/*.json", "src/traceforge/dashboard/static/**"]
 
 [tool.hatch.build.targets.sdist]
 # Keep the core sdist lean and safely under PyPI's 100 MiB per-file cap: ship only

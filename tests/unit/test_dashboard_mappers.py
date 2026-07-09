@@ -8,10 +8,13 @@ sink lives in ``tests/e2e/test_dashboard_repository.py``.
 
 from __future__ import annotations
 
+import json
+
 from traceforge.dashboard.repository import (
     DEFAULT_OUTPUT_DB,
     DEFAULT_SYSTEM_DB,
     _format_ttl,
+    _label_from_kind,
     _map_evidence,
     _map_event,
     _map_segments,
@@ -19,6 +22,7 @@ from traceforge.dashboard.repository import (
     _mcp_message,
     _risk_from_level,
     _segment_risk,
+    _summarize,
     resolve_paths,
 )
 
@@ -110,6 +114,103 @@ def test_map_event_bare_row_has_no_evidence() -> None:
     assert ev["ev"] is None
     assert ev["risk"] == 0
     assert ev["reco"]["action"] == "allow"
+
+
+def _message_row(kind: str, **payload: object) -> dict[str, object]:
+    """A non-tool event row (message/telemetry/lifecycle): no tool identity."""
+    return _event_row(
+        kind=kind,
+        tool_name="",
+        tool_display="",
+        risk_level="safe",
+        risk_score=1,
+        action="allow",
+        payload_json=json.dumps(payload),
+    )
+
+
+def test_map_event_message_uses_kind_label_and_content_summary() -> None:
+    user = _map_event(_message_row("message.user", content="Reply with exactly: PONG"), {})
+    assert user["tool"]["n"] == "User"
+    assert user["tool"]["n"] != "event"
+    assert user["summary"] == "Reply with exactly: PONG"
+    assert user["summary"] != "event"
+
+    asst = _map_event(
+        _message_row("message.assistant", content="Not logged in \u00b7 Please run /login"),
+        {},
+    )
+    assert asst["tool"]["n"] == "Assistant"
+    assert asst["summary"] == "Not logged in \u00b7 Please run /login"
+
+
+def test_map_event_message_summary_accepts_text_and_message_keys() -> None:
+    assert _map_event(_message_row("message.system", text="be concise"), {})["summary"] == (
+        "be concise"
+    )
+    assert _map_event(_message_row("message.user", message="hi there"), {})["summary"] == (
+        "hi there"
+    )
+
+
+def test_map_event_unknown_kind_falls_back_to_titlecased_last_segment() -> None:
+    ev = _map_event(_message_row("foo.bar"), {})
+    assert ev["tool"]["n"] == "Bar"  # last dotted segment, Title-cased
+    assert ev["tool"]["n"] != "event"
+
+    deep = _map_event(_message_row("lifecycle.tool_result"), {})
+    assert deep["tool"]["n"] == "Tool Result"
+
+
+def test_map_event_lifecycle_and_usage_kind_labels() -> None:
+    assert _map_event(_message_row("session.started"), {})["tool"]["n"] == "Session"
+    assert _map_event(_message_row("session.ended"), {})["tool"]["n"] == "Session"
+    assert _map_event(_message_row("telemetry.usage"), {})["tool"]["n"] == "Usage"
+
+
+def test_map_event_tool_row_label_and_summary_unchanged() -> None:
+    # A real tool call keeps its tool_name and tool_display-derived summary; the
+    # kind-label / content-snippet fallbacks must not touch this path.
+    ev = _map_event(_event_row(), _governed_meta())
+    assert ev["tool"]["n"] == "rm"
+    assert ev["summary"] == "rm -rf /tmp/x"
+
+    # tool_display empty -> summary comes from the command payload, not content.
+    cmd = _map_event(
+        _event_row(
+            tool_display="",
+            payload_json=json.dumps({"command": "ls -la", "content": "ignored"}),
+        ),
+        {},
+    )
+    assert cmd["tool"]["n"] == "rm"
+    assert cmd["summary"] == "ls -la"
+
+
+def test_label_from_kind_variants() -> None:
+    assert _label_from_kind("message.user") == "User"
+    assert _label_from_kind("message.assistant") == "Assistant"
+    assert _label_from_kind("message.system") == "System"
+    assert _label_from_kind("telemetry.usage") == "Usage"
+    assert _label_from_kind("session.started") == "Session"
+    assert _label_from_kind("foo.bar") == "Bar"
+    assert _label_from_kind("") == "Event"
+    assert _label_from_kind(None) == "Event"
+
+
+def test_summarize_prefers_tool_payload_then_content_then_label() -> None:
+    assert _summarize("Shell", {"command": "ls -la", "content": "ignored"}) == "ls -la"
+    assert _summarize("User", {"content": "hello world"}) == "hello world"
+    assert _summarize("Bar", {}) == "Bar"  # no signal -> falls through to the label
+
+
+def test_summarize_collapses_whitespace_and_truncates_content() -> None:
+    long = "line one\n\nline two   with   spaces " + "x" * 200
+    out = _summarize("User", {"content": long})
+    assert "\n" not in out
+    assert "   " not in out  # runs of whitespace collapsed to single spaces
+    assert len(out) <= 141  # ~140 chars plus a one-char ellipsis
+    assert out.endswith("\u2026")
 
 
 def test_map_evidence_pairs_mitre_and_defaults_pii_ifc() -> None:

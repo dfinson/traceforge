@@ -514,7 +514,9 @@ def _map_event(row: sqlite3.Row, meta: dict[str, Any]) -> dict[str, Any]:
 
     mechanism = cls.get("mechanism") or ""
     effect = cls.get("effect") or ""
-    tool_name = row["tool_name"] or row["tool_display"] or mechanism or "event"
+    tool_name = (
+        row["tool_name"] or row["tool_display"] or mechanism or _label_from_kind(row["kind"])
+    )
     action = row["action"] or rec.get("recommended_action") or "allow"
     confidence = _CONFIDENCE_NUM.get(risk_a.get("confidence") or "", 0.9)
 
@@ -565,11 +567,49 @@ def _map_evidence(evd: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+_KIND_LABELS: dict[str, str] = {
+    "message.user": "User",
+    "message.assistant": "Assistant",
+    "message.system": "System",
+    "telemetry.usage": "Usage",
+}
+
+
+def _label_from_kind(kind: str | None) -> str:
+    """Human label for a non-tool event, derived from its ``kind``.
+
+    Tool events carry their own name; message / telemetry / lifecycle events do
+    not, so fall back to a readable label instead of the literal ``"event"``.
+    Unknown kinds use their last dotted segment, Title-cased (``foo.bar`` -> ``Bar``).
+    """
+    key = (kind or "").strip()
+    if not key:
+        return "Event"
+    if key in _KIND_LABELS:
+        return _KIND_LABELS[key]
+    if key.startswith("session"):
+        return "Session"
+    last = key.rsplit(".", 1)[-1]
+    return last.replace("_", " ").title() or "Event"
+
+
+def _snippet(text: str, limit: int = 140) -> str:
+    """One-line preview of free text: collapse whitespace/newlines and truncate."""
+    collapsed = " ".join(text.split())
+    if len(collapsed) <= limit:
+        return collapsed
+    return collapsed[:limit].rstrip() + "\u2026"
+
+
 def _summarize(tool_name: str, payload: dict[str, Any]) -> str:
     for key in ("command", "url", "path", "file", "query"):
         val = payload.get(key)
         if isinstance(val, str) and val:
             return val
+    for key in ("content", "text", "message"):
+        val = payload.get(key)
+        if isinstance(val, str) and val.strip():
+            return _snippet(val)
     return tool_name
 
 

@@ -32,11 +32,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
-from traceforge.dashboard.repository import (
-    DashboardPaths,
-    DashboardRepository,
-    resolve_paths,
-)
+from traceforge.dashboard.repository import DashboardRepository
 
 logger = logging.getLogger(__name__)
 
@@ -209,26 +205,6 @@ def create_server(
     if static_dir is None:
         static_dir = default_static_dir()
     return DashboardServer((host, port), repository, static_dir)
-
-
-def serve(
-    paths: DashboardPaths | None = None,
-    host: str = DEFAULT_HOST,
-    port: int = DEFAULT_PORT,
-    static_dir: Path | None = None,
-) -> None:
-    """Blocking foreground server (used by the ``traceforge dashboard`` command)."""
-    repository = DashboardRepository(paths or resolve_paths())
-    server = create_server(repository, host=host, port=port, static_dir=static_dir)
-    bound_host, bound_port = server.server_address[:2]
-    logger.info("dashboard listening on http://%s:%s", bound_host, bound_port)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.shutdown()
-        server.server_close()
 
 
 class BackgroundServer:

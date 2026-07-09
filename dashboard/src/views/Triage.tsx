@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { ShieldOff, ArrowRight, ChevronDown, ShieldAlert, AlertTriangle } from "lucide-react";
-import { RUNS, type TEvent } from "@/data/runs";
+import type { TEvent } from "@/lib/types";
+import { useRuns } from "@/lib/queries";
 import { useApp } from "@/store";
 import { G } from "@/data/tips";
 import { Tip } from "@/components/Tip";
@@ -16,23 +17,32 @@ type QRow = { runId: string; title: string; idx: number; e: TEvent };
 
 export function Triage() {
   const { sysdb, openEvent } = useApp();
+  const { data: runs = [], isLoading } = useRuns();
 
   const queue = useMemo<QRow[]>(() => {
     const q: QRow[] = [];
-    RUNS.forEach((r) =>
+    runs.forEach((r) =>
       r.events.forEach((e, idx) => {
         if (e.risk >= 2) q.push({ runId: r.id, title: r.title, idx, e });
       })
     );
     return q.sort((a, b) => b.e.score - a.e.score);
-  }, []);
+  }, [runs]);
 
   const mem = useMemo(() => {
-    const taint = RUNS.flatMap((r) => r.taint.map((t) => ({ ...t, run: r.title })));
-    const trust = RUNS.flatMap((r) => r.trust.map((t) => ({ ...t, run: r.title })));
-    const mcp = RUNS.flatMap((r) => r.mcp.map((m) => ({ ...m, run: r.title })));
+    const taint = runs.flatMap((r) => r.taint.map((t) => ({ ...t, run: r.title })));
+    const trust = runs.flatMap((r) => r.trust.map((t) => ({ ...t, run: r.title })));
+    const mcp = runs.flatMap((r) => r.mcp.map((m) => ({ ...m, run: r.title })));
     return { taint, trust, mcp };
-  }, []);
+  }, [runs]);
+
+  if (isLoading) {
+    return (
+      <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
+        Loading triage…
+      </div>
+    );
+  }
 
   const crit = queue.filter((q) => q.e.risk === 3);
   const danger = queue.filter((q) => q.e.risk === 2);

@@ -1,10 +1,11 @@
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { RUNS } from "@/data/runs";
+import { useRuns } from "@/lib/queries";
 import { axisTick, tooltipItemStyle, tooltipLabelStyle, tooltipStyle } from "./chartTheme";
 
 export function TechniqueBars() {
+  const { data: runs = [] } = useRuns();
   const m: Record<string, { label: string; n: number }> = {};
-  RUNS.forEach((r) =>
+  runs.forEach((r) =>
     r.events.forEach((e) => {
       if (e.ev) {
         const [id, label] = e.ev.mitre;

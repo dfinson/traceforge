@@ -1,5 +1,5 @@
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { RUNS } from "@/data/runs";
+import { useRuns } from "@/lib/queries";
 import {
   axisTick,
   gridStroke,
@@ -10,8 +10,9 @@ import {
 } from "./chartTheme";
 
 export function RiskByAgent() {
+  const { data: runs = [] } = useRuns();
   const m: Record<string, number[]> = {};
-  RUNS.forEach((r) =>
+  runs.forEach((r) =>
     r.events.forEach((e) => {
       (m[r.agent] ||= [0, 0, 0, 0])[e.risk]++;
     })

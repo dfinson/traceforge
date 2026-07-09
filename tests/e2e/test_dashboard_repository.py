@@ -19,6 +19,7 @@ import pytest
 
 from traceforge.classify.core import Classification
 from traceforge.classify.risk import RiskAssessment
+from traceforge.dashboard import api, repository
 from traceforge.dashboard.repository import DashboardPaths, DashboardRepository
 from traceforge.governance.envelope import ContextGapEvent, EnrichedEvent
 from traceforge.governance.mcp_drift import MCPIntegrityAlert
@@ -363,3 +364,120 @@ async def test_health_without_output_db(tmp_path: Path) -> None:
     health = repo.health()
     assert health["has_output_db"] is False
     assert health["has_system_memory"] is False
+
+
+# --- fleet-path connection-open guard (regression for #153) -------------------
+
+
+async def _seed_many_output(db: Path, ids: list[str]) -> None:
+    """One event + one usage record per session, via the real output sink."""
+    sink = SqliteOutputSink(path=str(db))
+    for i, sid in enumerate(ids):
+        ts = _T0 + timedelta(seconds=i)
+        await sink.on_event(
+            SessionEvent(
+                kind=EventKind.MESSAGE_USER,
+                session_id=sid,
+                timestamp=ts,
+                payload={"tool_name": "bash"},
+            )
+        )
+        await sink.on_usage(
+            UsageRecord(
+                session_id=sid,
+                timestamp=ts,
+                model="gpt-4o",
+                input_tokens=10,
+                output_tokens=5,
+                cost_usd=0.01,
+            )
+        )
+    await sink.close()
+
+
+def _seed_many_system(db: Path, ids: list[str]) -> None:
+    """A finalized summary + taint/trust row per session (exercises sys helpers)."""
+    conn = sqlite3.connect(str(db))
+    conn.executescript(
+        """
+        CREATE TABLE session_summaries (
+            session_id TEXT PRIMARY KEY, repo TEXT, agent_model TEXT, started_at TEXT NOT NULL,
+            ended_at TEXT, total_events INTEGER, dropped_events INTEGER DEFAULT 0,
+            budget_snapshot_json TEXT, recommendation_counts_json TEXT, drift_max REAL);
+        CREATE TABLE session_state (session_id TEXT PRIMARY KEY, updated_at TEXT NOT NULL DEFAULT '');
+        CREATE TABLE taint_entries (
+            session_id TEXT NOT NULL, ordinal INTEGER NOT NULL, event_id TEXT NOT NULL,
+            source_event_key TEXT NOT NULL, clearance TEXT NOT NULL, source TEXT NOT NULL,
+            payload_pointer TEXT NOT NULL, PRIMARY KEY (session_id, ordinal));
+        CREATE TABLE trust_grants (
+            session_id TEXT NOT NULL, ordinal INTEGER NOT NULL, key TEXT NOT NULL,
+            granted_at TEXT NOT NULL, ttl_seconds REAL NOT NULL, reason TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (session_id, ordinal));
+        """
+    )
+    for sid in ids:
+        conn.execute(
+            "INSERT INTO session_summaries VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (
+                sid,
+                "acme/widgets",
+                "copilot/gpt-4o",
+                _T0.isoformat(),
+                _T0.isoformat(),
+                1,
+                0,
+                None,
+                None,
+                0.1,
+            ),
+        )
+        conn.execute(
+            "INSERT INTO taint_entries VALUES (?,?,?,?,?,?,?)",
+            (sid, 0, "e1", "k1", "restricted", "user_input", "/arguments"),
+        )
+        conn.execute(
+            "INSERT INTO trust_grants VALUES (?,?,?,?,?,?)",
+            (sid, 0, "deploy-key", _T0.isoformat(), 3600.0, "approved"),
+        )
+    conn.commit()
+    conn.close()
+
+
+async def test_get_runs_opens_constant_connections_regardless_of_run_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fleet path must not fan out connections per run.
+
+    Regression guard for the ``GET /api/runs`` N+1 connection blow-up (#153): the
+    old code opened ~8 read-only connections per run (build_run + identity/taint/
+    trust/model each opening their own), so a 40-run fleet cost ~300 opens and
+    ~27s. Assemble a many-run fleet and assert the total number of ``_connect_ro``
+    calls is a small constant, independent of the run count.
+    """
+    ids = [f"sess-{i:03d}" for i in range(40)]
+    out, sysdb = tmp_path / "traceforge.db", tmp_path / "system.db"
+    await _seed_many_output(out, ids)
+    _seed_many_system(sysdb, ids)
+    repo = DashboardRepository(DashboardPaths(output_db=out, system_db=sysdb))
+
+    opens = 0
+    real_connect = repository._connect_ro
+
+    def _counting_connect(path: Path) -> sqlite3.Connection:
+        nonlocal opens
+        opens += 1
+        return real_connect(path)
+
+    monkeypatch.setattr(repository, "_connect_ro", _counting_connect)
+
+    runs = api.get_runs(repo, None, {})  # type: ignore[arg-type]
+
+    # Correctness: every run assembled, identity + model resolved via shared conns.
+    assert len(runs) == len(ids)
+    assert {r["id"] for r in runs} == set(ids)
+    assert all(r["model"] == "gpt-4o" for r in runs)
+    assert all(r["repo"] == "acme/widgets" for r in runs)
+    assert all(len(r["taint"]) == 1 and len(r["trust"]) == 1 for r in runs)
+    # O(1) opens: list_run_ids (1) + has_system_memory (1) + shared output (1) +
+    # shared system (1) = 4. The pre-fix fan-out would be in the hundreds.
+    assert opens <= 6, f"expected a small constant number of opens, got {opens} for {len(ids)} runs"

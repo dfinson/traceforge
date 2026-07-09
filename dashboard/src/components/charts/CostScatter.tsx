@@ -9,7 +9,8 @@ import {
   YAxis,
   ZAxis,
 } from "recharts";
-import { RISK, RUNS } from "@/data/runs";
+import { RISK } from "@/lib/types";
+import { useRuns } from "@/lib/queries";
 import { axisTick, gridStroke, tooltipStyle } from "./chartTheme";
 
 interface Pt {
@@ -35,7 +36,8 @@ function ScatterTip({ active, payload }: { active?: boolean; payload?: { payload
 }
 
 export function CostScatter({ onPick }: { onPick: (id: string) => void }) {
-  const data: Pt[] = RUNS.map((r) => ({
+  const { data: runs = [] } = useRuns();
+  const data: Pt[] = runs.map((r) => ({
     id: r.id,
     title: r.title,
     x: +(r.durMs / 60000).toFixed(1),

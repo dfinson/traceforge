@@ -1,10 +1,11 @@
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
-import { RUNS } from "@/data/runs";
+import { useRuns } from "@/lib/queries";
 import { CHART_FILL, tooltipItemStyle, tooltipLabelStyle, tooltipStyle } from "./chartTheme";
 
 export function CoverageDonut() {
+  const { data: runs = [] } = useRuns();
   const m: Record<string, number> = {};
-  RUNS.forEach((r) =>
+  runs.forEach((r) =>
     r.events.forEach((e) => {
       m[e.cls.cat] = (m[e.cls.cat] || 0) + 1;
     })

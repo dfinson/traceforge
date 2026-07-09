@@ -1,5 +1,5 @@
 import { ChevronRight, Database, Cpu } from "lucide-react";
-import { RUNS } from "@/data/runs";
+import { useRuns } from "@/lib/queries";
 import { useApp } from "@/store";
 import { Tip } from "./Tip";
 import { G } from "@/data/tips";
@@ -13,7 +13,8 @@ const VIEW_LABEL: Record<string, string> = {
 
 export function Topbar() {
   const { view, runId, sysdb, back } = useApp();
-  const run = runId ? RUNS.find((r) => r.id === runId) : null;
+  const { data: runs = [] } = useRuns();
+  const run = runId ? runs.find((r) => r.id === runId) : null;
   return (
     <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-background/80 px-6 backdrop-blur">
       <div className="flex items-center gap-1.5 text-sm">

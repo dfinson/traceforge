@@ -1,5 +1,5 @@
-import type { TEvent } from "@/data/runs";
-import { RISK } from "@/data/runs";
+import type { TEvent } from "@/lib/types";
+import { RISK } from "@/lib/types";
 
 export function RiskRibbon({
   events,

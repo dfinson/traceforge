@@ -1,4 +1,4 @@
-import type { Verdict } from "@/data/runs";
+import type { Verdict } from "@/lib/types";
 import { ATIP, PRED_TIP } from "@/data/tips";
 import { Tip } from "./Tip";
 

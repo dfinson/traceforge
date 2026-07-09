@@ -1,12 +1,10 @@
 import { LayoutGrid, ShieldAlert, Receipt, Gauge } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { RUNS } from "@/data/runs";
+import { useRuns } from "@/lib/queries";
 import { useApp } from "@/store";
 import type { View } from "@/store";
 import { DataSourceToggle } from "./DataSourceToggle";
 import { Separator } from "@/components/ui/separator";
-
-const HIGH_RISK = RUNS.flatMap((r) => r.events).filter((e) => e.risk >= 2).length;
 
 function NavItem({
   icon: Icon,
@@ -43,6 +41,8 @@ function NavItem({
 
 export function Sidebar() {
   const { view, setView, back } = useApp();
+  const { data: runs = [] } = useRuns();
+  const highRisk = runs.flatMap((r) => r.events).filter((e) => e.risk >= 2).length;
   const fleetActive = view === "fleet" || view === "run";
   const go = (v: View) => (v === "fleet" ? back() : setView(v));
   return (
@@ -72,7 +72,7 @@ export function Sidebar() {
           label="Triage"
           active={view === "triage"}
           onClick={() => go("triage")}
-          badge={HIGH_RISK}
+          badge={highRisk}
         />
         <div className="px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
           Fleet lenses

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { RUNS } from "@/data/runs";
+import { useRuns } from "@/lib/queries";
 import { useApp } from "@/store";
 import { G } from "@/data/tips";
 import { Tip } from "@/components/Tip";
@@ -16,19 +16,20 @@ import {
 } from "@/components/ui/table";
 
 export function Coverage() {
-  const { openEvent } = useApp();
+  const { openRun } = useApp();
+  const { data: runs = [], isLoading } = useRuns();
 
   const cats = useMemo(() => {
     const m: Record<string, number> = {};
-    RUNS.forEach((r) => r.events.forEach((e) => (m[e.cls.cat] = (m[e.cls.cat] || 0) + 1)));
+    runs.forEach((r) => r.events.forEach((e) => (m[e.cls.cat] = (m[e.cls.cat] || 0) + 1)));
     return Object.entries(m)
       .map(([k, v]) => ({ k, v }))
       .sort((a, b) => b.v - a.v);
-  }, []);
+  }, [runs]);
 
   const candidates = useMemo(() => {
     const m: Record<string, { cat: string; min: number; n: number }> = {};
-    RUNS.forEach((r) =>
+    runs.forEach((r) =>
       r.events.forEach((e) => {
         if (e.cls.conf < 0.9) {
           const o = (m[e.cls.canon] ||= { cat: e.cls.cat, min: 1, n: 0 });
@@ -38,19 +39,30 @@ export function Coverage() {
       })
     );
     return Object.entries(m).sort((a, b) => a[1].min - b[1].min);
-  }, []);
+  }, [runs]);
 
+  // Real context gaps are session-scoped (output-sink `context_gaps`), surfaced
+  // by the repository as a per-run `gaps[]` array — unlike the mock, which
+  // stamped a gap string on individual events. Each row opens its run.
   const gaps = useMemo(() => {
-    const g: { runId: string; title: string; idx: number; gap: string }[] = [];
-    RUNS.forEach((r) =>
-      r.events.forEach((e, idx) => {
-        if (e.gap) g.push({ runId: r.id, title: r.title, idx, gap: e.gap });
+    const g: { runId: string; title: string; reason: string }[] = [];
+    runs.forEach((r) =>
+      r.gaps.forEach((gp) => {
+        g.push({ runId: r.id, title: r.title, reason: gp.reason });
       })
     );
     return g;
-  }, []);
+  }, [runs]);
 
   const total = cats.reduce((a, c) => a + c.v, 0);
+
+  if (isLoading) {
+    return (
+      <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
+        Loading coverage…
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -137,7 +149,7 @@ export function Coverage() {
             </CardTitle>
           </Tip>
           <CardDescription>
-            {gaps.length} recorded breaks in coverage. Click to inspect the event.
+            {gaps.length} recorded breaks in coverage. Click to open the run.
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -145,11 +157,11 @@ export function Coverage() {
             {gaps.map((g, i) => (
               <button
                 key={i}
-                onClick={() => openEvent(g.runId, g.idx)}
+                onClick={() => openRun(g.runId)}
                 className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted/40"
               >
                 <span className="size-1.5 shrink-0 rounded-full bg-[var(--risk-1)]" />
-                <span className="flex-1 truncate text-[12.5px]">{g.gap}</span>
+                <span className="flex-1 truncate text-[12.5px]">{g.reason}</span>
                 <span className="truncate text-[11px] text-muted-foreground">{g.title}</span>
               </button>
             ))}

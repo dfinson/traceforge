@@ -1,5 +1,5 @@
-import type { RiskLevel } from "@/data/runs";
-import { RISK } from "@/data/runs";
+import type { RiskLevel } from "@/lib/types";
+import { RISK } from "@/lib/types";
 import { RTIP } from "@/data/tips";
 import { Tip } from "./Tip";
 

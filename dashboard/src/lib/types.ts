@@ -80,6 +80,15 @@ export interface McpAlert {
   lvl: number;
 }
 
+// A recorded break in observability coverage (output-sink `context_gaps` row).
+// Session-scoped, not per-event — the Coverage view lists these per run. `t` is
+// kept as an ISO string (not revived to Date); it is not rendered as a Date.
+export interface RunGap {
+  t: string;
+  dropped: number;
+  reason: string;
+}
+
 export interface Run {
   id: string;
   repo: string;
@@ -99,6 +108,7 @@ export interface Run {
   taint: Taint[];
   trust: Trust[];
   mcp: McpAlert[];
+  gaps: RunGap[];
 }
 
 // Risk-level labels, index-aligned to RiskLevel (0..3). Display + data concern,

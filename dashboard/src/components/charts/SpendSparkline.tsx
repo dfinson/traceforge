@@ -1,5 +1,5 @@
 import { Area, AreaChart, ResponsiveContainer, YAxis } from "recharts";
-import type { TEvent } from "@/data/runs";
+import type { TEvent } from "@/lib/types";
 
 export function SpendSparkline({ events }: { events: TEvent[] }) {
   let c = 0;

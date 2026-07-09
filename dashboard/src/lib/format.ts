@@ -1,5 +1,5 @@
-import type { RiskLevel, TEvent } from "@/data/runs";
-import { RISK } from "@/data/runs";
+import type { RiskLevel, TEvent } from "@/lib/types";
+import { RISK } from "@/lib/types";
 
 export type Dim = "phase" | "tool" | "file" | "segment" | "turn" | "retry";
 

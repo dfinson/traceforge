@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { RUNS } from "@/data/runs";
+import { useRuns } from "@/lib/queries";
 import { useApp } from "@/store";
 import type { Dim } from "@/lib/format";
 import { agg, money, money3 } from "@/lib/format";
@@ -24,9 +24,10 @@ const DIMS: Dim[] = ["phase", "tool", "file"];
 
 export function Cost() {
   const { dim, setDim, openRun } = useApp();
+  const { data: runs = [], isLoading } = useRuns();
   const activeDim: Dim = DIMS.includes(dim) ? dim : "phase";
 
-  const all = useMemo(() => RUNS.flatMap((r) => r.events), []);
+  const all = useMemo(() => runs.flatMap((r) => r.events), [runs]);
   const bars = useMemo(() => agg(all, activeDim).map((d) => ({ k: d.k, v: d.v })), [all, activeDim]);
   const totals = useMemo(() => {
     const cost = all.reduce((a, e) => a + e.cost, 0);
@@ -37,14 +38,22 @@ export function Cost() {
 
   const models = useMemo(() => {
     const m: Record<string, { calls: number; tokens: number; cost: number }> = {};
-    RUNS.forEach((r) => {
+    runs.forEach((r) => {
       const o = (m[r.model] ||= { calls: 0, tokens: 0, cost: 0 });
       o.calls += r.events.length;
       o.tokens += r.usage.in + r.usage.out;
       o.cost += r.usage.cost;
     });
     return Object.entries(m).sort((a, b) => b[1].cost - a[1].cost);
-  }, []);
+  }, [runs]);
+
+  if (isLoading) {
+    return (
+      <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
+        Loading cost…
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">

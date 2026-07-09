@@ -1,4 +1,4 @@
-import type { TEvent } from "@/data/runs";
+import type { TEvent } from "@/lib/types";
 
 export function MiniRibbon({ events }: { events: TEvent[] }) {
   return (

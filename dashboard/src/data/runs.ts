@@ -219,7 +219,7 @@ function genRun(i: number): Run {
     segs[seg].risk = Math.max(segs[seg].risk, lvl) as RiskLevel;
     segs[0].risk = Math.max(segs[0].risk, lvl) as RiskLevel;
     evs.push({
-      id: 1000 + i * 100 + e,
+      id: String(1000 + i * 100 + e),
       t: new Date(clock),
       tool: t,
       kind: "tool_call",

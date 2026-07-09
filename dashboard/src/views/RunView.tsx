@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { AlertTriangle, ArrowLeft, ChevronRight, FileText } from "lucide-react";
-import { RUNS } from "@/data/runs";
-import type { TEvent } from "@/data/runs";
+import { useRuns } from "@/lib/queries";
+import type { TEvent } from "@/lib/types";
 import { useApp } from "@/store";
 import { dmin, hhmm, money, money3 } from "@/lib/format";
 import { G, mtip } from "@/data/tips";
@@ -17,8 +17,16 @@ import { Button } from "@/components/ui/button";
 
 export function RunView() {
   const { runId, sel, setSel, sysdb, back } = useApp();
+  const { data: runs = [], isLoading } = useRuns();
   const [open, setOpen] = useState<Record<string, boolean>>({});
-  const run = runId ? RUNS.find((r) => r.id === runId) : null;
+  const run = runId ? runs.find((r) => r.id === runId) : null;
+  if (isLoading && !run) {
+    return (
+      <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
+        Loading run…
+      </div>
+    );
+  }
   if (!run) return null;
   const evs = run.events;
   const cur = evs[Math.min(sel, evs.length - 1)];
@@ -68,7 +76,7 @@ export function RunView() {
             </span>
             <Tip tip={sysdb ? G.gov_meta : G.identity}>
               <span className="cursor-help underline decoration-dotted underline-offset-2">
-                drift {sysdb ? run.drift.toFixed(2) : "n/a"}
+                drift {sysdb && run.drift != null ? run.drift.toFixed(2) : "n/a"}
               </span>
             </Tip>
           </div>

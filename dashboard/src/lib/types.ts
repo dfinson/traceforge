@@ -41,7 +41,7 @@ export interface Seg {
 }
 
 export interface TEvent {
-  id: number;
+  id: string;
   t: Date;
   tool: Tool;
   kind: string;
@@ -92,7 +92,9 @@ export interface Run {
   usage: { in: number; out: number; cost: number };
   started: Date;
   durMs: number;
-  drift: number;
+  // null in the SDK-embed / output-DB-only degraded mode: cross-session drift
+  // baselines live in system.db, which may be absent. RunView renders "n/a".
+  drift: number | null;
   peak: RiskLevel;
   taint: Taint[];
   trust: Trust[];

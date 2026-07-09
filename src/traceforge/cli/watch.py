@@ -21,6 +21,7 @@ from traceforge.cli.runner import (
 )
 from traceforge.cli.score import ScoreServer
 from traceforge.sources.auto_detect import detect_frameworks
+from traceforge.types import EventKind, UsageRecord
 
 logger = logging.getLogger(__name__)
 
@@ -74,10 +75,24 @@ def _warn_gating_inactive() -> None:
 @click.option("--once", is_flag=True, help="Process existing files then exit (no watching).")
 @click.option("--no-score", is_flag=True, help="Don't start the Score API server.")
 @click.option(
+    "--titles/--no-titles",
+    "titles",
+    default=True,
+    help=(
+        "Infer chapter/segment titles (feeds the dashboard chapter tree). "
+        "Default on; --no-titles skips per-segment ONNX inference for max throughput."
+    ),
+)
+@click.option(
     "--log-level", default="INFO", type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"])
 )
 def watch(
-    config_path: str | None, frameworks: str | None, once: bool, no_score: bool, log_level: str
+    config_path: str | None,
+    frameworks: str | None,
+    once: bool,
+    no_score: bool,
+    titles: bool,
+    log_level: str,
 ) -> None:
     """Watch detected frameworks, run governance pipeline, emit to sinks."""
     logging.basicConfig(
@@ -154,9 +169,9 @@ def watch(
     # Run async event loop
     try:
         if once:
-            asyncio.run(_run_once(pipelines, pipeline, store))
+            asyncio.run(_run_once(pipelines, pipeline, store, titles))
         else:
-            asyncio.run(_run_watch(pipelines, pipeline, store))
+            asyncio.run(_run_watch(pipelines, pipeline, store, titles))
     except KeyboardInterrupt:
         click.echo("\nShutting down...")
     finally:
@@ -173,11 +188,16 @@ async def _run_watch(
     pipelines: list[ResolvedPipeline],
     governance: "GovernancePipeline",
     store: "SystemStore",
+    enable_title: bool = False,
 ) -> None:
     """Run all pipeline watchers concurrently."""
     tasks = []
     for p in pipelines:
-        tasks.append(asyncio.create_task(_watch_pipeline(p, governance), name=f"watch-{p.name}"))
+        tasks.append(
+            asyncio.create_task(
+                _watch_pipeline(p, governance, enable_title), name=f"watch-{p.name}"
+            )
+        )
 
     # Handle graceful shutdown
     loop = asyncio.get_event_loop()
@@ -211,13 +231,16 @@ async def _run_once(
     pipelines: list[ResolvedPipeline],
     governance: "GovernancePipeline",
     store: "SystemStore",
+    enable_title: bool = False,
 ) -> None:
     """Process existing files once and exit."""
     for p in pipelines:
-        await _process_pipeline_once(p, governance)
+        await _process_pipeline_once(p, governance, enable_title)
 
 
-async def _watch_pipeline(pipeline: ResolvedPipeline, governance: "GovernancePipeline") -> None:
+async def _watch_pipeline(
+    pipeline: ResolvedPipeline, governance: "GovernancePipeline", enable_title: bool = False
+) -> None:
     """Watch a single pipeline's source and feed events through the unified pipeline.
 
     The shared event pipeline is built once, but a *fresh* adapter is created
@@ -233,7 +256,7 @@ async def _watch_pipeline(pipeline: ResolvedPipeline, governance: "GovernancePip
         logger.warning("Source path does not exist: %s", pipeline.source_path)
         return
 
-    event_pipeline = _build_event_pipeline(pipeline, governance)
+    event_pipeline = _build_event_pipeline(pipeline, governance, enable_title)
     try:
         if pipeline.source_path.is_dir():
             # Watch directory for JSONL files. One adapter per file, keyed to that
@@ -257,7 +280,7 @@ async def _watch_pipeline(pipeline: ResolvedPipeline, governance: "GovernancePip
 
 
 async def _process_pipeline_once(
-    pipeline: ResolvedPipeline, governance: "GovernancePipeline"
+    pipeline: ResolvedPipeline, governance: "GovernancePipeline", enable_title: bool = False
 ) -> None:
     """Process existing content in a pipeline's source once (no watching).
 
@@ -270,7 +293,7 @@ async def _process_pipeline_once(
     if not (pipeline.source_path.is_dir() or pipeline.source_path.is_file()):
         return
 
-    event_pipeline = _build_event_pipeline(pipeline, governance)
+    event_pipeline = _build_event_pipeline(pipeline, governance, enable_title)
     try:
         if pipeline.source_path.is_dir():
             pattern = "*.jsonl" if pipeline.name != "continue" else "*.json"
@@ -303,7 +326,9 @@ def _build_sinks(pipeline: ResolvedPipeline) -> list:
     return build_sinks(pipeline.sinks)
 
 
-def _build_event_pipeline(pipeline: ResolvedPipeline, governance: "GovernancePipeline"):
+def _build_event_pipeline(
+    pipeline: ResolvedPipeline, governance: "GovernancePipeline", enable_title: bool = False
+):
     """Build the shared ``EventPipeline`` for a resolved pipeline (built once).
 
     The daemon runs the same unified pipeline as the SDK: adapt -> enrich ->
@@ -312,7 +337,10 @@ def _build_event_pipeline(pipeline: ResolvedPipeline, governance: "GovernancePip
     the pipeline itself. The shared governance engine also backs the Gate/Score IPC
     servers, so session budget/drift state stays unified across observation and
     preflight. Live ML structuring (phase + boundary labeling) is enabled by
-    default, matching the SDK ``Pipeline``.
+    default, matching the SDK ``Pipeline``. Per-segment title inference is gated by
+    ``enable_title`` (driven by the ``watch --titles/--no-titles`` flag): when on,
+    the titler is built and its :class:`TitleUpdate`\\ s are flushed to sinks on
+    ``close()``, populating ``segment_titles`` for the dashboard chapter tree.
 
     The event pipeline is stateless with respect to *which* source file feeds it,
     so it is constructed a single time and reused across every file in the source
@@ -326,6 +354,7 @@ def _build_event_pipeline(pipeline: ResolvedPipeline, governance: "GovernancePip
         sinks=_build_sinks(pipeline),
         enricher=Enricher(),
         governance=governance,
+        enable_title=enable_title,
     )
 
 
@@ -357,7 +386,16 @@ def _session_id_for_source(path: Path) -> str:
 
 
 async def _feed_line(line: str, adapter, event_pipeline) -> None:
-    """Parse one raw line and push each resulting event through the pipeline."""
+    """Parse one raw line and push each resulting event through the pipeline.
+
+    Every event is pushed once via :meth:`EventPipeline.push`. Usage-kind events
+    (:data:`EventKind.USAGE`, e.g. Claude's ``result`` record) are *additionally*
+    dual-emitted as a :class:`~traceforge.types.UsageRecord` via
+    :meth:`EventPipeline.push_usage`, so token/cost totals land in ``usage_records``
+    (the Cost lens source) instead of only ``enriched_events``. This is purely
+    additive: it does not change enriched-event counts. ``model`` is absent from the
+    Claude ``result`` record, so it is left ``""`` (no synthesized identity).
+    """
     try:
         data = json.loads(line)
     except json.JSONDecodeError:
@@ -366,6 +404,17 @@ async def _feed_line(line: str, adapter, event_pipeline) -> None:
 
     for event in adapter.parse_dict(data):
         await event_pipeline.push(event)
+        if event.kind == EventKind.USAGE:
+            await event_pipeline.push_usage(
+                UsageRecord(
+                    session_id=event.session_id,
+                    timestamp=event.timestamp,
+                    model=str(event.payload.get("model") or ""),
+                    input_tokens=int(event.payload.get("input_tokens") or 0),
+                    output_tokens=int(event.payload.get("output_tokens") or 0),
+                    cost_usd=event.payload.get("cost_usd"),
+                )
+            )
 
 
 def _load_config(config_path: str | None) -> dict | None:

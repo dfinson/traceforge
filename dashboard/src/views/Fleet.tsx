@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { ArrowRight, Search } from "lucide-react";
-import { RUNS, RISK } from "@/data/runs";
+import { RISK } from "@/lib/types";
+import { useRuns } from "@/lib/queries";
 import { useApp } from "@/store";
 import type { SortKey } from "@/store";
 import { agg, dmin, hhmm, money, tk } from "@/lib/format";
@@ -34,22 +35,23 @@ import {
 
 export function Fleet() {
   const { filt, setFilt, sort, setSort, sysdb, openRun, setView } = useApp();
+  const { data: runs = [], isLoading } = useRuns();
 
   const totals = useMemo(() => {
-    const all = RUNS.flatMap((r) => r.events);
+    const all = runs.flatMap((r) => r.events);
     const classified = all.filter((e) => (e.cls?.conf ?? 0) >= 0.9).length;
     return {
-      live: RUNS.filter((r) => r.live).length,
-      runs: RUNS.length,
-      spend: RUNS.reduce((a, r) => a + r.usage.cost, 0),
-      tokens: RUNS.reduce((a, r) => a + r.usage.in + r.usage.out, 0),
+      live: runs.filter((r) => r.live).length,
+      runs: runs.length,
+      spend: runs.reduce((a, r) => a + r.usage.cost, 0),
+      tokens: runs.reduce((a, r) => a + r.usage.in + r.usage.out, 0),
       classifiedPct: Math.round((classified / (all.length || 1)) * 100),
-      triage: RUNS.filter((r) => r.peak >= 2).length,
+      triage: runs.filter((r) => r.peak >= 2).length,
     };
-  }, []);
+  }, [runs]);
 
   const rail = useMemo(() => {
-    const all = RUNS.flatMap((r) => r.events);
+    const all = runs.flatMap((r) => r.events);
     const spendByPhase = agg(all, "phase");
     const risk = [0, 1, 2, 3].map((l) => ({
       label: RISK[l],
@@ -66,11 +68,11 @@ export function Fleet() {
       .slice(0, 5)
       .map(([label, value], i) => ({ label, value, color: CHART_FILL[i % CHART_FILL.length] }));
     return { spendByPhase, risk, coverage };
-  }, []);
+  }, [runs]);
 
   const rows = useMemo(() => {
     const q = filt.trim().toLowerCase();
-    let list = RUNS.filter(
+    let list = runs.filter(
       (r) =>
         !q ||
         r.title.toLowerCase().includes(q) ||
@@ -83,7 +85,15 @@ export function Fleet() {
       return b.started.getTime() - a.started.getTime();
     });
     return list;
-  }, [filt, sort]);
+  }, [filt, sort, runs]);
+
+  if (isLoading) {
+    return (
+      <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
+        Loading fleet…
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -202,7 +212,7 @@ export function Fleet() {
         <CardHeader className="flex-row items-center justify-between gap-3 space-y-0">
           <div>
             <CardTitle className="text-base">Runs</CardTitle>
-            <CardDescription>{rows.length} of {RUNS.length} shown</CardDescription>
+            <CardDescription>{rows.length} of {runs.length} shown</CardDescription>
           </div>
           <div className="flex items-center gap-2">
             <div className="relative">

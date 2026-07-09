@@ -1,10 +1,10 @@
 // Typed client for the read-only dashboard API served by `traceforge dashboard`.
 //
-// Not yet wired into the views — they still read the synthetic generator
-// (src/data/runs.ts). Each view is switched to these fetchers during the
-// per-view wiring tasks (docs/dashboard-spec.md, section 6, tasks D5-D8);
-// the per-view aggregate fetchers (fleet / triage / cost / coverage) are added
-// then, alongside their response types.
+// Thin-API design (docs/dashboard-spec.md fork 2, resolved to B): the backend
+// exposes `GET /api/runs` returning every run fully assembled, plus
+// `GET /api/runs/{id}` for the drill-in. Views aggregate client-side over the
+// shared run array via the `useRuns()` hook (src/lib/queries.ts), exactly as the
+// approved mock did against its synthetic generator (src/data/runs.ts).
 //
 // The API serializes the shapes in @/lib/types with Date fields as ISO-8601
 // strings. `reviveRun` turns those back into Date objects so the presentational
@@ -65,6 +65,11 @@ export function reviveRun(w: RunWire): Run {
 }
 
 // --- Runs ------------------------------------------------------------------
+
+export async function getRuns(signal?: AbortSignal): Promise<Run[]> {
+  const wire = await getJson<RunWire[]>("/runs", signal);
+  return wire.map(reviveRun);
+}
 
 export async function getRun(id: string, signal?: AbortSignal): Promise<Run> {
   const w = await getJson<RunWire>(

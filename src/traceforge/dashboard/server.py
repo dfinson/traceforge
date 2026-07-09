@@ -204,6 +204,11 @@ def create_server(
     """
     if static_dir is None:
         static_dir = default_static_dir()
+    # Register the view routes (/api/runs, ...) onto the shared table. Idempotent,
+    # so repeated create_server calls (tests, --open) never stack duplicates.
+    from traceforge.dashboard.api import register_api_routes
+
+    register_api_routes()
     return DashboardServer((host, port), repository, static_dir)
 
 

@@ -1,9 +1,10 @@
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { RUNS } from "@/data/runs";
+import { useRuns } from "@/lib/queries";
 import { axisTick, gridStroke, tooltipItemStyle, tooltipLabelStyle, tooltipStyle } from "./chartTheme";
 
 export function SpendArea() {
-  const all = RUNS.flatMap((r) => r.events).sort((a, b) => a.t.getTime() - b.t.getTime());
+  const { data: runs = [] } = useRuns();
+  const all = runs.flatMap((r) => r.events).sort((a, b) => a.t.getTime() - b.t.getTime());
   let c = 0;
   const data = all.map((e) => ({
     t: e.t.toTimeString().slice(0, 5),

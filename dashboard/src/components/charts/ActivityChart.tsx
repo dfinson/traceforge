@@ -1,5 +1,5 @@
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { RUNS } from "@/data/runs";
+import { useRuns } from "@/lib/queries";
 import {
   axisTick,
   gridStroke,
@@ -10,8 +10,9 @@ import {
 } from "./chartTheme";
 
 export function ActivityChart() {
+  const { data: runs = [] } = useRuns();
   const phaseTotals: Record<string, number> = {};
-  RUNS.forEach((run) =>
+  runs.forEach((run) =>
     run.events.forEach((e) => {
       phaseTotals[e.phase] = (phaseTotals[e.phase] || 0) + 1;
     })
@@ -22,7 +23,7 @@ export function ActivityChart() {
     .map(([p]) => p);
 
   const buckets: Record<number, Record<string, number>> = {};
-  RUNS.forEach((run) =>
+  runs.forEach((run) =>
     run.events.forEach((e) => {
       const h = e.t.getHours();
       const b = (buckets[h] ||= {});

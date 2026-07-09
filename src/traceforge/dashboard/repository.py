@@ -155,16 +155,25 @@ class DashboardRepository:
 
     # -- run listing / assembly ----------------------------------------------
 
-    def list_run_ids(self) -> list[str]:
-        """Distinct session ids in the output DB, most-recent activity first."""
-        conn = _connect_ro(self._paths.output_db)
-        try:
-            rows = conn.execute(
-                """SELECT session_id, MAX(timestamp) AS last_ts
+    def list_run_ids(self, *, limit: int | None = None, offset: int = 0) -> list[str]:
+        """Distinct session ids in the output DB, most-recent activity first.
+
+        ``limit``/``offset`` bound the window at the SQL layer (the most-recent
+        slice), so callers never materialize more than one page of ids — and,
+        downstream, never assemble more than one page of full runs. ``limit=None``
+        returns every id (used by the internal lightweight summary path).
+        """
+        sql = """SELECT session_id, MAX(timestamp) AS last_ts
                      FROM enriched_events
                     GROUP BY session_id
                     ORDER BY last_ts DESC"""
-            ).fetchall()
+        params: list[Any] = []
+        if limit is not None:
+            sql += " LIMIT ? OFFSET ?"
+            params = [limit, max(0, offset)]
+        conn = _connect_ro(self._paths.output_db)
+        try:
+            rows = conn.execute(sql, params).fetchall()
         finally:
             conn.close()
         return [r["session_id"] for r in rows]

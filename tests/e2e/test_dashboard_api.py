@@ -10,11 +10,14 @@ from __future__ import annotations
 import asyncio
 import http.client
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
 from tests.conftest import make_event
+from traceforge import EventKind, SessionEvent
+from traceforge.dashboard.api import DEFAULT_RUNS_LIMIT
 from traceforge.dashboard.repository import DashboardPaths, DashboardRepository
 from traceforge.dashboard.server import BackgroundServer, create_server
 from traceforge.sinks.sqlite_output import SqliteOutputSink
@@ -35,12 +38,35 @@ def _seed(db: Path, sessions: dict[str, int]) -> None:
     asyncio.run(_run())
 
 
+def _seed_at(db: Path, rows: list[tuple[str, datetime]]) -> None:
+    """Seed one event per (session_id, timestamp) so run recency is deterministic.
+
+    ``make_event`` stamps ``timestamp=now()`` and won't accept an override, so the
+    ordering/paging tests build events directly to pin each run's recency.
+    """
+
+    async def _run() -> None:
+        sink = SqliteOutputSink(path=str(db))
+        for session_id, ts in rows:
+            await sink.on_event(
+                SessionEvent(
+                    kind=EventKind.MESSAGE_USER,
+                    session_id=session_id,
+                    timestamp=ts,
+                    payload={"tool_name": "bash"},
+                )
+            )
+        await sink.close()
+
+    asyncio.run(_run())
+
+
 class _Client:
-    def __init__(self, host: str, port: int) -> None:
-        self._host, self._port = host, port
+    def __init__(self, host: str, port: int, timeout: float = 5) -> None:
+        self._host, self._port, self._timeout = host, port, timeout
 
     def get(self, path: str) -> tuple[int, bytes]:
-        conn = http.client.HTTPConnection(self._host, self._port, timeout=5)
+        conn = http.client.HTTPConnection(self._host, self._port, timeout=self._timeout)
         try:
             conn.request("GET", path)
             resp = conn.getresponse()
@@ -104,5 +130,57 @@ def test_runs_empty_without_output_db(tmp_path: Path) -> None:
         assert json.loads(body) == []
         # A specific run under a missing DB is a 404, not a 500.
         assert client.get("/api/runs/whatever")[0] == 404
+    finally:
+        bg.stop()
+
+
+def test_runs_ordered_most_recent_first(tmp_path: Path) -> None:
+    out = tmp_path / "traceforge.db"
+    base = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    _seed_at(
+        out,
+        [
+            ("oldest", base),
+            ("newest", base + timedelta(hours=2)),
+            ("middle", base + timedelta(hours=1)),
+        ],
+    )
+    repo = DashboardRepository(DashboardPaths(output_db=out, system_db=tmp_path / "absent.db"))
+    bg = _serve(repo)
+    try:
+        status, body = _Client(bg.host, bg.port).get("/api/runs")
+        assert status == 200
+        assert [r["id"] for r in json.loads(body)] == ["newest", "middle", "oldest"]
+    finally:
+        bg.stop()
+
+
+def test_runs_limit_and_offset_page_the_window(tmp_path: Path) -> None:
+    out = tmp_path / "traceforge.db"
+    base = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    # s3 newest ... s0 oldest.
+    _seed_at(out, [(f"s{i}", base + timedelta(hours=i)) for i in range(4)])
+    repo = DashboardRepository(DashboardPaths(output_db=out, system_db=tmp_path / "absent.db"))
+    bg = _serve(repo)
+    try:
+        client = _Client(bg.host, bg.port)
+        page1 = json.loads(client.get("/api/runs?limit=2")[1])
+        assert [r["id"] for r in page1] == ["s3", "s2"]
+        page2 = json.loads(client.get("/api/runs?limit=2&offset=2")[1])
+        assert [r["id"] for r in page2] == ["s1", "s0"]
+    finally:
+        bg.stop()
+
+
+def test_runs_default_window_caps_at_200(tmp_path: Path) -> None:
+    out = tmp_path / "traceforge.db"
+    # More sessions than the default window; the endpoint (no ?limit) must cap it.
+    _seed(out, {f"sess-{i:03d}": 1 for i in range(DEFAULT_RUNS_LIMIT + 5)})
+    repo = DashboardRepository(DashboardPaths(output_db=out, system_db=tmp_path / "absent.db"))
+    bg = _serve(repo)
+    try:
+        status, body = _Client(bg.host, bg.port, timeout=30).get("/api/runs")
+        assert status == 200
+        assert len(json.loads(body)) == DEFAULT_RUNS_LIMIT
     finally:
         bg.stop()

@@ -14,15 +14,35 @@ lens, never the landing tone. The Fleet landing is accounting-first
 ## Implementation status (as-built)
 
 **Shipped and verified.** `traceforge dashboard` serves the ported SPA and renders live from a
-seeded output-sink DB; `tsc -b` + `corepack pnpm build` are clean and the backend suite (38
+seeded output-sink DB; `tsc -b` + `corepack pnpm build` are clean and the backend suite (48
 tests across mappers, repository, server, API, CLI) is green. Degraded and no-output modes were
 smoke-tested against the real server.
 
 **API surface actually built (thin backend — see §5 fork 2):**
 
 - `GET /api/health` → `{output_db, system_db, has_output_db, has_system_memory}`
-- `GET /api/runs` → every run fully assembled (identity + events + usage + segs + governance memory)
-- `GET /api/runs/{id}` → one run (drill-in)
+- `GET /api/runs?limit&offset` → the **most-recent window** of runs, each fully assembled
+  (identity + events + usage + segs + governance memory), ordered most-recent-first. Bounded:
+  `limit` defaults to **200** and is clamped to a hard server-side max of **500**; `offset` pages.
+  The bound is applied at the SQL layer (`repository.list_run_ids(limit, offset)`), so a
+  high-volume store never materializes more than one page of full runs.
+- `GET /api/runs/{id}` → one run (drill-in; always full detail, unbounded by the list window)
+
+Because every view aggregates over this shared window, the Fleet/Triage/Cost/Coverage numbers
+reflect the **most-recent N runs** rather than all-time — the correct semantics for a live
+console. The Fleet subtitle says "The most recent runs…" so the UI doesn't over-claim; no other
+copy or layout changed. Ordering is by last-activity timestamp (`MAX(timestamp) DESC`), which
+keeps live runs at the top.
+
+**Known follow-up (documented, not in this build):** within the returned window, a single
+pathological long run still carries all its event bodies in the list payload. Trimming raw event
+bodies from the *list* response would break the client-side aggregations (Fleet KPIs/rail, Cost
+attribution, Coverage classification, Triage risk all read `run.events`), so it's deferred. The
+clean path is a lightweight list projection — per-run aggregates (cost/tokens + phase/risk/
+classification histograms) computed server-side (the unused `repository.list_runs()` /
+`_run_summary()` scaffold is the seed) — that the fleet views consume instead of raw events,
+leaving `/api/runs/{id}` as the only full-detail read. That's a real per-view refactor, out of
+scope for the windowing bound.
 
 The per-view aggregate endpoints sketched in §2 (`/api/fleet`, `/api/triage`, `/api/cost`,
 `/api/coverage`) were **not** built as separate routes. Every view instead aggregates
@@ -100,9 +120,9 @@ changes:
 For each view: components kept from the mock → real data → endpoint.
 
 > **As-built transport:** the per-view "Endpoint" lines below name the *data each view needs*;
-> the shipped transport is a single shared `GET /api/runs` that every view aggregates
-> client-side (see "Implementation status" above). `/api/runs/{id}` and `/api/health` are the
-> only other routes.
+> the shipped transport is a single shared `GET /api/runs` (bounded — most-recent window,
+> `?limit` default 200 / max 500, `?offset`) that every view aggregates client-side (see
+> "Implementation status" above). `/api/runs/{id}` and `/api/health` are the only other routes.
 
 ### Fleet (landing — accounting-first)
 - **Keeps**: 5 `KpiCard`s (Active / Runs / Spend / Tokens / Classified%), quiet
@@ -249,11 +269,14 @@ These were presented as product-taste forks and approved with the recommended de
 1. **sysdb toggle semantics** — auto-detected "governance memory present?" (identity stays
    available in both modes). Keep a manual override for teaching/demo. *(diverges from the mock's
    "identity unknown on SDK-embed")*
-2. **API shape** — **resolved to the thin backend**: `GET /api/runs` returns every run fully
-   assembled and each view aggregates client-side, plus `/api/runs/{id}` for the drill-in. This
-   keeps the mock's presentational components verbatim and was the fastest path to parity;
-   reported to the coordinator at D5. Fat per-view aggregate endpoints remain a non-breaking
-   future option (the `useRuns()` hook is the only seam).
+2. **API shape** — **resolved to the thin backend**: `GET /api/runs` returns the most-recent
+   window of runs fully assembled (bounded by `?limit`, default 200 / hard max 500, plus
+   `?offset`, ordered most-recent-first) and each view aggregates client-side, plus
+   `/api/runs/{id}` for the drill-in. This keeps the mock's presentational components verbatim
+   and was the fastest path to parity; reported to the coordinator at D5, and the list was
+   bounded as a post-review follow-up so a high-volume store can't return an unbounded payload.
+   Fat per-view aggregate endpoints (and a lightweight event-body-free list projection) remain a
+   non-breaking future option (the `useRuns()` hook is the only seam).
 3. **Read-API stack** — stdlib `http.server` (zero deps, matches ScoreServer).
 4. **Live updates** — interval poll-refetch for v1; SSE later.
 5. **Classification confidence** — categorical→numeric bands.

@@ -101,7 +101,7 @@ export function Fleet() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Fleet</h1>
           <p className="text-sm text-muted-foreground">
-            Every run TraceForge has structured. Click a row to rewind it.
+            The most recent runs TraceForge has structured. Click a row to rewind it.
           </p>
         </div>
         {totals.triage > 0 && (

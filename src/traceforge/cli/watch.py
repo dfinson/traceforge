@@ -218,22 +218,37 @@ async def _run_once(
 
 
 async def _watch_pipeline(pipeline: ResolvedPipeline, governance: "GovernancePipeline") -> None:
-    """Watch a single pipeline's source and feed events through the unified pipeline."""
+    """Watch a single pipeline's source and feed events through the unified pipeline.
+
+    The shared event pipeline is built once, but a *fresh* adapter is created
+    lazily per source file — keyed to that file's session id (the filename stem)
+    — so each file becomes its own run and no session's stateful adapter bleeds
+    into another.
+    """
+    from traceforge.adapters.mapped_json import MappedJsonAdapter
+
     logger.info("Starting watcher for %s at %s", pipeline.name, pipeline.source_path)
 
     if not (pipeline.source_path.is_dir() or pipeline.source_path.is_file()):
         logger.warning("Source path does not exist: %s", pipeline.source_path)
         return
 
-    adapter, event_pipeline = _build_pipeline_runtime(pipeline, governance)
+    event_pipeline = _build_event_pipeline(pipeline, governance)
     try:
         if pipeline.source_path.is_dir():
-            # Watch directory for JSONL files
+            # Watch directory for JSONL files. One adapter per file, keyed to that
+            # file's session id, created lazily as each file first yields a line.
             pattern = "*.jsonl" if pipeline.name != "continue" else "*.json"
-            async for _file_path, line in watch_directory(pipeline.source_path, pattern=pattern):
+            adapters: dict[Path, MappedJsonAdapter] = {}
+            async for file_path, line in watch_directory(pipeline.source_path, pattern=pattern):
+                adapter = adapters.get(file_path)
+                if adapter is None:
+                    adapter = _build_adapter(pipeline, _session_id_for_source(file_path))
+                    adapters[file_path] = adapter
                 await _feed_line(line, adapter, event_pipeline)
         else:
-            # Watch single file
+            # Watch single file; one adapter keyed to that file's session id.
+            adapter = _build_adapter(pipeline, _session_id_for_source(pipeline.source_path))
             async for line in watch_jsonl_file(pipeline.source_path, start_at="end"):
                 await _feed_line(line, adapter, event_pipeline)
     finally:
@@ -244,23 +259,30 @@ async def _watch_pipeline(pipeline: ResolvedPipeline, governance: "GovernancePip
 async def _process_pipeline_once(
     pipeline: ResolvedPipeline, governance: "GovernancePipeline"
 ) -> None:
-    """Process existing content in a pipeline's source once (no watching)."""
+    """Process existing content in a pipeline's source once (no watching).
+
+    The shared event pipeline is built once, but a *fresh* adapter is built per
+    source file keyed to that file's session id (the filename stem), so each file
+    becomes its own run instead of collapsing into a single ``pipeline.name`` run.
+    """
     logger.info("Processing %s at %s", pipeline.name, pipeline.source_path)
 
     if not (pipeline.source_path.is_dir() or pipeline.source_path.is_file()):
         return
 
-    adapter, event_pipeline = _build_pipeline_runtime(pipeline, governance)
+    event_pipeline = _build_event_pipeline(pipeline, governance)
     try:
         if pipeline.source_path.is_dir():
             pattern = "*.jsonl" if pipeline.name != "continue" else "*.json"
             for f in pipeline.source_path.rglob(pattern):
                 if f.is_file():
+                    adapter = _build_adapter(pipeline, _session_id_for_source(f))
                     for line in f.read_text(encoding="utf-8").splitlines():
                         stripped = line.strip()
                         if stripped:
                             await _feed_line(stripped, adapter, event_pipeline)
         else:
+            adapter = _build_adapter(pipeline, _session_id_for_source(pipeline.source_path))
             for line in pipeline.source_path.read_text(encoding="utf-8").splitlines():
                 stripped = line.strip()
                 if stripped:
@@ -281,8 +303,8 @@ def _build_sinks(pipeline: ResolvedPipeline) -> list:
     return build_sinks(pipeline.sinks)
 
 
-def _build_pipeline_runtime(pipeline: ResolvedPipeline, governance: "GovernancePipeline"):
-    """Build the ``(adapter, EventPipeline)`` runtime for a resolved pipeline.
+def _build_event_pipeline(pipeline: ResolvedPipeline, governance: "GovernancePipeline"):
+    """Build the shared ``EventPipeline`` for a resolved pipeline (built once).
 
     The daemon runs the same unified pipeline as the SDK: adapt -> enrich ->
     classify -> govern -> sinks, with ``governance`` wired in as a *stage* so every
@@ -291,19 +313,47 @@ def _build_pipeline_runtime(pipeline: ResolvedPipeline, governance: "GovernanceP
     servers, so session budget/drift state stays unified across observation and
     preflight. Live ML structuring (phase + boundary labeling) is enabled by
     default, matching the SDK ``Pipeline``.
+
+    The event pipeline is stateless with respect to *which* source file feeds it,
+    so it is constructed a single time and reused across every file in the source
+    directory — models load once. Per-file *session identity* is supplied by a
+    fresh adapter per file (see :func:`_build_adapter`), not by this pipeline.
     """
-    from traceforge.adapters.mapped_json import MappedJsonAdapter
     from traceforge.enricher import Enricher
     from traceforge.pipeline import EventPipeline
 
-    mapping_path = load_mapping_path(pipeline.adapter.mapping)
-    adapter = MappedJsonAdapter.from_yaml(str(mapping_path), session_id=pipeline.name)
-    event_pipeline = EventPipeline(
+    return EventPipeline(
         sinks=_build_sinks(pipeline),
         enricher=Enricher(),
         governance=governance,
     )
-    return adapter, event_pipeline
+
+
+def _build_adapter(pipeline: ResolvedPipeline, session_id: str):
+    """Build a fresh ``MappedJsonAdapter`` for one source file.
+
+    A new adapter is created per source file for two reasons: (1) it stamps the
+    given ``session_id`` onto every event it emits, so each file's events carry
+    that file's own session identity instead of sharing the framework name; and
+    (2) ``MappedJsonAdapter`` is *stateful* (tool-call pairing, latest
+    intent/reasoning), so a fresh instance stops one session's trailing state
+    from bleeding into the next file.
+    """
+    from traceforge.adapters.mapped_json import MappedJsonAdapter
+
+    mapping_path = load_mapping_path(pipeline.adapter.mapping)
+    return MappedJsonAdapter.from_yaml(str(mapping_path), session_id=session_id)
+
+
+def _session_id_for_source(path: Path) -> str:
+    """Return the session id for a single source file.
+
+    File-per-session frameworks (claude/codex/cline/opencode) name each file
+    after the session it contains — the filename stem is the real session UUID
+    (it equals the ``sessionId`` recorded inside the file). So the stem is the
+    correct per-file session id.
+    """
+    return path.stem
 
 
 async def _feed_line(line: str, adapter, event_pipeline) -> None:

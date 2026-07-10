@@ -29,7 +29,7 @@ export const G = {
   session_id:
     "Grouped by session_id|The stable id every event carries. TraceForge groups a run by it — no external run-tracking needed.",
   identity:
-    "Identity|repo + agent·model. With system.db they come from session_summaries (cross-session memory); on the SDK-embed path they fall back to per-event metadata + usage_records, so they stay available.",
+    "Identity|repo + agent·model for the run. Taken from cross-session session_summaries when recorded, otherwise reconstructed from per-event metadata + usage_records — shown whenever it is available.",
   enriched_events:
     "enriched_events|Output-sink table — one row per tool event, with risk, action, cost and duration hoisted into columns plus the full governance metadata_json.",
   segment_titles:
@@ -42,8 +42,8 @@ export const G = {
   spans: "spans|Timing spans per step — the source for duration and latency attribution.",
   gov_meta:
     "metadata.governance|The governance SessionMeta stamped on every event: classification, risk, recommendation, budget, drift, MCP alerts, evidence.",
-  sysdb:
-    "system.db memory|Cross-session governance store: identity, taint ledger, trust grants, drift baselines, MCP registry, budget counters.",
+  govMemory:
+    "Governance memory|Cross-session governance store: identity, taint ledger, trust grants, drift baselines, MCP registry, budget counters. Surfaces here whenever it has been recorded.",
 } as const;
 
 export const mtip = (m: [string, string]) =>

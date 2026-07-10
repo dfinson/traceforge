@@ -1,8 +1,6 @@
-import { ChevronRight, Database, Cpu } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { useRuns } from "@/lib/queries";
 import { useApp } from "@/store";
-import { Tip } from "./Tip";
-import { G } from "@/data/tips";
 
 const VIEW_LABEL: Record<string, string> = {
   fleet: "Fleet",
@@ -12,7 +10,7 @@ const VIEW_LABEL: Record<string, string> = {
 };
 
 export function Topbar() {
-  const { view, runId, sysdb, back } = useApp();
+  const { view, runId, back } = useApp();
   const { data: runs = [] } = useRuns();
   const run = runId ? runs.find((r) => r.id === runId) : null;
   return (
@@ -36,18 +34,6 @@ export function Topbar() {
           <span className="font-medium">{VIEW_LABEL[view] ?? "Fleet"}</span>
         )}
       </div>
-      <Tip tip={sysdb ? G.sysdb : G.identity} side="left">
-        <span
-          className={`inline-flex cursor-help items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11.5px] ${
-            sysdb
-              ? "border-border text-muted-foreground"
-              : "risk-soft-1"
-          }`}
-        >
-          {sysdb ? <Database className="size-3.5" /> : <Cpu className="size-3.5" />}
-          {sysdb ? "system.db" : "SDK-embed · limited memory"}
-        </span>
-      </Tip>
     </header>
   );
 }

@@ -101,8 +101,9 @@ export interface Run {
   usage: { in: number; out: number; cost: number };
   started: Date;
   durMs: number;
-  // null in the SDK-embed / output-DB-only degraded mode: cross-session drift
-  // baselines live in system.db, which may be absent. RunView renders "n/a".
+  // null when no cross-session drift baseline has been recorded for the run (it
+  // lives in the cross-session governance store, which may be absent). RunView
+  // renders "n/a".
   drift: number | null;
   peak: RiskLevel;
   taint: Taint[];

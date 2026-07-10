@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/table";
 
 export function Fleet() {
-  const { filt, setFilt, sort, setSort, sysdb, openRun, setView } = useApp();
+  const { filt, setFilt, sort, setSort, openRun, setView } = useApp();
   const { data: runs = [], isLoading } = useRuns();
 
   const totals = useMemo(() => {
@@ -121,7 +121,7 @@ export function Fleet() {
           label="Active"
           value={totals.live}
           sub="live now"
-          tip="Live runs|Runs still emitting events. On the CLI path these tail ~/.traceforge/traceforge.db."
+          tip="Live runs|Runs still emitting events — their timeline and cost keep growing as TraceForge tails the output sink."
         />
         <KpiCard label="Runs" value={totals.runs} sub="last 24h" tip={G.session_id} />
         <KpiCard label="Spend" value={money(totals.spend)} sub="all runs" tip={G.usage_records} />
@@ -266,7 +266,7 @@ export function Fleet() {
                       )}
                       <div className="min-w-0">
                         <div className="max-w-[34ch] truncate font-medium">{r.title}</div>
-                        {sysdb ? (
+                        {r.repo ? (
                           <div className="text-[11px] text-muted-foreground">{r.repo}</div>
                         ) : (
                           <Tip tip={G.identity}>
@@ -279,10 +279,12 @@ export function Fleet() {
                     </div>
                   </TableCell>
                   <TableCell>
-                    {sysdb ? (
+                    {r.agent || r.model ? (
                       <div className="text-[12.5px]">
-                        <div>{r.agent}</div>
-                        <div className="text-[11px] text-muted-foreground">{r.model}</div>
+                        {r.agent && <div>{r.agent}</div>}
+                        {r.model && (
+                          <div className="text-[11px] text-muted-foreground">{r.model}</div>
+                        )}
                       </div>
                     ) : (
                       <Tip tip={G.identity}>

@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppProvider, useApp } from "@/store";
 import { useHealth } from "@/lib/queries";
@@ -12,14 +11,8 @@ import { Cost } from "@/views/Cost";
 import { Coverage } from "@/views/Coverage";
 
 function Body() {
-  const { view, sysdbTouched, syncSysdb } = useApp();
+  const { view } = useApp();
   const { data: health } = useHealth();
-
-  // Auto-detect the governance-memory lens from the real data source, unless the
-  // user has manually overridden it (spec fork 1: auto-detect + keep override).
-  useEffect(() => {
-    if (health && !sysdbTouched) syncSysdb(health.has_system_memory);
-  }, [health, sysdbTouched, syncSysdb]);
 
   const noOutput = health != null && !health.has_output_db;
 

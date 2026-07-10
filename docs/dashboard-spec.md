@@ -267,13 +267,15 @@ degraded modes + the data-source indicator.
 | condition | what shows |
 |---|---|
 | **Full** (output DB + system.db present) | everything |
-| **Output-DB only** (SDK-embed, no system.db) | identity (repo/model/framework from `metadata_json`+`usage_records`) + all per-event governance stamps (in `metadata_json`) **remain**; **LOST**: taint ledger, trust grants, cross-session MCP/drift memory → Triage shows "Governance memory unavailable" card, RunView drift = "n/a" |
+| **Output-DB only** (no system.db yet) | identity (repo/model/framework from `metadata_json`+`usage_records`) + all per-event governance stamps (in `metadata_json`) + MCP drift (stamped per-event) **remain**; **absent until recorded**: taint ledger, trust grants, cross-session drift baseline → each Triage card shows its own empty row, or a single "No governance memory recorded" card when none has any rows; RunView drift = "n/a" |
 | **No output DB** | global empty state with a one-liner to configure the `sqlite` sink |
 
-`GET /api/health` exposes `has_system_memory` / `has_output_db`; the mock's `DataSourceToggle`
-becomes a **real auto-detected indicator** (with an optional manual override kept for
-teaching/demo). This refines the mock, which tied the toggle to *identity*; identity is in fact
-available in both modes because the output DB carries repo/model.
+Every governance-memory surface is gated on **data presence**, not on how the data was produced:
+if the backing rows exist (taint/trust in the governance store, MCP alerts in per-event metadata, a
+recorded drift baseline, identity from summaries *or* event metadata) the surface renders; if not,
+the same honest empty state shows. There is **no** CLI-vs-SDK data-source distinction in the UI —
+TraceForge's schema is identical regardless of entry point. `GET /api/health` still exposes
+`has_output_db` (drives the global no-data screen) and `has_system_memory` (informational only).
 
 ---
 
@@ -281,9 +283,12 @@ available in both modes because the output DB carries repo/model.
 
 These were presented as product-taste forks and approved with the recommended defaults below.
 
-1. **sysdb toggle semantics** — auto-detected "governance memory present?" (identity stays
-   available in both modes). Keep a manual override for teaching/demo. *(diverges from the mock's
-   "identity unknown on SDK-embed")*
+1. **Governance-memory gating** — every governance-memory surface (identity, drift, taint, trust,
+   MCP, context gaps) is keyed on **data presence**, not on the data source. The mock's
+   CLI-vs-SDK `DataSourceToggle` and the auto-detected `sysdb` lens have been removed: TraceForge's
+   schema is identical whether data arrived via the standalone CLI or an embedded SDK, so the entry
+   point is not a meaningful axis. Each surface renders when its backing rows exist and shows an
+   honest, source-agnostic empty state otherwise.
 2. **API shape** — **resolved to the thin backend**: `GET /api/runs` returns the most-recent
    window of runs fully assembled (bounded by `?limit`, default 200 / hard max 500, plus
    `?offset`, ordered most-recent-first) and each view aggregates client-side, plus
@@ -341,8 +346,8 @@ D2 backend-readlayer ─┬─> D3 http-server ─> D4 cli+bundle
   Deps: D1, D3.
 - **D7 — Wire Triage.** `/api/triage` (+ system.db governance memory); swap Triage. Deps: D1, D3.
 - **D8 — Wire Cost + Coverage.** `/api/cost?dim=`, `/api/coverage`; swap both. Deps: D1, D3.
-- **D9 — Degraded modes.** Per-view empty/partial states from `/api/health`; real DataSourceToggle
-  indicator; no-output-DB empty state. Deps: D5–D8.
+- **D9 — Degraded modes.** Per-view empty/partial states gated on data presence; no-output-DB
+  empty state from `/api/health`. Deps: D5–D8.
 - **D10 — Tests + docs.** Backend unit + endpoint tests over a seeded DB; e2e smoke (spin server,
   hit endpoints); frontend typecheck/build in CI or a make target; finalize this doc; README
   mention. Deps: all.

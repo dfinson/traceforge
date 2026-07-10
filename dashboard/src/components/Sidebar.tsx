@@ -3,7 +3,6 @@ import type { LucideIcon } from "lucide-react";
 import { useRuns } from "@/lib/queries";
 import { useApp } from "@/store";
 import type { View } from "@/store";
-import { DataSourceToggle } from "./DataSourceToggle";
 import { Separator } from "@/components/ui/separator";
 
 function NavItem({
@@ -85,10 +84,6 @@ export function Sidebar() {
           onClick={() => go("coverage")}
         />
       </nav>
-      <Separator />
-      <div className="p-3">
-        <DataSourceToggle />
-      </div>
     </aside>
   );
 }

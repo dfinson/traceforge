@@ -16,7 +16,7 @@ const RISK_VAR = (l: number) => `var(--risk-${l})`;
 type QRow = { runId: string; title: string; idx: number; e: TEvent };
 
 export function Triage() {
-  const { sysdb, openEvent } = useApp();
+  const { openEvent } = useApp();
   const { data: runs = [], isLoading } = useRuns();
 
   const queue = useMemo<QRow[]>(() => {
@@ -35,6 +35,10 @@ export function Triage() {
     const mcp = runs.flatMap((r) => r.mcp.map((m) => ({ ...m, run: r.title })));
     return { taint, trust, mcp };
   }, [runs]);
+
+  // Presence, not entry point: show the governance-memory cards when any of the
+  // three surfaces actually has rows, else the honest empty state below.
+  const hasMem = mem.taint.length > 0 || mem.trust.length > 0 || mem.mcp.length > 0;
 
   if (isLoading) {
     return (
@@ -94,9 +98,9 @@ export function Triage() {
         </Card>
       </div>
 
-      {sysdb ? (
+      {hasMem ? (
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-          <MemCard title="Taint ledger" tip={G.sysdb} desc="Untrusted → sink information flows.">
+          <MemCard title="Taint ledger" tip={G.govMemory} desc="Untrusted → sink information flows.">
             {mem.taint.length ? (
               mem.taint.map((t, i) => (
                 <MemRow key={i} lvl={t.lvl} head={t.flow} sub={`${t.det} · ${t.run}`} />
@@ -105,12 +109,16 @@ export function Triage() {
               <Empty>No taint flows recorded.</Empty>
             )}
           </MemCard>
-          <MemCard title="Trust grants" tip={G.sysdb} desc="Active TTL-bound trust for sources.">
-            {mem.trust.map((t, i) => (
-              <MemRow key={i} lvl={t.lvl} head={t.who} sub={`${t.ttl} · ${t.run}`} />
-            ))}
+          <MemCard title="Trust grants" tip={G.govMemory} desc="Active TTL-bound trust for sources.">
+            {mem.trust.length ? (
+              mem.trust.map((t, i) => (
+                <MemRow key={i} lvl={t.lvl} head={t.who} sub={`${t.ttl} · ${t.run}`} />
+              ))
+            ) : (
+              <Empty>No trust grants active.</Empty>
+            )}
           </MemCard>
-          <MemCard title="MCP drift" tip={G.sysdb} desc="Changes in MCP server tool surface.">
+          <MemCard title="MCP drift" tip={G.govMemory} desc="Changes in MCP server tool surface.">
             {mem.mcp.length ? (
               mem.mcp.map((m, i) => (
                 <MemRow key={i} lvl={m.lvl} head={m.srv} sub={`${m.msg} · ${m.run}`} />
@@ -124,11 +132,10 @@ export function Triage() {
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
             <ShieldOff className="size-7 text-muted-foreground/60" />
-            <div className="text-sm font-medium">Governance memory unavailable</div>
+            <div className="text-sm font-medium">No governance memory recorded</div>
             <p className="max-w-md text-[12.5px] text-muted-foreground">
-              Taint ledger, trust grants and MCP drift live in <code>system.db</code>, written on
-              the CLI path. On the SDK-embed path they aren't persisted — the risk queue above is
-              unaffected.
+              Taint ledger, trust grants and MCP drift appear here once TraceForge has recorded
+              them for these runs. None has been recorded yet — the risk queue above is unaffected.
             </p>
           </CardContent>
         </Card>

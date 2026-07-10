@@ -16,7 +16,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 
 export function RunView() {
-  const { runId, sel, setSel, sysdb, back } = useApp();
+  const { runId, sel, setSel, back } = useApp();
   const { data: runs = [], isLoading } = useRuns();
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const run = runId ? runs.find((r) => r.id === runId) : null;
@@ -31,6 +31,7 @@ export function RunView() {
   const evs = run.events;
   const cur = evs[Math.min(sel, evs.length - 1)];
   const activities = run.segs.filter((s) => s.kind === "activity");
+  const identity = [run.repo, run.agent, run.model].filter(Boolean).join(" · ");
 
   return (
     <div className="space-y-5">
@@ -38,14 +39,12 @@ export function RunView() {
         <div className="min-w-0">
           <h1 className="truncate text-xl font-semibold tracking-tight">{run.title}</h1>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] text-muted-foreground">
-            {sysdb ? (
-              <span>
-                {run.repo} · {run.agent} · {run.model}
-              </span>
+            {identity ? (
+              <span>{identity}</span>
             ) : (
               <Tip tip={G.identity}>
                 <span className="cursor-help underline decoration-dotted underline-offset-2">
-                  identity unknown (SDK-embed)
+                  identity unknown
                 </span>
               </Tip>
             )}
@@ -74,9 +73,9 @@ export function RunView() {
             <span>
               peak <RiskBadge level={run.peak} />
             </span>
-            <Tip tip={sysdb ? G.gov_meta : G.identity}>
+            <Tip tip={G.gov_meta}>
               <span className="cursor-help underline decoration-dotted underline-offset-2">
-                drift {sysdb && run.drift != null ? run.drift.toFixed(2) : "n/a"}
+                drift {run.drift != null ? run.drift.toFixed(2) : "n/a"}
               </span>
             </Tip>
           </div>

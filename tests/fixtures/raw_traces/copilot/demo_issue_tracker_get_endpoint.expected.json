@@ -1,5 +1,5 @@
 {
-  "event_count": 59,
+  "event_count": 60,
   "kinds": {
     "hook.completed": 9,
     "hook.started": 9,
@@ -8,6 +8,7 @@
     "message.user": 1,
     "session.ended": 1,
     "session.started": 1,
+    "telemetry.usage": 1,
     "tool.call.completed": 9,
     "tool.call.started": 9,
     "turn.ended": 6,

@@ -25,6 +25,7 @@ import traceforge.preprocessors.amazonq  # noqa: F401
 import traceforge.preprocessors.maf_transcript  # noqa: F401
 import traceforge.preprocessors.opencode  # noqa: F401
 import traceforge.preprocessors.copilot_vscode  # noqa: F401
+import traceforge.preprocessors.copilot  # noqa: F401
 import traceforge.preprocessors.antigravity  # noqa: F401
 
 __all__ = [

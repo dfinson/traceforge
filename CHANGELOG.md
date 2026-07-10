@@ -13,6 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-session `~/.copilot/session-state/<uuid>/events.jsonl` streams (override the
   root with `COPILOT_SESSION_STATE_DIR`).
 
+### Fixed
+
+- GitHub Copilot CLI runs no longer render blank `model` / `repo` and an empty Cost
+  lens. A new `copilot` preprocessor synthesizes per-model `assistant.usage` records
+  from the authoritative `session.shutdown.data.modelMetrics` (Copilot emits no
+  per-turn usage event), and the mapping surfaces `session.start`'s
+  `data.context.cwd` as `EventMetadata.repo` via `repo_field`. Input tokens aggregate
+  uncached + cache-read + cache-write with the split preserved in
+  `usage_records.attributes`; `cost_usd` stays `None` (Copilot's `requests.cost` is a
+  premium-request count, not dollars — never synthesized). Ingestion-side only; usage
+  rides `usage_records` (Cost lens), never the enriched-events timeline.
+
 ## [0.1.1] - 2026-07-09
 
 ### Added

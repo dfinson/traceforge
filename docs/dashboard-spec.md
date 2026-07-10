@@ -211,6 +211,32 @@ degraded modes + the data-source indicator.
 > shows real tokens with honest null/`$0.00` dollars). A `<synthetic>`/absent model
 > normalizes to `""` so it never wins `_dominant_model`, while its real tokens still count.
 
+> **Usage token semantics (Copilot CLI shutdown-metrics path).** GitHub Copilot CLI
+> emits **no** per-turn usage event, so the authoritative whole-session token accounting
+> lives on the terminal `session.shutdown` event as `data.modelMetrics` — a per-model
+> map `{<model>: {requests: {count, cost}, usage: {inputTokens, outputTokens,
+> cacheReadTokens, cacheWriteTokens, reasoningTokens}}}` (`modelMetrics` may be a JSON
+> string or an object; both are decoded). The `copilot` preprocessor synthesizes one
+> `assistant.usage` block **per model** from it (stable dedup id `<shutdown-id>:<model>`),
+> leaving every other event untouched so the enriched timeline is unchanged. Copilot's
+> `usage.inputTokens` is a **grand total** that already includes the cache tokens —
+> verified against `tokenDetails` on real `~/.copilot` streams and the pinned
+> `claude-opus-4.8` golden fixture, where `inputTokens == uncached_input + cacheRead +
+> cacheWrite` (e.g. `407996 = 211 + 394185 + 13600`). The watch bridge, however, treats
+> its `input_tokens` field as the *uncached* delta and rebuilds the headline as
+> `uncached + cacheRead + cacheWrite` (the Claude-path convention). So the preprocessor
+> emits the **uncached** input (grand total minus the cache components, clamped at zero),
+> which makes the headline land back on **exactly Copilot's reported `inputTokens`**, with
+> the lossless split kept in `usage_records.attributes` as
+> `{input_uncached, cache_read_tokens, cache_creation_tokens}`.
+> `reasoningTokens` is not surfaced separately (Copilot reports it as `0`; the provider
+> folds reasoning into output accounting). `cost_usd` is **`None`**: Copilot's
+> `requests.cost` is a **premium-request count**, not a dollar amount, so none is
+> derivable and none is synthesized (`build_run` degrades cost to `0.0` via `COALESCE`).
+> `run.repo` comes from `session.start`'s `data.context.cwd` (surfaced as
+> `EventMetadata.repo` via the mapping's `repo_field`); `run.model` is the deduped
+> `usage_records` dominant model (e.g. `claude-sonnet-4.5`, `gpt-5`).
+
 ### `TEvent` (timeline + inspector)
 | mock field | real source |
 |---|---|

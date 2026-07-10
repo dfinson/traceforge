@@ -81,6 +81,7 @@ def detect_frameworks(frameworks: list[str] | None = None) -> list[DetectedFrame
     """
     all_detectors = {
         "claude": _detect_claude,
+        "copilot": _detect_copilot,
         "codex": _detect_codex,
         "continue": _detect_continue,
         "cline": _detect_cline,
@@ -116,6 +117,21 @@ def _detect_claude() -> DetectedFramework | None:
     path = _expand("~/.claude/projects")
     if path.is_dir():
         return DetectedFramework("claude", path, "claude", "file_watch")
+    return None
+
+
+def _detect_copilot() -> DetectedFramework | None:
+    # GitHub Copilot CLI is dir-per-session: each session is a directory
+    # ``<session-uuid>/`` whose event stream is always literally ``events.jsonl``,
+    # under ``~/.copilot/session-state``. Pointing the file-watch source at that
+    # root lets the directory rglob pick up every ``<uuid>/events.jsonl``
+    # automatically. The copilot mapping already ships; this only wires the
+    # existing ingestion support into auto-detection. Override the root with
+    # ``COPILOT_SESSION_STATE_DIR`` (points directly at the session-state dir).
+    custom = os.environ.get("COPILOT_SESSION_STATE_DIR")
+    path = Path(custom) if custom else _expand("~/.copilot/session-state")
+    if path.is_dir():
+        return DetectedFramework("copilot", path, "copilot", "file_watch")
     return None
 
 

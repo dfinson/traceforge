@@ -50,6 +50,9 @@ def _framework_layout(home: Path) -> dict[str, tuple[Path, bool, str, str]]:
 
     return {
         "claude": (home / ".claude" / "projects", False, "claude", "file_watch"),
+        # Copilot CLI is dir-per-session under ~/.copilot/session-state; the
+        # detector points the file-watch source at that root (a directory).
+        "copilot": (home / ".copilot" / "session-state", False, "copilot", "file_watch"),
         "codex": (home / ".codex" / "sessions", False, "codex", "file_watch"),
         "continue": (home / ".continue" / "sessions", False, "continue", "file_watch"),
         "cline": (
@@ -133,6 +136,34 @@ def test_continue_global_dir_env_var_is_honored(
     detected = detect_frameworks(["continue"])
     assert len(detected) == 1
     assert _same_path(detected[0].path, custom / "sessions")
+
+
+def test_copilot_session_state_dir_env_var_is_honored(
+    tmp_traceforge_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Unlike CODEX_HOME/CONTINUE_GLOBAL_DIR (which point at a parent and get
+    # "/sessions" appended), COPILOT_SESSION_STATE_DIR points directly at the
+    # session-state root the detector watches.
+    custom = tmp_traceforge_home / "xdg-copilot" / "session-state"
+    custom.mkdir(parents=True)
+    monkeypatch.setenv("COPILOT_SESSION_STATE_DIR", str(custom))
+
+    detected = detect_frameworks(["copilot"])
+    assert len(detected) == 1
+    found = detected[0]
+    assert found.name == "copilot"
+    assert found.adapter == "copilot"
+    assert found.ingestion_mode == "file_watch"
+    assert _same_path(found.path, custom)
+
+
+def test_copilot_missing_session_state_dir_is_clean_no_match(
+    tmp_traceforge_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # No ~/.copilot/session-state on disk and no override → the detector returns
+    # no match rather than fabricating a detection for an absent store.
+    monkeypatch.delenv("COPILOT_SESSION_STATE_DIR", raising=False)
+    assert detect_frameworks(["copilot"]) == []
 
 
 def test_framework_filter_limits_detection(tmp_traceforge_home: Path) -> None:

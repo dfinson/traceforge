@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `copilot` (GitHub Copilot CLI) recognized by ingest auto-detection, reading the
+  per-session `~/.copilot/session-state/<uuid>/events.jsonl` streams (override the
+  root with `COPILOT_SESSION_STATE_DIR`).
+
 ## [0.1.1] - 2026-07-09
 
 ### Added

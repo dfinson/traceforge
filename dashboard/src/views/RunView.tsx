@@ -4,6 +4,7 @@ import { useRuns } from "@/lib/queries";
 import type { TEvent } from "@/lib/types";
 import { useApp } from "@/store";
 import { dmin, hhmm, money, money3, fmtVal } from "@/lib/format";
+import { buildChapters, locateEvent } from "@/lib/chapters";
 import { G, mtip } from "@/data/tips";
 import { Tip } from "@/components/Tip";
 import { RiskBadge, RiskDot } from "@/components/RiskBadge";
@@ -20,6 +21,7 @@ export function RunView() {
   const { data: runs = [], isLoading } = useRuns();
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const run = runId ? runs.find((r) => r.id === runId) : null;
+  const chapters = useMemo(() => (run ? buildChapters(run.segs, run.events) : []), [run]);
   if (isLoading && !run) {
     return (
       <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
@@ -29,8 +31,9 @@ export function RunView() {
   }
   if (!run) return null;
   const evs = run.events;
-  const cur = evs[Math.min(sel, evs.length - 1)];
-  const activities = run.segs.filter((s) => s.kind === "activity");
+  const selIdx = Math.min(sel, evs.length - 1);
+  const cur = evs[selIdx];
+  const active = locateEvent(chapters, selIdx);
   const identity = [run.repo, run.agent, run.model].filter(Boolean).join(" · ");
 
   return (
@@ -103,57 +106,102 @@ export function RunView() {
                 </CardTitle>
               </Tip>
               <CardDescription>
-                Titler tree — activity ▸ step. Click a step to inspect it.
+                Titler tree — activity ▸ step ▸ event. Click an event to inspect it.
               </CardDescription>
             </CardHeader>
             <CardContent className="p-2">
               <ScrollArea className="h-[300px] pr-2">
                 <div className="space-y-0.5">
-                  {activities.map((a) => {
-                    const steps = evs.map((e, i) => ({ e, i })).filter((x) => x.e.seg === a.id);
-                    const activeChapter = cur.seg === a.id;
-                    const isOpen = open[a.id] ?? activeChapter;
+                  {chapters.map((a) => {
+                    const activityActive = a.key === active?.activityKey;
+                    const activityOpen = open[a.key] ?? activityActive;
                     return (
-                      <div key={a.id}>
+                      <div key={a.key}>
                         <button
-                          onClick={() => setOpen((o) => ({ ...o, [a.id]: !isOpen }))}
+                          onClick={() => setOpen((o) => ({ ...o, [a.key]: !activityOpen }))}
                           className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors ${
-                            activeChapter ? "bg-muted/60" : "hover:bg-muted/50"
+                            activityActive ? "bg-muted/60" : "hover:bg-muted/50"
                           }`}
                         >
                           <ChevronRight
                             className={`size-3.5 shrink-0 text-muted-foreground transition-transform ${
-                              isOpen ? "rotate-90" : ""
+                              activityOpen ? "rotate-90" : ""
                             }`}
                           />
                           <RiskDot level={a.risk} />
-                          <span className="flex-1 truncate font-medium">{a.title}</span>
+                          <span
+                            className={`flex-1 truncate font-medium ${
+                              a.synthetic ? "text-muted-foreground" : ""
+                            }`}
+                          >
+                            {a.title}
+                          </span>
                           <span className="text-[11px] tabular-nums text-muted-foreground">
-                            {steps.length}
+                            {a.count}
                           </span>
                         </button>
-                        {isOpen && (
+                        {activityOpen && (
                           <div className="ml-[15px] space-y-0.5 border-l border-border/70 py-0.5 pl-1.5">
-                            {steps.map(({ e, i }) => (
-                              <button
-                                key={e.id}
-                                onClick={() => setSel(i)}
-                                className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors ${
-                                  i === sel ? "bg-muted" : "hover:bg-muted/40"
-                                }`}
-                              >
-                                <span className="w-5 shrink-0 text-right text-[10.5px] tabular-nums text-muted-foreground">
-                                  {i + 1}
-                                </span>
-                                <RiskDot level={e.risk} />
-                                <span className="w-14 shrink-0 truncate font-mono text-[11px]">
-                                  {e.tool.n}
-                                </span>
-                                <span className="flex-1 truncate text-[11.5px] text-muted-foreground">
-                                  {e.summary}
-                                </span>
-                              </button>
-                            ))}
+                            {a.steps.map((s) => {
+                              const stepActive = s.key === active?.stepKey;
+                              const stepOpen = open[s.key] ?? stepActive;
+                              return (
+                                <div key={s.key}>
+                                  <button
+                                    onClick={() => setOpen((o) => ({ ...o, [s.key]: !stepOpen }))}
+                                    className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors ${
+                                      stepActive ? "bg-muted/60" : "hover:bg-muted/50"
+                                    }`}
+                                  >
+                                    <ChevronRight
+                                      className={`size-3 shrink-0 text-muted-foreground transition-transform ${
+                                        stepOpen ? "rotate-90" : ""
+                                      }`}
+                                    />
+                                    <RiskDot level={s.risk} />
+                                    <span
+                                      className={`flex-1 truncate text-[12.5px] ${
+                                        s.synthetic ? "italic text-muted-foreground" : "font-medium"
+                                      }`}
+                                    >
+                                      {s.title}
+                                    </span>
+                                    <span className="text-[10.5px] tabular-nums text-muted-foreground">
+                                      {s.events.length}
+                                    </span>
+                                  </button>
+                                  {stepOpen && (
+                                    <div className="ml-[15px] space-y-0.5 border-l border-border/70 py-0.5 pl-1.5">
+                                      {s.events.map(({ e, i }) => (
+                                        <button
+                                          key={e.id}
+                                          onClick={() => setSel(i)}
+                                          className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors ${
+                                            i === sel ? "bg-muted" : "hover:bg-muted/40"
+                                          }`}
+                                        >
+                                          <span className="w-5 shrink-0 text-right text-[10.5px] tabular-nums text-muted-foreground">
+                                            {i + 1}
+                                          </span>
+                                          <RiskDot level={e.risk} />
+                                          <span className="w-14 shrink-0 truncate font-mono text-[11px]">
+                                            {e.tool.n}
+                                          </span>
+                                          <span className="flex-1 truncate text-[11.5px] text-muted-foreground">
+                                            {e.summary}
+                                          </span>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {a.steps.length === 0 && (
+                              <div className="px-2 py-1.5 text-[11.5px] italic text-muted-foreground">
+                                No steps recorded.
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -203,7 +251,7 @@ export function RunView() {
           </Card>
         </div>
 
-        <Inspector e={cur} idx={Math.min(sel, evs.length - 1)} />
+        <Inspector e={cur} idx={selIdx} />
       </div>
     </div>
   );

@@ -263,17 +263,20 @@ async def _watch_pipeline(
             # file's session id, created lazily as each file first yields a line.
             pattern = "*.jsonl" if pipeline.name != "continue" else "*.json"
             adapters: dict[Path, MappedJsonAdapter] = {}
+            seen_by_file: dict[Path, set[str]] = {}
             async for file_path, line in watch_directory(pipeline.source_path, pattern=pattern):
                 adapter = adapters.get(file_path)
                 if adapter is None:
                     adapter = _build_adapter(pipeline, _session_id_for_source(file_path))
                     adapters[file_path] = adapter
-                await _feed_line(line, adapter, event_pipeline)
+                    seen_by_file[file_path] = set()
+                await _feed_line(line, adapter, event_pipeline, seen_by_file[file_path])
         else:
             # Watch single file; one adapter keyed to that file's session id.
             adapter = _build_adapter(pipeline, _session_id_for_source(pipeline.source_path))
+            seen: set[str] = set()
             async for line in watch_jsonl_file(pipeline.source_path, start_at="end"):
-                await _feed_line(line, adapter, event_pipeline)
+                await _feed_line(line, adapter, event_pipeline, seen)
     finally:
         # Emit any buffered (unpaired tool-start) events and release sink resources.
         await event_pipeline.close()
@@ -300,16 +303,18 @@ async def _process_pipeline_once(
             for f in pipeline.source_path.rglob(pattern):
                 if f.is_file():
                     adapter = _build_adapter(pipeline, _session_id_for_source(f))
+                    seen: set[str] = set()
                     for line in f.read_text(encoding="utf-8").splitlines():
                         stripped = line.strip()
                         if stripped:
-                            await _feed_line(stripped, adapter, event_pipeline)
+                            await _feed_line(stripped, adapter, event_pipeline, seen)
         else:
             adapter = _build_adapter(pipeline, _session_id_for_source(pipeline.source_path))
+            seen = set()
             for line in pipeline.source_path.read_text(encoding="utf-8").splitlines():
                 stripped = line.strip()
                 if stripped:
-                    await _feed_line(stripped, adapter, event_pipeline)
+                    await _feed_line(stripped, adapter, event_pipeline, seen)
     finally:
         await event_pipeline.close()
 
@@ -385,16 +390,21 @@ def _session_id_for_source(path: Path) -> str:
     return path.stem
 
 
-async def _feed_line(line: str, adapter, event_pipeline) -> None:
-    """Parse one raw line and push each resulting event through the pipeline.
+async def _feed_line(line: str, adapter, event_pipeline, seen_msg_ids: set[str]) -> None:
+    """Parse one raw line and route each resulting event.
 
-    Every event is pushed once via :meth:`EventPipeline.push`. Usage-kind events
-    (:data:`EventKind.USAGE`, e.g. Claude's ``result`` record) are *additionally*
-    dual-emitted as a :class:`~traceforge.types.UsageRecord` via
-    :meth:`EventPipeline.push_usage`, so token/cost totals land in ``usage_records``
-    (the Cost lens source) instead of only ``enriched_events``. This is purely
-    additive: it does not change enriched-event counts. ``model`` is absent from the
-    Claude ``result`` record, so it is left ``""`` (no synthesized identity).
+    Non-usage events are pushed once onto the enriched-events timeline via
+    :meth:`EventPipeline.push`. Usage-kind events (:data:`EventKind.USAGE`) are
+    routed to ``usage_records`` **only** (the Cost lens source) via
+    :meth:`EventPipeline.push_usage` and never ride the timeline — a run emits one
+    usage record per assistant message, and putting ~N of them on the timeline
+    would bury the real activity in the chapter tree.
+
+    Real Claude Code repeats each assistant message across ~3 content-block lines
+    that share one ``msg_id`` and identical usage, so ``seen_msg_ids`` (one set
+    per source file) dedups on ``msg_id`` before a record is built — otherwise the
+    replayed lines would multiply the token totals. Records without a ``msg_id``
+    (e.g. the Agent-SDK ``result`` summary) are one-per-session and never deduped.
     """
     try:
         data = json.loads(line)
@@ -403,18 +413,61 @@ async def _feed_line(line: str, adapter, event_pipeline) -> None:
         return
 
     for event in adapter.parse_dict(data):
-        await event_pipeline.push(event)
         if event.kind == EventKind.USAGE:
-            await event_pipeline.push_usage(
-                UsageRecord(
-                    session_id=event.session_id,
-                    timestamp=event.timestamp,
-                    model=str(event.payload.get("model") or ""),
-                    input_tokens=int(event.payload.get("input_tokens") or 0),
-                    output_tokens=int(event.payload.get("output_tokens") or 0),
-                    cost_usd=event.payload.get("cost_usd"),
-                )
-            )
+            msg_id = event.payload.get("msg_id")
+            if msg_id is not None:
+                if msg_id in seen_msg_ids:
+                    continue
+                seen_msg_ids.add(str(msg_id))
+            record = _usage_record_from(event)
+            if record is not None:
+                await event_pipeline.push_usage(record)
+            continue
+        await event_pipeline.push(event)
+
+
+def _usage_record_from(event) -> "UsageRecord | None":
+    """Build a :class:`UsageRecord` from a ``telemetry.usage`` event, or ``None``.
+
+    Headline ``input_tokens`` is the *total context the model processed* — uncached
+    input plus cache-read plus cache-creation — because on Claude Code almost all
+    input is replayed cached context and the uncached delta alone is misleadingly
+    tiny. The uncached/cache split is preserved losslessly in ``attributes`` so a
+    future weighted-cost calc can price each component (cache-read is far cheaper).
+
+    ``cost_usd`` is passed through when the source carries it (the Agent-SDK
+    ``result`` record does) and left ``None`` otherwise — the per-message Claude
+    Code wire has no cost, and one is never synthesized. A ``<synthetic>`` or absent
+    model normalizes to ``""`` so it never pollutes the run's dominant model while
+    its tokens still count. Records with all-zero tokens are pure noise and skipped.
+    """
+    payload = event.payload
+    model = str(payload.get("model") or "")
+    if model == "<synthetic>":
+        model = ""
+
+    input_uncached = int(payload.get("input_tokens") or 0)
+    output_tokens = int(payload.get("output_tokens") or 0)
+    cache_read = int(payload.get("cache_read_tokens") or 0)
+    cache_write = int(payload.get("cache_write_tokens") or 0)
+    total_input = input_uncached + cache_read + cache_write
+    if total_input == 0 and output_tokens == 0:
+        return None
+
+    cost = payload.get("cost_usd")
+    return UsageRecord(
+        session_id=event.session_id,
+        timestamp=event.timestamp,
+        model=model,
+        input_tokens=total_input,
+        output_tokens=output_tokens,
+        cost_usd=float(cost) if cost is not None else None,
+        attributes={
+            "input_uncached": input_uncached,
+            "cache_read_tokens": cache_read,
+            "cache_creation_tokens": cache_write,
+        },
+    )
 
 
 def _load_config(config_path: str | None) -> dict | None:

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 import sqlite3
 from pathlib import Path
 
@@ -33,13 +34,23 @@ pytestmark = pytest.mark.e2e
 watch_mod = importlib.import_module("traceforge.cli.watch")
 
 # The real Claude fixture. Its ``result`` line carries total_cost_usd=0.0089 and
-# usage.{input_tokens=3500, output_tokens=450}. The per-file adapter stamps the
-# file stem as the session id, so the run's session id is ``claude_session``.
+# usage.{input_tokens=3500, output_tokens=450, cache_read_input_tokens=2000,
+# cache_creation_input_tokens=100}. The per-file adapter stamps the file stem as
+# the session id, so the run's session id is ``claude_session``.
+#
+# Headline ``input_tokens`` is the AGGREGATE context the model processed —
+# uncached + cache-read + cache-creation = 3500 + 2000 + 100 = 5600 (ruling A):
+# on Claude the uncached delta alone is misleadingly tiny. The uncached/cache
+# split is preserved losslessly in ``usage_records.attributes``.
 _FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "claude_session.jsonl"
 _SESSION_ID = "claude_session"
-_EXPECTED_INPUT_TOKENS = 3500
+_EXPECTED_INPUT_TOKENS = 5600
 _EXPECTED_OUTPUT_TOKENS = 450
 _EXPECTED_COST_USD = 0.0089
+# Lossless breakdown stashed in ``usage_records.attributes`` (ruling A).
+_EXPECTED_INPUT_UNCACHED = 3500
+_EXPECTED_CACHE_READ = 2000
+_EXPECTED_CACHE_CREATION = 100
 
 
 def _run_fixture_once(tmp_path: Path, monkeypatch, *, enable_title: bool) -> Path:
@@ -84,6 +95,23 @@ def _assert_fixture_usage(db_path: Path) -> None:
 
     (usage_session,) = _query_one(db_path, "SELECT DISTINCT session_id FROM usage_records")
     assert usage_session == _SESSION_ID
+
+    # Ruling A: the uncached/cache split is preserved losslessly in attributes so a
+    # future weighted-cost calc can price cache-read (~10x cheaper) correctly.
+    (attributes_json,) = _query_one(db_path, "SELECT attributes_json FROM usage_records LIMIT 1")
+    assert attributes_json is not None, "usage breakdown attributes were not persisted"
+    attributes = json.loads(attributes_json)
+    assert attributes["input_uncached"] == _EXPECTED_INPUT_UNCACHED
+    assert attributes["cache_read_tokens"] == _EXPECTED_CACHE_READ
+    assert attributes["cache_creation_tokens"] == _EXPECTED_CACHE_CREATION
+
+    # Ruling C: usage rides ``usage_records`` ONLY — never the enriched-events
+    # timeline (one usage row per assistant message would bury real activity).
+    (timeline_usage,) = _query_one(
+        db_path,
+        "SELECT COUNT(*) FROM enriched_events WHERE kind = 'telemetry.usage'",
+    )
+    assert timeline_usage == 0, "usage events must not ride the enriched-events timeline"
 
 
 def test_watch_once_persists_usage_and_titles(tmp_path, monkeypatch) -> None:

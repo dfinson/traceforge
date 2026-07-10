@@ -38,6 +38,7 @@ def load_mapping_path(name: str) -> Path:
 
 ADAPTER_MAP: dict[str, MappedJsonAdapterConfig] = {
     "claude": MappedJsonAdapterConfig(type="mapped_json", mapping="claude"),
+    "copilot": MappedJsonAdapterConfig(type="mapped_json", mapping="copilot"),
     "codex": MappedJsonAdapterConfig(type="mapped_json", mapping="codex"),
     "continue": MappedJsonAdapterConfig(type="mapped_json", mapping="continue_dev"),
     "cline": MappedJsonAdapterConfig(type="mapped_json", mapping="cline"),

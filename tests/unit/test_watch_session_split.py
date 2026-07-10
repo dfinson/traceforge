@@ -24,7 +24,7 @@ from pathlib import Path
 from tests.conftest import RecordingSink
 
 from traceforge.cli.runner import ADAPTER_MAP, ResolvedPipeline
-from traceforge.cli.watch import _process_pipeline_once
+from traceforge.cli.watch import _process_pipeline_once, _session_id_for_source
 
 # ``traceforge.cli`` re-exports the ``watch`` Command, which shadows the submodule
 # attribute, so ``import traceforge.cli.watch as x`` would bind the Command, not the
@@ -106,3 +106,95 @@ def test_once_single_file_uses_file_stem(tmp_path, monkeypatch) -> None:
     assert recording.events, "no events were emitted through the --once path"
     assert session_ids == {_SESSION_A}
     assert pipeline.name not in session_ids
+
+
+# ─── Copilot CLI: dir-per-session (<uuid>/events.jsonl) ──────────────────────
+#
+# GitHub Copilot CLI does NOT name each file after its session. Every session is a
+# directory ``<uuid>/`` whose stream is literally ``events.jsonl``, so the filename
+# stem is always ``"events"``. Keying runs on the stem would collapse EVERY copilot
+# session into one run named ``"events"``. The correct session id is the parent
+# directory name. These tests pin that contract.
+
+
+def _copilot_lines(tag: str) -> list[str]:
+    """A few minimal, real-shaped GitHub Copilot CLI ``events.jsonl`` lines."""
+    return [
+        json.dumps(
+            {
+                "type": "session.start",
+                "id": f"evt-start-{tag}",
+                "timestamp": "2024-06-01T10:00:00Z",
+                "data": {"selectedModel": "gpt-5", "context": {"cwd": "/proj"}},
+            }
+        ),
+        json.dumps(
+            {
+                "type": "user.message",
+                "id": f"evt-user-{tag}",
+                "timestamp": "2024-06-01T10:00:01Z",
+                "data": {"content": f"hello from {tag}"},
+            }
+        ),
+        json.dumps(
+            {
+                "type": "assistant.message",
+                "id": f"evt-asst-{tag}",
+                "timestamp": "2024-06-01T10:00:02Z",
+                "data": {"content": f"done {tag}"},
+            }
+        ),
+    ]
+
+
+def _write_copilot_session(state_dir: Path, session_id: str, tag: str) -> None:
+    """Copilot is dir-per-session: ``<state_dir>/<uuid>/events.jsonl``."""
+    session_dir = state_dir / session_id
+    session_dir.mkdir(parents=True, exist_ok=True)
+    (session_dir / "events.jsonl").write_text(
+        "\n".join(_copilot_lines(tag)) + "\n", encoding="utf-8"
+    )
+
+
+def test_session_id_for_source_copilot_uses_parent_dir() -> None:
+    """For copilot, the session id is the parent directory (the session UUID)."""
+    path = Path("/home/u/.copilot/session-state") / _SESSION_A / "events.jsonl"
+    assert _session_id_for_source(path, "copilot") == _SESSION_A
+
+
+def test_session_id_for_source_non_copilot_uses_stem() -> None:
+    """File-per-session frameworks (and the default) key on the filename stem."""
+    path = Path("/home/u/.claude/projects") / f"{_SESSION_A}.jsonl"
+    assert _session_id_for_source(path, "claude") == _SESSION_A
+    # No framework given → stem (backward-compatible default).
+    assert _session_id_for_source(path) == _SESSION_A
+
+
+def test_once_copilot_dir_splits_runs_by_parent_dir(tmp_path, monkeypatch) -> None:
+    """--once over a copilot session-state dir yields one run per session directory
+    (the dir UUID), never the ``"events"`` stem or the framework name."""
+    state = tmp_path / "session-state"
+    _write_copilot_session(state, _SESSION_A, "A")
+    _write_copilot_session(state, _SESSION_B, "B")
+
+    pipeline = ResolvedPipeline(
+        name="copilot",
+        source_path=state,
+        ingestion_mode="file_watch",
+        adapter=ADAPTER_MAP["copilot"],
+        sinks=[],  # real sinks are swapped for a recording sink below
+    )
+
+    recording = RecordingSink()
+    monkeypatch.setattr(watch_mod, "_build_sinks", lambda _p: [recording.sink])
+
+    asyncio.run(_process_pipeline_once(pipeline, governance=None))
+
+    session_ids = {e.session_id for e in recording.events}
+
+    assert recording.events, "no events were emitted through the --once path"
+    # The critical regression: the shared ``events.jsonl`` stem must NEVER be the id.
+    assert "events" not in session_ids
+    assert pipeline.name not in session_ids
+    # Exactly one session id per session directory, each equal to that dir's UUID.
+    assert session_ids == {_SESSION_A, _SESSION_B}

@@ -65,7 +65,12 @@ def tmp_traceforge_home(
     # and drop source-specific overrides so detection is deterministic.
     monkeypatch.setenv("APPDATA", str(home / "AppData" / "Roaming"))
     monkeypatch.setenv("LOCALAPPDATA", str(home / "AppData" / "Local"))
-    for var in ("CODEX_HOME", "CONTINUE_GLOBAL_DIR", "TRACEFORGE_CONFIG"):
+    for var in (
+        "CODEX_HOME",
+        "CONTINUE_GLOBAL_DIR",
+        "COPILOT_SESSION_STATE_DIR",
+        "TRACEFORGE_CONFIG",
+    ):
         monkeypatch.delenv(var, raising=False)
 
     (home / ".traceforge").mkdir(parents=True, exist_ok=True)

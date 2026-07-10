@@ -244,9 +244,9 @@ async def _watch_pipeline(
     """Watch a single pipeline's source and feed events through the unified pipeline.
 
     The shared event pipeline is built once, but a *fresh* adapter is created
-    lazily per source file — keyed to that file's session id (the filename stem)
-    — so each file becomes its own run and no session's stateful adapter bleeds
-    into another.
+    lazily per source file — keyed to that file's session id (see
+    :func:`_session_id_for_source`) — so each file becomes its own run and no
+    session's stateful adapter bleeds into another.
     """
     from traceforge.adapters.mapped_json import MappedJsonAdapter
 
@@ -267,13 +267,17 @@ async def _watch_pipeline(
             async for file_path, line in watch_directory(pipeline.source_path, pattern=pattern):
                 adapter = adapters.get(file_path)
                 if adapter is None:
-                    adapter = _build_adapter(pipeline, _session_id_for_source(file_path))
+                    adapter = _build_adapter(
+                        pipeline, _session_id_for_source(file_path, pipeline.name)
+                    )
                     adapters[file_path] = adapter
                     seen_by_file[file_path] = set()
                 await _feed_line(line, adapter, event_pipeline, seen_by_file[file_path])
         else:
             # Watch single file; one adapter keyed to that file's session id.
-            adapter = _build_adapter(pipeline, _session_id_for_source(pipeline.source_path))
+            adapter = _build_adapter(
+                pipeline, _session_id_for_source(pipeline.source_path, pipeline.name)
+            )
             seen: set[str] = set()
             async for line in watch_jsonl_file(pipeline.source_path, start_at="end"):
                 await _feed_line(line, adapter, event_pipeline, seen)
@@ -288,8 +292,9 @@ async def _process_pipeline_once(
     """Process existing content in a pipeline's source once (no watching).
 
     The shared event pipeline is built once, but a *fresh* adapter is built per
-    source file keyed to that file's session id (the filename stem), so each file
-    becomes its own run instead of collapsing into a single ``pipeline.name`` run.
+    source file keyed to that file's session id (see
+    :func:`_session_id_for_source`), so each file becomes its own run instead of
+    collapsing into a single ``pipeline.name`` run.
     """
     logger.info("Processing %s at %s", pipeline.name, pipeline.source_path)
 
@@ -302,14 +307,16 @@ async def _process_pipeline_once(
             pattern = "*.jsonl" if pipeline.name != "continue" else "*.json"
             for f in pipeline.source_path.rglob(pattern):
                 if f.is_file():
-                    adapter = _build_adapter(pipeline, _session_id_for_source(f))
+                    adapter = _build_adapter(pipeline, _session_id_for_source(f, pipeline.name))
                     seen: set[str] = set()
                     for line in f.read_text(encoding="utf-8").splitlines():
                         stripped = line.strip()
                         if stripped:
                             await _feed_line(stripped, adapter, event_pipeline, seen)
         else:
-            adapter = _build_adapter(pipeline, _session_id_for_source(pipeline.source_path))
+            adapter = _build_adapter(
+                pipeline, _session_id_for_source(pipeline.source_path, pipeline.name)
+            )
             seen = set()
             for line in pipeline.source_path.read_text(encoding="utf-8").splitlines():
                 stripped = line.strip()
@@ -379,14 +386,21 @@ def _build_adapter(pipeline: ResolvedPipeline, session_id: str):
     return MappedJsonAdapter.from_yaml(str(mapping_path), session_id=session_id)
 
 
-def _session_id_for_source(path: Path) -> str:
+def _session_id_for_source(path: Path, framework: str | None = None) -> str:
     """Return the session id for a single source file.
 
     File-per-session frameworks (claude/codex/cline/opencode) name each file
     after the session it contains — the filename stem is the real session UUID
     (it equals the ``sessionId`` recorded inside the file). So the stem is the
     correct per-file session id.
+
+    GitHub Copilot CLI is *dir*-per-session instead: every session's stream is
+    literally ``<session-uuid>/events.jsonl``, so the stem is always ``"events"``
+    and would collapse every session into one run. For ``copilot`` the session id
+    is the **parent directory** name (the session UUID) rather than the stem.
     """
+    if framework == "copilot":
+        return path.parent.name
     return path.stem
 
 

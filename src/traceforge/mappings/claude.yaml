@@ -25,6 +25,7 @@ ingestion_mode: file_watch
 type_field: block_type
 default_kind: ""
 preprocessor: claude
+repo_field: cwd
 
 motivation:
   sources:
@@ -79,6 +80,24 @@ events:
     kind: llm.thinking.chunk
     payload:
       content: thinking
+
+  # ── Per-message usage (real Claude Code transcripts) ───────────────────────
+  # Claude Code has no `result` line — token usage rides every assistant message.
+  # The preprocessor emits one synthetic `assistant.usage` block per assistant
+  # line, so the SAME message.id appears ~3x (one per content block); the watch
+  # usage bridge dedups on `msg_id` before summing, routes these to
+  # `usage_records` only (never the enriched-events timeline), and aggregates the
+  # input components. No cost field exists in the per-message wire (cost_usd stays
+  # null — never synthesized).
+  assistant.usage:
+    kind: telemetry.usage
+    payload:
+      model: model
+      input_tokens: input_tokens
+      output_tokens: output_tokens
+      cache_read_tokens: cache_read_input_tokens
+      cache_write_tokens: cache_creation_input_tokens
+      msg_id: msg_id
 
   # ── Result (session summary with usage) ────────────────────────────────────
   result:

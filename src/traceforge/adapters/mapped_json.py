@@ -92,6 +92,7 @@ class FrameworkMapping(StrictModel):
     framework_version: str  # version of the framework's event format this mapping targets
     ingestion_mode: IngestionMode  # must be explicit in YAML
     type_field: str = "type"  # dot-path to event type in raw JSON
+    repo_field: str | None = None  # dot-path to repo/project identity (e.g. Claude `cwd`)
     timestamp_field: str | None = None  # dot-path to timestamp
     default_kind: str = EventKind.RAW  # kind for unmapped event types
     preprocessor: str | None = None  # registered preprocessor name (optional)
@@ -227,11 +228,21 @@ class MappedJsonAdapter(JsonLineAdapter):
                 source_event_ids=tuple(self._source_event_ids),
             )
 
+        # Resolve repo/project identity (e.g. Claude's top-level ``cwd``) so the
+        # dashboard can surface a run's repo. Populated only when the mapping
+        # declares ``repo_field`` and the value is present — never synthesized.
+        repo: str | None = None
+        if self._mapping.repo_field:
+            repo_val = _resolve_path(obj, self._mapping.repo_field)
+            if repo_val is not None:
+                repo = str(repo_val)
+
         metadata = EventMetadata(
             source_framework=self._mapping.framework,
             ingestion_mode=self._mapping.ingestion_mode,
             raw_kind=raw_type,
             motivation=motivation,
+            repo=repo,
         )
 
         yield SessionEvent(

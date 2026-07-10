@@ -28,6 +28,11 @@ def preprocess_claude(obj: dict[str, Any]) -> list[dict[str, Any]]:
     if not msg_type:
         return [obj]
 
+    # Top-level project/repo identity — Claude Code stamps ``cwd`` on every line.
+    # Carry it onto each flattened block so the mapping can surface it as
+    # ``EventMetadata.repo`` (the dashboard reads a run's repo from there).
+    cwd = obj.get("cwd")
+
     if msg_type == "result":
         normalized = dict(obj)
         normalized["block_type"] = "result"
@@ -36,12 +41,12 @@ def preprocess_claude(obj: dict[str, Any]) -> list[dict[str, Any]]:
         if isinstance(usage, dict):
             for k, v in usage.items():
                 normalized[f"usage_{k}"] = v
-        return [normalized]
+        return _stamp_cwd([normalized], cwd)
 
     if msg_type == "system":
         normalized = dict(obj)
         normalized["block_type"] = "system"
-        return [normalized]
+        return _stamp_cwd([normalized], cwd)
 
     message = obj.get("message")
     if not isinstance(message, dict):
@@ -51,14 +56,25 @@ def preprocess_claude(obj: dict[str, Any]) -> list[dict[str, Any]]:
 
     if msg_type == "user":
         if isinstance(content, str):
-            return [{"block_type": "user.text", "content": content}]
+            return _stamp_cwd([{"block_type": "user.text", "content": content}], cwd)
         if isinstance(content, list):
-            return _flatten_blocks(content, "user")
-        return [{"block_type": "user.text", "content": str(content) if content else ""}]
+            return _stamp_cwd(_flatten_blocks(content, "user"), cwd)
+        return _stamp_cwd(
+            [{"block_type": "user.text", "content": str(content) if content else ""}], cwd
+        )
 
     if msg_type == "assistant":
         if isinstance(content, list):
-            return _flatten_blocks(content, "assistant")
+            blocks = _flatten_blocks(content, "assistant")
+            # Real Claude Code carries token usage on each assistant message
+            # (there is no ``result`` line). Emit a synthetic usage block so the
+            # mapping can bridge it to ``usage_records`` (the Cost lens). The same
+            # message is repeated across its content-block lines with an identical
+            # ``msg_id``; the watch usage bridge dedups on that key.
+            usage_block = _assistant_usage_block(message)
+            if usage_block is not None:
+                blocks.append(usage_block)
+            return _stamp_cwd(blocks, cwd)
         return [obj]
 
     return [obj]
@@ -93,3 +109,38 @@ def _flatten_blocks(blocks: list[Any], context: str) -> list[dict[str, Any]]:
 
         results.append(normalized)
     return results
+
+
+def _stamp_cwd(dicts: list[dict[str, Any]], cwd: Any) -> list[dict[str, Any]]:
+    """Stamp the session's top-level ``cwd`` onto each flattened block.
+
+    No-op when ``cwd`` is absent. Uses ``setdefault`` so a block that already
+    carries its own ``cwd`` is left untouched.
+    """
+    if cwd is None:
+        return dicts
+    for d in dicts:
+        d.setdefault("cwd", cwd)
+    return dicts
+
+
+def _assistant_usage_block(message: dict[str, Any]) -> dict[str, Any] | None:
+    """Build a synthetic ``assistant.usage`` block from an assistant message.
+
+    Returns ``None`` when the message carries no ``usage`` object (e.g. the
+    Agent-SDK wire format, where usage rides a separate ``result`` record). The
+    block keeps the raw per-message token fields; the mapping renames them and
+    the watch usage bridge aggregates + dedups them by ``msg_id``.
+    """
+    usage = message.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    return {
+        "block_type": "assistant.usage",
+        "msg_id": message.get("id"),
+        "model": message.get("model"),
+        "input_tokens": usage.get("input_tokens"),
+        "output_tokens": usage.get("output_tokens"),
+        "cache_read_input_tokens": usage.get("cache_read_input_tokens"),
+        "cache_creation_input_tokens": usage.get("cache_creation_input_tokens"),
+    }

@@ -706,9 +706,12 @@ def _first_meta(metas: list[dict[str, Any]], key: str) -> str | None:
 
 
 def _dominant_model(conn: sqlite3.Connection, session_id: str) -> str:
+    # Ignore blank model strings: usage records for `<synthetic>`/absent-model
+    # messages are normalized to "" upstream (their tokens still count), and a
+    # blank is not a model — it must never win the run's dominant model.
     row = conn.execute(
         """SELECT model, COUNT(*) c FROM usage_records
-            WHERE session_id = ? GROUP BY model ORDER BY c DESC LIMIT 1""",
+            WHERE session_id = ? AND model != '' GROUP BY model ORDER BY c DESC LIMIT 1""",
         (session_id,),
     ).fetchone()
     return row["model"] if row else ""

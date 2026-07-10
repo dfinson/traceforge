@@ -196,6 +196,21 @@ degraded modes + the data-source indicator.
 | `trust[]` | system.db `trust_grants` (key, granted_at+ttl_seconds→TTL, reason) |
 | `mcp[]` | system.db `mcp_profiles` + `metadata_json.governance.mcp_alerts` |
 
+> **Usage token semantics (Claude Code per-message path).** For real Claude Code
+> transcripts there is no Agent-SDK `result` line — token usage rides every assistant
+> message, and Claude Code writes one JSONL line per content block, so a single
+> `message.id` (with identical `message.usage`) is repeated ~3×. The watch usage bridge
+> therefore **dedups on `message.id` first**, then writes one `usage_records` row per
+> message. Headline `input_tokens` is the **aggregate context the model processed** =
+> `input_tokens + cache_read_input_tokens + cache_creation_input_tokens` (on Claude the
+> uncached delta alone is misleadingly tiny — almost all input is replayed cached
+> context). The lossless split is kept in `usage_records.attributes` as
+> `{input_uncached, cache_read_tokens, cache_creation_tokens}` so a future weighted-cost
+> calc can price cache-read (far cheaper) separately. `cost_usd` is **`None`** on this
+> path — the per-message wire carries no cost and one is never synthesized (the Cost lens
+> shows real tokens with honest null/`$0.00` dollars). A `<synthetic>`/absent model
+> normalizes to `""` so it never wins `_dominant_model`, while its real tokens still count.
+
 ### `TEvent` (timeline + inspector)
 | mock field | real source |
 |---|---|

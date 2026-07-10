@@ -16,6 +16,13 @@ ingestion_mode: file_watch
 type_field: type
 timestamp_field: timestamp
 default_kind: raw
+preprocessor: copilot
+# GitHub Copilot CLI stamps the working directory on ``session.start`` as
+# ``data.context.cwd``. Surfacing it as ``EventMetadata.repo`` lets the dashboard
+# resolve a run's repo (``_first_meta`` reads the first non-empty repo, and
+# ``session.started`` — which carries this — leads the timeline). Populated only
+# when present; never synthesized.
+repo_field: data.context.cwd
 
 motivation:
   sources:
@@ -181,6 +188,18 @@ events:
       tool_call_id: data.toolCallId
 
   # ── Usage ──────────────────────────────────────────────────────────────────
+  # GitHub Copilot CLI emits no per-turn usage event; the ``copilot`` preprocessor
+  # synthesizes one ``assistant.usage`` block per model from
+  # ``session.shutdown.data.modelMetrics`` (the authoritative whole-session token
+  # accounting). Copilot's ``usage.inputTokens`` is a grand total that already
+  # includes cache tokens, so the preprocessor emits ``inputTokens`` as the
+  # *uncached* delta (grand total minus cache read/write); the watch usage bridge
+  # then rebuilds the headline as ``uncached + cacheRead + cacheWrite`` — exactly
+  # Copilot's reported ``inputTokens`` — and keeps the split in
+  # ``UsageRecord.attributes``.
+  # ``msg_id`` (``<shutdown-id>:<model>``) dedups a replayed shutdown. No dollar
+  # cost exists in the wire, so ``cost_usd`` stays null. ``cost``/``duration`` remain
+  # mapped for back-compat with producers that carry them.
   assistant.usage:
     kind: telemetry.usage
     payload:
@@ -191,6 +210,7 @@ events:
       cache_write_tokens: data.cacheWriteTokens
       cost_usd: data.cost
       duration_ms: data.duration
+      msg_id: data.messageId
 
   # ── Hooks ──────────────────────────────────────────────────────────────────
   hook.start:

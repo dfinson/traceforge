@@ -262,7 +262,28 @@ async def test_list_runs_summarizes_identity_and_usage(full_repo: DashboardRepos
     assert run["model"] == "gpt-4o"
     assert run["title"] == "Refactor auth"
     assert run["live"] is True
-    assert run["usage"] == {"in": 1000, "out": 500, "cost": 0.9, "premiumRequests": None}
+    assert run["usage"] == {
+        "in": 1000,
+        "out": 500,
+        "cost": 0.9,
+        "premiumRequests": None,
+        "inputUncached": None,
+        "cacheRead": None,
+        "cacheCreation": None,
+        "requestsTotal": None,
+        "models": [
+            {
+                "model": "gpt-4o",
+                "premiumRequests": None,
+                "requests": None,
+                "inputUncached": None,
+                "cacheRead": None,
+                "cacheCreation": None,
+                "input": 1000,
+                "output": 500,
+            }
+        ],
+    }
     assert run["drift"] == 0.42
     assert run["peak"] == 3  # critical
     assert run["eventCount"] == 2
@@ -278,7 +299,28 @@ async def test_build_run_core_fields(full_repo: DashboardRepository) -> None:
     assert run["live"] is True
     assert run["drift"] == 0.42
     assert run["peak"] == 3
-    assert run["usage"] == {"in": 1000, "out": 500, "cost": 0.9, "premiumRequests": None}
+    assert run["usage"] == {
+        "in": 1000,
+        "out": 500,
+        "cost": 0.9,
+        "premiumRequests": None,
+        "inputUncached": None,
+        "cacheRead": None,
+        "cacheCreation": None,
+        "requestsTotal": None,
+        "models": [
+            {
+                "model": "gpt-4o",
+                "premiumRequests": None,
+                "requests": None,
+                "inputUncached": None,
+                "cacheRead": None,
+                "cacheCreation": None,
+                "input": 1000,
+                "output": 500,
+            }
+        ],
+    }
     assert len(run["events"]) == 2
 
 
@@ -304,6 +346,9 @@ async def test_build_run_maps_first_event_richly(full_repo: DashboardRepository)
     assert ev["ev"]["ptr"] == "/arguments"
     # The low-risk second event carries no evidence.
     assert run["events"][1]["ev"] is None
+    # Its wire cost is absent, so event cost projects None (unknown, → "—"),
+    # never a fabricated 0.0 — the inspector must not imply a real zero dollars.
+    assert run["events"][1]["cost"] is None
 
 
 async def test_build_run_governance_memory_from_system_db(full_repo: DashboardRepository) -> None:
@@ -423,6 +468,159 @@ async def test_premium_requests_surface_with_null_cost_and_zero_distinct(tmp_pat
     assert summaries["cop-premium"]["usage"]["premiumRequests"] == 15
     assert summaries["cop-premium"]["usage"]["cost"] is None
     assert summaries["cop-zero"]["usage"]["premiumRequests"] == 0
+
+
+async def _seed_mixed(db: Path) -> None:
+    """One run mixing every usage shape: multi-model Copilot rows with the five
+    attribute keys, a genuine-zero-premium model, a blank-model row (real tokens,
+    unattributable), and a non-Copilot row with no attributes at all."""
+    sink = SqliteOutputSink(path=str(db))
+    await sink.on_event(_bare_event_for("mix", _T0))
+    rows = [
+        # Two opus rows → premium 600+9=609, requests 800+10=810, cacheRead 800+180=980.
+        (
+            "claude-opus-4.6",
+            1000,
+            400,
+            {
+                "input_uncached": 30,
+                "cache_read_tokens": 800,
+                "cache_creation_tokens": 170,
+                "premium_requests": 600,
+                "requests_total": 800,
+            },
+        ),
+        (
+            "claude-opus-4.6",
+            200,
+            100,
+            {
+                "input_uncached": 9,
+                "cache_read_tokens": 180,
+                "cache_creation_tokens": 11,
+                "premium_requests": 9,
+                "requests_total": 10,
+            },
+        ),
+        # A model that genuinely made ZERO premium requests — a real 0, not unknown.
+        (
+            "claude-haiku-4.5",
+            100,
+            20,
+            {
+                "input_uncached": 100,
+                "cache_read_tokens": 0,
+                "cache_creation_tokens": 0,
+                "premium_requests": 0,
+                "requests_total": 38,
+            },
+        ),
+        # Blank model: real tokens the wire couldn't attribute — kept, not dropped.
+        (
+            "",
+            50,
+            10,
+            {
+                "input_uncached": 50,
+                "cache_read_tokens": 0,
+                "cache_creation_tokens": 0,
+                "premium_requests": 0,
+                "requests_total": 5,
+            },
+        ),
+    ]
+    for model, in_tok, out_tok, attrs in rows:
+        await sink.on_usage(
+            UsageRecord(
+                session_id="mix",
+                timestamp=_T0,
+                model=model,
+                input_tokens=in_tok,
+                output_tokens=out_tok,
+                cost_usd=None,
+                attributes=attrs,
+            )
+        )
+    # Non-Copilot row: no attributes at all → every count field stays unknown (None).
+    await sink.on_usage(
+        UsageRecord(
+            session_id="mix",
+            timestamp=_T0,
+            model="gpt-4o",
+            input_tokens=300,
+            output_tokens=60,
+            cost_usd=None,
+        )
+    )
+    await sink.close()
+
+
+async def test_usage_breakdown_multi_model_cache_and_null_vs_zero(tmp_path: Path) -> None:
+    """The full null-aware usage breakdown: per-model attribution, run-level cache
+    and premium sums, blank-model retention, and unknown (None) staying distinct
+    from a genuine 0 within the same run."""
+    out = tmp_path / "traceforge.db"
+    await _seed_mixed(out)
+    repo = DashboardRepository(DashboardPaths(output_db=out, system_db=tmp_path / "absent.db"))
+
+    run = repo.build_run("mix")
+    assert run is not None
+    usage = run["usage"]
+
+    # Token grand totals always coalesce to numbers; dollars stay unknown (Copilot).
+    assert usage["in"] == 1650
+    assert usage["out"] == 590
+    assert usage["cost"] is None
+    # Run-level counts sum only rows that carry the key (the no-attrs gpt-4o row
+    # contributes nothing rather than a fabricated 0).
+    assert usage["premiumRequests"] == 609
+    assert usage["inputUncached"] == 189
+    assert usage["cacheRead"] == 980
+    assert usage["cacheCreation"] == 181
+    assert usage["requestsTotal"] == 853
+
+    by_model = {m["model"]: m for m in usage["models"]}
+    # Blank-model row is kept (its tokens are real) — never dropped.
+    assert set(by_model) == {"claude-opus-4.6", "claude-haiku-4.5", "", "gpt-4o"}
+    assert by_model["claude-opus-4.6"] == {
+        "model": "claude-opus-4.6",
+        "premiumRequests": 609,
+        "requests": 810,
+        "inputUncached": 39,
+        "cacheRead": 980,
+        "cacheCreation": 181,
+        "input": 1200,
+        "output": 500,
+    }
+    # Genuine zero premium — a real 0, distinct from unknown.
+    assert by_model["claude-haiku-4.5"]["premiumRequests"] == 0
+    assert by_model[""]["inputUncached"] == 50
+    assert by_model[""]["input"] == 50
+    # Non-Copilot model carries no attributes → every count is unknown (None),
+    # never coerced to 0; its tokens are still real numbers.
+    gpt = by_model["gpt-4o"]
+    assert gpt["premiumRequests"] is None
+    assert gpt["requests"] is None
+    assert gpt["inputUncached"] is None
+    assert gpt["cacheRead"] is None
+    assert gpt["cacheCreation"] is None
+    assert gpt["input"] == 300
+    assert gpt["output"] == 60
+
+    # Event with no wire cost projects None (unknown, → "—"), never 0.0.
+    assert run["events"][0]["cost"] is None
+
+    # The list/summary path builds the identical breakdown (parity of both sites).
+    summary = {r["id"]: r for r in repo.list_runs()}["mix"]
+    assert summary["usage"]["premiumRequests"] == 609
+    assert summary["usage"]["cacheRead"] == 980
+    assert summary["usage"]["cost"] is None
+    assert {m["model"]: m["premiumRequests"] for m in summary["usage"]["models"]} == {
+        "claude-opus-4.6": 609,
+        "claude-haiku-4.5": 0,
+        "": 0,
+        "gpt-4o": None,
+    }
 
 
 async def test_degraded_mode_without_system_db(tmp_path: Path) -> None:

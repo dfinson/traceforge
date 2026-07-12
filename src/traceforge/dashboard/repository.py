@@ -254,14 +254,7 @@ class DashboardRepository:
                     WHERE session_id = ?""",
                 (session_id,),
             ).fetchall()
-            usage = conn.execute(
-                """SELECT COALESCE(SUM(input_tokens), 0)  AS in_tok,
-                          COALESCE(SUM(output_tokens), 0) AS out_tok,
-                          SUM(cost_usd)                   AS cost
-                     FROM usage_records
-                    WHERE session_id = ?""",
-                (session_id,),
-            ).fetchone()
+            usage = _usage_breakdown(conn, session_id)
             gap_rows = conn.execute(
                 """SELECT timestamp, dropped_count, reason
                      FROM context_gaps
@@ -291,18 +284,10 @@ class DashboardRepository:
                 "live": identity["live"],
                 "segs": segments,
                 "events": events,
-                "usage": {
-                    "in": int(usage["in_tok"]),
-                    "out": int(usage["out_tok"]),
-                    # Copilot carries no dollar cost on the wire; ``SUM(cost_usd)``
-                    # is NULL only when NO usage row for the run has real dollars.
-                    # Pass that through as null (not 0.0) so the frontend renders
-                    # "—" (unknown), never a fake "$0.00" that reads as free.
-                    "cost": float(usage["cost"]) if usage["cost"] is not None else None,
-                    # The one real Copilot billing signal: premium-request count
-                    # summed across models (null when unknown, a true 0 otherwise).
-                    "premiumRequests": _premium_requests(conn, session_id),
-                },
+                # Full null-aware usage breakdown (tokens, null-or-real dollars, and
+                # the real Copilot billing signals: premium-request counts +
+                # cache-aware per-model token attribution). See _usage_breakdown.
+                "usage": usage,
                 "started": event_rows[0]["timestamp"],
                 "durMs": dur_ms,
                 "drift": identity["drift"],
@@ -338,14 +323,7 @@ class DashboardRepository:
                 """SELECT DISTINCT risk_level FROM enriched_events WHERE session_id = ?""",
                 (session_id,),
             ).fetchall()
-            usage = conn.execute(
-                """SELECT COALESCE(SUM(input_tokens), 0)  AS in_tok,
-                          COALESCE(SUM(output_tokens), 0) AS out_tok,
-                          SUM(cost_usd)                   AS cost
-                     FROM usage_records
-                    WHERE session_id = ?""",
-                (session_id,),
-            ).fetchone()
+            usage = _usage_breakdown(conn, session_id)
             title_row = conn.execute(
                 """SELECT title FROM segment_titles
                     WHERE session_id = ? AND kind = 'session' LIMIT 1""",
@@ -357,7 +335,6 @@ class DashboardRepository:
                 (session_id,),
             ).fetchone()
             dominant_model = _dominant_model(conn, session_id)
-            premium_requests = _premium_requests(conn, session_id)
         finally:
             conn.close()
 
@@ -374,12 +351,7 @@ class DashboardRepository:
             "model": identity["model"] or dominant_model,
             "title": (title_row["title"] if title_row else None) or session_id,
             "live": identity["live"],
-            "usage": {
-                "in": int(usage["in_tok"]),
-                "out": int(usage["out_tok"]),
-                "cost": float(usage["cost"]) if usage["cost"] is not None else None,
-                "premiumRequests": premium_requests,
-            },
+            "usage": usage,
             "started": agg["first_ts"],
             "durMs": dur_ms,
             "drift": identity["drift"],
@@ -538,7 +510,10 @@ def _map_event(row: sqlite3.Row, meta: dict[str, Any]) -> dict[str, Any]:
         "risk": _risk_from_level(row["risk_level"]),
         "score": round((row["risk_score"] or 0) / 100.0, 2),
         "action": action,
-        "cost": float(row["cost"]) if row["cost"] is not None else 0.0,
+        # Event dollar cost is None when the wire carries none (GitHub Copilot
+        # emits no per-event dollars) — pass null through so the inspector renders
+        # "—", never a fabricated "$0.000" that reads as free.
+        "cost": float(row["cost"]) if row["cost"] is not None else None,
         "tokens": int(payload.get("tokens") or 0),
         "dur": float(row["duration_ms"]) if row["duration_ms"] is not None else 0.0,
         "phase": meta.get("phase") or "",
@@ -726,37 +701,135 @@ def _dominant_model(conn: sqlite3.Connection, session_id: str) -> str:
     return row["model"] if row else ""
 
 
-def _premium_requests(conn: sqlite3.Connection, session_id: str) -> int | None:
-    """Sum the run's Copilot premium-request count, or ``None`` when unknown.
+def _attr_count(attrs: dict[str, Any], key: str) -> int | None:
+    """One numeric usage attribute from a parsed ``attributes_json``, or ``None``.
 
-    GitHub Copilot's per-model ``modelMetrics.requests.cost`` is a
-    premium-request *count* (not dollars); the copilot preprocessor stashes it in
-    each ``usage_records`` row's ``attributes_json`` under ``premium_requests``.
-    This sums it across the run's models. The unknown/zero distinction is real and
-    preserved: a run whose usage rows never carry the key (every non-Copilot
-    source) returns ``None`` (surfaced as "—", not "0 premium requests"), while a
-    Copilot run that genuinely made zero premium requests returns ``0`` (a true
-    zero). ``cost_usd`` stays null throughout — no dollars are ever derived from
-    the count.
+    Mirrors :func:`_usage_breakdown`'s null semantics: a missing key, a JSON
+    ``null``, a boolean, or any non-numeric value is *unknown* (``None``) and is
+    never coerced to ``0`` — so a real ``0`` on the wire stays distinct from "the
+    key was never there".
+    """
+    value = attrs.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return int(value)
+
+
+def _nsum(acc: int | None, value: int | None) -> int | None:
+    """Null-aware running sum: an unknown (``None``) addend contributes nothing,
+    but a present addend (including ``0``) promotes the accumulator from unknown
+    to a real number — so genuine zero never collapses back into unknown."""
+    if value is None:
+        return acc
+    return (acc or 0) + value
+
+
+def _usage_breakdown(conn: sqlite3.Connection, session_id: str) -> dict[str, Any]:
+    """Full null-aware ``Run.usage`` breakdown in a single pass over the run's
+    ``usage_records`` rows.
+
+    Returns the complete usage dict the frontend renders:
+
+    * ``in`` / ``out`` — token grand totals, always numeric. ``input_tokens`` /
+      ``output_tokens`` are per-row totals that already include cache reads/creation.
+    * ``cost`` — the summed ``cost_usd``, or ``None`` when no row carries dollars.
+      GitHub Copilot emits none, so this stays ``None`` and renders "—" (unknown),
+      never a fabricated "$0.00". No dollars are ever derived from the counts below.
+    * ``premiumRequests`` — Copilot's only real billing signal: the premium-request
+      COUNT (``modelMetrics.<model>.requests.cost`` is a count, not dollars),
+      summed across models.
+    * ``inputUncached`` / ``cacheRead`` / ``cacheCreation`` — cache-aware token
+      classes (billed/uncached vs cache read vs cache creation).
+    * ``requestsTotal`` — total request count across models.
+    * ``models`` — per-model rows ``{model, premiumRequests, requests,
+      inputUncached, cacheRead, cacheCreation, input, output}``.
+
+    The unknown-vs-zero distinction is preserved throughout (see :func:`_nsum`):
+    every count field is ``None`` until some row carries its key, then the running
+    sum — so a non-Copilot run (whose rows carry none of the keys) stays ``None``
+    ("—") while a Copilot run that genuinely made zero premium requests reports
+    ``0``. ``in`` / ``out`` and each model's ``input`` / ``output`` always coalesce
+    to numbers. Blank-model ("") rows are kept — their tokens are real (the
+    frontend labels a blank model "unknown model"). ``models`` is ``[]`` when the
+    run has no ``usage_records`` rows.
+
+    Takes the already-open read-only ``conn`` and reuses it (exactly like
+    :func:`_dominant_model`), never opening its own — so the fleet path stays O(1)
+    on connections and ``attributes_json`` is parsed exactly once per row.
     """
     rows = conn.execute(
-        """SELECT attributes_json FROM usage_records
-            WHERE session_id = ? AND attributes_json IS NOT NULL""",
+        """SELECT model, input_tokens, output_tokens, cost_usd, attributes_json
+             FROM usage_records
+            WHERE session_id = ?""",
         (session_id,),
     ).fetchall()
-    total: int | None = None
+
+    in_tok = 0
+    out_tok = 0
+    cost: float | None = None
+    premium: int | None = None
+    uncached: int | None = None
+    cache_read: int | None = None
+    cache_creation: int | None = None
+    requests_total: int | None = None
+    models: dict[str, dict[str, Any]] = {}
+
     for row in rows:
-        try:
-            attrs = json.loads(row["attributes_json"])
-        except (TypeError, ValueError):
-            continue
-        if not isinstance(attrs, dict) or "premium_requests" not in attrs:
-            continue
-        value = attrs["premium_requests"]
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            continue
-        total = (total or 0) + int(value)
-    return total
+        row_in = int(row["input_tokens"] or 0)
+        row_out = int(row["output_tokens"] or 0)
+        in_tok += row_in
+        out_tok += row_out
+        if row["cost_usd"] is not None:
+            cost = (cost or 0.0) + float(row["cost_usd"])
+
+        attrs = _loads(row["attributes_json"])
+        p = _attr_count(attrs, "premium_requests")
+        u = _attr_count(attrs, "input_uncached")
+        cr = _attr_count(attrs, "cache_read_tokens")
+        cc = _attr_count(attrs, "cache_creation_tokens")
+        rt = _attr_count(attrs, "requests_total")
+
+        premium = _nsum(premium, p)
+        uncached = _nsum(uncached, u)
+        cache_read = _nsum(cache_read, cr)
+        cache_creation = _nsum(cache_creation, cc)
+        requests_total = _nsum(requests_total, rt)
+
+        # Keep the raw model string; a blank ("") model is a real row (its tokens
+        # count) and must not be dropped — the frontend labels it "unknown model".
+        model = row["model"] or ""
+        agg = models.get(model)
+        if agg is None:
+            agg = {
+                "model": model,
+                "premiumRequests": None,
+                "requests": None,
+                "inputUncached": None,
+                "cacheRead": None,
+                "cacheCreation": None,
+                "input": 0,
+                "output": 0,
+            }
+            models[model] = agg
+        agg["input"] += row_in
+        agg["output"] += row_out
+        agg["premiumRequests"] = _nsum(agg["premiumRequests"], p)
+        agg["requests"] = _nsum(agg["requests"], rt)
+        agg["inputUncached"] = _nsum(agg["inputUncached"], u)
+        agg["cacheRead"] = _nsum(agg["cacheRead"], cr)
+        agg["cacheCreation"] = _nsum(agg["cacheCreation"], cc)
+
+    return {
+        "in": in_tok,
+        "out": out_tok,
+        "cost": cost,
+        "premiumRequests": premium,
+        "inputUncached": uncached,
+        "cacheRead": cache_read,
+        "cacheCreation": cache_creation,
+        "requestsTotal": requests_total,
+        "models": list(models.values()),
+    }
 
 
 def _session_title(seg_rows: list[sqlite3.Row]) -> str | None:

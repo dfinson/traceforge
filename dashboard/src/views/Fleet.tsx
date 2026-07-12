@@ -4,7 +4,7 @@ import { RISK } from "@/lib/types";
 import { useRuns } from "@/lib/queries";
 import { useApp } from "@/store";
 import type { SortKey } from "@/store";
-import { agg, dmin, fmtCost, hhmm, money, premiumReq, tk } from "@/lib/format";
+import { dmin, fmtCost, hhmm, nsum, pct, premiumReq, tk } from "@/lib/format";
 import { coverageStats, effectMix, scopeSplit } from "@/lib/coverage";
 import { G } from "@/data/tips";
 import { KpiCard } from "@/components/KpiCard";
@@ -14,8 +14,6 @@ import { DistBar } from "@/components/DistBar";
 import { CHART_FILL, RISK_FILL } from "@/components/charts/chartTheme";
 import { MiniRibbon } from "@/components/charts/MiniRibbon";
 import { ActivityChart } from "@/components/charts/ActivityChart";
-import { AttributionBars } from "@/components/charts/AttributionBars";
-import { SpendArea } from "@/components/charts/SpendArea";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
@@ -41,13 +39,15 @@ export function Fleet() {
   const totals = useMemo(() => {
     const all = runs.flatMap((r) => r.events);
     const classified = all.filter((e) => (e.cls?.conf ?? 0) >= 0.9).length;
+    // GitHub Copilot bills in premium requests, not dollars — so the fleet-level
+    // billing signal is the premium-request COUNT, summed null-aware: it stays
+    // null (rendered "—") until some run reports a count, and never fabricates a 0.
+    // There is no fleet "$" because the wire carries no dollars.
+    const premium = runs.reduce<number | null>((a, r) => nsum(a, r.usage.premiumRequests), null);
     return {
       live: runs.filter((r) => r.live).length,
       runs: runs.length,
-      // Fleet-wide dollar spend sums only the runs that carry real dollars; runs
-      // with unknown cost (null — e.g. Copilot) contribute nothing rather than
-      // poisoning the total with NaN. It stays an honest sum of what's known.
-      spend: runs.reduce((a, r) => a + (r.usage.cost ?? 0), 0),
+      premium,
       tokens: runs.reduce((a, r) => a + r.usage.in + r.usage.out, 0),
       classifiedPct: Math.round((classified / (all.length || 1)) * 100),
       triage: runs.filter((r) => r.peak >= 2).length,
@@ -56,7 +56,28 @@ export function Fleet() {
 
   const rail = useMemo(() => {
     const all = runs.flatMap((r) => r.events);
-    const spendByPhase = agg(all, "phase");
+    // Fleet-wide cache-aware token consumption: the three real token classes
+    // GitHub Copilot bills against, summed null-aware so an all-unknown
+    // (non-Copilot) fleet honestly shows no breakdown rather than a fabricated 0.
+    const uncached = runs.reduce<number | null>((a, r) => nsum(a, r.usage.inputUncached), null);
+    const cacheRead = runs.reduce<number | null>((a, r) => nsum(a, r.usage.cacheRead), null);
+    const cacheCreation = runs.reduce<number | null>(
+      (a, r) => nsum(a, r.usage.cacheCreation),
+      null
+    );
+    const inputTotal = nsum(nsum(uncached, cacheRead), cacheCreation);
+    const consumption = {
+      hasData: inputTotal != null,
+      cachePct: pct(cacheRead, inputTotal),
+      // Only render classes we actually know: a null (unknown) class is dropped
+      // rather than shown as a fabricated "0" in the bar/legend. A genuine 0
+      // (value != null) is kept — unknown and real-zero stay distinct.
+      segments: [
+        { label: "billed input", value: uncached, color: CHART_FILL[0] },
+        { label: "cache read", value: cacheRead, color: CHART_FILL[2] },
+        { label: "cache creation", value: cacheCreation, color: CHART_FILL[3] },
+      ].filter((s): s is { label: string; value: number; color: string } => s.value != null),
+    };
     const risk = [0, 1, 2, 3].map((l) => ({
       label: RISK[l],
       value: all.filter((e) => e.risk === l).length,
@@ -78,7 +99,7 @@ export function Fleet() {
       hook: "var(--muted-foreground)",
       lifecycle: "var(--border)",
     });
-    return { spendByPhase, risk, coverage, scope, cov };
+    return { consumption, risk, coverage, scope, cov };
   }, [runs]);
 
   const rows = useMemo(() => {
@@ -139,7 +160,12 @@ export function Fleet() {
           tip="Live runs|Runs still emitting events — their timeline and cost keep growing as TraceForge tails the output sink."
         />
         <KpiCard label="Runs" value={totals.runs} sub="last 24h" tip={G.session_id} />
-        <KpiCard label="Spend" value={money(totals.spend)} sub="all runs" tip={G.usage_records} />
+        <KpiCard
+          label="Premium reqs"
+          value={totals.premium == null ? "—" : totals.premium}
+          sub="all runs"
+          tip={G.usage_records}
+        />
         <KpiCard label="Tokens" value={tk(totals.tokens)} sub="in + out" tip={G.usage_records} />
         <KpiCard
           label="Classified"
@@ -163,35 +189,32 @@ export function Fleet() {
               <ActivityChart />
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader>
-              <Tip tip={G.usage_records}>
-                <CardTitle className="w-fit cursor-help text-base underline decoration-dotted underline-offset-4">
-                  Spend over time
-                </CardTitle>
-              </Tip>
-              <CardDescription>
-                Cumulative fleet cost across the session window — every tool call adds to the running
-                total.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <SpendArea />
-            </CardContent>
-          </Card>
         </div>
 
         <div className="space-y-5">
           <Card>
             <CardHeader className="pb-3">
-              <Tip tip={G.attribution_rollups}>
+              <Tip tip={G.usage_records}>
                 <CardTitle className="w-fit cursor-help text-[11px] font-medium uppercase tracking-wide text-muted-foreground underline decoration-dotted underline-offset-4">
-                  Spend by phase
+                  Consumption
                 </CardTitle>
               </Tip>
             </CardHeader>
             <CardContent>
-              <AttributionBars data={rail.spendByPhase} />
+              {rail.consumption.hasData ? (
+                <div className="space-y-3">
+                  <DistBar segments={rail.consumption.segments} />
+                  <p className="text-[11px] leading-snug text-muted-foreground">
+                    {rail.consumption.cachePct != null &&
+                      `${rail.consumption.cachePct}% of input served from cache · `}
+                    {totals.premium == null
+                      ? "— premium requests"
+                      : `${totals.premium} premium request${totals.premium === 1 ? "" : "s"}`}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-[11px] leading-snug text-muted-foreground">No token breakdown</p>
+              )}
             </CardContent>
           </Card>
           <Card>

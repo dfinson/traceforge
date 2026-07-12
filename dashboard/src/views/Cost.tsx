@@ -1,16 +1,11 @@
 import { useMemo } from "react";
 import { useRuns } from "@/lib/queries";
-import { useApp } from "@/store";
-import type { Dim } from "@/lib/format";
-import { agg, money, money3 } from "@/lib/format";
-import { DIMTIP, G } from "@/data/tips";
-import { Tip } from "@/components/Tip";
+import { nsum, pct, tk } from "@/lib/format";
+import { G } from "@/data/tips";
 import { KpiCard } from "@/components/KpiCard";
-import { AttributionBars } from "@/components/charts/AttributionBars";
-import { CostScatter } from "@/components/charts/CostScatter";
-import { SpendArea } from "@/components/charts/SpendArea";
+import { DistBar } from "@/components/DistBar";
+import { CHART_FILL } from "@/components/charts/chartTheme";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
   TableBody,
@@ -20,33 +15,87 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-const DIMS: Dim[] = ["phase", "tool", "file"];
-
+// GitHub Copilot bills in premium REQUESTS, not dollars — the wire carries no
+// per-event cost. This view is built entirely from the real signals persisted on
+// usage_records: the premium-request count and cache-aware token attribution.
+// Every aggregate is null-aware: unknown stays null (rendered "—"), never a
+// fabricated 0, so a genuine zero (e.g. a model that ran no premium requests)
+// stays distinct from "we don't know".
 export function Cost() {
-  const { dim, setDim, openRun } = useApp();
   const { data: runs = [], isLoading } = useRuns();
-  const activeDim: Dim = DIMS.includes(dim) ? dim : "phase";
 
-  const all = useMemo(() => runs.flatMap((r) => r.events), [runs]);
-  const bars = useMemo(() => agg(all, activeDim).map((d) => ({ k: d.k, v: d.v })), [all, activeDim]);
   const totals = useMemo(() => {
-    const cost = all.reduce((a, e) => a + e.cost, 0);
-    const tokens = all.reduce((a, e) => a + e.tokens, 0);
-    const retried = all.filter((e) => e.retry).reduce((a, e) => a + e.cost, 0);
-    return { cost, tokens, retried, calls: all.length };
-  }, [all]);
+    const premium = runs.reduce<number | null>((a, r) => nsum(a, r.usage.premiumRequests), null);
+    const billedInput = runs.reduce<number | null>((a, r) => nsum(a, r.usage.inputUncached), null);
+    const cacheRead = runs.reduce<number | null>((a, r) => nsum(a, r.usage.cacheRead), null);
+    const cacheCreation = runs.reduce<number | null>(
+      (a, r) => nsum(a, r.usage.cacheCreation),
+      null
+    );
+    const output = runs.reduce((a, r) => a + r.usage.out, 0);
+    const inputTotal = nsum(nsum(billedInput, cacheRead), cacheCreation);
+    const cacheHeadline =
+      inputTotal && cacheRead != null ? ((cacheRead / inputTotal) * 100).toFixed(1) + "%" : "—";
+    return {
+      premium,
+      billedInput,
+      cacheRead,
+      cacheCreation,
+      output,
+      inputTotal,
+      cachePct: pct(cacheRead, inputTotal),
+      cacheHeadline,
+      hasTokens: inputTotal != null,
+      // Only render classes we actually know: an unknown (null) class is dropped
+      // rather than shown as a fabricated "0"; a genuine 0 (value != null) stays.
+      tokenSegs: [
+        { label: "billed input", value: billedInput, color: CHART_FILL[0] },
+        { label: "cache read", value: cacheRead, color: CHART_FILL[2] },
+        { label: "cache creation", value: cacheCreation, color: CHART_FILL[3] },
+      ].filter((s): s is { label: string; value: number; color: string } => s.value != null),
+    };
+  }, [runs]);
 
+  // Per-model attribution: fold every run's usage.models list into one map keyed
+  // by the raw model string, summing null-aware. A blank model string is real
+  // token usage we couldn't attribute — surfaced as "unknown model", never dropped.
   const models = useMemo(() => {
-    const m: Record<string, { calls: number; tokens: number; cost: number }> = {};
-    runs.forEach((r) => {
-      const o = (m[r.model] ||= { calls: 0, tokens: 0, cost: 0 });
-      o.calls += r.events.length;
-      o.tokens += r.usage.in + r.usage.out;
-      // Unknown cost (null — e.g. Copilot carries no dollars) adds nothing to the
-      // per-model dollar total rather than NaN-poisoning it.
-      o.cost += r.usage.cost ?? 0;
-    });
-    return Object.entries(m).sort((a, b) => b[1].cost - a[1].cost);
+    const m = new Map<
+      string,
+      {
+        model: string;
+        premiumRequests: number | null;
+        requests: number | null;
+        inputUncached: number | null;
+        cacheRead: number | null;
+        output: number;
+      }
+    >();
+    runs
+      .flatMap((r) => r.usage.models)
+      .forEach((mu) => {
+        const o = m.get(mu.model) ?? {
+          model: mu.model,
+          premiumRequests: null,
+          requests: null,
+          inputUncached: null,
+          cacheRead: null,
+          output: 0,
+        };
+        o.premiumRequests = nsum(o.premiumRequests, mu.premiumRequests);
+        o.requests = nsum(o.requests, mu.requests);
+        o.inputUncached = nsum(o.inputUncached, mu.inputUncached);
+        o.cacheRead = nsum(o.cacheRead, mu.cacheRead);
+        o.output += mu.output;
+        m.set(mu.model, o);
+      });
+    // Sort premium desc, then requests desc. `?? -1` sinks unknown below a real 0
+    // so the honest "we don't know" rows never outrank a measured zero.
+    return [...m.values()].sort(
+      (a, b) =>
+        (b.premiumRequests ?? -1) - (a.premiumRequests ?? -1) ||
+        (b.requests ?? -1) - (a.requests ?? -1)
+    );
   }, [runs]);
 
   if (isLoading) {
@@ -62,102 +111,107 @@ export function Cost() {
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Cost</h1>
         <p className="text-sm text-muted-foreground">
-          Spend and latency attributed across trace-native dimensions.
+          GitHub Copilot bills in premium requests; the wire carries no dollar cost (—). Tokens are
+          attributed per model.
         </p>
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiCard label="Total spend" value={money(totals.cost)} tip={G.attribution_rollups} />
-        <KpiCard label="Tokens" value={(totals.tokens / 1000).toFixed(0) + "k"} tip={G.usage_records} />
-        <KpiCard label="Tool calls" value={totals.calls} tip={G.spans} />
         <KpiCard
-          label="Retry waste"
-          value={money(totals.retried)}
-          accent="var(--risk-1)"
-          tip={DIMTIP.retry}
+          label="Premium requests"
+          value={totals.premium == null ? "—" : totals.premium}
+          sub="the billed signal"
+          tip={G.usage_records}
         />
-      </div>
-
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        <Card>
-          <CardHeader className="flex-row items-start justify-between gap-3 space-y-0">
-            <div>
-              <CardTitle className="text-base">Attribution</CardTitle>
-              <CardDescription>Cost grouped by dimension.</CardDescription>
-            </div>
-            <Tabs value={activeDim} onValueChange={(v) => setDim(v as Dim)}>
-              <TabsList>
-                {DIMS.map((d) => (
-                  <TabsTrigger key={d} value={d} className="capitalize">
-                    {d}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
-          </CardHeader>
-          <CardContent>
-            <Tip tip={DIMTIP[activeDim]}>
-              <div className="mb-2 w-fit cursor-help text-[11px] text-muted-foreground underline decoration-dotted underline-offset-2">
-                by {activeDim}
-              </div>
-            </Tip>
-            <AttributionBars data={bars} />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Cost × duration</CardTitle>
-            <CardDescription>
-              Each run — bubble size = events, color = peak risk. Click to open.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <CostScatter onPick={openRun} />
-          </CardContent>
-        </Card>
+        <KpiCard
+          label="Billed input"
+          value={totals.billedInput == null ? "—" : tk(totals.billedInput)}
+          sub="uncached tokens"
+          tip={G.usage_records}
+        />
+        <KpiCard
+          label="Cache reads"
+          value={totals.cacheRead == null ? "—" : tk(totals.cacheRead)}
+          sub={totals.cachePct == null ? "input served from cache" : `${totals.cachePct}% of input`}
+          tip={G.usage_records}
+        />
+        <KpiCard label="Output" value={tk(totals.output)} sub="tokens" tip={G.usage_records} />
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Cumulative spend</CardTitle>
-          <CardDescription>Fleet spend accruing over the day.</CardDescription>
+          <CardTitle className="text-base">Cache efficiency</CardTitle>
+          <CardDescription>
+            Input tokens by billing class — cache reads bill at a fraction of fresh input, so a
+            high cache share is the real cost story.
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <SpendArea />
+          {totals.hasTokens ? (
+            <div className="space-y-3">
+              <div className="flex items-baseline justify-between">
+                <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                  served from cache
+                </span>
+                <span className="text-lg font-semibold tabular-nums">{totals.cacheHeadline}</span>
+              </div>
+              <DistBar segments={totals.tokenSegs} />
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No token breakdown available.</p>
+          )}
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
           <CardTitle className="text-base">By model</CardTitle>
-          <CardDescription>Spend and volume per model.</CardDescription>
+          <CardDescription>
+            Premium requests and cache-aware token volume per model — the honest per-model
+            attribution.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead>Model</TableHead>
-                <TableHead className="text-right">Calls</TableHead>
-                <TableHead className="text-right">Tokens</TableHead>
-                <TableHead className="text-right">Cost</TableHead>
-                <TableHead className="text-right">$/call</TableHead>
+                <TableHead className="text-right">Premium reqs</TableHead>
+                <TableHead className="text-right">Requests</TableHead>
+                <TableHead className="text-right">Billed input</TableHead>
+                <TableHead className="text-right">Cache read</TableHead>
+                <TableHead className="text-right">Output</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {models.map(([model, o]) => (
-                <TableRow key={model} className="hover:bg-transparent">
-                  <TableCell className="font-mono text-[12.5px]">{model}</TableCell>
-                  <TableCell className="text-right tabular-nums">{o.calls}</TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {(o.tokens / 1000).toFixed(1)}k
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">{money(o.cost)}</TableCell>
-                  <TableCell className="text-right tabular-nums text-muted-foreground">
-                    {money3(o.cost / o.calls)}
+              {models.length === 0 ? (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={6} className="text-center text-muted-foreground">
+                    No usage records.
                   </TableCell>
                 </TableRow>
-              ))}
+              ) : (
+                models.map((o) => (
+                  <TableRow key={o.model} className="hover:bg-transparent">
+                    <TableCell className="font-mono text-[12.5px]">
+                      {o.model || "unknown model"}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {o.premiumRequests == null ? "—" : o.premiumRequests}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {o.requests == null ? "—" : o.requests}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {o.inputUncached == null ? "—" : tk(o.inputUncached)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {o.cacheRead == null ? "—" : tk(o.cacheRead)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{tk(o.output)}</TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
         </CardContent>

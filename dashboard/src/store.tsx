@@ -1,6 +1,5 @@
 import { createContext, useContext, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import type { Dim } from "@/lib/format";
 
 export type View = "fleet" | "run" | "triage" | "cost" | "coverage";
 export type SortKey = "recent" | "risk" | "cost";
@@ -9,7 +8,6 @@ export interface AppApi {
   view: View;
   runId: string | null;
   sel: number;
-  dim: Dim;
   filt: string;
   sort: SortKey;
   setView: (v: View) => void;
@@ -17,7 +15,6 @@ export interface AppApi {
   openEvent: (id: string, idx: number) => void;
   back: () => void;
   setSel: (i: number) => void;
-  setDim: (d: Dim) => void;
   setFilt: (s: string) => void;
   setSort: (s: SortKey) => void;
 }
@@ -34,7 +31,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [view, setView] = useState<View>("fleet");
   const [runId, setRunId] = useState<string | null>(null);
   const [sel, setSel] = useState(0);
-  const [dim, setDim] = useState<Dim>("phase");
   const [filt, setFilt] = useState("");
   const [sort, setSort] = useState<SortKey>("recent");
 
@@ -43,7 +39,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       view,
       runId,
       sel,
-      dim,
       filt,
       sort,
       setView,
@@ -59,11 +54,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
       back: () => setView("fleet"),
       setSel,
-      setDim,
       setFilt,
       setSort,
     }),
-    [view, runId, sel, dim, filt, sort]
+    [view, runId, sel, filt, sort]
   );
 
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;

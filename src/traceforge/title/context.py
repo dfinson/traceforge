@@ -266,6 +266,39 @@ def salient_symbols(
 
 
 # ------------------------------------------------------------------- assemble
+#: Slot keys that carry a concrete *subject* the span acted on, as opposed to the
+#: verb-side ``actions`` / free-text ``notes`` which name no entity. When none of
+#: these is present the span model has nothing to anchor on and tends to
+#: hallucinate a subject, so the caller abstains from trusting it.
+_ANCHOR_SLOTS = frozenset({"intent", "files", "symbols"})
+
+
+def _drop_system(rows: list[dict]) -> list[dict]:
+    """Filter out ``message.system`` events before mining.
+
+    System prompts embed tool-doc examples, boilerplate file names and code
+    identifiers that are not part of what the agent actually *did* this span;
+    mining them contaminates the ``files``/``symbols``/``notes`` slots with
+    prompt scaffolding. They carry no signal about the segment's real subject, so
+    they are dropped source-agnostically here.
+    """
+    return [r for r in rows if not str(r.get("kind", "")).startswith("message.system")]
+
+
+def has_anchor(ctx: str) -> bool:
+    """Whether a distilled context names a concrete subject.
+
+    ``True`` iff the context carries an ``intent``, ``files`` or ``symbols``
+    slot -- a real entity to title. A context of only ``actions``/``notes`` has
+    no subject anchor, so a model title over it is a guess; callers fall back to
+    an extractive heuristic (or abstain) in that case.
+    """
+    for part in ctx.split(" | "):
+        if part.split(":", 1)[0].strip() in _ANCHOR_SLOTS:
+            return True
+    return False
+
+
 def distilled_context(rows: list[dict]) -> str:
     """The golden platter: the few highest-signal facts about a span.
 
@@ -273,6 +306,7 @@ def distilled_context(rows: list[dict]) -> str:
     in sequence order. Returns the slot string the titler was trained on, or
     ``"(no signal)"`` when nothing useful is extractable.
     """
+    rows = _drop_system(rows)
     parts: list[str] = []
     intent = next((extract_intent(r) for r in rows if extract_intent(r)), None)
     if intent:
@@ -292,4 +326,4 @@ def distilled_context(rows: list[dict]) -> str:
     return " | ".join(parts) if parts else "(no signal)"
 
 
-__all__ = ["STOP", "distilled_context"]
+__all__ = ["STOP", "distilled_context", "has_anchor"]

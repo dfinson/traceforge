@@ -98,7 +98,12 @@ export interface Run {
   live: boolean;
   segs: Seg[];
   events: TEvent[];
-  usage: { in: number; out: number; cost: number };
+  // `cost` is null when the run carries no dollar cost on the wire (e.g. GitHub
+  // Copilot CLI, which emits no dollars at all) — rendered as "—" (unknown), never
+  // a fake "$0.00". `premiumRequests` is Copilot's only real billing signal: the
+  // per-run premium-request count (summed across models); null when unknown, a
+  // true 0 when the run genuinely made none.
+  usage: { in: number; out: number; cost: number | null; premiumRequests: number | null };
   started: Date;
   durMs: number;
   // null when no cross-session drift baseline has been recorded for the run (it

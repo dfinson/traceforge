@@ -161,5 +161,5 @@ def test_build_run_surfaces_repo_model_and_usage(tmp_path, monkeypatch) -> None:
     assert run["model"] == _EXPECTED_MODEL
     assert run["usage"]["in"] == _EXPECTED_SUM_INPUT
     assert run["usage"]["out"] == _EXPECTED_SUM_OUTPUT
-    # No wire cost → COALESCE(SUM(NULL), 0.0) → 0.0 (no NaN, no crash).
-    assert run["usage"]["cost"] == 0.0
+    # No wire cost → SUM(NULL) → None (honest "unknown", NOT a fabricated $0.00).
+    assert run["usage"]["cost"] is None

@@ -262,7 +262,7 @@ async def test_list_runs_summarizes_identity_and_usage(full_repo: DashboardRepos
     assert run["model"] == "gpt-4o"
     assert run["title"] == "Refactor auth"
     assert run["live"] is True
-    assert run["usage"] == {"in": 1000, "out": 500, "cost": 0.9}
+    assert run["usage"] == {"in": 1000, "out": 500, "cost": 0.9, "premiumRequests": None}
     assert run["drift"] == 0.42
     assert run["peak"] == 3  # critical
     assert run["eventCount"] == 2
@@ -278,7 +278,7 @@ async def test_build_run_core_fields(full_repo: DashboardRepository) -> None:
     assert run["live"] is True
     assert run["drift"] == 0.42
     assert run["peak"] == 3
-    assert run["usage"] == {"in": 1000, "out": 500, "cost": 0.9}
+    assert run["usage"] == {"in": 1000, "out": 500, "cost": 0.9, "premiumRequests": None}
     assert len(run["events"]) == 2
 
 
@@ -332,6 +332,97 @@ async def test_build_run_segments_and_gaps(full_repo: DashboardRepository) -> No
 
 async def test_build_run_unknown_session_returns_none(full_repo: DashboardRepository) -> None:
     assert full_repo.build_run("does-not-exist") is None
+
+
+def _bare_event_for(session_id: str, ts: datetime) -> SessionEvent:
+    """A minimal low-risk event for an arbitrary session (build_run needs ≥1 event)."""
+    risk = RiskAssessment(
+        score=4, level="safe", confidence="low", factors=(), mitre=(), version="risk-v2"
+    )
+    gov = SessionMeta(classification=None, risk_assessment=risk)
+    return SessionEvent(
+        kind=EventKind.TOOL_CALL_STARTED,
+        session_id=session_id,
+        timestamp=ts,
+        payload={"tool_name": "git"},
+        metadata=EventMetadata(governance=gov),
+    )
+
+
+async def _seed_premium(db: Path) -> None:
+    """Seed Copilot-shaped runs: no dollars, premium-request COUNTS in attributes."""
+    sink = SqliteOutputSink(path=str(db))
+    # Run with premium activity across two models: counts 12 + 3 = 15, cost NULL.
+    for model, premium, total in (("claude-opus-4.6", 12, 22), ("claude-opus-4.6", 3, 34)):
+        await sink.on_event(_bare_event_for("cop-premium", _T0))
+        await sink.on_usage(
+            UsageRecord(
+                session_id="cop-premium",
+                timestamp=_T0,
+                model=model,
+                input_tokens=100,
+                output_tokens=20,
+                cost_usd=None,
+                attributes={
+                    "input_uncached": 100,
+                    "cache_read_tokens": 0,
+                    "cache_creation_tokens": 0,
+                    "premium_requests": premium,
+                    "requests_total": total,
+                },
+            )
+        )
+    # Run that genuinely made ZERO premium requests (included model) — a real 0.
+    await sink.on_event(_bare_event_for("cop-zero", _T0))
+    await sink.on_usage(
+        UsageRecord(
+            session_id="cop-zero",
+            timestamp=_T0,
+            model="claude-haiku-4.5",
+            input_tokens=100,
+            output_tokens=20,
+            cost_usd=None,
+            attributes={
+                "input_uncached": 100,
+                "cache_read_tokens": 0,
+                "cache_creation_tokens": 0,
+                "premium_requests": 0,
+                "requests_total": 38,
+            },
+        )
+    )
+    await sink.close()
+
+
+async def test_premium_requests_surface_with_null_cost_and_zero_distinct(tmp_path: Path) -> None:
+    """cost stays None (unknown), while the premium-request COUNT is surfaced.
+
+    Also guards the unknown-vs-real-0 distinction: a run that never carries the
+    premium key surfaces ``None`` (→ "—"), a run that genuinely made 0 premium
+    requests surfaces ``0`` (→ "0 premium requests").
+    """
+    out = tmp_path / "traceforge.db"
+    await _seed_premium(out)
+    repo = DashboardRepository(DashboardPaths(output_db=out, system_db=tmp_path / "absent.db"))
+
+    premium_run = repo.build_run("cop-premium")
+    assert premium_run is not None
+    # No dollars are ever fabricated from the premium count.
+    assert premium_run["usage"]["cost"] is None
+    # Premium counts sum across the run's models (12 + 3).
+    assert premium_run["usage"]["premiumRequests"] == 15
+
+    zero_run = repo.build_run("cop-zero")
+    assert zero_run is not None
+    assert zero_run["usage"]["cost"] is None
+    # A genuine zero — distinct from unknown.
+    assert zero_run["usage"]["premiumRequests"] == 0
+
+    # And via the list/summary path, the same honesty holds.
+    summaries = {r["id"]: r for r in repo.list_runs()}
+    assert summaries["cop-premium"]["usage"]["premiumRequests"] == 15
+    assert summaries["cop-premium"]["usage"]["cost"] is None
+    assert summaries["cop-zero"]["usage"]["premiumRequests"] == 0
 
 
 async def test_degraded_mode_without_system_db(tmp_path: Path) -> None:

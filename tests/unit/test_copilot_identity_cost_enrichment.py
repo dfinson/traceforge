@@ -144,6 +144,43 @@ def test_preprocessor_skips_blank_model_and_missing_usage() -> None:
     assert [b["type"] for b in blocks] == ["session.shutdown"]
 
 
+def test_preprocessor_captures_premium_request_counts() -> None:
+    # ``requests.cost`` is a premium-request COUNT (not dollars) and ``requests.count``
+    # is the total request count. Both must ride the synthetic usage block so the
+    # bridge can stash them and the dashboard can show "N premium requests".
+    blocks = preprocess_copilot(
+        _shutdown({_MODEL: {"usage": dict(_USAGE), "requests": {"count": 40, "cost": 3}}})
+    )
+    usage = blocks[-1]
+    assert usage["data"]["premiumRequests"] == 3
+    assert usage["data"]["requestsTotal"] == 40
+
+
+def test_preprocessor_preserves_genuine_zero_premium_count() -> None:
+    # Included models (haiku/sonnet) stay at 0 premium even at high volume — a real
+    # zero, distinct from "unknown". It must be captured, not dropped.
+    blocks = preprocess_copilot(
+        _shutdown({_MODEL: {"usage": dict(_USAGE), "requests": {"count": 144, "cost": 0}}})
+    )
+    usage = blocks[-1]
+    assert usage["data"]["premiumRequests"] == 0
+    assert usage["data"]["requestsTotal"] == 144
+
+
+def test_preprocessor_omits_premium_keys_when_requests_absent_or_malformed() -> None:
+    # No ``requests`` block → no keys (honest-blank, never fabricated into 0).
+    no_req = preprocess_copilot(_shutdown({_MODEL: {"usage": dict(_USAGE)}}))[-1]["data"]
+    assert "premiumRequests" not in no_req
+    assert "requestsTotal" not in no_req
+
+    # A malformed ``requests`` block (non-dict, or non-numeric fields) adds nothing.
+    bad = preprocess_copilot(
+        _shutdown({_MODEL: {"usage": dict(_USAGE), "requests": {"count": "x", "cost": None}}})
+    )[-1]["data"]
+    assert "premiumRequests" not in bad
+    assert "requestsTotal" not in bad
+
+
 # ─── Adapter (repo_field → EventMetadata.repo) ───────────────────────────────
 
 
@@ -178,6 +215,23 @@ def test_adapter_maps_synthetic_usage_to_telemetry_usage() -> None:
 
     # The shutdown itself still maps to session.ended (rides the timeline).
     assert any(e.kind == EventKind.SESSION_ENDED for e in events)
+
+
+def test_adapter_maps_premium_requests_into_payload() -> None:
+    adapter = _copilot_adapter()
+    events = list(
+        adapter.parse_dict(
+            _shutdown({_MODEL: {"usage": dict(_USAGE), "requests": {"count": 40, "cost": 3}}})
+        )
+    )
+    usage_events = [e for e in events if e.kind == EventKind.USAGE]
+    assert len(usage_events) == 1
+    payload = usage_events[0].payload
+    # The premium-request count + total ride the payload for the watch bridge.
+    assert payload["premium_requests"] == 3
+    assert payload["requests_total"] == 40
+    # Still no dollar cost synthesized.
+    assert "cost_usd" not in payload
 
 
 # ─── _feed_line (copilot-shaped: aggregate + dedup + off-timeline) ────────────
@@ -226,3 +280,27 @@ def test_feed_line_builds_aggregated_usage_off_timeline_and_dedups() -> None:
     # Off-timeline: session.ended rides the timeline; the usage event never does.
     assert all(e.kind != EventKind.USAGE for e in pipeline.pushed)
     assert any(e.kind == EventKind.SESSION_ENDED for e in pipeline.pushed)
+
+
+def test_feed_line_stashes_premium_request_counts_in_attributes() -> None:
+    adapter = _copilot_adapter("cp-sess")
+    pipeline = _RecordingPipeline()
+    seen: set[str] = set()
+
+    line = json.dumps(
+        _shutdown({_MODEL: {"usage": dict(_USAGE), "requests": {"count": 40, "cost": 3}}})
+    )
+    asyncio.run(watch_mod._feed_line(line, adapter, pipeline, seen))
+
+    assert len(pipeline.usage) == 1
+    record = pipeline.usage[0]
+    # cost_usd is still honestly None — the premium COUNT is not dollars.
+    assert record.cost_usd is None
+    # The token split is preserved AND the premium/total counts are stashed alongside.
+    assert record.attributes == {
+        "input_uncached": _UNCACHED,
+        "cache_read_tokens": _CACHE_READ,
+        "cache_creation_tokens": 0,
+        "premium_requests": 3,
+        "requests_total": 40,
+    }

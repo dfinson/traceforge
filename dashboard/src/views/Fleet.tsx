@@ -4,7 +4,7 @@ import { RISK } from "@/lib/types";
 import { useRuns } from "@/lib/queries";
 import { useApp } from "@/store";
 import type { SortKey } from "@/store";
-import { agg, dmin, hhmm, money, tk } from "@/lib/format";
+import { agg, dmin, fmtCost, hhmm, money, premiumReq, tk } from "@/lib/format";
 import { coverageStats, effectMix, scopeSplit } from "@/lib/coverage";
 import { G } from "@/data/tips";
 import { KpiCard } from "@/components/KpiCard";
@@ -44,7 +44,10 @@ export function Fleet() {
     return {
       live: runs.filter((r) => r.live).length,
       runs: runs.length,
-      spend: runs.reduce((a, r) => a + r.usage.cost, 0),
+      // Fleet-wide dollar spend sums only the runs that carry real dollars; runs
+      // with unknown cost (null — e.g. Copilot) contribute nothing rather than
+      // poisoning the total with NaN. It stays an honest sum of what's known.
+      spend: runs.reduce((a, r) => a + (r.usage.cost ?? 0), 0),
       tokens: runs.reduce((a, r) => a + r.usage.in + r.usage.out, 0),
       classifiedPct: Math.round((classified / (all.length || 1)) * 100),
       triage: runs.filter((r) => r.peak >= 2).length,
@@ -88,8 +91,12 @@ export function Fleet() {
         r.agent.toLowerCase().includes(q)
     );
     list = [...list].sort((a, b) => {
-      if (sort === "risk") return b.peak - a.peak || b.usage.cost - a.usage.cost;
-      if (sort === "cost") return b.usage.cost - a.usage.cost;
+      // Unknown cost (null) sorts below any real dollar amount (which is always
+      // >= 0) instead of being treated as 0, so a Copilot run with no dollars
+      // doesn't masquerade as the cheapest — it sinks to the bottom.
+      const cost = (r: (typeof list)[number]) => r.usage.cost ?? -1;
+      if (sort === "risk") return b.peak - a.peak || cost(b) - cost(a);
+      if (sort === "cost") return cost(b) - cost(a);
       return b.started.getTime() - a.started.getTime();
     });
     return list;
@@ -332,7 +339,14 @@ export function Fleet() {
                     </div>
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{r.events.length}</TableCell>
-                  <TableCell className="text-right tabular-nums">{money(r.usage.cost)}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    <div>{fmtCost(r.usage.cost)}</div>
+                    {r.usage.premiumRequests != null && (
+                      <div className="text-[11px] text-muted-foreground">
+                        {premiumReq(r.usage.premiumRequests)}
+                      </div>
+                    )}
+                  </TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">
                     {dmin(r.durMs)}
                   </TableCell>

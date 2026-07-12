@@ -257,7 +257,7 @@ class DashboardRepository:
             usage = conn.execute(
                 """SELECT COALESCE(SUM(input_tokens), 0)  AS in_tok,
                           COALESCE(SUM(output_tokens), 0) AS out_tok,
-                          COALESCE(SUM(cost_usd), 0.0)    AS cost
+                          SUM(cost_usd)                   AS cost
                      FROM usage_records
                     WHERE session_id = ?""",
                 (session_id,),
@@ -294,7 +294,14 @@ class DashboardRepository:
                 "usage": {
                     "in": int(usage["in_tok"]),
                     "out": int(usage["out_tok"]),
-                    "cost": float(usage["cost"]),
+                    # Copilot carries no dollar cost on the wire; ``SUM(cost_usd)``
+                    # is NULL only when NO usage row for the run has real dollars.
+                    # Pass that through as null (not 0.0) so the frontend renders
+                    # "—" (unknown), never a fake "$0.00" that reads as free.
+                    "cost": float(usage["cost"]) if usage["cost"] is not None else None,
+                    # The one real Copilot billing signal: premium-request count
+                    # summed across models (null when unknown, a true 0 otherwise).
+                    "premiumRequests": _premium_requests(conn, session_id),
                 },
                 "started": event_rows[0]["timestamp"],
                 "durMs": dur_ms,
@@ -334,7 +341,7 @@ class DashboardRepository:
             usage = conn.execute(
                 """SELECT COALESCE(SUM(input_tokens), 0)  AS in_tok,
                           COALESCE(SUM(output_tokens), 0) AS out_tok,
-                          COALESCE(SUM(cost_usd), 0.0)    AS cost
+                          SUM(cost_usd)                   AS cost
                      FROM usage_records
                     WHERE session_id = ?""",
                 (session_id,),
@@ -350,6 +357,7 @@ class DashboardRepository:
                 (session_id,),
             ).fetchone()
             dominant_model = _dominant_model(conn, session_id)
+            premium_requests = _premium_requests(conn, session_id)
         finally:
             conn.close()
 
@@ -369,7 +377,8 @@ class DashboardRepository:
             "usage": {
                 "in": int(usage["in_tok"]),
                 "out": int(usage["out_tok"]),
-                "cost": float(usage["cost"]),
+                "cost": float(usage["cost"]) if usage["cost"] is not None else None,
+                "premiumRequests": premium_requests,
             },
             "started": agg["first_ts"],
             "durMs": dur_ms,
@@ -715,6 +724,39 @@ def _dominant_model(conn: sqlite3.Connection, session_id: str) -> str:
         (session_id,),
     ).fetchone()
     return row["model"] if row else ""
+
+
+def _premium_requests(conn: sqlite3.Connection, session_id: str) -> int | None:
+    """Sum the run's Copilot premium-request count, or ``None`` when unknown.
+
+    GitHub Copilot's per-model ``modelMetrics.requests.cost`` is a
+    premium-request *count* (not dollars); the copilot preprocessor stashes it in
+    each ``usage_records`` row's ``attributes_json`` under ``premium_requests``.
+    This sums it across the run's models. The unknown/zero distinction is real and
+    preserved: a run whose usage rows never carry the key (every non-Copilot
+    source) returns ``None`` (surfaced as "—", not "0 premium requests"), while a
+    Copilot run that genuinely made zero premium requests returns ``0`` (a true
+    zero). ``cost_usd`` stays null throughout — no dollars are ever derived from
+    the count.
+    """
+    rows = conn.execute(
+        """SELECT attributes_json FROM usage_records
+            WHERE session_id = ? AND attributes_json IS NOT NULL""",
+        (session_id,),
+    ).fetchall()
+    total: int | None = None
+    for row in rows:
+        try:
+            attrs = json.loads(row["attributes_json"])
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(attrs, dict) or "premium_requests" not in attrs:
+            continue
+        value = attrs["premium_requests"]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        total = (total or 0) + int(value)
+    return total
 
 
 def _session_title(seg_rows: list[sqlite3.Row]) -> str | None:

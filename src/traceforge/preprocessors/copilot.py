@@ -52,7 +52,8 @@ def preprocess_copilot(obj: dict[str, Any]) -> list[dict[str, Any]]:
         usage = entry.get("usage")
         if not isinstance(usage, dict):
             continue
-        usage_blocks.append(_usage_block(str(model), usage, shutdown_id, timestamp))
+        requests = entry.get("requests")
+        usage_blocks.append(_usage_block(str(model), usage, requests, shutdown_id, timestamp))
 
     return [obj, *usage_blocks]
 
@@ -79,7 +80,7 @@ def _decode_model_metrics(raw: Any) -> dict[str, Any]:
 
 
 def _usage_block(
-    model: str, usage: dict[str, Any], shutdown_id: str, timestamp: Any
+    model: str, usage: dict[str, Any], requests: Any, shutdown_id: str, timestamp: Any
 ) -> dict[str, Any]:
     """Build one synthetic ``assistant.usage`` event for a single model.
 
@@ -99,8 +100,19 @@ def _usage_block(
     equal Copilot's own reported ``inputTokens`` and keeps the split faithful in
     ``UsageRecord.attributes``. ``reasoningTokens`` is not surfaced separately
     (Copilot reports it as ``0`` and the provider folds reasoning into output
-    accounting). No dollar cost exists in the wire (``requests.cost`` is a
-    premium-request count), so none is emitted and ``cost_usd`` stays null.
+    accounting).
+
+    No dollar cost exists in the wire, so none is emitted and ``cost_usd`` stays
+    null. The one real billing signal Copilot carries is the per-model
+    ``requests`` block: ``requests.cost`` is a **premium-request count** (not
+    dollars — included models like haiku/sonnet stay ``0`` even at high volume;
+    only premium models such as opus accrue) and ``requests.count`` is the total
+    request count. Both are captured here (as ``premiumRequests`` /
+    ``requestsTotal``) so the bridge can stash them in ``UsageRecord.attributes``
+    and the dashboard can surface "N premium requests" instead of a fake "$0.00".
+    A genuine ``0`` premium count is preserved (it is a real zero); a missing or
+    malformed ``requests`` block yields no keys at all (honest-blank, never
+    fabricated).
     """
     input_total = _as_int(usage.get("inputTokens"))
     cache_read = _as_int(usage.get("cacheReadTokens"))
@@ -110,18 +122,23 @@ def _usage_block(
         input_uncached = 0
 
     msg_id = f"{shutdown_id}:{model}"
-    block: dict[str, Any] = {
-        "type": "assistant.usage",
-        "id": msg_id,
-        "data": {
-            "model": model,
-            "inputTokens": input_uncached,
-            "outputTokens": _as_int(usage.get("outputTokens")),
-            "cacheReadTokens": cache_read,
-            "cacheWriteTokens": cache_write,
-            "messageId": msg_id,
-        },
+    data: dict[str, Any] = {
+        "model": model,
+        "inputTokens": input_uncached,
+        "outputTokens": _as_int(usage.get("outputTokens")),
+        "cacheReadTokens": cache_read,
+        "cacheWriteTokens": cache_write,
+        "messageId": msg_id,
     }
+    if isinstance(requests, dict):
+        premium = _as_int_opt(requests.get("cost"))
+        if premium is not None:
+            data["premiumRequests"] = premium
+        total = _as_int_opt(requests.get("count"))
+        if total is not None:
+            data["requestsTotal"] = total
+
+    block: dict[str, Any] = {"type": "assistant.usage", "id": msg_id, "data": data}
     if timestamp is not None:
         block["timestamp"] = timestamp
     return block
@@ -135,3 +152,18 @@ def _as_int(value: Any) -> int:
         return int(value)
     except (ValueError, TypeError):
         return 0
+
+
+def _as_int_opt(value: Any) -> int | None:
+    """Coerce to ``int``, or ``None`` for missing/malformed values.
+
+    Unlike :func:`_as_int`, a genuine ``0`` is preserved and an absent value stays
+    ``None`` — so the premium/total request counts are captured as real zeros
+    without a missing block being fabricated into ``0``.
+    """
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return None

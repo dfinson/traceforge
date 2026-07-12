@@ -226,6 +226,10 @@ def test_usage_input_breakdown_is_preserved(tmp_path, monkeypatch) -> None:
         "input_uncached": 29824,
         "cache_read_tokens": 7058,
         "cache_creation_tokens": 0,
+        # The premium-request COUNT (the only real billing signal Copilot emits) is
+        # captured losslessly. requests.cost is a premium-request count, NOT dollars.
+        "premium_requests": 1,
+        "requests_total": 1,
     }
 
 
@@ -253,7 +257,7 @@ def test_usage_stays_off_the_enriched_timeline(tmp_path, monkeypatch) -> None:
 
 
 def test_build_run_surfaces_repo_model_and_usage(tmp_path, monkeypatch) -> None:
-    """build_run returns non-empty repo + model + usage per run, cost honestly 0.0."""
+    """build_run returns non-empty repo + model + usage per run; cost honestly None."""
     db_path = _run_once(tmp_path, monkeypatch)
 
     paths = resolve_paths(output_db=db_path, system_db=tmp_path / "system.db")
@@ -265,12 +269,15 @@ def test_build_run_surfaces_repo_model_and_usage(tmp_path, monkeypatch) -> None:
     assert run_a["model"] == "claude-sonnet-4.5"
     assert run_a["usage"]["in"] == 36882
     assert run_a["usage"]["out"] == 354
-    # No wire cost → COALESCE(SUM(NULL), 0.0) → 0.0 (no NaN, no crash).
-    assert run_a["usage"]["cost"] == 0.0
+    # No wire cost → SUM(NULL) → None (honest "unknown", NOT a fabricated $0.00).
+    assert run_a["usage"]["cost"] is None
+    # The premium-request count IS surfaced (1 per the seeded modelMetrics).
+    assert run_a["usage"]["premiumRequests"] == 1
 
     run_b = repo.build_run(_UUID_B)
     assert run_b is not None
     assert run_b["repo"] == "/home/user/project-b"
     assert run_b["model"] == "gpt-5"
     assert run_b["usage"]["in"] == 100
-    assert run_b["usage"]["cost"] == 0.0
+    assert run_b["usage"]["cost"] is None
+    assert run_b["usage"]["premiumRequests"] == 1

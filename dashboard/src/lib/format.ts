@@ -5,6 +5,20 @@ export type Dim = "phase" | "tool" | "file" | "segment" | "turn" | "retry";
 
 export const money = (n: number) => "$" + n.toFixed(2);
 export const money3 = (n: number) => "$" + n.toFixed(3);
+
+/** Render a run's dollar cost, or "—" when it is unknown. Cost is null when the
+ * wire carries no dollars (e.g. GitHub Copilot CLI emits none) — that is *unknown*,
+ * not free, so it must never render as "$0.00". A real 0 dollars (should any
+ * source ever report it) still shows "$0.00"; only null/undefined becomes "—". */
+export const fmtCost = (n: number | null | undefined) =>
+  n == null ? "—" : money(n);
+
+/** Render a run's Copilot premium-request count as "N premium request(s)", or ""
+ * when unknown (null/undefined — every non-Copilot source). A true 0 is a real
+ * "0 premium requests", distinct from unknown. */
+export const premiumReq = (n: number | null | undefined) =>
+  n == null ? "" : `${n} premium request${n === 1 ? "" : "s"}`;
+
 export const tk = (n: number) => (n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n));
 export const hhmm = (d: Date) => d.toTimeString().slice(0, 8);
 export const dmin = (ms: number) =>

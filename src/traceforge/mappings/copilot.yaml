@@ -269,13 +269,32 @@ events:
       skill_name: data.skillName
 
   # ── Permissions ────────────────────────────────────────────────────────────
+  # Copilot gates privileged actions behind a permission request that carries the
+  # requested capability ``kind`` (read / write / shell / …) plus the intention and
+  # target (fileName+diff for writes, path for reads, fullCommandText for shell).
+  # Surfacing that payload lets the Enricher classify the gate with an effect/risk,
+  # the same way it classifies the tool call the gate protects. Fields resolve to
+  # None when absent and are omitted by the adapter — honest-blank, never synthesized.
   permission.requested:
     kind: permission.requested
-    payload: {}
+    payload:
+      permission_kind: data.permissionRequest.kind
+      intention: data.permissionRequest.intention
+      path: data.permissionRequest.path
+      file: data.permissionRequest.fileName
+      diff: data.permissionRequest.diff
+      command: data.permissionRequest.fullCommandText
+      tool_call_id: data.permissionRequest.toolCallId
+      extension_name: data.permissionRequest.extensionName
 
+  # The completion carries only the approval result (approved / denied-*), not the
+  # request payload, so it is not independently classifiable — kept as-is.
   permission.completed:
     kind: permission.granted
-    payload: {}
+    payload:
+      result: data.result.kind
+      tool_call_id: data.toolCallId
+      request_id: data.requestId
 
   # ── User input ─────────────────────────────────────────────────────────────
   user_input.requested:

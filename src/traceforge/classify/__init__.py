@@ -35,6 +35,7 @@ from traceforge.classify.mcp import (
     classify_mcp_tool,
     extract_mcp_namespace,
 )
+from traceforge.classify.permission import classify_permission
 from traceforge.classify.powershell import classify_powershell_command
 from traceforge.classify.registry import DimensionRegistry, get_default_registry
 from traceforge.classify.risk import Confidence, RiskAssessment, assess_risk, assess_tool_risk
@@ -84,6 +85,7 @@ __all__ = [
     "classify_powershell_command",
     "classify_tool",
     "classify_mcp_tool",
+    "classify_permission",
     "extract_mcp_namespace",
     "McpServerProfile",
     "McpToolOverride",

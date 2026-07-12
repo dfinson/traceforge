@@ -12,6 +12,7 @@ from traceforge.classify.cmd import classify_cmd_command
 from traceforge.classify.config import ClassificationEngine, ClassifyConfig, load_config
 from traceforge.classify.core import Classification, PhaseSegment
 from traceforge.classify.coding import CodingMechanism, CodingScope
+from traceforge.classify.permission import classify_permission
 from traceforge.classify.powershell import classify_powershell_command
 from traceforge.classify.risk import assess_risk, assess_tool_risk
 from traceforge.classify.tool_display import ToolDisplayProvider, ToolDisplayResolver
@@ -201,6 +202,16 @@ class Enricher:
             event = self._set_phase(event)
             result = [*orphans, event] if orphans else event
 
+        elif event.kind == EventKind.PERMISSION_REQUESTED:
+            # Permission gates carry the requested capability kind (read/write/
+            # shell/…). Classify them from that kind so they surface with an
+            # effect + risk just like the tool call they gate, rather than
+            # landing unclassified. Unknown/absent kinds stay honest-blank.
+            event = self._classify_permission(event)
+            event = self._set_visibility(event)
+            event = self._set_phase(event)
+            result = event
+
         else:
             # Non-tool events: set visibility and phase, pass through
             event = self._set_visibility(event)
@@ -329,6 +340,36 @@ class Enricher:
                 event = self._assess_risk(event, cls)
             else:
                 event = self._assess_tool_risk(event, cls)
+
+        return event
+
+    def _classify_permission(self, event: SessionEvent) -> SessionEvent:
+        """Set metadata.classification for a permission-gate event from its kind.
+
+        Mirrors :meth:`_classify` for tool events: derives a Classification from
+        the requested ``permission_kind`` (read/write/shell/…), refines its scope
+        from the target path, and — when a risk config is loaded — stashes a risk
+        assessment in ``payload._enrichment.risk``. The gate's intention, target,
+        and diff ride the payload untouched, preserving the security signal.
+
+        Unknown or absent kinds leave the event unclassified (honest-blank): no
+        effect is invented for a gate whose semantics are not on the wire.
+        """
+        permission_kind = event.payload.get("permission_kind")
+        cls = classify_permission(permission_kind)
+        if cls is None:
+            return event
+
+        # Refine scope from the gated file path (test/docs/config/… vs generic
+        # source), same as tool events.
+        cls = _refine_scope_from_payload(cls, event.payload)
+
+        new_metadata = event.metadata.model_copy(update={"classification": cls})
+        event = event.model_copy(update={"metadata": new_metadata})
+
+        # Risk scoring — mirror native tools (targets from the payload path).
+        if self._engine.risk_config is not None:
+            event = self._assess_tool_risk(event, cls)
 
         return event
 

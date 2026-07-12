@@ -112,6 +112,23 @@ def test_run_detail_endpoint_returns_single_run(client: _Client) -> None:
     assert len(run["events"]) == 2
 
 
+def test_transcript_endpoint_returns_full_text_turns(client: _Client) -> None:
+    status, body = client.get("/api/runs/sess-alpha/transcript")
+    assert status == 200
+    transcript = json.loads(body)
+    assert transcript["id"] == "sess-alpha"
+    turns = transcript["turns"]
+    assert len(turns) == 3  # sess-alpha was seeded with 3 events
+    for turn in turns:
+        assert {"id", "t", "role", "label", "kind", "text"} <= turn.keys()
+
+
+def test_transcript_unknown_run_is_404(client: _Client) -> None:
+    status, body = client.get("/api/runs/does-not-exist/transcript")
+    assert status == 404
+    assert json.loads(body)["error"] == "not found"
+
+
 def test_unknown_run_is_404(client: _Client) -> None:
     status, body = client.get("/api/runs/does-not-exist")
     assert status == 404

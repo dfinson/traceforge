@@ -17,6 +17,7 @@
 // components (which call Date methods) keep working unchanged.
 
 import type { Run, TEvent } from "@/lib/types";
+import type { Transcript } from "@/lib/types";
 
 export const API_BASE = "/api";
 
@@ -90,4 +91,15 @@ export async function getRun(id: string, signal?: AbortSignal): Promise<Run> {
     signal,
   );
   return reviveRun(w);
+}
+
+// --- Transcript ------------------------------------------------------------
+
+// The transcript wire form needs no revival: `t` stays an ISO string (rendered as
+// a label, not a Date), so the parsed JSON already matches `Transcript`.
+export function getTranscript(
+  id: string,
+  signal?: AbortSignal,
+): Promise<Transcript> {
+  return getJson<Transcript>(`/runs/${encodeURIComponent(id)}/transcript`, signal);
 }

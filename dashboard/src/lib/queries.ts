@@ -11,9 +11,9 @@
 
 import { useQuery } from "@tanstack/react-query";
 import type { Query } from "@tanstack/react-query";
-import { getHealth, getRuns } from "@/lib/api";
+import { getHealth, getRuns, getTranscript } from "@/lib/api";
 import type { Health } from "@/lib/api";
-import type { Run } from "@/lib/types";
+import type { Run, Transcript } from "@/lib/types";
 
 // Poll while any run is still live (spec fork 4: interval poll for v1), otherwise
 // stay idle. Live runs tail the output DB, so their events/cost keep growing.
@@ -33,5 +33,18 @@ export function useHealth() {
     queryKey: ["health"],
     queryFn: ({ signal }) => getHealth(signal),
     staleTime: 60_000,
+  });
+}
+
+// Per-run full-text transcript, fetched lazily: `enabled` is driven by the
+// RunView panel's open state so the (potentially large) full bodies load only
+// when the reader actually opens the transcript. Keyed by run id so switching
+// runs refetches and each run caches independently.
+export function useTranscript(runId: string | null, enabled: boolean) {
+  return useQuery<Transcript>({
+    queryKey: ["transcript", runId],
+    queryFn: ({ signal }) => getTranscript(runId as string, signal),
+    enabled: enabled && runId != null,
+    staleTime: 30_000,
   });
 }

@@ -359,6 +359,38 @@ class DashboardRepository:
             "eventCount": int(agg["n"]),
         }
 
+    def build_transcript(
+        self, session_id: str, *, out_conn: sqlite3.Connection | None = None
+    ) -> dict[str, Any] | None:
+        """Assemble the full-text transcript for one session, or ``None`` if unknown.
+
+        One turn per ``enriched_events`` row in chronological order, each carrying
+        its ``role`` (user / assistant / system / tool), a display ``label``, its
+        ``kind``, and the **complete, untruncated** free text from the payload.
+
+        This is the reading view. It is deliberately separate from
+        ``/api/runs/{id}`` (whose per-event ``summary`` is a one-line, truncated
+        preview) and from the bounded ``GET /api/runs`` list projection — the
+        transcript is fetched on demand for a single run so its full bodies never
+        inflate the fleet payload.
+        """
+        own = out_conn is None
+        conn = _connect_ro(self._paths.output_db) if own else out_conn
+        try:
+            rows = conn.execute(
+                """SELECT id, kind, timestamp, tool_name, tool_display, payload_json
+                     FROM enriched_events
+                    WHERE session_id = ?
+                    ORDER BY timestamp ASC, created_at ASC""",
+                (session_id,),
+            ).fetchall()
+        finally:
+            if own:
+                conn.close()
+        if not rows:
+            return None
+        return {"id": session_id, "turns": [_map_transcript_turn(r) for r in rows]}
+
     # -- system.db (governance memory) — optional -----------------------------
 
     def _identity(
@@ -595,6 +627,72 @@ def _summarize(tool_name: str, payload: dict[str, Any]) -> str:
         if isinstance(val, str) and val.strip():
             return _snippet(val)
     return tool_name
+
+
+# kind -> transcript role. Prefix-based so unlisted kinds still resolve sensibly
+# (e.g. every ``session.*`` lifecycle event -> system). Tool/command/file/mcp and
+# anything unrecognized falls through to "tool" — the actor is the agent's tools.
+def _transcript_role(kind: str | None) -> str:
+    key = (kind or "").strip()
+    if key.startswith("message.user") or key.startswith("input."):
+        return "user"
+    if (
+        key.startswith("message.assistant")
+        or key.startswith("llm.")
+        or key.startswith("reasoning.")
+        or key.startswith("planning.")
+    ):
+        return "assistant"
+    if key.startswith("message.system") or key.startswith("session."):
+        return "system"
+    return "tool"
+
+
+# Payload keys carrying an invocation (the "what ran") and a body (the message or
+# output), in priority order. A turn shows the first of each it finds, so a tool
+# call with both a ``command`` and its ``output`` renders both, in that order.
+_TRANSCRIPT_INVOCATION_KEYS: tuple[str, ...] = ("command", "arguments", "url", "query")
+_TRANSCRIPT_BODY_KEYS: tuple[str, ...] = (
+    "content",
+    "text",
+    "message",
+    "output",
+    "result",
+    "stdout",
+    "body",
+)
+
+
+def _transcript_text(payload: dict[str, Any]) -> str:
+    """Full (untruncated) free text for a transcript turn.
+
+    Unlike :func:`_summarize` (a one-line, whitespace-collapsed, truncated preview
+    for the timeline), this returns the complete text — newlines preserved — so the
+    Transcript panel can render the run's actual content top-to-bottom.
+    """
+    parts: list[str] = []
+    for keys in (_TRANSCRIPT_INVOCATION_KEYS, _TRANSCRIPT_BODY_KEYS):
+        for key in keys:
+            val = payload.get(key)
+            if isinstance(val, str) and val.strip():
+                parts.append(val.strip())
+                break
+    return "\n\n".join(parts)
+
+
+def _map_transcript_turn(row: sqlite3.Row) -> dict[str, Any]:
+    """Reshape one ``enriched_events`` row into a transcript turn (full text)."""
+    payload = _loads(row["payload_json"])
+    kind = row["kind"]
+    label = row["tool_name"] or row["tool_display"] or _label_from_kind(kind)
+    return {
+        "id": row["id"],
+        "t": row["timestamp"],
+        "role": _transcript_role(kind),
+        "label": label,
+        "kind": kind,
+        "text": _transcript_text(payload),
+    }
 
 
 def _segment_risk(events: list[dict[str, Any]]) -> dict[str, int]:

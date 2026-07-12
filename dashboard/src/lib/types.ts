@@ -152,3 +152,26 @@ export interface Run {
 // Risk-level labels, index-aligned to RiskLevel (0..3). Display + data concern,
 // shared by badges, ribbons and formatters — so it lives with the types.
 export const RISK = ["safe", "caution", "danger", "critical"] as const;
+
+// --- Transcript (per-run full-text reading view) ---------------------------
+// A run's transcript is fetched on demand (GET /api/runs/{id}/transcript) rather
+// than riding on the bounded /api/runs list: one turn per event, carrying the
+// COMPLETE untruncated text (distinct from TEvent.summary's one-line preview).
+export type TranscriptRole = "user" | "assistant" | "system" | "tool";
+
+export interface TranscriptTurn {
+  id: string;
+  // ISO-8601 string — kept as-is (like RunGap.t), not revived to a Date.
+  t: string;
+  role: TranscriptRole;
+  // Tool name, or a readable role label ("User"/"Assistant"/"System") for messages.
+  label: string;
+  kind: string;
+  // Full, newline-preserving body text; "" when the event carried no free text.
+  text: string;
+}
+
+export interface Transcript {
+  id: string;
+  turns: TranscriptTurn[];
+}

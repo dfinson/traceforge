@@ -19,6 +19,7 @@ Two layers, mirroring the boundary-stream tests:
 from __future__ import annotations
 
 import importlib.util
+import json
 from datetime import datetime, timezone
 
 import pytest
@@ -30,12 +31,20 @@ from traceforge.types import EventMetadata, SessionEvent
 
 def _event(i, tool="edit", boundary=None, payload=None, kind="tool.call", metadata=True):
     md = EventMetadata(source_framework="copilot", boundary=boundary) if metadata else None
+    body = {"tool_name": tool}
+    if payload is None:
+        # A realistic tool call acts on a file, giving the span a concrete
+        # subject anchor so the span model (not the anchorless heuristic
+        # fallback) titles it. Signal-less fixtures pass payload={} to opt out.
+        body["arguments"] = {"path": "client.py"}
+    else:
+        body.update(payload)
     return SessionEvent(
         id=f"e{i}",
         kind=kind,
         session_id="S",
         timestamp=datetime.now(timezone.utc),
-        payload={"tool_name": tool, **(payload or {})},
+        payload=body,
         metadata=md,
     )
 
@@ -416,6 +425,74 @@ def test_refine_activity_without_refiner_returns_empty():
     from traceforge.title.inferencer import _ClosedActivity
 
     assert inf.refine_activity(_ClosedActivity("e0", "Title 0", [("e0", [])])) == []
+
+
+# ─── honest abstention: no subject anchor -> heuristic, never a model guess ───
+
+
+def _frow(kind="tool.call", tool_name=None, payload=None):
+    """A minimal event feature-row (the shape ``distilled_context`` consumes)."""
+    return {
+        "kind": kind,
+        "tool_name": tool_name,
+        "payload_json": json.dumps(payload) if payload is not None else None,
+        "binaries": [],
+        "structure": [],
+    }
+
+
+def test_anchored_span_still_uses_the_model():
+    # A span with a real subject anchor (a stated intent) is titled by the span
+    # model exactly as before.
+    fake = _FakeTitle()
+    inf = TitleInferencer(model=fake)
+    rows = [
+        _frow(
+            tool_name="report_intent",
+            payload={
+                "tool_name": "report_intent",
+                "arguments": {"intent": "Adding retry logic to the client"},
+            },
+        )
+    ]
+    title = inf._title(rows)
+    assert fake.contexts  # the model was consulted
+    assert title == "Title 0"
+
+
+def test_anchorless_span_falls_back_to_heuristic_not_model():
+    # Only narration, no intent/files/symbols: the model would hallucinate a
+    # subject, so we title extractively from the words actually spoken and never
+    # invoke the model.
+    fake = _FakeTitle()
+    inf = TitleInferencer(model=fake)
+    rows = [_frow(kind="message.user", payload={"content": "Please fix the flaky retry behavior"})]
+    title = inf._title(rows)
+    assert fake.contexts == []  # model NOT consulted (no anchor)
+    assert title and "retry" in title.lower()  # grounded in the real words
+
+
+def test_anchorless_span_without_narration_abstains():
+    # Actions only, nothing spoken: no honest title exists, so abstain (return
+    # "") rather than let the model invent one.
+    fake = _FakeTitle()
+    inf = TitleInferencer(model=fake)
+    rows = [_frow(tool_name="edit"), _frow(tool_name="shell")]
+    assert inf._title(rows) == ""
+    assert fake.contexts == []  # the model never guessed
+
+
+def test_title_distinct_heuristic_fallback_respects_used():
+    # The anchorless heuristic fallback still honors parent/sibling distinctness:
+    # a second span with identical words abstains instead of repeating the title.
+    fake = _FakeTitle()
+    inf = TitleInferencer(model=fake)
+    rows = [_frow(kind="message.user", payload={"content": "Please fix the flaky retry behavior"})]
+    used: set = set()
+    first = inf._title_distinct(rows, used)
+    assert first and fake.contexts == []
+    second = inf._title_distinct(rows, used)
+    assert second == ""  # collides with the sibling -> abstain, don't guess
 
 
 # ─── real packaged model ─────────────────────────────────────────────────────

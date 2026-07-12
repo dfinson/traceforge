@@ -193,7 +193,7 @@ class TestPipelineSessionEviction:
                 kind="tool.call",
                 session_id=session_id,
                 timestamp=datetime.now(timezone.utc),
-                payload={"tool_name": "edit"},
+                payload={"tool_name": "edit", "arguments": {"path": "client.py"}},
                 metadata=EventMetadata(source_framework="copilot"),
             )
 
@@ -662,7 +662,7 @@ class TestPipelineActivityTitleRefinement:
                 kind="tool.call",
                 session_id=session_id,
                 timestamp=datetime.now(timezone.utc),
-                payload={"tool_name": "edit"},
+                payload={"tool_name": "edit", "arguments": {"path": "client.py"}},
                 metadata=EventMetadata(source_framework="copilot", boundary=boundary),
             )
 

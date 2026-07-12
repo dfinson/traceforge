@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 
-from traceforge.title.context import distilled_context
+from traceforge.title.context import distilled_context, has_anchor
 
 
 def _row(kind="tool.call", tool_name=None, payload=None, binaries=(), structure=()):
@@ -82,3 +82,51 @@ def test_notes_slot_from_assistant_narration():
     ctx = distilled_context(rows)
     assert "notes:" in ctx
     assert "refactored the parser" in ctx
+
+
+def test_system_events_are_stripped_before_mining():
+    # A message.system event carries tool-doc / prompt scaffolding (example file
+    # names and identifiers) that is NOT what the agent did this span; it must be
+    # dropped so it can't contaminate the files/symbols slots, while the real
+    # assistant work is kept.
+    rows = [
+        _row(
+            kind="message.system",
+            payload={"content": "Use `example_helper` in config.py per the tool docs"},
+            binaries=["config.py"],
+        ),
+        _row(
+            kind="message.assistant",
+            payload={"content": "Updated `validate_token` to reject expired tokens"},
+        ),
+    ]
+    ctx = distilled_context(rows)
+    assert "validate_token" in ctx  # real work kept
+    assert "example_helper" not in ctx  # system-prompt contamination dropped
+    assert "config.py" not in ctx
+
+
+def test_system_only_span_has_no_signal():
+    # If the ONLY events are system prompts, there is nothing the agent did ->
+    # no signal, rather than a title mined from prompt boilerplate.
+    rows = [
+        _row(
+            kind="message.system",
+            tool_name="edit",
+            payload={"arguments": {"path": "client.py"}},
+            binaries=["client.py"],
+        )
+    ]
+    assert distilled_context(rows) == "(no signal)"
+
+
+def test_has_anchor_true_for_subject_slots():
+    assert has_anchor("intent: Adding retry logic to the client")
+    assert has_anchor("actions: edit | files: client.py")
+    assert has_anchor("symbols: validate_token")
+
+
+def test_has_anchor_false_without_subject_slots():
+    assert not has_anchor("actions: edit, shell")
+    assert not has_anchor("actions: edit | notes: we tried a few things")
+    assert not has_anchor("(no signal)")

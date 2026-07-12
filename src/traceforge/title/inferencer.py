@@ -53,7 +53,8 @@ from dataclasses import dataclass, field
 from traceforge.phase.event_rows import event_to_feature_row
 from traceforge.types import EventKind, SessionEvent, TitleUpdate
 
-from .context import distilled_context, narration, payload_text
+from .context import distilled_context, has_anchor, narration, payload_text
+from .heuristics import heuristic_title
 from .hygiene import best_of, norm_key, pick_distinct
 
 _ACTIVITY = "activity-boundary"
@@ -226,16 +227,37 @@ class TitleInferencer:
             refinements.append(TitleRefinement(step_id, "step", step_title, closed.activity_id))
         return refinements
 
+    def _heuristic_fallback(self, rows: list[dict]) -> str:
+        """An extractive title over the span's own narration, or ``""``.
+
+        Used when the distilled context has no subject anchor (:func:`has_anchor`
+        is ``False``): the span model would hallucinate a subject, so instead we
+        title from the words actually spoken this span. Absent any narration this
+        yields ``""`` -- an honest abstention beats an invented title.
+        """
+        return heuristic_title(" ".join(narration(rows)))
+
     def _title(self, rows: list[dict]) -> str:
         ctx = distilled_context(rows)
         if ctx == "(no signal)":
             return ""
+        if not has_anchor(ctx):
+            return self._heuristic_fallback(rows)
         return best_of(self.model.candidates(ctx))
 
     def _title_distinct(self, rows: list[dict], used: set) -> str:
         ctx = distilled_context(rows)
         if ctx == "(no signal)":
             return ""
+        if not has_anchor(ctx):
+            title = self._heuristic_fallback(rows)
+            if not title:
+                return ""
+            key = norm_key(title)
+            if not key or key in used:
+                return ""  # collides with parent/sibling -> abstain, don't guess
+            used.add(key)
+            return title
         return pick_distinct(used, self.model.candidates(ctx))
 
     def new_stream(self, session_id: str, source: str = "") -> "SessionTitleStream":

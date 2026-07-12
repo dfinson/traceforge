@@ -46,13 +46,21 @@ _UUID_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 _UUID_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 
 
-def _session_lines(*, tag: str, model: str, cwd: str, usage: dict) -> list[str]:
+def _session_lines(
+    *, tag: str, model: str, cwd: str, usage: dict, nano_aiu: int | None = None
+) -> list[str]:
     """Real-shaped Copilot ``events.jsonl`` lines: start, exchange, tool, shutdown.
 
     ``session.shutdown`` carries ``modelMetrics`` (the whole-session token accounting)
-    — the only place Copilot records usage. ``requests.cost`` is a premium-request
-    *count*, not a dollar amount, so no cost is derivable.
+    — the only place Copilot records usage. ``modelMetrics.<model>.totalNanoAiu`` is
+    the PRIMARY billing signal (AI Units in nano-AIU); it is injected only when
+    ``nano_aiu`` is provided, so a session without it stays honestly unknown (aiuNano
+    → None). ``requests.cost`` is a now-secondary premium-request *count*, not a dollar
+    amount, so no cost is derivable.
     """
+    entry: dict = {"requests": {"count": 1, "cost": 1}, "usage": usage}
+    if nano_aiu is not None:
+        entry["totalNanoAiu"] = nano_aiu
     return [
         json.dumps(
             {
@@ -115,7 +123,7 @@ def _session_lines(*, tag: str, model: str, cwd: str, usage: dict) -> list[str]:
                 "data": {
                     "shutdownType": "routine",
                     "totalApiDurationMs": 3500,
-                    "modelMetrics": {model: {"requests": {"count": 1, "cost": 1}, "usage": usage}},
+                    "modelMetrics": {model: entry},
                 },
             }
         ),
@@ -137,6 +145,9 @@ def _seed_state(root: Path) -> None:
                 "cacheWriteTokens": 0,
                 "reasoningTokens": 0,
             },
+            # Session A reports AIU (10.52 AIU) — proves the primary signal flows
+            # raw JSONL → preprocessor → adapter → sink → repo.
+            10517580000,
         ),
         (
             _UUID_B,
@@ -150,12 +161,14 @@ def _seed_state(root: Path) -> None:
                 "cacheWriteTokens": 0,
                 "reasoningTokens": 0,
             },
+            # Session B reports NO totalNanoAiu → aiuNano stays unknown (None) end-to-end.
+            None,
         ),
     ]
-    for uuid, tag, model, cwd, usage in sessions:
+    for uuid, tag, model, cwd, usage, nano_aiu in sessions:
         session_dir = root / uuid
         session_dir.mkdir(parents=True, exist_ok=True)
-        lines = _session_lines(tag=tag, model=model, cwd=cwd, usage=usage)
+        lines = _session_lines(tag=tag, model=model, cwd=cwd, usage=usage, nano_aiu=nano_aiu)
         (session_dir / "events.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -226,8 +239,10 @@ def test_usage_input_breakdown_is_preserved(tmp_path, monkeypatch) -> None:
         "input_uncached": 29824,
         "cache_read_tokens": 7058,
         "cache_creation_tokens": 0,
-        # The premium-request COUNT (the only real billing signal Copilot emits) is
-        # captured losslessly. requests.cost is a premium-request count, NOT dollars.
+        # AIU (nano-AIU) is the PRIMARY billing signal Copilot emits, captured
+        # losslessly as an integer. The premium-request COUNT (requests.cost — a
+        # count, NOT dollars) is now a secondary/legacy signal, kept alongside.
+        "nano_aiu": 10517580000,
         "premium_requests": 1,
         "requests_total": 1,
     }
@@ -271,6 +286,8 @@ def test_build_run_surfaces_repo_model_and_usage(tmp_path, monkeypatch) -> None:
     assert run_a["usage"]["out"] == 354
     # No wire cost → SUM(NULL) → None (honest "unknown", NOT a fabricated $0.00).
     assert run_a["usage"]["cost"] is None
+    # AIU is the primary signal and flows end-to-end: 10517580000 nano (10.52 AIU).
+    assert run_a["usage"]["aiuNano"] == 10517580000
     # The premium-request count IS surfaced (1 per the seeded modelMetrics).
     assert run_a["usage"]["premiumRequests"] == 1
 
@@ -280,4 +297,6 @@ def test_build_run_surfaces_repo_model_and_usage(tmp_path, monkeypatch) -> None:
     assert run_b["model"] == "gpt-5"
     assert run_b["usage"]["in"] == 100
     assert run_b["usage"]["cost"] is None
+    # Session B carried no totalNanoAiu → aiuNano stays unknown (None), never a fake 0.
+    assert run_b["usage"]["aiuNano"] is None
     assert run_b["usage"]["premiumRequests"] == 1

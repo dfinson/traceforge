@@ -4,7 +4,7 @@ import { RISK } from "@/lib/types";
 import { useRuns } from "@/lib/queries";
 import { useApp } from "@/store";
 import type { SortKey } from "@/store";
-import { dmin, fmtCost, hhmm, nsum, pct, premiumReq, tk } from "@/lib/format";
+import { dmin, fmtAiu, fmtCost, hhmm, nsum, pct, premiumReq, tk } from "@/lib/format";
 import { coverageStats, effectMix, scopeSplit } from "@/lib/coverage";
 import { G } from "@/data/tips";
 import { KpiCard } from "@/components/KpiCard";
@@ -39,14 +39,18 @@ export function Fleet() {
   const totals = useMemo(() => {
     const all = runs.flatMap((r) => r.events);
     const classified = all.filter((e) => (e.cls?.conf ?? 0) >= 0.9).length;
-    // GitHub Copilot bills in premium requests, not dollars — so the fleet-level
-    // billing signal is the premium-request COUNT, summed null-aware: it stays
-    // null (rendered "—") until some run reports a count, and never fabricates a 0.
-    // There is no fleet "$" because the wire carries no dollars.
+    // GitHub Copilot bills in AI Units ("AIU", AI credits), not dollars — so the
+    // PRIMARY fleet consumption signal is total AIU (nano-AIU summed null-aware,
+    // divided to AIU only at render). It stays null (rendered "—") until some run
+    // reports it, and never fabricates a 0. The premium-request COUNT is now a
+    // secondary/legacy signal, summed the same null-aware way. There is no fleet
+    // "$" because the wire carries no dollars.
+    const aiu = runs.reduce<number | null>((a, r) => nsum(a, r.usage.aiuNano), null);
     const premium = runs.reduce<number | null>((a, r) => nsum(a, r.usage.premiumRequests), null);
     return {
       live: runs.filter((r) => r.live).length,
       runs: runs.length,
+      aiu,
       premium,
       tokens: runs.reduce((a, r) => a + r.usage.in + r.usage.out, 0),
       classifiedPct: Math.round((classified / (all.length || 1)) * 100),
@@ -161,9 +165,13 @@ export function Fleet() {
         />
         <KpiCard label="Runs" value={totals.runs} sub="last 24h" tip={G.session_id} />
         <KpiCard
-          label="Premium reqs"
-          value={totals.premium == null ? "—" : totals.premium}
-          sub="all runs"
+          label="AI credits"
+          value={fmtAiu(totals.aiu)}
+          sub={
+            totals.premium == null
+              ? "AIU · — premium reqs"
+              : `AIU · ${totals.premium} premium req${totals.premium === 1 ? "" : "s"}`
+          }
           tip={G.usage_records}
         />
         <KpiCard label="Tokens" value={tk(totals.tokens)} sub="in + out" tip={G.usage_records} />
@@ -201,20 +209,30 @@ export function Fleet() {
               </Tip>
             </CardHeader>
             <CardContent>
-              {rail.consumption.hasData ? (
-                <div className="space-y-3">
-                  <DistBar segments={rail.consumption.segments} />
-                  <p className="text-[11px] leading-snug text-muted-foreground">
-                    {rail.consumption.cachePct != null &&
-                      `${rail.consumption.cachePct}% of input served from cache · `}
-                    {totals.premium == null
-                      ? "— premium requests"
-                      : `${totals.premium} premium request${totals.premium === 1 ? "" : "s"}`}
-                  </p>
+              <div className="space-y-3">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                    AI credits
+                  </span>
+                  <span className="text-lg font-semibold tabular-nums">{fmtAiu(totals.aiu)}</span>
                 </div>
-              ) : (
-                <p className="text-[11px] leading-snug text-muted-foreground">No token breakdown</p>
-              )}
+                {rail.consumption.hasData ? (
+                  <>
+                    <DistBar segments={rail.consumption.segments} />
+                    <p className="text-[11px] leading-snug text-muted-foreground">
+                      {rail.consumption.cachePct != null &&
+                        `${rail.consumption.cachePct}% of input served from cache · `}
+                      {totals.premium == null
+                        ? "— premium requests"
+                        : `${totals.premium} premium request${totals.premium === 1 ? "" : "s"}`}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-[11px] leading-snug text-muted-foreground">
+                    No token breakdown
+                  </p>
+                )}
+              </div>
             </CardContent>
           </Card>
           <Card>
@@ -305,6 +323,7 @@ export function Fleet() {
                 <TableHead>Identity</TableHead>
                 <TableHead>Risk</TableHead>
                 <TableHead className="text-right">Events</TableHead>
+                <TableHead className="text-right">AI credits</TableHead>
                 <TableHead className="text-right">Cost</TableHead>
                 <TableHead className="text-right">Duration</TableHead>
                 <TableHead className="text-right">Started</TableHead>
@@ -363,13 +382,14 @@ export function Fleet() {
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{r.events.length}</TableCell>
                   <TableCell className="text-right tabular-nums">
-                    <div>{fmtCost(r.usage.cost)}</div>
+                    <div>{fmtAiu(r.usage.aiuNano)}</div>
                     {r.usage.premiumRequests != null && (
                       <div className="text-[11px] text-muted-foreground">
                         {premiumReq(r.usage.premiumRequests)}
                       </div>
                     )}
                   </TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtCost(r.usage.cost)}</TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">
                     {dmin(r.durMs)}
                   </TableCell>

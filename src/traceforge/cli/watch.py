@@ -474,12 +474,17 @@ def _usage_record_from(event) -> "UsageRecord | None":
         "cache_read_tokens": cache_read,
         "cache_creation_tokens": cache_write,
     }
-    # Copilot's per-model ``modelMetrics.requests`` counts (the only real billing
-    # signal on the wire — ``requests.cost`` is a premium-request *count*, not
-    # dollars) ride the synthetic usage payload. Preserve them losslessly so the
-    # dashboard can surface "N premium requests" where a fake "$0.00" once sat. A
-    # genuine ``0`` is a real zero and kept; absent keys (every non-Copilot source)
-    # add nothing, so ``attributes`` stays exactly the token split there.
+    # Copilot's per-model AI-Unit consumption (``modelMetrics.totalNanoAiu``, in
+    # nano-AIU) is now the **primary** billing signal on the wire; its per-model
+    # ``modelMetrics.requests`` counts are a **secondary/legacy** premium-request
+    # *count* (``requests.cost`` is a count, not dollars). Both ride the synthetic
+    # usage payload and are preserved losslessly here. Null-until-seen: a genuine
+    # ``0`` is a real zero and kept; absent keys (every non-Copilot source) add
+    # nothing, so ``attributes`` stays exactly the token split there. nano-AIU is
+    # kept as an integer end-to-end — only the frontend divides by 1e9.
+    nano_aiu = payload.get("nano_aiu")
+    if nano_aiu is not None:
+        attributes["nano_aiu"] = int(nano_aiu)
     premium_requests = payload.get("premium_requests")
     if premium_requests is not None:
         attributes["premium_requests"] = int(premium_requests)

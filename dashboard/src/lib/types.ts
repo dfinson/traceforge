@@ -95,10 +95,12 @@ export interface RunGap {
 // rows (one entry per distinct model string; a blank model "" is kept as its own
 // entry — labelled "unknown model" — because its tokens are real). The count
 // fields are null when unknown (the source never reported them, e.g. non-Copilot)
-// and a real number — including a genuine 0 — once any row carries them. `input`
-// and `output` are token grand totals and always numeric.
+// and a real number — including a genuine 0 — once any row carries them. `aiuNano`
+// is per-model AI-Unit consumption in nano-AIU (Copilot's primary billing signal);
+// `input` and `output` are token grand totals and always numeric.
 export interface ModelUsage {
   model: string;
+  aiuNano: number | null;
   premiumRequests: number | null;
   requests: number | null;
   inputUncached: number | null;
@@ -119,16 +121,20 @@ export interface Run {
   events: TEvent[];
   // `cost` is null when the run carries no dollar cost on the wire (e.g. GitHub
   // Copilot CLI, which emits no dollars at all) — rendered as "—" (unknown), never
-  // a fake "$0.00". `premiumRequests` is Copilot's only real billing signal: the
-  // per-run premium-request count (summed across models); null when unknown, a
-  // true 0 when the run genuinely made none. `inputUncached`/`cacheRead`/
-  // `cacheCreation` are cache-aware token classes and `requestsTotal` the request
-  // count — each null until some usage row reports it (unknown vs a real 0).
-  // `models` carries the per-model attribution (empty when no usage rows).
+  // a fake "$0.00". `aiuNano` is Copilot's PRIMARY billing signal: per-run AI-Unit
+  // consumption in nano-AIU (summed across models; divide by 1e9 for AIU) — null
+  // when unknown, a true 0 when the run genuinely consumed none. `premiumRequests`
+  // is a secondary/legacy signal: the per-run premium-request count (summed across
+  // models); null when unknown, a true 0 when the run genuinely made none.
+  // `inputUncached`/`cacheRead`/`cacheCreation` are cache-aware token classes and
+  // `requestsTotal` the request count — each null until some usage row reports it
+  // (unknown vs a real 0). `models` carries the per-model attribution (empty when
+  // no usage rows).
   usage: {
     in: number;
     out: number;
     cost: number | null;
+    aiuNano: number | null;
     premiumRequests: number | null;
     inputUncached: number | null;
     cacheRead: number | null;

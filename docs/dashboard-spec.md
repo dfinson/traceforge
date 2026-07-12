@@ -214,7 +214,7 @@ degraded modes + the data-source indicator.
 > **Usage token semantics (Copilot CLI shutdown-metrics path).** GitHub Copilot CLI
 > emits **no** per-turn usage event, so the authoritative whole-session token accounting
 > lives on the terminal `session.shutdown` event as `data.modelMetrics` — a per-model
-> map `{<model>: {requests: {count, cost}, usage: {inputTokens, outputTokens,
+> map `{<model>: {totalNanoAiu, requests: {count, cost}, usage: {inputTokens, outputTokens,
 > cacheReadTokens, cacheWriteTokens, reasoningTokens}}}` (`modelMetrics` may be a JSON
 > string or an object; both are decoded). The `copilot` preprocessor synthesizes one
 > `assistant.usage` block **per model** from it (stable dedup id `<shutdown-id>:<model>`),
@@ -230,9 +230,15 @@ degraded modes + the data-source indicator.
 > the lossless split kept in `usage_records.attributes` as
 > `{input_uncached, cache_read_tokens, cache_creation_tokens}`.
 > `reasoningTokens` is not surfaced separately (Copilot reports it as `0`; the provider
-> folds reasoning into output accounting). `cost_usd` is **`None`**: Copilot's
-> `requests.cost` is a **premium-request count**, not a dollar amount, so none is
-> derivable and none is synthesized (`build_run` degrades cost to `0.0` via `COALESCE`).
+> folds reasoning into output accounting). The **primary** billing signal is per-model
+> `totalNanoAiu` — AI Units ("AIU", AI credits) in *nano*-AIU — carried verbatim as an
+> integer onto each synthetic block (`nanoAiu`), stashed in
+> `usage_records.attributes.nano_aiu`, and summed per run and per model as `usage.aiuNano`
+> (per-model AIU sums exactly to the shutdown's top-level `totalNanoAiu`, so no separate
+> top-level record is synthesized; nano is divided by 1e9 → AIU only at render). `cost_usd`
+> is **`None`**: Copilot's `requests.cost` is a now-**secondary/legacy premium-request
+> count**, not a dollar amount, so none is derivable and none is synthesized (`build_run`
+> degrades cost to `0.0` via `COALESCE`).
 > `run.repo` comes from `session.start`'s `data.context.cwd` (surfaced as
 > `EventMetadata.repo` via the mapping's `repo_field`); `run.model` is the deduped
 > `usage_records` dominant model (e.g. `claude-sonnet-4.5`, `gpt-5`).

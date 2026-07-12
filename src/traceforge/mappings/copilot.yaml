@@ -199,11 +199,13 @@ events:
   # ``UsageRecord.attributes``.
   # ``msg_id`` (``<shutdown-id>:<model>``) dedups a replayed shutdown. No dollar
   # cost exists in the wire, so ``cost_usd`` stays null. ``cost``/``duration`` remain
-  # mapped for back-compat with producers that carry them. ``premiumRequests`` /
-  # ``requestsTotal`` carry the one real billing signal Copilot emits — the
-  # per-model ``modelMetrics.requests`` counts (``cost`` is a premium-request
-  # *count*, not dollars) — which the bridge stashes in ``UsageRecord.attributes``
-  # so the dashboard can surface "N premium requests" instead of a fake "$0.00".
+  # mapped for back-compat with producers that carry them. ``nanoAiu`` carries the
+  # **primary** billing signal Copilot now emits — the per-model
+  # ``modelMetrics.totalNanoAiu`` (AI Units in nano-AIU; the read layer sums it and
+  # only the frontend divides by 1e9). ``premiumRequests`` / ``requestsTotal`` are
+  # the now-**secondary/legacy** per-model ``modelMetrics.requests`` counts
+  # (``cost`` is a premium-request *count*, not dollars). All three are stashed in
+  # ``UsageRecord.attributes`` (null-until-seen: absent keys add nothing).
   assistant.usage:
     kind: telemetry.usage
     payload:
@@ -215,6 +217,7 @@ events:
       cost_usd: data.cost
       duration_ms: data.duration
       msg_id: data.messageId
+      nano_aiu: data.nanoAiu
       premium_requests: data.premiumRequests
       requests_total: data.requestsTotal
 

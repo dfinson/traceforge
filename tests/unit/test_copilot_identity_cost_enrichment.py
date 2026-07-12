@@ -44,6 +44,17 @@ _USAGE = {
     "reasoningTokens": 0,
 }
 
+# ── AI Units (AIU) ground truth, verified 3/3 against real ~/.copilot sessions ──
+# Each model's ``modelMetrics.<model>.totalNanoAiu`` (nano-AIU) sums EXACTLY to the
+# shutdown's top-level ``data.totalNanoAiu`` — so the read layer reconstructs the
+# session total by summing the per-model blocks (no separate top-level event).
+# nano ÷ 1e9 = AIU.
+_AIU_SINGLE = 10517580000  # single-model sample → 10.52 AIU
+_AIU_OPUS = 66450771325000
+_AIU_SONNET = 77277060000
+_AIU_HAIKU = 68365100000
+_AIU_SESSION_TOTAL = _AIU_OPUS + _AIU_SONNET + _AIU_HAIKU  # 66596413485000 → 66,596.4 AIU
+
 
 def _copilot_adapter(session_id: str = "test-session") -> MappedJsonAdapter:
     return MappedJsonAdapter.from_yaml(str(MAPPINGS_DIR / "copilot.yaml"), session_id=session_id)
@@ -181,6 +192,63 @@ def test_preprocessor_omits_premium_keys_when_requests_absent_or_malformed() -> 
     assert "requestsTotal" not in bad
 
 
+# ─── AI Units (AIU) — the primary billing signal ─────────────────────────────
+
+
+def test_preprocessor_captures_nano_aiu() -> None:
+    # ``modelMetrics.<model>.totalNanoAiu`` (nano-AIU) is Copilot's PRIMARY billing
+    # signal. It rides the synthetic usage block verbatim as an integer ``nanoAiu``
+    # (never divided here — the pipeline keeps nano precision end-to-end).
+    blocks = preprocess_copilot(
+        _shutdown({_MODEL: {"usage": dict(_USAGE), "totalNanoAiu": _AIU_SINGLE}})
+    )
+    assert blocks[-1]["data"]["nanoAiu"] == _AIU_SINGLE
+
+
+def test_preprocessor_preserves_genuine_zero_nano_aiu() -> None:
+    # A model that genuinely consumed zero AIU is a real 0, distinct from "unknown".
+    blocks = preprocess_copilot(_shutdown({_MODEL: {"usage": dict(_USAGE), "totalNanoAiu": 0}}))
+    assert blocks[-1]["data"]["nanoAiu"] == 0
+
+
+def test_preprocessor_omits_nano_aiu_when_absent_or_malformed() -> None:
+    # No ``totalNanoAiu`` → no key (honest-blank; non-Copilot sources add nothing).
+    absent = preprocess_copilot(_shutdown({_MODEL: {"usage": dict(_USAGE)}}))[-1]["data"]
+    assert "nanoAiu" not in absent
+    # A malformed (non-numeric) value adds nothing rather than fabricating a 0.
+    bad = preprocess_copilot(_shutdown({_MODEL: {"usage": dict(_USAGE), "totalNanoAiu": "x"}}))[-1][
+        "data"
+    ]
+    assert "nanoAiu" not in bad
+
+
+def test_preprocessor_per_model_nano_aiu_sums_to_session_total() -> None:
+    # KEY DESIGN INVARIANT (verified 3/3 on real sessions): the per-model
+    # ``totalNanoAiu`` values sum EXACTLY to the shutdown's top-level
+    # ``totalNanoAiu`` — so carrying per-model ``nanoAiu`` and summing it in the read
+    # layer reconstructs the session total, with no separate top-level event.
+    blocks = preprocess_copilot(
+        _shutdown(
+            {
+                "claude-opus-4.8": {"usage": dict(_USAGE), "totalNanoAiu": _AIU_OPUS},
+                "claude-sonnet-4.6": {"usage": dict(_USAGE), "totalNanoAiu": _AIU_SONNET},
+                "claude-haiku-4.5": {"usage": dict(_USAGE), "totalNanoAiu": _AIU_HAIKU},
+            }
+        )
+    )
+    usage_blocks = [b for b in blocks if b["type"] == "assistant.usage"]
+    per_model = {b["data"]["model"]: b["data"]["nanoAiu"] for b in usage_blocks}
+    assert per_model == {
+        "claude-opus-4.8": _AIU_OPUS,
+        "claude-sonnet-4.6": _AIU_SONNET,
+        "claude-haiku-4.5": _AIU_HAIKU,
+    }
+    # Integer nano precision preserved; the sum reconstructs the session total, and
+    # ÷1e9 yields the AIU the dashboard renders (66,596.4 AIU).
+    assert sum(per_model.values()) == _AIU_SESSION_TOTAL
+    assert round(_AIU_SESSION_TOTAL / 1e9, 1) == 66596.4
+
+
 # ─── Adapter (repo_field → EventMetadata.repo) ───────────────────────────────
 
 
@@ -212,9 +280,28 @@ def test_adapter_maps_synthetic_usage_to_telemetry_usage() -> None:
     assert payload["msg_id"] == "sh1:claude-sonnet-4.5"
     # No dollar cost in the wire → cost_usd never mapped (stays absent → None).
     assert "cost_usd" not in payload
+    # Null-until-seen at the adapter boundary: no ``totalNanoAiu`` on the wire → the
+    # mapped ``nano_aiu`` key is omitted entirely (never fabricated into 0).
+    assert "nano_aiu" not in payload
 
     # The shutdown itself still maps to session.ended (rides the timeline).
     assert any(e.kind == EventKind.SESSION_ENDED for e in events)
+
+
+def test_adapter_maps_nano_aiu_into_payload() -> None:
+    adapter = _copilot_adapter()
+    events = list(
+        adapter.parse_dict(
+            _shutdown({_MODEL: {"usage": dict(_USAGE), "totalNanoAiu": _AIU_SINGLE}})
+        )
+    )
+    usage_events = [e for e in events if e.kind == EventKind.USAGE]
+    assert len(usage_events) == 1
+    payload = usage_events[0].payload
+    # AIU (nano-AIU) rides the payload as ``nano_aiu`` for the watch bridge to stash.
+    assert payload["nano_aiu"] == _AIU_SINGLE
+    # Still no dollar cost synthesized.
+    assert "cost_usd" not in payload
 
 
 def test_adapter_maps_premium_requests_into_payload() -> None:
@@ -301,6 +388,40 @@ def test_feed_line_stashes_premium_request_counts_in_attributes() -> None:
         "input_uncached": _UNCACHED,
         "cache_read_tokens": _CACHE_READ,
         "cache_creation_tokens": 0,
+        "premium_requests": 3,
+        "requests_total": 40,
+    }
+
+
+def test_feed_line_stashes_nano_aiu_in_attributes() -> None:
+    adapter = _copilot_adapter("cp-sess")
+    pipeline = _RecordingPipeline()
+    seen: set[str] = set()
+
+    line = json.dumps(
+        _shutdown(
+            {
+                _MODEL: {
+                    "usage": dict(_USAGE),
+                    "totalNanoAiu": _AIU_SINGLE,
+                    "requests": {"count": 40, "cost": 3},
+                }
+            }
+        )
+    )
+    asyncio.run(watch_mod._feed_line(line, adapter, pipeline, seen))
+
+    assert len(pipeline.usage) == 1
+    record = pipeline.usage[0]
+    # cost_usd stays honestly None — AIU is Copilot's billing signal, not dollars.
+    assert record.cost_usd is None
+    # nano-AIU is stashed as an INTEGER (no float division) alongside the token split
+    # and the now-secondary premium/total counts.
+    assert record.attributes == {
+        "input_uncached": _UNCACHED,
+        "cache_read_tokens": _CACHE_READ,
+        "cache_creation_tokens": 0,
+        "nano_aiu": _AIU_SINGLE,
         "premium_requests": 3,
         "requests_total": 40,
     }

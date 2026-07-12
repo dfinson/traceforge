@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useRuns } from "@/lib/queries";
-import { nsum, pct, tk } from "@/lib/format";
+import { fmtAiu, nsum, pct, tk } from "@/lib/format";
 import { G } from "@/data/tips";
 import { KpiCard } from "@/components/KpiCard";
 import { DistBar } from "@/components/DistBar";
@@ -15,16 +15,19 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-// GitHub Copilot bills in premium REQUESTS, not dollars — the wire carries no
-// per-event cost. This view is built entirely from the real signals persisted on
-// usage_records: the premium-request count and cache-aware token attribution.
-// Every aggregate is null-aware: unknown stays null (rendered "—"), never a
-// fabricated 0, so a genuine zero (e.g. a model that ran no premium requests)
-// stays distinct from "we don't know".
+// GitHub Copilot bills in AI Units ("AIU", AI credits), not dollars — the wire
+// carries no per-event cost. AIU is now the PRIMARY billing signal; the
+// premium-request count is a secondary/legacy count. This view is built entirely
+// from the real signals persisted on usage_records: total AIU, the premium-request
+// count, and cache-aware token attribution. Every aggregate is null-aware: unknown
+// stays null (rendered "—"), never a fabricated 0, so a genuine zero (e.g. a model
+// that ran no premium requests) stays distinct from "we don't know". No dollars are
+// ever derived from AIU.
 export function Cost() {
   const { data: runs = [], isLoading } = useRuns();
 
   const totals = useMemo(() => {
+    const aiu = runs.reduce<number | null>((a, r) => nsum(a, r.usage.aiuNano), null);
     const premium = runs.reduce<number | null>((a, r) => nsum(a, r.usage.premiumRequests), null);
     const billedInput = runs.reduce<number | null>((a, r) => nsum(a, r.usage.inputUncached), null);
     const cacheRead = runs.reduce<number | null>((a, r) => nsum(a, r.usage.cacheRead), null);
@@ -37,6 +40,7 @@ export function Cost() {
     const cacheHeadline =
       inputTotal && cacheRead != null ? ((cacheRead / inputTotal) * 100).toFixed(1) + "%" : "—";
     return {
+      aiu,
       premium,
       billedInput,
       cacheRead,
@@ -64,6 +68,7 @@ export function Cost() {
       string,
       {
         model: string;
+        aiuNano: number | null;
         premiumRequests: number | null;
         requests: number | null;
         inputUncached: number | null;
@@ -76,12 +81,14 @@ export function Cost() {
       .forEach((mu) => {
         const o = m.get(mu.model) ?? {
           model: mu.model,
+          aiuNano: null,
           premiumRequests: null,
           requests: null,
           inputUncached: null,
           cacheRead: null,
           output: 0,
         };
+        o.aiuNano = nsum(o.aiuNano, mu.aiuNano);
         o.premiumRequests = nsum(o.premiumRequests, mu.premiumRequests);
         o.requests = nsum(o.requests, mu.requests);
         o.inputUncached = nsum(o.inputUncached, mu.inputUncached);
@@ -89,10 +96,12 @@ export function Cost() {
         o.output += mu.output;
         m.set(mu.model, o);
       });
-    // Sort premium desc, then requests desc. `?? -1` sinks unknown below a real 0
-    // so the honest "we don't know" rows never outrank a measured zero.
+    // Sort AIU desc (the primary signal), then premium desc, then requests desc.
+    // `?? -1` sinks unknown below a real 0 so the honest "we don't know" rows never
+    // outrank a measured zero.
     return [...m.values()].sort(
       (a, b) =>
+        (b.aiuNano ?? -1) - (a.aiuNano ?? -1) ||
         (b.premiumRequests ?? -1) - (a.premiumRequests ?? -1) ||
         (b.requests ?? -1) - (a.requests ?? -1)
     );
@@ -111,16 +120,22 @@ export function Cost() {
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Cost</h1>
         <p className="text-sm text-muted-foreground">
-          GitHub Copilot bills in premium requests; the wire carries no dollar cost (—). Tokens are
-          attributed per model.
+          GitHub Copilot bills in AI credits (AIU); premium requests are a secondary/legacy count.
+          The wire carries no dollar cost (—). Tokens are attributed per model.
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <KpiCard
+          label="AI credits"
+          value={fmtAiu(totals.aiu)}
+          sub="the billed signal"
+          tip={G.usage_records}
+        />
         <KpiCard
           label="Premium requests"
           value={totals.premium == null ? "—" : totals.premium}
-          sub="the billed signal"
+          sub="secondary / legacy count"
           tip={G.usage_records}
         />
         <KpiCard
@@ -167,8 +182,8 @@ export function Cost() {
         <CardHeader>
           <CardTitle className="text-base">By model</CardTitle>
           <CardDescription>
-            Premium requests and cache-aware token volume per model — the honest per-model
-            attribution.
+            AI credits, premium requests, and cache-aware token volume per model — the honest
+            per-model attribution.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -176,6 +191,7 @@ export function Cost() {
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead>Model</TableHead>
+                <TableHead className="text-right">AI credits</TableHead>
                 <TableHead className="text-right">Premium reqs</TableHead>
                 <TableHead className="text-right">Requests</TableHead>
                 <TableHead className="text-right">Billed input</TableHead>
@@ -186,7 +202,7 @@ export function Cost() {
             <TableBody>
               {models.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={6} className="text-center text-muted-foreground">
+                  <TableCell colSpan={7} className="text-center text-muted-foreground">
                     No usage records.
                   </TableCell>
                 </TableRow>
@@ -196,6 +212,7 @@ export function Cost() {
                     <TableCell className="font-mono text-[12.5px]">
                       {o.model || "unknown model"}
                     </TableCell>
+                    <TableCell className="text-right tabular-nums">{fmtAiu(o.aiuNano)}</TableCell>
                     <TableCell className="text-right tabular-nums">
                       {o.premiumRequests == null ? "—" : o.premiumRequests}
                     </TableCell>

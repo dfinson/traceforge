@@ -4,8 +4,9 @@ GitHub Copilot CLI never emits a per-turn ``assistant.usage`` event, so the Cost
 lens (``usage_records``) would stay empty. The authoritative token accounting for a
 whole session lives on the terminal ``session.shutdown`` event as
 ``data.modelMetrics`` — a per-model map of the complete input/output/cache token
-totals. This preprocessor decodes it and appends one synthetic ``assistant.usage``
-block per model so the existing YAML mapping can bridge each into ``usage_records``.
+totals **and per-model AI-Unit consumption** (``totalNanoAiu``). This preprocessor
+decodes it and appends one synthetic ``assistant.usage`` block per model so the
+existing YAML mapping can bridge each into ``usage_records``.
 
 Every original event is preserved verbatim (returned first), so the enriched-events
 timeline is unchanged. Only ``session.shutdown`` ever produces extra dicts.
@@ -53,7 +54,10 @@ def preprocess_copilot(obj: dict[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(usage, dict):
             continue
         requests = entry.get("requests")
-        usage_blocks.append(_usage_block(str(model), usage, requests, shutdown_id, timestamp))
+        nano_aiu = entry.get("totalNanoAiu")
+        usage_blocks.append(
+            _usage_block(str(model), usage, requests, nano_aiu, shutdown_id, timestamp)
+        )
 
     return [obj, *usage_blocks]
 
@@ -80,7 +84,12 @@ def _decode_model_metrics(raw: Any) -> dict[str, Any]:
 
 
 def _usage_block(
-    model: str, usage: dict[str, Any], requests: Any, shutdown_id: str, timestamp: Any
+    model: str,
+    usage: dict[str, Any],
+    requests: Any,
+    nano_aiu: Any,
+    shutdown_id: str,
+    timestamp: Any,
 ) -> dict[str, Any]:
     """Build one synthetic ``assistant.usage`` event for a single model.
 
@@ -103,16 +112,25 @@ def _usage_block(
     accounting).
 
     No dollar cost exists in the wire, so none is emitted and ``cost_usd`` stays
-    null. The one real billing signal Copilot carries is the per-model
-    ``requests`` block: ``requests.cost`` is a **premium-request count** (not
-    dollars — included models like haiku/sonnet stay ``0`` even at high volume;
-    only premium models such as opus accrue) and ``requests.count`` is the total
-    request count. Both are captured here (as ``premiumRequests`` /
-    ``requestsTotal``) so the bridge can stash them in ``UsageRecord.attributes``
-    and the dashboard can surface "N premium requests" instead of a fake "$0.00".
-    A genuine ``0`` premium count is preserved (it is a real zero); a missing or
-    malformed ``requests`` block yields no keys at all (honest-blank, never
-    fabricated).
+    null. The **primary** billing signal Copilot now carries is the per-model
+    ``totalNanoAiu`` — AI Units ("AIU", AI credits) expressed in *nano*-AIU
+    (divide by 1e9 for AIU). It is captured verbatim as an integer ``nanoAiu``
+    (never converted here — the pipeline keeps nano precision end-to-end and only
+    the frontend divides). Because the per-model AIU sums exactly to the
+    shutdown's top-level ``totalNanoAiu`` (verified against real ``~/.copilot``
+    sessions), the read layer simply sums each block's ``nanoAiu`` — no separate
+    top-level event is synthesized.
+
+    The per-model ``requests`` block is now a **secondary/legacy** count, not the
+    headline: ``requests.cost`` is a **premium-request count** (not dollars —
+    included models like haiku/sonnet stay ``0`` even at high volume; only premium
+    models such as opus accrue) and ``requests.count`` is the total request count.
+    Both are still captured (as ``premiumRequests`` / ``requestsTotal``) so the
+    bridge can stash them in ``UsageRecord.attributes`` alongside ``nanoAiu``.
+
+    Every count uses honest-blank semantics via :func:`_as_int_opt`: a genuine
+    ``0`` (AIU or premium) is preserved (it is a real zero); a missing or
+    malformed value yields no key at all (never fabricated).
     """
     input_total = _as_int(usage.get("inputTokens"))
     cache_read = _as_int(usage.get("cacheReadTokens"))
@@ -130,6 +148,9 @@ def _usage_block(
         "cacheWriteTokens": cache_write,
         "messageId": msg_id,
     }
+    aiu = _as_int_opt(nano_aiu)
+    if aiu is not None:
+        data["nanoAiu"] = aiu
     if isinstance(requests, dict):
         premium = _as_int_opt(requests.get("cost"))
         if premium is not None:

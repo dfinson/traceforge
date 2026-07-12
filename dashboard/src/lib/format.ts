@@ -17,6 +17,20 @@ export const fmtCost = (n: number | null | undefined) =>
 export const premiumReq = (n: number | null | undefined) =>
   n == null ? "" : `${n} premium request${n === 1 ? "" : "s"}`;
 
+/** Render a run's AI-Unit (AIU) consumption from integer nano-AIU, or "—" when
+ * unknown. AIU ("AI credits") is Copilot's PRIMARY billing signal; it rides the
+ * whole pipeline as integer nano-AIU and is divided by 1e9 ONLY here (no float
+ * precision loss upstream). Null (every non-Copilot source) renders "—"; a genuine
+ * 0 renders "0.0 AIU" (distinct from unknown). Formatted to one decimal with
+ * thousands separators, e.g. "66,596.4 AIU". */
+export const fmtAiu = (nano: number | null | undefined) =>
+  nano == null
+    ? "—"
+    : (nano / 1e9).toLocaleString("en-US", {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+      }) + " AIU";
+
 export const tk = (n: number) => (n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n));
 
 /** Whole-percent share of `n` over `total`, or null when either is unknown (null)

@@ -469,6 +469,24 @@ def _usage_record_from(event) -> "UsageRecord | None":
         return None
 
     cost = payload.get("cost_usd")
+    attributes: dict[str, int] = {
+        "input_uncached": input_uncached,
+        "cache_read_tokens": cache_read,
+        "cache_creation_tokens": cache_write,
+    }
+    # Copilot's per-model ``modelMetrics.requests`` counts (the only real billing
+    # signal on the wire — ``requests.cost`` is a premium-request *count*, not
+    # dollars) ride the synthetic usage payload. Preserve them losslessly so the
+    # dashboard can surface "N premium requests" where a fake "$0.00" once sat. A
+    # genuine ``0`` is a real zero and kept; absent keys (every non-Copilot source)
+    # add nothing, so ``attributes`` stays exactly the token split there.
+    premium_requests = payload.get("premium_requests")
+    if premium_requests is not None:
+        attributes["premium_requests"] = int(premium_requests)
+    requests_total = payload.get("requests_total")
+    if requests_total is not None:
+        attributes["requests_total"] = int(requests_total)
+
     return UsageRecord(
         session_id=event.session_id,
         timestamp=event.timestamp,
@@ -476,11 +494,7 @@ def _usage_record_from(event) -> "UsageRecord | None":
         input_tokens=total_input,
         output_tokens=output_tokens,
         cost_usd=float(cost) if cost is not None else None,
-        attributes={
-            "input_uncached": input_uncached,
-            "cache_read_tokens": cache_read,
-            "cache_creation_tokens": cache_write,
-        },
+        attributes=attributes,
     )
 
 

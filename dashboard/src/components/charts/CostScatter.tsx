@@ -41,7 +41,7 @@ export function CostScatter({ onPick }: { onPick: (id: string) => void }) {
     id: r.id,
     title: r.title,
     x: +(r.durMs / 60000).toFixed(1),
-    y: +r.usage.cost.toFixed(2),
+    y: +(r.usage.cost ?? 0).toFixed(2),
     z: r.events.length,
     peak: r.peak,
   }));

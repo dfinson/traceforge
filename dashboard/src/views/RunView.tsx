@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowLeft, ChevronRight, FileText } from "lucide-react";
 import { useRuns } from "@/lib/queries";
 import type { TEvent } from "@/lib/types";
 import { useApp } from "@/store";
-import { dmin, hhmm, money, money3, fmtVal } from "@/lib/format";
+import { dmin, hhmm, money3, fmtCost, fmtVal, premiumReq } from "@/lib/format";
 import { buildChapters, locateEvent } from "@/lib/chapters";
 import { G, mtip } from "@/data/tips";
 import { Tip } from "@/components/Tip";
@@ -56,7 +56,13 @@ export function RunView() {
             <span>·</span>
             <span>{dmin(run.durMs)}</span>
             <span>·</span>
-            <span>{money(run.usage.cost)}</span>
+            <span>{fmtCost(run.usage.cost)}</span>
+            {run.usage.premiumRequests != null && (
+              <>
+                <span>·</span>
+                <span>{premiumReq(run.usage.premiumRequests)}</span>
+              </>
+            )}
           </div>
         </div>
         <Button variant="outline" size="sm" onClick={back} className="shrink-0">
@@ -89,7 +95,9 @@ export function RunView() {
           <div className="flex justify-between text-[10.5px] text-muted-foreground">
             <span>{hhmm(evs[0].t)}</span>
             <span>
-              {evs.length} events · {money(run.usage.cost)} total
+              {evs.length} events · {fmtCost(run.usage.cost)} total
+              {run.usage.premiumRequests != null &&
+                ` · ${premiumReq(run.usage.premiumRequests)}`}
             </span>
             <span>{hhmm(evs[evs.length - 1].t)}</span>
           </div>

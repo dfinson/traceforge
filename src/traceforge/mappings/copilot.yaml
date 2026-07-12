@@ -199,7 +199,11 @@ events:
   # ``UsageRecord.attributes``.
   # ``msg_id`` (``<shutdown-id>:<model>``) dedups a replayed shutdown. No dollar
   # cost exists in the wire, so ``cost_usd`` stays null. ``cost``/``duration`` remain
-  # mapped for back-compat with producers that carry them.
+  # mapped for back-compat with producers that carry them. ``premiumRequests`` /
+  # ``requestsTotal`` carry the one real billing signal Copilot emits — the
+  # per-model ``modelMetrics.requests`` counts (``cost`` is a premium-request
+  # *count*, not dollars) — which the bridge stashes in ``UsageRecord.attributes``
+  # so the dashboard can surface "N premium requests" instead of a fake "$0.00".
   assistant.usage:
     kind: telemetry.usage
     payload:
@@ -211,6 +215,8 @@ events:
       cost_usd: data.cost
       duration_ms: data.duration
       msg_id: data.messageId
+      premium_requests: data.premiumRequests
+      requests_total: data.requestsTotal
 
   # ── Hooks ──────────────────────────────────────────────────────────────────
   hook.start:

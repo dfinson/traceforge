@@ -42,7 +42,9 @@ export function Cost() {
       const o = (m[r.model] ||= { calls: 0, tokens: 0, cost: 0 });
       o.calls += r.events.length;
       o.tokens += r.usage.in + r.usage.out;
-      o.cost += r.usage.cost;
+      // Unknown cost (null — e.g. Copilot carries no dollars) adds nothing to the
+      // per-model dollar total rather than NaN-poisoning it.
+      o.cost += r.usage.cost ?? 0;
     });
     return Object.entries(m).sort((a, b) => b[1].cost - a[1].cost);
   }, [runs]);

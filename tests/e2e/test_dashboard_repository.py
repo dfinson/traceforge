@@ -770,3 +770,99 @@ async def test_get_runs_opens_constant_connections_regardless_of_run_count(
     # O(1) opens: list_run_ids (1) + has_system_memory (1) + shared output (1) +
     # shared system (1) = 4. The pre-fix fan-out would be in the hundreds.
     assert opens <= 6, f"expected a small constant number of opens, got {opens} for {len(ids)} runs"
+
+
+# ─── transcript (per-run full-text reading view) ─────────────────────────────
+
+TID = "sess-transcript"
+# Deliberately longer than _snippet's 140-char cap: proves the transcript keeps the
+# full body where the timeline summary would truncate + collapse newlines.
+_LONG_ASSISTANT = (
+    "I looked at the login handler and found the bug: the session token is compared "
+    "with == instead of a constant-time check, and the expiry is read in seconds but "
+    "compared against milliseconds.\n\nHere is the plan:\n1. Use hmac.compare_digest\n"
+    "2. Normalise the expiry units\n3. Add a regression test for an expired token."
+)
+
+
+async def _seed_transcript(db: Path) -> None:
+    """A run mixing user / assistant / system messages and a tool call with output."""
+    sink = SqliteOutputSink(path=str(db))
+    await sink.on_event(
+        SessionEvent(
+            kind=EventKind.MESSAGE_USER,
+            session_id=TID,
+            timestamp=_T0,
+            payload={"content": "Please fix the login bug"},
+        )
+    )
+    await sink.on_event(
+        SessionEvent(
+            kind=EventKind.MESSAGE_ASSISTANT,
+            session_id=TID,
+            timestamp=_T0 + timedelta(seconds=1),
+            payload={"text": _LONG_ASSISTANT},
+        )
+    )
+    await sink.on_event(
+        SessionEvent(
+            kind=EventKind.MESSAGE_SYSTEM,
+            session_id=TID,
+            timestamp=_T0 + timedelta(seconds=2),
+            payload={"message": "context window trimmed"},
+        )
+    )
+    await sink.on_event(
+        SessionEvent(
+            kind=EventKind.TOOL_CALL_STARTED,
+            session_id=TID,
+            timestamp=_T0 + timedelta(seconds=3),
+            payload={"tool_name": "bash", "command": "rm -rf /tmp/x", "output": "removed"},
+        )
+    )
+    await sink.close()
+
+
+async def test_build_transcript_maps_roles_labels_and_order(tmp_path: Path) -> None:
+    out = tmp_path / "traceforge.db"
+    await _seed_transcript(out)
+    repo = DashboardRepository(DashboardPaths(output_db=out, system_db=tmp_path / "absent.db"))
+
+    transcript = repo.build_transcript(TID)
+    assert transcript is not None
+    assert transcript["id"] == TID
+    turns = transcript["turns"]
+    # One turn per event, in chronological order.
+    assert [t["role"] for t in turns] == ["user", "assistant", "system", "tool"]
+    assert [t["kind"] for t in turns] == [
+        "message.user",
+        "message.assistant",
+        "message.system",
+        "tool.call.started",
+    ]
+    # Message turns fall back to a readable role label (no tool name); the tool turn
+    # carries its tool name.
+    assert [t["label"] for t in turns] == ["User", "Assistant", "System", "bash"]
+    assert all("id" in t and "t" in t for t in turns)
+
+
+async def test_build_transcript_keeps_full_untruncated_text(tmp_path: Path) -> None:
+    out = tmp_path / "traceforge.db"
+    await _seed_transcript(out)
+    repo = DashboardRepository(DashboardPaths(output_db=out, system_db=tmp_path / "absent.db"))
+
+    turns = repo.build_transcript(TID)["turns"]  # type: ignore[index]
+    # The assistant body is returned in full, newlines preserved — not the 140-char
+    # collapsed preview the timeline uses.
+    assert turns[1]["text"] == _LONG_ASSISTANT
+    assert len(turns[1]["text"]) > 140
+    assert "\n" in turns[1]["text"]
+    # A tool call renders its invocation then its output, in that order.
+    assert turns[3]["text"] == "rm -rf /tmp/x\n\nremoved"
+
+
+async def test_build_transcript_unknown_session_returns_none(tmp_path: Path) -> None:
+    out = tmp_path / "traceforge.db"
+    await _seed_transcript(out)
+    repo = DashboardRepository(DashboardPaths(output_db=out, system_db=tmp_path / "absent.db"))
+    assert repo.build_transcript("does-not-exist") is None

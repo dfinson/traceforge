@@ -99,6 +99,20 @@ def get_run(
     return repo.build_run(match.group("id"))
 
 
+def get_transcript(
+    repo: DashboardRepository, match: re.Match[str], _query: _Query
+) -> dict[str, Any] | None:
+    """``GET /api/runs/{id}/transcript`` — the run's full-text transcript.
+
+    Returns ``{id, turns[]}`` with the complete, untruncated text per event (the
+    reading view), or ``None`` (-> 404) for an unknown run / no output DB. Kept off
+    the bounded ``/api/runs`` list so full bodies load only when a run is opened.
+    """
+    if not repo.has_output_db():
+        return None
+    return repo.build_transcript(match.group("id"))
+
+
 _REGISTERED = False
 
 
@@ -108,11 +122,13 @@ def register_api_routes() -> None:
     Registration mutates the module-global table in ``server``; the guard keeps
     repeated ``create_server`` calls (e.g. across tests) from stacking duplicate
     routes. The run-list pattern is registered before ``/{id}`` so a bare
-    ``/api/runs`` never gets captured as an id.
+    ``/api/runs`` never gets captured as an id, and ``/{id}/transcript`` before the
+    bare ``/{id}`` so the drill-in read never shadows the transcript read.
     """
     global _REGISTERED
     if _REGISTERED:
         return
     register_route(r"^/api/runs/?$", get_runs)
+    register_route(r"^/api/runs/(?P<id>[^/]+)/transcript/?$", get_transcript)
     register_route(r"^/api/runs/(?P<id>[^/]+)/?$", get_run)
     _REGISTERED = True

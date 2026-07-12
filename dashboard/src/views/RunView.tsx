@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
-import { AlertTriangle, ArrowLeft, ChevronRight, FileText } from "lucide-react";
-import { useRuns } from "@/lib/queries";
-import type { TEvent } from "@/lib/types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, ArrowLeft, ChevronRight, FileText, MessagesSquare } from "lucide-react";
+import { useRuns, useTranscript } from "@/lib/queries";
+import type { TEvent, TranscriptRole, TranscriptTurn } from "@/lib/types";
 import { useApp } from "@/store";
 import { dmin, hhmm, fmtCost, fmtVal, premiumReq } from "@/lib/format";
 import { buildChapters, locateEvent } from "@/lib/chapters";
@@ -259,6 +259,8 @@ export function RunView() {
 
         <Inspector e={cur} idx={selIdx} />
       </div>
+
+      <TranscriptPanel runId={run.id} selectedId={cur?.id ?? null} />
     </div>
   );
 }
@@ -376,6 +378,106 @@ function Inspector({ e, idx }: { e: TEvent; idx: number }) {
           </Tip>
         )}
       </CardContent>
+    </Card>
+  );
+}
+
+// Per-role accent for the transcript's left rail + label, reusing the risk-soft
+// tokens the rest of the console uses so the palette stays consistent.
+const ROLE_STYLES: Record<TranscriptRole, { rail: string; label: string }> = {
+  user: { rail: "border-l-primary", label: "text-primary" },
+  assistant: { rail: "border-l-border", label: "text-foreground" },
+  system: { rail: "border-l-muted-foreground/40", label: "text-muted-foreground" },
+  tool: { rail: "border-l-muted-foreground/40", label: "text-muted-foreground" },
+};
+
+function TranscriptTurnRow({ turn, active }: { turn: TranscriptTurn; active: boolean }) {
+  const style = ROLE_STYLES[turn.role];
+  const ref = useRef<HTMLDivElement>(null);
+  // Keep the selected event's turn in view as the reader clicks around the
+  // Chapters/Timeline (turn.id === the enriched event id they select).
+  useEffect(() => {
+    if (active) ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [active]);
+  return (
+    <div
+      ref={ref}
+      className={`border-l-2 ${style.rail} rounded-r-md pl-3 transition-colors ${
+        active ? "bg-muted/60" : ""
+      }`}
+    >
+      <div className="flex items-baseline gap-2">
+        <span className={`text-[11px] font-medium uppercase tracking-wide ${style.label}`}>
+          {turn.role}
+        </span>
+        <span className="truncate font-mono text-[11px] text-muted-foreground">{turn.label}</span>
+        <span className="ml-auto shrink-0 text-[10.5px] tabular-nums text-muted-foreground">
+          {hhmm(new Date(turn.t))}
+        </span>
+      </div>
+      {turn.text ? (
+        <p className="mt-1 whitespace-pre-wrap break-words text-[12.5px] leading-relaxed">
+          {turn.text}
+        </p>
+      ) : (
+        <p className="mt-1 text-[12px] italic text-muted-foreground">No text captured.</p>
+      )}
+    </div>
+  );
+}
+
+// Collapsible full-width panel rendering the run's full-text transcript. The
+// transcript is fetched lazily (only once opened) via useTranscript so the
+// potentially large bodies never load for readers who stay on the timeline. When
+// open, the turn matching the currently-selected event is highlighted and scrolled
+// into view, keeping the transcript in sync with the Chapters/Timeline selection.
+function TranscriptPanel({ runId, selectedId }: { runId: string; selectedId: string | null }) {
+  const [open, setOpen] = useState(false);
+  const { data, isLoading, isError } = useTranscript(runId, open);
+  const turns = data?.turns ?? [];
+
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader className="flex-row items-center justify-between gap-3 space-y-0">
+        <div className="flex items-center gap-2">
+          <MessagesSquare className="size-4 text-muted-foreground" />
+          <div>
+            <CardTitle className="text-base">Transcript</CardTitle>
+            <CardDescription>The run’s full text — messages and tool calls, in order.</CardDescription>
+          </div>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => setOpen((o) => !o)} className="shrink-0">
+          <ChevronRight className={`size-4 transition-transform ${open ? "rotate-90" : ""}`} />
+          {open ? "Hide" : "Show"}
+        </Button>
+      </CardHeader>
+      {open && (
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="px-4 py-6 text-sm text-muted-foreground">Loading transcript…</div>
+          ) : isError ? (
+            <div className="px-4 py-6 text-sm text-muted-foreground">
+              Could not load the transcript for this run.
+            </div>
+          ) : turns.length === 0 ? (
+            <div className="px-4 py-6 text-sm text-muted-foreground">
+              No transcript recorded for this run.
+            </div>
+          ) : (
+            <ScrollArea className="h-[420px]">
+              <div className="space-y-4 px-4 py-3">
+                {turns.map((turn) => (
+                  <TranscriptTurnRow
+                    key={turn.id}
+                    turn={turn}
+                    active={turn.id === selectedId}
+                  />
+                ))}
+              </div>
+            </ScrollArea>
+          )}
+        </CardContent>
+      )}
     </Card>
   );
 }

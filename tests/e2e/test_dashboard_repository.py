@@ -266,6 +266,7 @@ async def test_list_runs_summarizes_identity_and_usage(full_repo: DashboardRepos
         "in": 1000,
         "out": 500,
         "cost": 0.9,
+        "aiuNano": None,
         "premiumRequests": None,
         "inputUncached": None,
         "cacheRead": None,
@@ -274,6 +275,7 @@ async def test_list_runs_summarizes_identity_and_usage(full_repo: DashboardRepos
         "models": [
             {
                 "model": "gpt-4o",
+                "aiuNano": None,
                 "premiumRequests": None,
                 "requests": None,
                 "inputUncached": None,
@@ -303,6 +305,7 @@ async def test_build_run_core_fields(full_repo: DashboardRepository) -> None:
         "in": 1000,
         "out": 500,
         "cost": 0.9,
+        "aiuNano": None,
         "premiumRequests": None,
         "inputUncached": None,
         "cacheRead": None,
@@ -311,6 +314,7 @@ async def test_build_run_core_fields(full_repo: DashboardRepository) -> None:
         "models": [
             {
                 "model": "gpt-4o",
+                "aiuNano": None,
                 "premiumRequests": None,
                 "requests": None,
                 "inputUncached": None,
@@ -471,13 +475,19 @@ async def test_premium_requests_surface_with_null_cost_and_zero_distinct(tmp_pat
 
 
 async def _seed_mixed(db: Path) -> None:
-    """One run mixing every usage shape: multi-model Copilot rows with the five
-    attribute keys, a genuine-zero-premium model, a blank-model row (real tokens,
-    unattributable), and a non-Copilot row with no attributes at all."""
+    """One run mixing every usage shape: multi-model Copilot rows carrying AIU
+    (nano-AIU) plus the five token/premium attribute keys, a genuine-zero-premium
+    model, a blank-model row (real tokens, unattributable, and — critically — no
+    ``nano_aiu`` key so its AIU stays unknown even though its premium is a real 0),
+    and a non-Copilot row with no attributes at all. The three Copilot models carry
+    the real per-session ``totalNanoAiu`` values (66450771325000 + 77277060000 +
+    68365100000 = 66596413485000 → 66,596.4 AIU) so the run-level sum reconstructs a
+    real session total."""
     sink = SqliteOutputSink(path=str(db))
     await sink.on_event(_bare_event_for("mix", _T0))
     rows = [
-        # Two opus rows → premium 600+9=609, requests 800+10=810, cacheRead 800+180=980.
+        # Two opus rows → premium 600+9=609, requests 800+10=810, cacheRead 800+180=980,
+        # AIU 66450771325000+77277060000=66528048385000.
         (
             "claude-opus-4.6",
             1000,
@@ -486,6 +496,7 @@ async def _seed_mixed(db: Path) -> None:
                 "input_uncached": 30,
                 "cache_read_tokens": 800,
                 "cache_creation_tokens": 170,
+                "nano_aiu": 66450771325000,
                 "premium_requests": 600,
                 "requests_total": 800,
             },
@@ -498,11 +509,13 @@ async def _seed_mixed(db: Path) -> None:
                 "input_uncached": 9,
                 "cache_read_tokens": 180,
                 "cache_creation_tokens": 11,
+                "nano_aiu": 77277060000,
                 "premium_requests": 9,
                 "requests_total": 10,
             },
         ),
-        # A model that genuinely made ZERO premium requests — a real 0, not unknown.
+        # A model that genuinely made ZERO premium requests — a real 0, not unknown —
+        # but DID consume AIU (68365100000 nano).
         (
             "claude-haiku-4.5",
             100,
@@ -511,11 +524,14 @@ async def _seed_mixed(db: Path) -> None:
                 "input_uncached": 100,
                 "cache_read_tokens": 0,
                 "cache_creation_tokens": 0,
+                "nano_aiu": 68365100000,
                 "premium_requests": 0,
                 "requests_total": 38,
             },
         ),
         # Blank model: real tokens the wire couldn't attribute — kept, not dropped.
+        # It carries a genuine-0 premium but NO ``nano_aiu`` key, proving AIU stays
+        # unknown (None) per-key independently of the premium signal.
         (
             "",
             50,
@@ -556,9 +572,9 @@ async def _seed_mixed(db: Path) -> None:
 
 
 async def test_usage_breakdown_multi_model_cache_and_null_vs_zero(tmp_path: Path) -> None:
-    """The full null-aware usage breakdown: per-model attribution, run-level cache
-    and premium sums, blank-model retention, and unknown (None) staying distinct
-    from a genuine 0 within the same run."""
+    """The full null-aware usage breakdown: per-model attribution, run-level AIU,
+    cache and premium sums, blank-model retention, and unknown (None) staying
+    distinct from a genuine 0 within the same run — per key independently."""
     out = tmp_path / "traceforge.db"
     await _seed_mixed(out)
     repo = DashboardRepository(DashboardPaths(output_db=out, system_db=tmp_path / "absent.db"))
@@ -571,6 +587,12 @@ async def test_usage_breakdown_multi_model_cache_and_null_vs_zero(tmp_path: Path
     assert usage["in"] == 1650
     assert usage["out"] == 590
     assert usage["cost"] is None
+    # AIU is the PRIMARY billing signal: per-model nano-AIU summed null-until-seen.
+    # The blank-model row carries no nano_aiu key and the gpt-4o row no attributes,
+    # so both contribute nothing — the sum is exactly the three Copilot models, which
+    # reconstructs the real session total (÷1e9 → 66,596.4 AIU).
+    assert usage["aiuNano"] == 66596413485000
+    assert round(usage["aiuNano"] / 1e9, 1) == 66596.4
     # Run-level counts sum only rows that carry the key (the no-attrs gpt-4o row
     # contributes nothing rather than a fabricated 0).
     assert usage["premiumRequests"] == 609
@@ -584,6 +606,7 @@ async def test_usage_breakdown_multi_model_cache_and_null_vs_zero(tmp_path: Path
     assert set(by_model) == {"claude-opus-4.6", "claude-haiku-4.5", "", "gpt-4o"}
     assert by_model["claude-opus-4.6"] == {
         "model": "claude-opus-4.6",
+        "aiuNano": 66528048385000,
         "premiumRequests": 609,
         "requests": 810,
         "inputUncached": 39,
@@ -592,13 +615,19 @@ async def test_usage_breakdown_multi_model_cache_and_null_vs_zero(tmp_path: Path
         "input": 1200,
         "output": 500,
     }
-    # Genuine zero premium — a real 0, distinct from unknown.
+    # Genuine zero premium — a real 0, distinct from unknown — but real AIU consumed.
     assert by_model["claude-haiku-4.5"]["premiumRequests"] == 0
+    assert by_model["claude-haiku-4.5"]["aiuNano"] == 68365100000
     assert by_model[""]["inputUncached"] == 50
     assert by_model[""]["input"] == 50
+    # Blank model made a real 0 premium requests yet its AIU stays UNKNOWN (None):
+    # the two signals are tracked per-key, never conflated.
+    assert by_model[""]["premiumRequests"] == 0
+    assert by_model[""]["aiuNano"] is None
     # Non-Copilot model carries no attributes → every count is unknown (None),
     # never coerced to 0; its tokens are still real numbers.
     gpt = by_model["gpt-4o"]
+    assert gpt["aiuNano"] is None
     assert gpt["premiumRequests"] is None
     assert gpt["requests"] is None
     assert gpt["inputUncached"] is None
@@ -612,9 +641,16 @@ async def test_usage_breakdown_multi_model_cache_and_null_vs_zero(tmp_path: Path
 
     # The list/summary path builds the identical breakdown (parity of both sites).
     summary = {r["id"]: r for r in repo.list_runs()}["mix"]
+    assert summary["usage"]["aiuNano"] == 66596413485000
     assert summary["usage"]["premiumRequests"] == 609
     assert summary["usage"]["cacheRead"] == 980
     assert summary["usage"]["cost"] is None
+    assert {m["model"]: m["aiuNano"] for m in summary["usage"]["models"]} == {
+        "claude-opus-4.6": 66528048385000,
+        "claude-haiku-4.5": 68365100000,
+        "": None,
+        "gpt-4o": None,
+    }
     assert {m["model"]: m["premiumRequests"] for m in summary["usage"]["models"]} == {
         "claude-opus-4.6": 609,
         "claude-haiku-4.5": 0,

@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **AI Units (AIU / "AI credits") are now the primary Copilot consumption signal**,
+  captured end-to-end. The `copilot` preprocessor carries each model's
+  `session.shutdown.data.modelMetrics.<model>.totalNanoAiu` (nano-AIU) onto its
+  synthetic `assistant.usage` record; the watch bridge stashes it in
+  `usage_records.attributes.nano_aiu`; and the dashboard read layer sums it per run
+  and per model (`usage.aiuNano`). Because per-model AIU sums exactly to the
+  session's top-level `totalNanoAiu`, no separate top-level record is synthesized.
+  nano-AIU is kept as an integer through the pipeline and divided by 1e9 (→ AIU) only
+  at render (`fmtAiu`). The Fleet, Cost, and Run views now headline **AI credits**
+  and demote the premium-request count to a secondary/legacy stat. Null-until-seen
+  throughout: an unknown AIU renders `—` (non-Copilot runs carry none), a genuine `0`
+  is kept, and no dollars are ever derived (`cost_usd` stays `None`).
 - `copilot` (GitHub Copilot CLI) recognized by ingest auto-detection, reading the
   per-session `~/.copilot/session-state/<uuid>/events.jsonl` streams (override the
   root with `COPILOT_SESSION_STATE_DIR`).

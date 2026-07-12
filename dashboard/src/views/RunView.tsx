@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowLeft, ChevronRight, FileText, MessagesSquare } from
 import { useRuns, useTranscript } from "@/lib/queries";
 import type { TEvent, TranscriptRole, TranscriptTurn } from "@/lib/types";
 import { useApp } from "@/store";
-import { dmin, hhmm, fmtCost, fmtVal, premiumReq } from "@/lib/format";
+import { dmin, hhmm, fmtAiu, fmtCost, fmtVal, premiumReq } from "@/lib/format";
 import { buildChapters, locateEvent } from "@/lib/chapters";
 import { G, mtip } from "@/data/tips";
 import { Tip } from "@/components/Tip";
@@ -55,6 +55,8 @@ export function RunView() {
             <span>·</span>
             <span>{dmin(run.durMs)}</span>
             <span>·</span>
+            <span>{fmtAiu(run.usage.aiuNano)}</span>
+            <span>·</span>
             <span>{fmtCost(run.usage.cost)}</span>
             {run.usage.premiumRequests != null && (
               <>
@@ -93,7 +95,7 @@ export function RunView() {
           <div className="flex justify-between text-[10.5px] text-muted-foreground">
             <span>{hhmm(evs[0].t)}</span>
             <span>
-              {evs.length} events · {fmtCost(run.usage.cost)} total
+              {evs.length} events · {fmtAiu(run.usage.aiuNano)} total
               {run.usage.premiumRequests != null &&
                 ` · ${premiumReq(run.usage.premiumRequests)}`}
             </span>

@@ -833,13 +833,17 @@ def _usage_breakdown(conn: sqlite3.Connection, session_id: str) -> dict[str, Any
     * ``cost`` — the summed ``cost_usd``, or ``None`` when no row carries dollars.
       GitHub Copilot emits none, so this stays ``None`` and renders "—" (unknown),
       never a fabricated "$0.00". No dollars are ever derived from the counts below.
-    * ``premiumRequests`` — Copilot's only real billing signal: the premium-request
+    * ``aiuNano`` — Copilot's **primary** billing signal: per-model AI-Unit
+      consumption in *nano*-AIU (``modelMetrics.<model>.totalNanoAiu``), summed
+      across models. Integer nano-AIU is kept verbatim; only the frontend divides
+      by 1e9 to AIU. ``None`` until some row carries it (unknown vs a genuine 0).
+    * ``premiumRequests`` — a **secondary/legacy** signal: the premium-request
       COUNT (``modelMetrics.<model>.requests.cost`` is a count, not dollars),
       summed across models.
     * ``inputUncached`` / ``cacheRead`` / ``cacheCreation`` — cache-aware token
       classes (billed/uncached vs cache read vs cache creation).
     * ``requestsTotal`` — total request count across models.
-    * ``models`` — per-model rows ``{model, premiumRequests, requests,
+    * ``models`` — per-model rows ``{model, aiuNano, premiumRequests, requests,
       inputUncached, cacheRead, cacheCreation, input, output}``.
 
     The unknown-vs-zero distinction is preserved throughout (see :func:`_nsum`):
@@ -865,6 +869,7 @@ def _usage_breakdown(conn: sqlite3.Connection, session_id: str) -> dict[str, Any
     in_tok = 0
     out_tok = 0
     cost: float | None = None
+    aiu: int | None = None
     premium: int | None = None
     uncached: int | None = None
     cache_read: int | None = None
@@ -881,12 +886,14 @@ def _usage_breakdown(conn: sqlite3.Connection, session_id: str) -> dict[str, Any
             cost = (cost or 0.0) + float(row["cost_usd"])
 
         attrs = _loads(row["attributes_json"])
+        a = _attr_count(attrs, "nano_aiu")
         p = _attr_count(attrs, "premium_requests")
         u = _attr_count(attrs, "input_uncached")
         cr = _attr_count(attrs, "cache_read_tokens")
         cc = _attr_count(attrs, "cache_creation_tokens")
         rt = _attr_count(attrs, "requests_total")
 
+        aiu = _nsum(aiu, a)
         premium = _nsum(premium, p)
         uncached = _nsum(uncached, u)
         cache_read = _nsum(cache_read, cr)
@@ -900,6 +907,7 @@ def _usage_breakdown(conn: sqlite3.Connection, session_id: str) -> dict[str, Any
         if agg is None:
             agg = {
                 "model": model,
+                "aiuNano": None,
                 "premiumRequests": None,
                 "requests": None,
                 "inputUncached": None,
@@ -911,6 +919,7 @@ def _usage_breakdown(conn: sqlite3.Connection, session_id: str) -> dict[str, Any
             models[model] = agg
         agg["input"] += row_in
         agg["output"] += row_out
+        agg["aiuNano"] = _nsum(agg["aiuNano"], a)
         agg["premiumRequests"] = _nsum(agg["premiumRequests"], p)
         agg["requests"] = _nsum(agg["requests"], rt)
         agg["inputUncached"] = _nsum(agg["inputUncached"], u)
@@ -921,6 +930,7 @@ def _usage_breakdown(conn: sqlite3.Connection, session_id: str) -> dict[str, Any
         "in": in_tok,
         "out": out_tok,
         "cost": cost,
+        "aiuNano": aiu,
         "premiumRequests": premium,
         "inputUncached": uncached,
         "cacheRead": cache_read,

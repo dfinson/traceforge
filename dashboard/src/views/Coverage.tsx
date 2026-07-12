@@ -4,6 +4,7 @@ import { useApp } from "@/store";
 import { G } from "@/data/tips";
 import { Tip } from "@/components/Tip";
 import { CoverageDonut } from "@/components/charts/CoverageDonut";
+import { coverageStats, effectMix } from "@/lib/coverage";
 import { CHART_FILL } from "@/components/charts/chartTheme";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -19,13 +20,14 @@ export function Coverage() {
   const { openRun } = useApp();
   const { data: runs = [], isLoading } = useRuns();
 
-  const cats = useMemo(() => {
-    const m: Record<string, number> = {};
-    runs.forEach((r) => r.events.forEach((e) => (m[e.cls.cat] = (m[e.cls.cat] || 0) + 1)));
-    return Object.entries(m)
-      .map(([k, v]) => ({ k, v }))
-      .sort((a, b) => b.v - a.v);
-  }, [runs]);
+  const events = useMemo(() => runs.flatMap((r) => r.events), [runs]);
+
+  const cats = useMemo(
+    () => effectMix(events).map(({ label, value }) => ({ k: label, v: value })),
+    [events],
+  );
+
+  const cov = useMemo(() => coverageStats(events), [events]);
 
   const candidates = useMemo(() => {
     const m: Record<string, { cat: string; min: number; n: number }> = {};
@@ -54,8 +56,6 @@ export function Coverage() {
     return g;
   }, [runs]);
 
-  const total = cats.reduce((a, c) => a + c.v, 0);
-
   if (isLoading) {
     return (
       <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
@@ -77,8 +77,15 @@ export function Coverage() {
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Classification spread</CardTitle>
-            <CardDescription>{total} events by canonical tool category.</CardDescription>
+            <Tip tip="Classification spread|Scored over CLASSIFIABLE events only — tool calls and permission requests, the events an effect (read_only / mutating / destructive) can apply to. Lifecycle and hook-wrapper events have no effect by nature, so they are excluded from the denominator rather than counted as failures.">
+              <CardTitle className="w-fit cursor-help text-base underline decoration-dotted underline-offset-4">
+                Classification spread
+              </CardTitle>
+            </Tip>
+            <CardDescription>
+              {cov.classified} of {cov.classifiable} classifiable events carry an effect ({cov.pct}
+              %).
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <CoverageDonut />
@@ -94,6 +101,13 @@ export function Coverage() {
                 </div>
               ))}
             </div>
+            {(cov.lifecycle > 0 || cov.hook > 0) && (
+              <p className="mt-3 border-t pt-3 text-[11px] leading-snug text-muted-foreground">
+                Excludes {cov.lifecycle.toLocaleString()} lifecycle
+                {cov.hook > 0 ? ` + ${cov.hook.toLocaleString()} hook-wrapper` : ""} events — no
+                effect by nature, so they are not scored here.
+              </p>
+            )}
           </CardContent>
         </Card>
 

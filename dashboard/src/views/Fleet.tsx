@@ -5,6 +5,7 @@ import { useRuns } from "@/lib/queries";
 import { useApp } from "@/store";
 import type { SortKey } from "@/store";
 import { agg, dmin, hhmm, money, tk } from "@/lib/format";
+import { coverageStats, effectMix, scopeSplit } from "@/lib/coverage";
 import { G } from "@/data/tips";
 import { KpiCard } from "@/components/KpiCard";
 import { Tip } from "@/components/Tip";
@@ -58,16 +59,23 @@ export function Fleet() {
       value: all.filter((e) => e.risk === l).length,
       color: RISK_FILL[l],
     }));
-    const cats: Record<string, number> = {};
-    all.forEach((e) => {
-      const c = e.cls?.cat || "unclassified";
-      cats[c] = (cats[c] || 0) + 1;
-    });
-    const coverage = Object.entries(cats)
-      .sort((a, b) => b[1] - a[1])
+    const cov = coverageStats(all);
+    const coverage = effectMix(all)
       .slice(0, 5)
-      .map(([label, value], i) => ({ label, value, color: CHART_FILL[i % CHART_FILL.length] }));
-    return { spendByPhase, risk, coverage };
+      .map(({ label, value }, i) => ({
+        label,
+        value,
+        color: CHART_FILL[i % CHART_FILL.length],
+      }));
+    // Lifecycle + hook-wrapper events have no effect by nature; keep them
+    // visible in their own breakdown so they never read as classification
+    // failures.
+    const scope = scopeSplit(cov, {
+      classifiable: CHART_FILL[2],
+      hook: "var(--muted-foreground)",
+      lifecycle: "var(--border)",
+    });
+    return { spendByPhase, risk, coverage, scope, cov };
   }, [runs]);
 
   const rows = useMemo(() => {
@@ -181,12 +189,35 @@ export function Fleet() {
           </Card>
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Classification mix
-              </CardTitle>
+              <Tip tip="Classification coverage|cls.cat is an effect taxonomy (read_only / mutating / destructive) — a tool-action property. Coverage is scored over CLASSIFIABLE events only (tool calls + permissions); lifecycle and hook-wrapper events have no effect by nature and are tracked separately, not counted as failures.">
+                <CardTitle className="w-fit cursor-help text-[11px] font-medium uppercase tracking-wide text-muted-foreground underline decoration-dotted underline-offset-4">
+                  Classification mix
+                </CardTitle>
+              </Tip>
             </CardHeader>
-            <CardContent>
-              <DistBar segments={rail.coverage} />
+            <CardContent className="space-y-4">
+              <div>
+                <div className="mb-2 flex items-baseline justify-between">
+                  <span className="text-[11px] text-muted-foreground">effect coverage</span>
+                  <span className="text-sm font-semibold tabular-nums">{rail.cov.pct}%</span>
+                </div>
+                <DistBar segments={rail.coverage} />
+                <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
+                  {rail.cov.classified} of {rail.cov.classifiable} classifiable events (tool calls +
+                  permissions) carry an effect.
+                </p>
+              </div>
+              {rail.scope.length > 0 && (
+                <div className="border-t pt-3">
+                  <span className="text-[11px] text-muted-foreground">event scope</span>
+                  <div className="mt-2">
+                    <DistBar segments={rail.scope} />
+                  </div>
+                  <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+                    Lifecycle and hook-wrapper events have no effect by nature — shown, not scored.
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
           <Card>

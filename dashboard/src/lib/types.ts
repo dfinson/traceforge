@@ -49,7 +49,9 @@ export interface TEvent {
   risk: RiskLevel;
   score: number;
   action: Verdict;
-  cost: number;
+  // Per-event dollar cost, or null when the wire carries none (GitHub Copilot
+  // emits no per-event dollars) — unknown, rendered "—", never a fake "$0.000".
+  cost: number | null;
   tokens: number;
   dur: number;
   phase: string;
@@ -89,6 +91,23 @@ export interface RunGap {
   reason: string;
 }
 
+// Per-model usage attribution for a run, aggregated from its `usage_records`
+// rows (one entry per distinct model string; a blank model "" is kept as its own
+// entry — labelled "unknown model" — because its tokens are real). The count
+// fields are null when unknown (the source never reported them, e.g. non-Copilot)
+// and a real number — including a genuine 0 — once any row carries them. `input`
+// and `output` are token grand totals and always numeric.
+export interface ModelUsage {
+  model: string;
+  premiumRequests: number | null;
+  requests: number | null;
+  inputUncached: number | null;
+  cacheRead: number | null;
+  cacheCreation: number | null;
+  input: number;
+  output: number;
+}
+
 export interface Run {
   id: string;
   repo: string;
@@ -102,8 +121,21 @@ export interface Run {
   // Copilot CLI, which emits no dollars at all) — rendered as "—" (unknown), never
   // a fake "$0.00". `premiumRequests` is Copilot's only real billing signal: the
   // per-run premium-request count (summed across models); null when unknown, a
-  // true 0 when the run genuinely made none.
-  usage: { in: number; out: number; cost: number | null; premiumRequests: number | null };
+  // true 0 when the run genuinely made none. `inputUncached`/`cacheRead`/
+  // `cacheCreation` are cache-aware token classes and `requestsTotal` the request
+  // count — each null until some usage row reports it (unknown vs a real 0).
+  // `models` carries the per-model attribution (empty when no usage rows).
+  usage: {
+    in: number;
+    out: number;
+    cost: number | null;
+    premiumRequests: number | null;
+    inputUncached: number | null;
+    cacheRead: number | null;
+    cacheCreation: number | null;
+    requestsTotal: number | null;
+    models: ModelUsage[];
+  };
   started: Date;
   durMs: number;
   // null when no cross-session drift baseline has been recorded for the run (it

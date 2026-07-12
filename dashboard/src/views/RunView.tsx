@@ -3,14 +3,13 @@ import { AlertTriangle, ArrowLeft, ChevronRight, FileText } from "lucide-react";
 import { useRuns } from "@/lib/queries";
 import type { TEvent } from "@/lib/types";
 import { useApp } from "@/store";
-import { dmin, hhmm, money3, fmtCost, fmtVal, premiumReq } from "@/lib/format";
+import { dmin, hhmm, fmtCost, fmtVal, premiumReq } from "@/lib/format";
 import { buildChapters, locateEvent } from "@/lib/chapters";
 import { G, mtip } from "@/data/tips";
 import { Tip } from "@/components/Tip";
 import { RiskBadge, RiskDot } from "@/components/RiskBadge";
 import { VerdictBadge, Pred } from "@/components/VerdictBadge";
 import { RiskRibbon } from "@/components/charts/RiskRibbon";
-import { SpendSparkline } from "@/components/charts/SpendSparkline";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -75,7 +74,7 @@ export function RunView() {
           <div>
             <CardTitle className="text-base">Rewind</CardTitle>
             <CardDescription>
-              One sliver per event, colored by risk. Click to inspect — spend accrues below.
+              One sliver per event, colored by risk. Click to inspect.
             </CardDescription>
           </div>
           <div className="flex items-center gap-4 text-[12px] text-muted-foreground">
@@ -91,7 +90,6 @@ export function RunView() {
         </CardHeader>
         <CardContent className="space-y-1">
           <RiskRibbon events={evs} sel={sel} onSelect={setSel} />
-          <SpendSparkline events={evs} />
           <div className="flex justify-between text-[10.5px] text-muted-foreground">
             <span>{hhmm(evs[0].t)}</span>
             <span>
@@ -340,7 +338,7 @@ function Inspector({ e, idx }: { e: TEvent; idx: number }) {
           <Meta label="Duration" value={`${e.dur} ms`} />
           <Meta label="Score" value={e.score.toFixed(2)} />
           <Meta label="Tokens" value={e.tokens.toLocaleString()} />
-          <Meta label="Cost" value={money3(e.cost)} />
+          <Meta label="Cost" value={fmtCost(e.cost)} />
           <Meta
             label="Confidence"
             value={

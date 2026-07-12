@@ -1,8 +1,6 @@
 import type { RiskLevel, TEvent } from "@/lib/types";
 import { RISK } from "@/lib/types";
 
-export type Dim = "phase" | "tool" | "file" | "segment" | "turn" | "retry";
-
 export const money = (n: number) => "$" + n.toFixed(2);
 export const money3 = (n: number) => "$" + n.toFixed(3);
 
@@ -20,6 +18,19 @@ export const premiumReq = (n: number | null | undefined) =>
   n == null ? "" : `${n} premium request${n === 1 ? "" : "s"}`;
 
 export const tk = (n: number) => (n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n));
+
+/** Whole-percent share of `n` over `total`, or null when either is unknown (null)
+ * or the total is 0 — so an unknown share renders "—", never a fabricated "0%". */
+export const pct = (n: number | null | undefined, total: number | null | undefined) =>
+  n == null || total == null || total === 0 ? null : Math.round((n / total) * 100);
+
+/** Null-aware running sum: unknown (null/undefined) addends are skipped so they
+ * never fabricate a 0, but the moment any real number is seen the accumulator
+ * becomes numeric. Stays null only while *everything* seen is unknown — the
+ * "genuine 0 differs from unknown" invariant the truth instrument depends on. */
+export const nsum = (acc: number | null, x: number | null | undefined) =>
+  x == null ? acc : (acc ?? 0) + x;
+
 export const hhmm = (d: Date) => d.toTimeString().slice(0, 8);
 export const dmin = (ms: number) =>
   Math.floor(ms / 60000) + "m " + String(Math.floor(ms / 1000) % 60).padStart(2, "0") + "s";
@@ -36,30 +47,6 @@ export function fmtVal(v: unknown): string {
 
 export function peakOf(evs: TEvent[]): RiskLevel {
   return Math.max(0, ...evs.map((e) => e.risk)) as RiskLevel;
-}
-
-export function agg(evs: TEvent[], dim: Dim): { k: string; v: number }[] {
-  const m: Record<string, number> = {};
-  evs.forEach((e) => {
-    const k =
-      dim === "phase"
-        ? e.phase
-        : dim === "tool"
-          ? e.tool.n
-          : dim === "file"
-            ? e.file
-            : dim === "segment"
-              ? e.seg
-              : dim === "turn"
-                ? e.turn
-                : e.retry
-                  ? "retry"
-                  : "first-try";
-    m[k] = (m[k] || 0) + e.cost;
-  });
-  return Object.entries(m)
-    .map(([k, v]) => ({ k, v }))
-    .sort((a, b) => b.v - a.v);
 }
 
 export function dist(evs: TEvent[]): { lvl: number; n: number; pct: number }[] {

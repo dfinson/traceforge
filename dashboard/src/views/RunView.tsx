@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ArrowLeft, ChevronRight, FileText, MessagesSquare } from "lucide-react";
 import { useRuns, useTranscript } from "@/lib/queries";
 import type { TEvent, TranscriptRole, TranscriptTurn } from "@/lib/types";
@@ -260,7 +260,7 @@ export function RunView() {
         <Inspector e={cur} idx={selIdx} />
       </div>
 
-      <TranscriptPanel runId={run.id} />
+      <TranscriptPanel runId={run.id} selectedId={cur?.id ?? null} />
     </div>
   );
 }
@@ -391,10 +391,21 @@ const ROLE_STYLES: Record<TranscriptRole, { rail: string; label: string }> = {
   tool: { rail: "border-l-muted-foreground/40", label: "text-muted-foreground" },
 };
 
-function TranscriptTurnRow({ turn }: { turn: TranscriptTurn }) {
+function TranscriptTurnRow({ turn, active }: { turn: TranscriptTurn; active: boolean }) {
   const style = ROLE_STYLES[turn.role];
+  const ref = useRef<HTMLDivElement>(null);
+  // Keep the selected event's turn in view as the reader clicks around the
+  // Chapters/Timeline (turn.id === the enriched event id they select).
+  useEffect(() => {
+    if (active) ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [active]);
   return (
-    <div className={`border-l-2 ${style.rail} pl-3`}>
+    <div
+      ref={ref}
+      className={`border-l-2 ${style.rail} rounded-r-md pl-3 transition-colors ${
+        active ? "bg-muted/60" : ""
+      }`}
+    >
       <div className="flex items-baseline gap-2">
         <span className={`text-[11px] font-medium uppercase tracking-wide ${style.label}`}>
           {turn.role}
@@ -417,8 +428,10 @@ function TranscriptTurnRow({ turn }: { turn: TranscriptTurn }) {
 
 // Collapsible full-width panel rendering the run's full-text transcript. The
 // transcript is fetched lazily (only once opened) via useTranscript so the
-// potentially large bodies never load for readers who stay on the timeline.
-function TranscriptPanel({ runId }: { runId: string }) {
+// potentially large bodies never load for readers who stay on the timeline. When
+// open, the turn matching the currently-selected event is highlighted and scrolled
+// into view, keeping the transcript in sync with the Chapters/Timeline selection.
+function TranscriptPanel({ runId, selectedId }: { runId: string; selectedId: string | null }) {
   const [open, setOpen] = useState(false);
   const { data, isLoading, isError } = useTranscript(runId, open);
   const turns = data?.turns ?? [];
@@ -454,7 +467,11 @@ function TranscriptPanel({ runId }: { runId: string }) {
             <ScrollArea className="h-[420px]">
               <div className="space-y-4 px-4 py-3">
                 {turns.map((turn) => (
-                  <TranscriptTurnRow key={turn.id} turn={turn} />
+                  <TranscriptTurnRow
+                    key={turn.id}
+                    turn={turn}
+                    active={turn.id === selectedId}
+                  />
                 ))}
               </div>
             </ScrollArea>

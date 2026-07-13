@@ -5,7 +5,7 @@ import { useRuns } from "@/lib/queries";
 import { useApp } from "@/store";
 import type { SortKey } from "@/store";
 import { dmin, fmtAiu, fmtCost, hhmm, nsum, pct, premiumReq, tk } from "@/lib/format";
-import { coverageStats, effectMix, scopeSplit } from "@/lib/coverage";
+import { coverageStats, effectMix, isClassifiable, scopeSplit } from "@/lib/coverage";
 import { G } from "@/data/tips";
 import { KpiCard } from "@/components/KpiCard";
 import { Tip } from "@/components/Tip";
@@ -38,7 +38,14 @@ export function Fleet() {
 
   const totals = useMemo(() => {
     const all = runs.flatMap((r) => r.events);
-    const classified = all.filter((e) => (e.cls?.conf ?? 0) >= 0.9).length;
+    // Classification confidence is an effect property of CLASSIFIABLE events
+    // (tool calls + permissions). Scoring high-confidence classifications against
+    // ALL events — lifecycle turns/messages/session markers that carry no effect
+    // by nature — deflates the denominator and makes the classifier read as broken
+    // when it is not (the `unclassified-coverage-framing` diagnostic). Scope both
+    // sides to classifiable events so the KPI reflects the real rate.
+    const classifiable = all.filter(isClassifiable);
+    const classified = classifiable.filter((e) => (e.cls?.conf ?? 0) >= 0.9).length;
     // GitHub Copilot bills in AI Units ("AIU", AI credits), not dollars — so the
     // PRIMARY fleet consumption signal is total AIU (nano-AIU summed null-aware,
     // divided to AIU only at render). It stays null (rendered "—") until some run
@@ -53,7 +60,7 @@ export function Fleet() {
       aiu,
       premium,
       tokens: runs.reduce((a, r) => a + r.usage.in + r.usage.out, 0),
-      classifiedPct: Math.round((classified / (all.length || 1)) * 100),
+      classifiedPct: Math.round((classified / (classifiable.length || 1)) * 100),
       triage: runs.filter((r) => r.peak >= 2).length,
     };
   }, [runs]);

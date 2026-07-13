@@ -39,7 +39,7 @@ motivation:
 
 events:
   # ── Say subtypes (preprocessor synthesizes "say.<subtype>") ──
-  # Verified against ClineSay type in ExtensionMessage.ts (38 values)
+  # Verified against ClineSay type in ExtensionMessage.ts (37 values)
   say.task:
     kind: session.started
     payload:
@@ -160,10 +160,6 @@ events:
       content: text
   say.checkpoint_created:
     kind: checkpoint.created
-    payload:
-      content: text
-  say.generate_explanation:
-    kind: reasoning.started
     payload:
       content: text
   say.info:

@@ -1051,13 +1051,6 @@ class TestKnownProductBugsNullContainers:
         assert len(out) == 1
         assert out[0]["type"] == "model_request"
 
-    def test_pydantic_ai_stream_null_part(self) -> None:
-        out = preprocess_pydantic_ai({"event_kind": "model_response_stream", "part": None})
-        assert isinstance(out, list)
-        assert len(out) == 1
-        assert out[0]["type"] == "model_response_chunk"
-        assert out[0]["chunk"] == ""
-
     def test_amazonq_null_prompt_enum(self) -> None:
         out = preprocess_amazonq(
             {

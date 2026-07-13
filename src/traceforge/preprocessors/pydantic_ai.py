@@ -23,10 +23,6 @@ def preprocess_pydantic_ai(obj: dict[str, Any]) -> list[dict[str, Any]]:
             normalized["type"] = "tool_call_start"
         elif event_kind == "function_tool_result":
             normalized["type"] = "tool_call_end"
-        elif event_kind == "model_response_stream":
-            normalized["type"] = "model_response_chunk"
-            if "chunk" not in normalized:
-                normalized["chunk"] = (normalized.get("part") or {}).get("content", "")
         else:
             normalized["type"] = f"stream.{event_kind}"
         return [normalized]

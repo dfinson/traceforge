@@ -18,6 +18,11 @@ Expected input shape (each JSONL line parsed as dict):
         "id": "activity-456",
         ...
     }
+
+Note on the sender key: `Activity.from_property` is declared `Field(alias="from")`.
+Real MAF writers serialize via `model_dump_json()` *without* `by_alias=True`, so
+the on-disk sender key is the field name `from_property`, not the alias `from`.
+This preprocessor accepts both.
 """
 
 from __future__ import annotations
@@ -32,8 +37,11 @@ def preprocess_maf_transcript(obj: dict[str, Any]) -> list[dict[str, Any]]:
     """Flatten MAF Activity dict into a single event with compound type."""
     activity_type = obj.get("type", "unknown")
 
-    # Determine sender role — normalize to lowercase
-    from_obj = obj.get("from") or obj.get("from_") or {}
+    # Determine sender role — normalize to lowercase.
+    # Real MAF writers (FileTranscriptStore / transcript loggers) serialize
+    # Activity via model_dump_json() WITHOUT by_alias=True, so the on-disk key
+    # is the field name `from_property`, not the alias `from`. Check both.
+    from_obj = obj.get("from") or obj.get("from_property") or obj.get("from_") or {}
     from_role = ""
     if isinstance(from_obj, dict):
         from_role = (from_obj.get("role") or "").lower()

@@ -842,6 +842,23 @@ class TestMafTranscript:
         )
         assert out[0]["_event_type"] == "message.bot"
 
+    def test_from_property_real_on_disk_key(self) -> None:
+        # Real MAF writers (FileTranscriptStore / transcript loggers) serialize
+        # Activity via model_dump_json() WITHOUT by_alias, so the on-disk sender
+        # key is the field name `from_property`, not the alias `from` (issue #173).
+        # The compound discriminator must still resolve, else every transcript
+        # event silently degrades to a bare type and drops to `raw`.
+        out = preprocess_maf_transcript(
+            {
+                "type": "message",
+                "from_property": {"id": "b", "name": "Agent", "role": "bot"},
+                "text": "hi",
+            }
+        )
+        assert out[0]["_event_type"] == "message.bot"
+        assert out[0]["from_role"] == "bot"
+        assert out[0]["from_name"] == "Agent"
+
     def test_conversation_id_flattened(self) -> None:
         out = preprocess_maf_transcript(_maf_valid())
         assert out[0]["conversation_id"] == "conv1"

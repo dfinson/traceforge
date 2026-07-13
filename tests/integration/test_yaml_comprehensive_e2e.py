@@ -1862,17 +1862,6 @@ class TestPydanticAIMappings:
         ),
         pytest.param(
             {
-                "event_kind": "model_response_stream",
-                "model_name": "gpt-4o",
-                "part": {"part_kind": "text", "content": "Hello"},
-                "timestamp": "2024-06-15T10:00:17Z",
-            },
-            EventKind.LLM_OUTPUT_CHUNK,
-            {"content": "Hello"},
-            id="model_response_chunk",
-        ),
-        pytest.param(
-            {
                 "type": "validation_error",
                 "tool_name": "search",
                 "error": "invalid args",

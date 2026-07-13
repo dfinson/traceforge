@@ -141,10 +141,6 @@ events:
     payload:
       tool_name: tool_name
       tool_call_id: tool_call_id
-  model_response_chunk:
-    kind: llm.output.chunk
-    payload:
-      content: chunk
 
   # ── Retries / validation ──
   validation_error:

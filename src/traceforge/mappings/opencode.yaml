@@ -451,21 +451,13 @@ events:
     kind: session.info
     payload:
       session_id: properties.sessionID
-      directory: properties.directory
+      directory: properties.subdirectory
   session.next.prompt.admitted:
     kind: message.user
     payload:
       session_id: properties.sessionID
       delivery: properties.delivery
-      text: properties.text
-  session.next.prompt.promoted:
-    kind: session.info
-    payload:
-      session_id: properties.sessionID
-  session.next.interrupt.requested:
-    kind: session.info
-    payload:
-      session_id: properties.sessionID
+      text: properties.prompt.text
   session.next.context.updated:
     kind: session.info
     payload:

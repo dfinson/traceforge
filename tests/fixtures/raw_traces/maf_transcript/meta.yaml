@@ -6,4 +6,25 @@ model: gpt-5
 captured_at: "2026-06-28T09:31:15Z"
 traceforge_commit: 13f4d3d
 line_count: 27
-notes: Real OpenAI session; coding task on demo-issue-tracker-api.
+notes: >-
+  Two scenarios live in this directory.
+
+  (1) demo_issue_tracker_get_endpoint (27 lines): real OpenAI session, coding task
+  on demo-issue-tracker-api. CAVEAT: captured with capture_maf.py forcing
+  model_dump(by_alias=True), so its sender key is the alias `from` — which is NOT
+  the real MAF on-disk shape. Real MAF writers (FileTranscriptStore / transcript
+  loggers) call model_dump_json() WITHOUT by_alias, emitting the field name
+  `from_property`. Kept as-is (regenerating needs a real paid OpenAI call); the
+  preprocessor accepts both keys so it still parses.
+
+  (2) real_shape_from_property (5 lines): SHAPE FIXTURE (not a live capture),
+  framework_version microsoft-agents-activity 1.1.0. Emitted directly from the SDK
+  via Activity(...).model_dump_json(exclude_none=True, exclude_unset=True) — the exact
+  serialization FileTranscriptStore/transcript loggers use, WITHOUT by_alias=True — so
+  every line carries the real on-disk sender key `from_property` (field name, not the
+  alias `from`) and snake_case `channel_id`. Regression guard for issue #173: before the
+  maf_transcript preprocessor learned to read `from_property`, all 5 lines degraded to a
+  bare discriminator (`message`/`trace`/`invoke`/`event`), matched no `events:` key, and
+  fell through to `raw` (100% event loss). The golden pins the correct discriminators:
+  message.user, trace.bot->session.info, invoke.bot->tool.call.started,
+  event.user->hook.started, message.bot->message.assistant.

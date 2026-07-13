@@ -1,0 +1,10 @@
+{
+  "event_count": 5,
+  "kinds": {
+    "hook.started": 1,
+    "message.assistant": 1,
+    "message.user": 1,
+    "session.info": 1,
+    "tool.call.started": 1
+  }
+}

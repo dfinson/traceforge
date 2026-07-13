@@ -127,6 +127,12 @@ def _activity(
         text=text,
         value=_jsonable(value) if value is not None else None,
     )
+    # NOTE (issue #173): by_alias=True emits the alias `from`, but real MAF writers
+    # (FileTranscriptStore / transcript loggers) call model_dump_json() WITHOUT
+    # by_alias, so the true on-disk sender key is the field name `from_property`.
+    # This capture is therefore alias-shaped, NOT real-shaped; the verbatim real
+    # shape is covered by the hand-derived real_shape_from_property fixture. Kept
+    # as-is to avoid a fresh paid capture — the preprocessor accepts both keys.
     return activity.model_dump(mode="json", by_alias=True, exclude_none=True)
 
 

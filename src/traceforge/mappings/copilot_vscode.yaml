@@ -125,10 +125,12 @@ events:
     payload:
       request_id: request_id
 
-  steering:
-    kind: input.received
-    payload:
-      request_id: request_id
+  # `steering` is intentionally NOT mapped: in microsoft/vscode it is a
+  # ChatRequestQueueKind (request-queue state), not a member of the IChatProgress
+  # response-part union, so it never appears as a part `kind`. The preprocessor's
+  # _emit_part derives event_type strictly from a progress part's `kind`
+  # (copilot_vscode.py), so a `steering` event can never be emitted — mapping it
+  # here would be dead config. See issue #172.
 
   command:
     kind: command.started

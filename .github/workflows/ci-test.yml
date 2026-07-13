@@ -65,4 +65,5 @@ jobs:
       - run: corepack pnpm install --frozen-lockfile
       - run: corepack pnpm exec tsc -b
       - run: corepack pnpm build
+      - run: corepack pnpm exec vitest run
 

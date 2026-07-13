@@ -12,9 +12,27 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
+      # Checkout WITHOUT fetching LFS objects. With lfs:false the *.onnx/*.safetensors
+      # files are left as ~133-byte LFS pointer text, so no LFS bandwidth is spent here.
       - uses: actions/checkout@v6
         with:
-          lfs: true
+          lfs: false
+      # Cache the local LFS object store. The cache key hashes the checked-out pointer
+      # files, whose content embeds each weight's sha256 OID, so the key changes exactly
+      # when a weight changes. On a cache hit, `git lfs pull` below finds every object
+      # locally and makes NO call to the LFS server.
+      - name: Cache Git LFS objects
+        uses: actions/cache@v4
+        with:
+          path: .git/lfs
+          key: lfs-v1-${{ hashFiles('**/*.onnx', '**/*.safetensors') }}
+          restore-keys: |
+            lfs-v1-
+      # Materialize weights into the working tree from the local (cached) store.
+      # Cache hit: zero network. Cache miss: one fetch from the LFS server (needs budget),
+      # then the cache step saves .git/lfs for subsequent runs.
+      - name: Materialize LFS weights
+        run: git lfs pull
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
@@ -25,9 +43,23 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # Checkout WITHOUT fetching LFS objects (see the `test` job for the full rationale):
+      # lfs:false leaves the weights as LFS pointer text and spends no LFS bandwidth.
       - uses: actions/checkout@v6
         with:
-          lfs: true
+          lfs: false
+      # Cache the local LFS object store, keyed to the weight OIDs embedded in the
+      # checked-out pointer files. Cache hit => `git lfs pull` runs offline.
+      - name: Cache Git LFS objects
+        uses: actions/cache@v4
+        with:
+          path: .git/lfs
+          key: lfs-v1-${{ hashFiles('**/*.onnx', '**/*.safetensors') }}
+          restore-keys: |
+            lfs-v1-
+      # Materialize weights from the local (cached) store before anything loads them.
+      - name: Materialize LFS weights
+        run: git lfs pull
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"

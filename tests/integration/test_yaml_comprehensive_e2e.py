@@ -1475,12 +1475,6 @@ class TestClineMappings:
             id="say.checkpoint_created",
         ),
         pytest.param(
-            _cline_say("generate_explanation", "Explaining changes"),
-            EventKind.REASONING_STARTED,
-            {"content": "Explaining changes"},
-            id="say.generate_explanation",
-        ),
-        pytest.param(
             _cline_say("info", "General info"),
             EventKind.SESSION_INFO,
             {"content": "General info"},

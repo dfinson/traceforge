@@ -12,6 +12,10 @@ _VERSION_SUFFIX_RE = re.compile(r"\.\d+$")
 _MESSAGE_ROLES: dict[tuple[str, str], str] = {}
 
 
+def _reset() -> None:
+    _MESSAGE_ROLES.clear()
+
+
 @register_preprocessor("opencode")
 def preprocess_opencode(obj: dict[str, Any]) -> list[dict[str, Any]]:
     """Normalize OpenCode's SQLite `event` rows to stable mapping types."""
@@ -50,8 +54,9 @@ def preprocess_opencode(obj: dict[str, Any]) -> list[dict[str, Any]]:
         role = _MESSAGE_ROLES.get((session_id, message_id), "unknown")
         norm["message_role"] = role
 
-        if part_type == "text" and role in {"user", "assistant"}:
-            norm["type"] = f"message.part.text.{role}"
+        if part_type == "text":
+            text_role = role if role in {"user", "assistant"} else "unknown"
+            norm["type"] = f"message.part.text.{text_role}"
         elif part_type == "tool":
             state = part.get("state") if isinstance(part.get("state"), dict) else {}
             status = str(state.get("status") or "unknown")

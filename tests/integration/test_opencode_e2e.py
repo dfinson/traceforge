@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
 from traceforge.adapters.mapped_json import MappedJsonAdapter
+from traceforge.preprocessors.opencode import _reset as _opencode_reset
 from traceforge.types import EventKind
 
 MAPPINGS_DIR = Path(__file__).resolve().parent.parent.parent / "src" / "traceforge" / "mappings"
@@ -17,6 +19,13 @@ def adapter() -> MappedJsonAdapter:
     return MappedJsonAdapter.from_yaml(
         str(MAPPINGS_DIR / "opencode.yaml"), session_id="opencode-e2e"
     )
+
+
+@pytest.fixture(autouse=True)
+def reset_opencode_state() -> Iterator[None]:
+    _opencode_reset()
+    yield
+    _opencode_reset()
 
 
 def _parse(adapter: MappedJsonAdapter, event: dict) -> list:
@@ -36,20 +45,44 @@ def _wire_event(event_type: str, **properties: object) -> dict:
     }
 
 
+_ASSISTANT_CORRELATED_EVENTS = [
+    "session.next.step.started",
+    "session.next.step.ended",
+    "session.next.step.failed",
+    "session.next.text.started",
+    "session.next.text.delta",
+    "session.next.text.ended",
+    "session.next.reasoning.started",
+    "session.next.reasoning.delta",
+    "session.next.reasoning.ended",
+    "session.next.tool.input.started",
+    "session.next.tool.input.delta",
+    "session.next.tool.input.ended",
+    "session.next.tool.called",
+    "session.next.tool.progress",
+    "session.next.tool.success",
+    "session.next.tool.failed",
+]
+
+
 class TestOpenCodeMappings:
     CASES = [
         pytest.param(
             _wire_event(
                 "session.next.prompted",
+                messageID="msg-user-1",
                 prompt={
                     "text": "Summarize this repo",
                     "files": None,
                     "agents": None,
-                    "references": None,
                 },
             ),
             "message.user",
-            {"session_id": "sess-abc", "prompt_text": "Summarize this repo"},
+            {
+                "session_id": "sess-abc",
+                "message_id": "msg-user-1",
+                "prompt_text": "Summarize this repo",
+            },
             id="session.next.prompted",
         ),
         pytest.param(
@@ -413,25 +446,15 @@ class TestOpenCodeMappings:
             {"uri": "file:///repo/README.md", "mime": "text/markdown", "name": "README.md"},
         ]
         agents = [{"name": "planner", "source": "builtin"}, {"name": "coder", "source": "builtin"}]
-        references = [
-            {
-                "name": "bug-123",
-                "kind": "git",
-                "repository": "dfinson/traceforge",
-                "branch": "main",
-                "target": "src/traceforge",
-            }
-        ]
-
         results = _parse(
             adapter,
             _wire_event(
                 "session.next.prompted",
+                messageID="msg-user-attachments",
                 prompt={
                     "text": "Review these files",
                     "files": files,
                     "agents": agents,
-                    "references": references,
                 },
             ),
         )
@@ -439,10 +462,13 @@ class TestOpenCodeMappings:
         result = results[0]
         assert result.kind == "message.user"
         assert result.kind == EventKind.MESSAGE_USER
-        assert result.payload["prompt_text"] == "Review these files"
-        assert result.payload["prompt_files"] == files
-        assert result.payload["prompt_agents"] == agents
-        assert result.payload["prompt_references"] == references
+        assert result.payload == {
+            "session_id": "sess-abc",
+            "message_id": "msg-user-attachments",
+            "prompt_text": "Review these files",
+            "prompt_files": files,
+            "prompt_agents": agents,
+        }
 
     def test_tool_content_union(self, adapter: MappedJsonAdapter) -> None:
         content = [
@@ -465,6 +491,312 @@ class TestOpenCodeMappings:
         assert result.kind == EventKind.TOOL_CALL_COMPLETED
         assert result.payload["content"] == content
         assert result.payload["structured"] == {"status": "ok"}
+
+    @pytest.mark.parametrize("event_type", _ASSISTANT_CORRELATED_EVENTS)
+    def test_assistant_message_id_preserved(
+        self, adapter: MappedJsonAdapter, event_type: str
+    ) -> None:
+        result = _parse(
+            adapter,
+            _wire_event(event_type, assistantMessageID="msg-assistant-1"),
+        )[0]
+
+        assert result.payload["assistant_message_id"] == "msg-assistant-1"
+
+    def test_moved_uses_location_directory_and_preserves_subdirectory(
+        self, adapter: MappedJsonAdapter
+    ) -> None:
+        result = _parse(
+            adapter,
+            _wire_event(
+                "session.next.moved",
+                location={"directory": "C:\\repo", "workspaceID": "workspace-1"},
+                subdirectory="packages\\frontend",
+            ),
+        )[0]
+
+        assert result.payload == {
+            "session_id": "sess-abc",
+            "directory": "C:\\repo",
+            "subdirectory": "packages\\frontend",
+        }
+
+    def test_moved_without_subdirectory_keeps_canonical_directory(
+        self, adapter: MappedJsonAdapter
+    ) -> None:
+        result = _parse(
+            adapter,
+            _wire_event("session.next.moved", location={"directory": "C:\\repo"}),
+        )[0]
+
+        assert result.payload == {
+            "session_id": "sess-abc",
+            "directory": "C:\\repo",
+        }
+
+    def test_prompt_admitted_preserves_structured_prompt(self, adapter: MappedJsonAdapter) -> None:
+        files = [{"uri": "file:///repo/main.py", "mime": "text/x-python"}]
+        agents = [{"name": "reviewer", "source": "builtin"}]
+        result = _parse(
+            adapter,
+            _wire_event(
+                "session.next.prompt.admitted",
+                messageID="msg-user-2",
+                delivery="queue",
+                prompt={
+                    "text": "Review this file",
+                    "files": files,
+                    "agents": agents,
+                },
+            ),
+        )[0]
+
+        assert result.payload == {
+            "session_id": "sess-abc",
+            "message_id": "msg-user-2",
+            "delivery": "queue",
+            "text": "Review this file",
+            "prompt_files": files,
+            "prompt_agents": agents,
+        }
+
+    def test_context_updated_preserves_text(self, adapter: MappedJsonAdapter) -> None:
+        result = _parse(
+            adapter,
+            _wire_event(
+                "session.next.context.updated",
+                messageID="msg-system-1",
+                text="Updated working context",
+            ),
+        )[0]
+
+        assert result.payload == {
+            "session_id": "sess-abc",
+            "message_id": "msg-system-1",
+            "text": "Updated working context",
+        }
+
+    def test_v1_sqlite_message_and_part_mappings_remain_live(
+        self, adapter: MappedJsonAdapter
+    ) -> None:
+        rows = [
+            (
+                "session.created.1",
+                {"sessionID": "sqlite-session", "info": {"title": "SQLite session"}},
+                "session.started",
+            ),
+            (
+                "session.updated.1",
+                {"sessionID": "sqlite-session", "info": {"title": "Updated"}},
+                "session.info",
+            ),
+            (
+                "message.updated.1",
+                {
+                    "sessionID": "sqlite-session",
+                    "info": {
+                        "id": "msg-user",
+                        "sessionID": "sqlite-session",
+                        "role": "user",
+                    },
+                },
+                "message.user",
+            ),
+            (
+                "message.updated.1",
+                {
+                    "sessionID": "sqlite-session",
+                    "info": {
+                        "id": "msg-assistant",
+                        "sessionID": "sqlite-session",
+                        "role": "assistant",
+                    },
+                },
+                "message.assistant",
+            ),
+            (
+                "message.part.updated.1",
+                {
+                    "sessionID": "sqlite-session",
+                    "time": 1719828000000,
+                    "part": {
+                        "id": "part-user",
+                        "messageID": "msg-user",
+                        "sessionID": "sqlite-session",
+                        "type": "text",
+                        "text": "question",
+                    },
+                },
+                "message.user",
+            ),
+            (
+                "message.part.updated.1",
+                {
+                    "sessionID": "sqlite-session",
+                    "time": 1719828000001,
+                    "part": {
+                        "id": "part-assistant",
+                        "messageID": "msg-assistant",
+                        "sessionID": "sqlite-session",
+                        "type": "text",
+                        "text": "answer",
+                    },
+                },
+                "message.assistant",
+            ),
+            (
+                "message.part.updated.1",
+                {
+                    "sessionID": "sqlite-session",
+                    "time": 1719828000002,
+                    "part": {
+                        "id": "part-unknown",
+                        "messageID": "msg-unknown",
+                        "sessionID": "sqlite-session",
+                        "type": "text",
+                        "text": "uncorrelated",
+                    },
+                },
+                "raw",
+            ),
+            (
+                "message.part.updated.1",
+                {
+                    "sessionID": "sqlite-session",
+                    "time": 1719828000003,
+                    "part": {
+                        "id": "part-reasoning",
+                        "messageID": "msg-assistant",
+                        "sessionID": "sqlite-session",
+                        "type": "reasoning",
+                        "text": "thinking",
+                    },
+                },
+                "llm.reasoning.completed",
+            ),
+            (
+                "message.part.updated.1",
+                {
+                    "sessionID": "sqlite-session",
+                    "time": 1719828000004,
+                    "part": {
+                        "id": "part-tool-running",
+                        "messageID": "msg-assistant",
+                        "sessionID": "sqlite-session",
+                        "type": "tool",
+                        "callID": "call-1",
+                        "tool": "search",
+                        "state": {"status": "running", "input": {"query": "traceforge"}},
+                    },
+                },
+                "tool.call.started",
+            ),
+            (
+                "message.part.updated.1",
+                {
+                    "sessionID": "sqlite-session",
+                    "time": 1719828000005,
+                    "part": {
+                        "id": "part-tool-completed",
+                        "messageID": "msg-assistant",
+                        "sessionID": "sqlite-session",
+                        "type": "tool",
+                        "callID": "call-1",
+                        "tool": "search",
+                        "state": {"status": "completed", "output": "found"},
+                    },
+                },
+                "tool.call.completed",
+            ),
+            (
+                "message.part.updated.1",
+                {
+                    "sessionID": "sqlite-session",
+                    "time": 1719828000006,
+                    "part": {
+                        "id": "part-tool-error",
+                        "messageID": "msg-assistant",
+                        "sessionID": "sqlite-session",
+                        "type": "tool",
+                        "callID": "call-2",
+                        "tool": "search",
+                        "state": {
+                            "status": "error",
+                            "input": {"query": "traceforge"},
+                            "error": "offline",
+                            "metadata": {"interrupted": True},
+                            "time": {"start": 10, "end": 20},
+                        },
+                    },
+                },
+                "tool.call.failed",
+            ),
+            (
+                "message.part.updated.1",
+                {
+                    "sessionID": "sqlite-session",
+                    "time": 1719828000007,
+                    "part": {
+                        "id": "part-step-start",
+                        "messageID": "msg-assistant",
+                        "sessionID": "sqlite-session",
+                        "type": "step-start",
+                    },
+                },
+                "llm.call.started",
+            ),
+            (
+                "message.part.updated.1",
+                {
+                    "sessionID": "sqlite-session",
+                    "time": 1719828000008,
+                    "part": {
+                        "id": "part-step-finish",
+                        "messageID": "msg-assistant",
+                        "sessionID": "sqlite-session",
+                        "type": "step-finish",
+                        "tokens": {"input": 1, "output": 2},
+                    },
+                },
+                "llm.call.completed",
+            ),
+            (
+                "message.part.updated.1",
+                {
+                    "sessionID": "sqlite-session",
+                    "time": 1719828000009,
+                    "part": {
+                        "id": "part-patch",
+                        "messageID": "msg-assistant",
+                        "sessionID": "sqlite-session",
+                        "type": "patch",
+                        "files": ["src/app.py"],
+                    },
+                },
+                "file.edited",
+            ),
+        ]
+
+        results = []
+        for event_type, data, expected in rows:
+            parsed = _parse(adapter, {"type": event_type, "data": json.dumps(data)})
+            assert parsed, f"{event_type} row for {expected} was dropped: {data}"
+            results.append(parsed[0])
+
+        assert [result.kind for result in results] == [expected for _, _, expected in rows]
+        assert results[4].payload["text"] == "question"
+        assert results[5].payload["text"] == "answer"
+        assert results[6].kind == EventKind.RAW
+        assert results[6].kind not in {EventKind.MESSAGE_ASSISTANT, EventKind.MESSAGE_USER}
+        assert results[6].payload == {
+            "session_id": "sqlite-session",
+            "message_id": "msg-unknown",
+            "part_id": "part-unknown",
+            "text": "uncorrelated",
+            "original_type": "message.part.text.unknown",
+        }
+        assert results[10].payload["error"] == "offline"
+        assert results[10].payload["metadata"] == {"interrupted": True}
 
     def test_literal_field_shell(self, adapter: MappedJsonAdapter) -> None:
         results = _parse(

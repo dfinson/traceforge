@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import copy
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -42,12 +42,20 @@ from traceforge.preprocessors.copilot_vscode import preprocess_copilot_vscode
 from traceforge.preprocessors.goose import preprocess_goose
 from traceforge.preprocessors.maf_transcript import preprocess_maf_transcript
 from traceforge.preprocessors.openai_agents import preprocess_openai_agents
+from traceforge.preprocessors.opencode import _reset as _opencode_reset
 from traceforge.preprocessors.opencode import preprocess_opencode
 from traceforge.preprocessors.openhands import preprocess_openhands
 from traceforge.preprocessors.pydantic_ai import preprocess_pydantic_ai
 from traceforge.preprocessors.smolagents import preprocess_smolagents
 
 Preproc = Callable[[dict[str, Any]], list[dict[str, Any]]]
+
+
+@pytest.fixture(autouse=True)
+def reset_opencode_state() -> Iterator[None]:
+    _opencode_reset()
+    yield
+    _opencode_reset()
 
 
 # ─── Generic contract specification ──────────────────────────────────────────
@@ -952,7 +960,17 @@ class TestOpencode:
         out = preprocess_opencode(
             {
                 "type": "message.part.updated.1",
-                "data": {"part": {"type": "text", "messageID": "m9", "sessionID": "s9"}},
+                "data": {
+                    "sessionID": "s9",
+                    "time": 1719828000000,
+                    "part": {
+                        "id": "p9",
+                        "type": "text",
+                        "messageID": "m9",
+                        "sessionID": "s9",
+                        "text": "hello",
+                    },
+                },
             }
         )
         assert out[0]["type"] == "message.part.text.user"
@@ -962,7 +980,19 @@ class TestOpencode:
         out = preprocess_opencode(
             {
                 "type": "message.part.updated.1",
-                "data": {"part": {"type": "tool", "state": {"status": "pending"}}},
+                "data": {
+                    "sessionID": "s",
+                    "time": 1719828000000,
+                    "part": {
+                        "id": "p",
+                        "type": "tool",
+                        "messageID": "m",
+                        "sessionID": "s",
+                        "callID": "call",
+                        "tool": "search",
+                        "state": {"status": "pending", "input": {}, "raw": ""},
+                    },
+                },
             }
         )
         assert out == []

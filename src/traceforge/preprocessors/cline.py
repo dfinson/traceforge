@@ -8,6 +8,9 @@ from typing import Any
 from traceforge.preprocessors.registry import register_preprocessor
 
 
+_COMPACTION_STATUSES = frozenset({"started", "completed", "skipped", "failed", "cancelled"})
+
+
 @register_preprocessor("cline")
 def preprocess_cline(obj: dict[str, Any]) -> list[dict[str, Any]]:
     """Synthesize compound type from Cline's type + say/ask subtype.
@@ -25,11 +28,18 @@ def preprocess_cline(obj: dict[str, Any]) -> list[dict[str, Any]]:
 
         # Parse JSON text field for known subtypes that embed structured data
         text = normalized.get("text")
-        if text and subtype in ("api_req_started", "api_req_finished", "tool"):
+        if text and subtype in ("api_req_started", "api_req_finished", "tool", "compaction"):
             try:
                 parsed = json.loads(text)
                 if isinstance(parsed, dict):
                     normalized["parsed"] = parsed
+                    status = parsed.get("status")
+                    if (
+                        subtype == "compaction"
+                        and isinstance(status, str)
+                        and status in _COMPACTION_STATUSES
+                    ):
+                        normalized["type"] = f"{normalized['type']}.{status}"
             except (json.JSONDecodeError, ValueError):
                 pass
         return [normalized]

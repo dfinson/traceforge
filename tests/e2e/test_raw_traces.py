@@ -174,3 +174,21 @@ def test_pydantic_ai_part_end_carries_real_content() -> None:
     assert any("ticket" in t.lower() or "endpoint" in t.lower() for t in non_empty), (
         f"expected real captured task text, got {assistant_texts!r}"
     )
+
+
+def test_cline_compaction_preserves_native_payload() -> None:
+    """Cline's JSON-encoded compaction divider must stay useful on the timeline."""
+    if "cline" not in FRAMEWORKS:
+        pytest.skip("cline trace not captured")
+    compacted = [
+        event for event in _parse_trace("cline") if event.kind == EventKind.WORKFLOW_COMPLETED
+    ]
+    assert len(compacted) == 1
+    payload = compacted[0].payload
+    assert payload["content"]
+    assert payload["status"] == "completed"
+    assert payload["mode"] == "auto"
+    assert payload["tokens_before"] == 12000
+    assert payload["tokens_after"] == 4300
+    assert payload["messages_before"] == 48
+    assert payload["messages_after"] == 17

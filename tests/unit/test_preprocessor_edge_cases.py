@@ -22,6 +22,7 @@ reported to the epic coordinator rather than fixed here (this ticket is tests-on
 from __future__ import annotations
 
 import copy
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -494,6 +495,52 @@ class TestCline:
     def test_invalid_json_text_left_unparsed(self) -> None:
         out = preprocess_cline({"type": "say", "say": "api_req_started", "text": "not json"})
         assert "parsed" not in out[0]
+
+    @pytest.mark.parametrize("status", ["started", "completed", "skipped", "failed", "cancelled"])
+    def test_compaction_status_qualifies_compound_type(self, status: str) -> None:
+        out = preprocess_cline(
+            {
+                "type": "say",
+                "say": "compaction",
+                "text": json.dumps({"status": status, "mode": "auto"}),
+            }
+        )
+        assert out[0]["type"] == f"say.compaction.{status}"
+
+    def test_compaction_json_preserves_structured_counters(self) -> None:
+        info = {
+            "status": "completed",
+            "mode": "manual",
+            "tokensBefore": 12000,
+            "tokensAfter": 4300,
+            "messagesBefore": 48,
+            "messagesAfter": 17,
+        }
+        out = preprocess_cline({"type": "say", "say": "compaction", "text": json.dumps(info)})
+        assert out[0]["parsed"] == info
+
+    def test_future_compaction_status_uses_safe_base_type(self) -> None:
+        out = preprocess_cline(
+            {
+                "type": "say",
+                "say": "compaction",
+                "text": '{"status":"paused","mode":"auto"}',
+            }
+        )
+        assert out[0]["type"] == "say.compaction"
+        assert out[0]["parsed"] == {"status": "paused", "mode": "auto"}
+
+    def test_invalid_compaction_json_uses_safe_base_type(self) -> None:
+        out = preprocess_cline({"type": "say", "say": "compaction", "text": "not json"})
+        assert out[0]["type"] == "say.compaction"
+        assert "parsed" not in out[0]
+
+    def test_non_string_compaction_status_uses_safe_base_type(self) -> None:
+        out = preprocess_cline(
+            {"type": "say", "say": "compaction", "text": '{"status":[],"mode":"auto"}'}
+        )
+        assert out[0]["type"] == "say.compaction"
+        assert out[0]["parsed"] == {"status": [], "mode": "auto"}
 
     def test_unknown_type_passthrough(self) -> None:
         obj = {"type": "other", "text": "x"}

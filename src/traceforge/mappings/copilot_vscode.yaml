@@ -111,10 +111,8 @@ events:
       request_id: request_id
 
   # ── Additional VS Code chat part kinds ─────────────────────────────────────
-  # Proactively mapped (observed across VS Code chat versions but absent from the
-  # local dev sessions) so a one-shot paid capture won't trip the drift guard on
-  # a part type that simply didn't occur here. Missing nested fields resolve to
-  # None, so a sparse payload is harmless.
+  # These response kinds have direct canonical equivalents. Other v3 kinds are
+  # intentionally left to default_kind: raw until their semantics are observed.
   progressTaskSerialized:
     kind: tool.progress
     payload:
@@ -149,10 +147,15 @@ events:
     payload:
       request_id: request_id
 
-  codeCitation:
-    kind: file.read
+  # Citations are serialized separately at requests[i].codeCitations, not as
+  # response parts. They describe public-code similarity metadata rather than a
+  # file access, so preserve them as neutral request-correlated information.
+  code_citation:
+    kind: session.info
     payload:
-      uri: value
+      value: value
+      license: license
+      snippet: snippet
       request_id: request_id
 
   markdownContent:
@@ -179,5 +182,4 @@ events:
     payload:
       request_id: request_id
       model: model
-      first_progress_ms: first_progress_ms
-      duration_ms: total_elapsed_ms
+      duration_ms: elapsed_ms

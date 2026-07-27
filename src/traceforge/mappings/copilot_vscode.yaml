@@ -157,6 +157,7 @@ events:
       license: license
       snippet: snippet
       request_id: request_id
+      model: model
 
   markdownContent:
     kind: message.assistant

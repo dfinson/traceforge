@@ -12,7 +12,8 @@ Paths mix dict keys and integer array indices, e.g.
 ``["requests", 2, "response"]``. The interesting state lives under ``requests[]``:
 each request carries the user ``message``, a streamed ``response`` part list
 (``thinking`` / ``toolInvocationSerialized`` / markdown text / file refs),
-request-level ``codeCitations``, and terminal request-level ``elapsedMs``.
+request-level ``codeCitations`` and ``elapsedMs``. Final response parts may be
+written after ``elapsedMs``.
 
 Because the adapter feeds records one physical line at a time, this preprocessor
 keeps a small amount of module-level state (a mirror of the ``requests`` index ->
@@ -105,6 +106,7 @@ def _emit_request(req: dict[str, Any], idx: int) -> list[dict[str, Any]]:
     _REQ_IDS[idx] = req.get("requestId")
     _REQ_MODELS[idx] = req.get("modelId")
     _REQ_TS[idx] = req.get("timestamp")
+    _REQ_CITATION_COUNTS.pop(idx, None)
 
     message = req.get("message")
     text = message.get("text") if isinstance(message, dict) else message

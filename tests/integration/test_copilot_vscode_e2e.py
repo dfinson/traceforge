@@ -174,6 +174,10 @@ def test_request_level_code_citations_preserve_metadata(adapter: MappedJsonAdapt
         if event.kind == EventKind.SESSION_INFO and event.payload.get("license")
     ]
     assert [event.payload["request_id"] for event in citations] == ["req-0", "req-0"]
+    assert [event.payload["model"] for event in citations] == [
+        "copilot/claude-opus-4.7",
+        "copilot/claude-opus-4.7",
+    ]
     assert citations[0].payload["value"] == appended_citation["value"]
     assert citations[0].payload["license"] == "MIT"
     assert citations[0].payload["snippet"] == "def one(): ..."

@@ -5,6 +5,10 @@
 #         anomalyco/opencode packages/core/src/session/event.ts (re-export of @opencode-ai/schema/session-event)
 #         anomalyco/opencode packages/opencode/src/server/routes/instance/httpapi/handlers/event.ts
 #         anomalyco/opencode packages/opencode/src/event-v2-bridge.ts
+#         anomalyco/opencode packages/schema/src/v1/session.ts (V1 durable schemas)
+#         anomalyco/opencode packages/opencode/src/session/session.ts (V1 publishers)
+# Verified against anomalyco/opencode@55b02116905efff9b8a245ea8f885f3c979101de
+# (dev, 2026-07-27).
 #
 # v1.17 SQLite format: ~/.local/share/opencode/opencode.db table `event`.
 # Rows are {id, aggregate_id=sessionID, seq, type, data}. The type has a
@@ -26,7 +30,8 @@
 #   {timestamp: number (ms UTC), sessionID: string, ...event-specific fields}
 #
 # Base schema: {timestamp: DateTimeUtcFromMillis, sessionID: Session.ID}
-# All events use aggregate: "sessionID", version: 1.
+# V2 events use aggregate "sessionID" and version 1 except step.ended/step.failed,
+# which currently use version 2 and are stored with a .2 suffix.
 #
 # Token usage: session.next.step.ended → properties.tokens =
 #   {input, output, reasoning, cache: {read, write}}
@@ -37,12 +42,9 @@
 # wire format bypasses Schema.encode — JSON.stringify calls DateTime.Utc.toJSON()
 # which returns an ISO 8601 UTC string (e.g. "2024-01-15T12:34:56.789Z").
 #
-# Prompt shape: {text: string, files?: FileAttachment[], agents?: AgentAttachment[],
-#   references?: ReferenceAttachment[]}
+# Prompt shape: {text: string, files?: FileAttachment[], agents?: AgentAttachment[]}
 # FileAttachment: {uri, mime, name?, description?, source?}
 # AgentAttachment: {name, source?}
-# ReferenceAttachment: {name, kind: "local"|"git"|"invalid", uri?, repository?,
-#   branch?, target?, targetUri?, problem?, source?}
 #
 # ToolOutput.Structured: Record<string, any> (plain JSON object)
 # ToolOutput.Content: tagged union on "type":
@@ -51,7 +53,7 @@
 # Instance SSE also emits server.connected and server.heartbeat with empty properties.
 # Global SSE (/global/event) uses a DIFFERENT wire format — not covered by this YAML.
 #
-# 26 total events defined in All union at v1.2.24.
+# 31 events defined in SessionEvent.Definitions at the verified upstream commit.
 
 framework: opencode
 framework_version: ">=1.17,<2.0"
@@ -72,6 +74,10 @@ motivation:
 
 events:
   # ── v1.17 SQLite event-sourced store ──
+  # KEEP all 14 normalized mappings: the local daemon still publishes and durably
+  # projects these V1 events alongside V2. message.updated.1 and
+  # message.part.updated.1 are the local persistence path for message/part content;
+  # deleting these mappings loses data.
   session.created:
     kind: session.started
     payload:
@@ -171,7 +177,6 @@ events:
       call_id: data.part.callID
       tool: data.part.tool
       input: data.part.state.input
-      raw_input: data.part.state.raw
       metadata: data.part.metadata
 
   message.part.tool.completed:
@@ -189,7 +194,7 @@ events:
       metadata: data.part.state.metadata
       time: data.part.state.time
 
-  message.part.tool.failed:
+  message.part.tool.error:
     kind: tool.call.failed
     payload:
       session_id: data.sessionID
@@ -198,9 +203,9 @@ events:
       call_id: data.part.callID
       tool: data.part.tool
       input: data.part.state.input
-      output: data.part.state.output
       error: data.part.state.error
       metadata: data.part.state.metadata
+      time: data.part.state.time
 
   message.part.step-start:
     kind: llm.call.started
@@ -243,7 +248,6 @@ events:
       prompt_text: properties.prompt.text
       prompt_files: properties.prompt.files
       prompt_agents: properties.prompt.agents
-      prompt_references: properties.prompt.references
 
   session.next.agent.switched:
     kind: workflow.agent_switched
@@ -282,6 +286,7 @@ events:
     kind: llm.call.started
     payload:
       session_id: properties.sessionID
+      assistant_message_id: properties.assistantMessageID
       agent: properties.agent
       model_id: properties.model.id
       provider_id: properties.model.providerID
@@ -292,6 +297,7 @@ events:
     kind: llm.call.completed
     payload:
       session_id: properties.sessionID
+      assistant_message_id: properties.assistantMessageID
       finish: properties.finish
       cost: properties.cost
       input_tokens: properties.tokens.input
@@ -305,6 +311,7 @@ events:
     kind: llm.call.failed
     payload:
       session_id: properties.sessionID
+      assistant_message_id: properties.assistantMessageID
       error_type: properties.error.type
       error_message: properties.error.message
 
@@ -313,17 +320,20 @@ events:
     kind: message.assistant.started
     payload:
       session_id: properties.sessionID
+      assistant_message_id: properties.assistantMessageID
 
   session.next.text.delta:
     kind: message.assistant.chunk
     payload:
       session_id: properties.sessionID
+      assistant_message_id: properties.assistantMessageID
       delta: properties.delta
 
   session.next.text.ended:
     kind: message.assistant
     payload:
       session_id: properties.sessionID
+      assistant_message_id: properties.assistantMessageID
       text: properties.text
 
   # ── Reasoning streaming ──
@@ -331,12 +341,14 @@ events:
     kind: llm.reasoning.started
     payload:
       session_id: properties.sessionID
+      assistant_message_id: properties.assistantMessageID
       reasoning_id: properties.reasoningID
 
   session.next.reasoning.delta:
     kind: llm.reasoning.chunk
     payload:
       session_id: properties.sessionID
+      assistant_message_id: properties.assistantMessageID
       reasoning_id: properties.reasoningID
       delta: properties.delta
 
@@ -344,6 +356,7 @@ events:
     kind: llm.reasoning.completed
     payload:
       session_id: properties.sessionID
+      assistant_message_id: properties.assistantMessageID
       reasoning_id: properties.reasoningID
       text: properties.text
 
@@ -352,6 +365,7 @@ events:
     kind: tool.input.started
     payload:
       session_id: properties.sessionID
+      assistant_message_id: properties.assistantMessageID
       call_id: properties.callID
       name: properties.name
 
@@ -359,6 +373,7 @@ events:
     kind: tool.input.chunk
     payload:
       session_id: properties.sessionID
+      assistant_message_id: properties.assistantMessageID
       call_id: properties.callID
       delta: properties.delta
 
@@ -366,6 +381,7 @@ events:
     kind: tool.input.completed
     payload:
       session_id: properties.sessionID
+      assistant_message_id: properties.assistantMessageID
       call_id: properties.callID
       text: properties.text
 
@@ -374,6 +390,7 @@ events:
     kind: tool.call.started
     payload:
       session_id: properties.sessionID
+      assistant_message_id: properties.assistantMessageID
       call_id: properties.callID
       tool: properties.tool
       input: properties.input
@@ -384,6 +401,7 @@ events:
     kind: tool.call.progress
     payload:
       session_id: properties.sessionID
+      assistant_message_id: properties.assistantMessageID
       call_id: properties.callID
       structured: properties.structured
       content: properties.content
@@ -392,6 +410,7 @@ events:
     kind: tool.call.completed
     payload:
       session_id: properties.sessionID
+      assistant_message_id: properties.assistantMessageID
       call_id: properties.callID
       structured: properties.structured
       content: properties.content
@@ -402,6 +421,7 @@ events:
     kind: tool.call.failed
     payload:
       session_id: properties.sessionID
+      assistant_message_id: properties.assistantMessageID
       call_id: properties.callID
       error_type: properties.error.type
       error_message: properties.error.message
@@ -451,15 +471,24 @@ events:
     kind: session.info
     payload:
       session_id: properties.sessionID
-      directory: properties.subdirectory
+      directory: properties.location.directory
+      subdirectory: properties.subdirectory
   session.next.prompt.admitted:
     kind: message.user
     payload:
       session_id: properties.sessionID
+      message_id: properties.messageID
       delivery: properties.delivery
       text: properties.prompt.text
+      prompt_files: properties.prompt.files
+      prompt_agents: properties.prompt.agents
   session.next.context.updated:
     kind: session.info
     payload:
       session_id: properties.sessionID
       message_id: properties.messageID
+      text: properties.text
+
+  # RevertEvent.Staged/Cleared/Committed are schema/projector definitions, but the
+  # local daemon emits V1 session.updated.1 for revert operations. Leave them
+  # unmapped until an ingestible emission path and an honest canonical kind exist.

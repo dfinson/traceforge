@@ -50,8 +50,9 @@ def preprocess_opencode(obj: dict[str, Any]) -> list[dict[str, Any]]:
         role = _MESSAGE_ROLES.get((session_id, message_id), "unknown")
         norm["message_role"] = role
 
-        if part_type == "text" and role in {"user", "assistant"}:
-            norm["type"] = f"message.part.text.{role}"
+        if part_type == "text":
+            text_role = role if role in {"user", "assistant"} else "unknown"
+            norm["type"] = f"message.part.text.{text_role}"
         elif part_type == "tool":
             state = part.get("state") if isinstance(part.get("state"), dict) else {}
             status = str(state.get("status") or "unknown")

@@ -8,6 +8,69 @@ from typing import Any
 from traceforge.preprocessors.registry import register_preprocessor
 
 
+_AGENT_STATUS_TAGS = frozenset(
+    {
+        "pending_init",
+        "running",
+        "interrupted",
+        "completed",
+        "errored",
+        "shutdown",
+        "not_found",
+    }
+)
+_STATUS_EVENT_TYPES = frozenset(
+    {
+        "collab_agent_spawn_end",
+        "collab_agent_spawn_failed",
+        "collab_agent_interaction_end",
+        "collab_waiting_end",
+        "collab_close_end",
+        "collab_resume_end",
+    }
+)
+
+
+def _sanitize_agent_statuses(value: Any) -> Any:
+    """Remove message/error bodies from externally tagged AgentStatus values."""
+    if isinstance(value, list):
+        return [_sanitize_agent_statuses(item) for item in value]
+    if isinstance(value, dict):
+        if len(value) == 1:
+            variant = next(iter(value))
+            if variant in _AGENT_STATUS_TAGS:
+                return variant
+        return {key: _sanitize_agent_statuses(item) for key, item in value.items()}
+    return value
+
+
+def _sanitize_collab_event(
+    block_type: str, payload: dict[str, Any], base: dict[str, Any]
+) -> dict[str, Any]:
+    normalized = {
+        key: _sanitize_agent_statuses(value)
+        if key in {"status", "agent_statuses", "statuses"}
+        else value
+        for key, value in payload.items()
+        if key not in {"type", "block_type"}
+    }
+    if block_type == "event.collab_agent_spawn_end" and not payload.get("new_thread_id"):
+        block_type = "event.collab_agent_spawn_failed"
+    return {**base, "block_type": block_type, **normalized}
+
+
+def _redact_agent_communication(obj: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(obj)
+    encrypted = normalized.get("content_encrypted") is True or (
+        "encrypted_content" in normalized and normalized["encrypted_content"] is not None
+    )
+    normalized.pop("encrypted_content", None)
+    if encrypted:
+        normalized.pop("content", None)
+        normalized["content_encrypted"] = True
+    return normalized
+
+
 @register_preprocessor("codex")
 def preprocess_codex(obj: dict[str, Any]) -> list[dict[str, Any]]:
     """Normalize a Codex CLI rollout line into traceforge-friendly dicts.
@@ -27,6 +90,9 @@ def preprocess_codex(obj: dict[str, Any]) -> list[dict[str, Any]]:
     - event_msg.exec_command_end → "tool.exec_end"
     - event_msg.mcp_tool_call_begin → "tool.mcp_call"
     - event_msg.mcp_tool_call_end → "tool.mcp_result"
+    - inter_agent_communication → "agent.communication" (direct/legacy shape)
+    - inter_agent_communication_metadata → "agent.communication.metadata"
+    - response_item.agent_message → "agent.communication" (current persisted shape)
     - session_meta → "session.meta"
     - response_item.message (role=assistant) → "message.assistant"
     - event_msg.user_message → "message.user"
@@ -37,6 +103,11 @@ def preprocess_codex(obj: dict[str, Any]) -> list[dict[str, Any]]:
 
     # If already preprocessed (has block_type but no rollout structure), pass through
     if "block_type" in obj and not top_type:
+        block_type = str(obj["block_type"])
+        if block_type.removeprefix("event.") in _STATUS_EVENT_TYPES:
+            return [_sanitize_collab_event(block_type, obj, {})]
+        if block_type == "agent.communication":
+            return [_redact_agent_communication(obj)]
         return [obj]
 
     if not isinstance(payload, dict):
@@ -53,6 +124,34 @@ def preprocess_codex(obj: dict[str, Any]) -> list[dict[str, Any]]:
                 "model_provider": payload.get("model_provider", ""),
                 "cwd": payload.get("cwd", ""),
                 "cli_version": payload.get("cli_version", ""),
+            }
+        ]
+
+    if top_type == "inter_agent_communication":
+        normalized = {
+            **base,
+            "block_type": "agent.communication",
+            "id": payload.get("id"),
+            "author": payload.get("author"),
+            "recipient": payload.get("recipient"),
+            "other_recipients": payload.get("other_recipients", []),
+            "trigger_turn": payload.get("trigger_turn"),
+            "turn_id": (payload.get("internal_chat_message_metadata_passthrough") or {}).get(
+                "turn_id"
+            ),
+        }
+        if "encrypted_content" in payload and payload["encrypted_content"] is not None:
+            normalized["content_encrypted"] = True
+        else:
+            normalized["content"] = payload.get("content", "")
+        return [normalized]
+
+    if top_type == "inter_agent_communication_metadata":
+        return [
+            {
+                **base,
+                "block_type": "agent.communication.metadata",
+                "trigger_turn": payload.get("trigger_turn"),
             }
         ]
 
@@ -129,6 +228,37 @@ def _handle_response_item(payload: dict[str, Any], base: dict[str, Any]) -> list
             }
         ]
 
+    if item_type == "agent_message":
+        content_blocks = payload.get("content", [])
+        content_encrypted = False
+        text_parts: list[str] = []
+        if isinstance(content_blocks, list):
+            for block in content_blocks:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "encrypted_content":
+                    content_encrypted = True
+                    text_parts.clear()
+                    break
+                if block.get("type") == "input_text":
+                    text_parts.append(str(block.get("text", "")))
+
+        normalized = {
+            **base,
+            "block_type": "agent.communication",
+            "id": payload.get("id"),
+            "author": payload.get("author"),
+            "recipient": payload.get("recipient"),
+            "turn_id": (payload.get("internal_chat_message_metadata_passthrough") or {}).get(
+                "turn_id"
+            ),
+        }
+        if content_encrypted:
+            normalized["content_encrypted"] = True
+        else:
+            normalized["content"] = "\n".join(part for part in text_parts if part)
+        return [normalized]
+
     if item_type == "reasoning":
         return []
 
@@ -184,6 +314,9 @@ def _handle_response_item(payload: dict[str, Any], base: dict[str, Any]) -> list
 def _handle_event_msg(payload: dict[str, Any], base: dict[str, Any]) -> list[dict[str, Any]]:
     """Handle event_msg lines (lifecycle events)."""
     event_type = payload.get("type", "")
+
+    if event_type in _STATUS_EVENT_TYPES:
+        return [_sanitize_collab_event(f"event.{event_type}", payload, base)]
 
     if event_type == "exec_command_begin":
         return [

@@ -36,6 +36,7 @@ from traceforge.preprocessors.claude import preprocess_claude
 from traceforge.preprocessors.cline import preprocess_cline
 from traceforge.preprocessors.codex import preprocess_codex
 from traceforge.preprocessors.continue_dev import preprocess_continue
+from traceforge.preprocessors.copilot_vscode import _emit_request as _copilot_vscode_emit_request
 from traceforge.preprocessors.copilot_vscode import _reset as _copilot_vscode_reset
 from traceforge.preprocessors.copilot_vscode import preprocess_copilot_vscode
 from traceforge.preprocessors.goose import preprocess_goose
@@ -494,6 +495,52 @@ class TestCline:
     def test_invalid_json_text_left_unparsed(self) -> None:
         out = preprocess_cline({"type": "say", "say": "api_req_started", "text": "not json"})
         assert "parsed" not in out[0]
+
+    @pytest.mark.parametrize("status", ["started", "completed", "skipped", "failed", "cancelled"])
+    def test_compaction_status_qualifies_compound_type(self, status: str) -> None:
+        out = preprocess_cline(
+            {
+                "type": "say",
+                "say": "compaction",
+                "text": json.dumps({"status": status, "mode": "auto"}),
+            }
+        )
+        assert out[0]["type"] == f"say.compaction.{status}"
+
+    def test_compaction_json_preserves_structured_counters(self) -> None:
+        info = {
+            "status": "completed",
+            "mode": "manual",
+            "tokensBefore": 12000,
+            "tokensAfter": 4300,
+            "messagesBefore": 48,
+            "messagesAfter": 17,
+        }
+        out = preprocess_cline({"type": "say", "say": "compaction", "text": json.dumps(info)})
+        assert out[0]["parsed"] == info
+
+    def test_future_compaction_status_uses_safe_base_type(self) -> None:
+        out = preprocess_cline(
+            {
+                "type": "say",
+                "say": "compaction",
+                "text": '{"status":"paused","mode":"auto"}',
+            }
+        )
+        assert out[0]["type"] == "say.compaction"
+        assert out[0]["parsed"] == {"status": "paused", "mode": "auto"}
+
+    def test_invalid_compaction_json_uses_safe_base_type(self) -> None:
+        out = preprocess_cline({"type": "say", "say": "compaction", "text": "not json"})
+        assert out[0]["type"] == "say.compaction"
+        assert "parsed" not in out[0]
+
+    def test_non_string_compaction_status_uses_safe_base_type(self) -> None:
+        out = preprocess_cline(
+            {"type": "say", "say": "compaction", "text": '{"status":[],"mode":"auto"}'}
+        )
+        assert out[0]["type"] == "say.compaction"
+        assert out[0]["parsed"] == {"status": [], "mode": "auto"}
 
     def test_unknown_type_passthrough(self) -> None:
         obj = {"type": "other", "text": "x"}
@@ -1152,21 +1199,45 @@ class TestCopilotVscode:
         assert out[0]["event_type"] == "user_message"
         assert out[0]["request_id"] == "r1"
 
-    def test_result_set_record(self) -> None:
+    def test_elapsed_ms_set_record(self) -> None:
         _copilot_vscode_reset()
         preprocess_copilot_vscode({"kind": 0, "v": {"sessionId": "s", "requests": []}})
         preprocess_copilot_vscode(
             {"kind": 2, "k": ["requests"], "v": [{"requestId": "r1", "message": {"text": "hi"}}]}
         )
-        out = preprocess_copilot_vscode(
+        result_out = preprocess_copilot_vscode(
             {
                 "kind": 1,
                 "k": ["requests", 0, "result"],
                 "v": {"timings": {"firstProgress": 10, "totalElapsed": 99}},
             }
         )
+        assert result_out == []
+
+        out = preprocess_copilot_vscode({"kind": 1, "k": ["requests", 0, "elapsedMs"], "v": 101})
         assert out[0]["event_type"] == "request_result"
-        assert out[0]["total_elapsed_ms"] == 99
+        assert out[0]["elapsed_ms"] == 101
+        assert "first_progress_ms" not in out[0]
+
+    def test_request_index_reuse_resets_citation_state(self) -> None:
+        citation = {
+            "kind": "codeCitation",
+            "value": {"path": "/source"},
+            "license": "MIT",
+            "snippet": "source",
+        }
+        _copilot_vscode_reset()
+
+        first = _copilot_vscode_emit_request(
+            {"requestId": "r1", "message": {"text": "one"}, "codeCitations": [citation]}, 0
+        )
+        second = _copilot_vscode_emit_request(
+            {"requestId": "r2", "message": {"text": "two"}, "codeCitations": [citation]}, 0
+        )
+
+        assert [event["event_type"] for event in first] == ["user_message", "code_citation"]
+        assert [event["event_type"] for event in second] == ["user_message", "code_citation"]
+        assert second[1]["request_id"] == "r2"
 
     def test_already_typed_row_passthrough(self) -> None:
         obj = {"event_type": "user_message", "text": "x"}

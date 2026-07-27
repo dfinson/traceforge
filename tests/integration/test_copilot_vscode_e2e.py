@@ -14,7 +14,9 @@ import pytest
 from traceforge.adapters.mapped_json import MappedJsonAdapter
 from traceforge.types import EventKind
 
-MAPPINGS_DIR = Path(__file__).resolve().parent.parent.parent / "src" / "traceforge" / "mappings"
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+MAPPINGS_DIR = REPO_ROOT / "src" / "traceforge" / "mappings"
+RAW_FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures" / "raw_traces" / "copilot_vscode"
 
 
 @pytest.fixture
@@ -46,7 +48,12 @@ def _snapshot(session_id: str = "sess-1") -> dict:
     }
 
 
-def _request(request_id: str, text: str, model: str = "copilot/claude-opus-4.7") -> dict:
+def _request(
+    request_id: str,
+    text: str,
+    model: str = "copilot/claude-opus-4.7",
+    code_citations: list[dict] | None = None,
+) -> dict:
     return {
         "kind": 2,
         "k": ["requests"],
@@ -58,6 +65,7 @@ def _request(request_id: str, text: str, model: str = "copilot/claude-opus-4.7")
                 "agent": {"id": "github.copilot.editsAgent"},
                 "message": {"text": text, "parts": []},
                 "response": [],
+                "codeCitations": code_citations or [],
             }
         ],
     }
@@ -71,8 +79,15 @@ def _result(idx: int) -> dict:
     return {
         "kind": 1,
         "k": ["requests", idx, "result"],
-        "v": {"timings": {"firstProgress": 5142, "totalElapsed": 206179}},
+        "v": {
+            "details": "Claude Opus 4.7",
+            "timings": {"firstProgress": 5142, "totalElapsed": 206179},
+        },
     }
+
+
+def _elapsed(idx: int, elapsed_ms: int = 206241) -> dict:
+    return {"kind": 1, "k": ["requests", idx, "elapsedMs"], "v": elapsed_ms}
 
 
 def test_full_turn_maps_to_canonical_kinds(adapter: MappedJsonAdapter) -> None:
@@ -98,6 +113,7 @@ def test_full_turn_maps_to_canonical_kinds(adapter: MappedJsonAdapter) -> None:
                 ],
             ),
             _result(0),
+            _elapsed(0),
         ],
     )
     kinds = [e.kind for e in events]
@@ -120,6 +136,66 @@ def test_full_turn_maps_to_canonical_kinds(adapter: MappedJsonAdapter) -> None:
     assert tool.payload["tool_call_id"] == "call-1"
     assert tool.payload["invocation"] == "Reading app/main.py"
     assert tool.payload["request_id"] == "req-0"
+
+    completed = next(e for e in events if e.kind == EventKind.LLM_CALL_COMPLETED)
+    assert completed.payload["duration_ms"] == 206241
+    assert "first_progress_ms" not in completed.payload
+
+
+def test_request_level_code_citations_preserve_metadata(adapter: MappedJsonAdapter) -> None:
+    appended_citation = {
+        "kind": "codeCitation",
+        "value": {"scheme": "https", "authority": "github.com", "path": "/octo/one"},
+        "license": "MIT",
+        "snippet": "def one(): ...",
+    }
+    set_citation = {
+        "kind": "codeCitation",
+        "value": {"scheme": "https", "authority": "github.com", "path": "/octo/two"},
+        "license": "Apache-2.0",
+        "snippet": "def two(): ...",
+    }
+    events = _feed(
+        adapter,
+        [
+            _snapshot(),
+            _request("req-0", "first", code_citations=[appended_citation]),
+            {
+                "kind": 1,
+                "k": ["requests", 0, "codeCitations"],
+                "v": [appended_citation, set_citation],
+            },
+        ],
+    )
+
+    citations = [
+        event
+        for event in events
+        if event.kind == EventKind.SESSION_INFO and event.payload.get("license")
+    ]
+    assert [event.payload["request_id"] for event in citations] == ["req-0", "req-0"]
+    assert [event.payload["model"] for event in citations] == [
+        "copilot/claude-opus-4.7",
+        "copilot/claude-opus-4.7",
+    ]
+    assert citations[0].payload["value"] == appended_citation["value"]
+    assert citations[0].payload["license"] == "MIT"
+    assert citations[0].payload["snippet"] == "def one(): ..."
+    assert citations[1].payload["license"] == "Apache-2.0"
+
+
+def test_real_fixture_uses_request_elapsed_ms(adapter: MappedJsonAdapter) -> None:
+    fixture = RAW_FIXTURES_DIR / "demo_issue_tracker_get_endpoint.jsonl"
+    records = [
+        json.loads(line) for line in fixture.read_text(encoding="utf-8").splitlines() if line
+    ]
+
+    events = _feed(adapter, records)
+
+    completed = [event for event in events if event.kind == EventKind.LLM_CALL_COMPLETED]
+    assert len(completed) == 1
+    assert completed[0].payload["duration_ms"] == 363545
+    assert "first_progress_ms" not in completed[0].payload
 
 
 def test_thinking_feeds_tool_motivation(adapter: MappedJsonAdapter) -> None:

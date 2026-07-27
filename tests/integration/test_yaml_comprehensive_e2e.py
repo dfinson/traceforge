@@ -1523,6 +1523,91 @@ class TestClineMappings:
             id="say.conditional_rules_applied",
         ),
         pytest.param(
+            _cline_say("compaction", json.dumps({"status": "started", "mode": "auto"})),
+            EventKind.WORKFLOW_STARTED,
+            {
+                "content": json.dumps({"status": "started", "mode": "auto"}),
+                "status": "started",
+                "mode": "auto",
+            },
+            id="say.compaction.started",
+        ),
+        pytest.param(
+            _cline_say(
+                "compaction",
+                json.dumps(
+                    {
+                        "status": "completed",
+                        "mode": "manual",
+                        "tokensBefore": 12000,
+                        "tokensAfter": 4300,
+                        "messagesBefore": 48,
+                        "messagesAfter": 17,
+                    }
+                ),
+            ),
+            EventKind.WORKFLOW_COMPLETED,
+            {
+                "content": json.dumps(
+                    {
+                        "status": "completed",
+                        "mode": "manual",
+                        "tokensBefore": 12000,
+                        "tokensAfter": 4300,
+                        "messagesBefore": 48,
+                        "messagesAfter": 17,
+                    }
+                ),
+                "status": "completed",
+                "mode": "manual",
+                "tokens_before": 12000,
+                "tokens_after": 4300,
+                "messages_before": 48,
+                "messages_after": 17,
+            },
+            id="say.compaction.completed",
+        ),
+        pytest.param(
+            _cline_say("compaction", json.dumps({"status": "skipped", "mode": "auto"})),
+            EventKind.SESSION_INFO,
+            {
+                "content": json.dumps({"status": "skipped", "mode": "auto"}),
+                "status": "skipped",
+                "mode": "auto",
+            },
+            id="say.compaction.skipped",
+        ),
+        pytest.param(
+            _cline_say("compaction", json.dumps({"status": "failed", "mode": "manual"})),
+            EventKind.WORKFLOW_FAILED,
+            {
+                "content": json.dumps({"status": "failed", "mode": "manual"}),
+                "status": "failed",
+                "mode": "manual",
+            },
+            id="say.compaction.failed",
+        ),
+        pytest.param(
+            _cline_say("compaction", json.dumps({"status": "cancelled", "mode": "auto"})),
+            EventKind.SESSION_INFO,
+            {
+                "content": json.dumps({"status": "cancelled", "mode": "auto"}),
+                "status": "cancelled",
+                "mode": "auto",
+            },
+            id="say.compaction.cancelled",
+        ),
+        pytest.param(
+            _cline_say("compaction", json.dumps({"status": "paused", "mode": "auto"})),
+            EventKind.SESSION_INFO,
+            {
+                "content": json.dumps({"status": "paused", "mode": "auto"}),
+                "status": "paused",
+                "mode": "auto",
+            },
+            id="say.compaction.future-status",
+        ),
+        pytest.param(
             _cline_say(None, "Fallback assistant text"),
             EventKind.MESSAGE_ASSISTANT,
             {"content": "Fallback assistant text"},

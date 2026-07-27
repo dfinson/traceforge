@@ -1,5 +1,5 @@
 {
-  "event_count": 7,
+  "event_count": 8,
   "kinds": {
     "llm.call.started": 1,
     "message.assistant": 1,
@@ -7,6 +7,7 @@
     "reasoning.started": 1,
     "session.ended": 1,
     "session.started": 1,
-    "tool.call.completed": 1
+    "tool.call.completed": 1,
+    "workflow.completed": 1
   }
 }

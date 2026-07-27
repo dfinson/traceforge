@@ -1525,7 +1525,11 @@ class TestClineMappings:
         pytest.param(
             _cline_say("compaction", json.dumps({"status": "started", "mode": "auto"})),
             EventKind.WORKFLOW_STARTED,
-            {"status": "started", "mode": "auto"},
+            {
+                "content": json.dumps({"status": "started", "mode": "auto"}),
+                "status": "started",
+                "mode": "auto",
+            },
             id="say.compaction.started",
         ),
         pytest.param(
@@ -1544,6 +1548,16 @@ class TestClineMappings:
             ),
             EventKind.WORKFLOW_COMPLETED,
             {
+                "content": json.dumps(
+                    {
+                        "status": "completed",
+                        "mode": "manual",
+                        "tokensBefore": 12000,
+                        "tokensAfter": 4300,
+                        "messagesBefore": 48,
+                        "messagesAfter": 17,
+                    }
+                ),
                 "status": "completed",
                 "mode": "manual",
                 "tokens_before": 12000,
@@ -1556,19 +1570,31 @@ class TestClineMappings:
         pytest.param(
             _cline_say("compaction", json.dumps({"status": "skipped", "mode": "auto"})),
             EventKind.SESSION_INFO,
-            {"status": "skipped", "mode": "auto"},
+            {
+                "content": json.dumps({"status": "skipped", "mode": "auto"}),
+                "status": "skipped",
+                "mode": "auto",
+            },
             id="say.compaction.skipped",
         ),
         pytest.param(
             _cline_say("compaction", json.dumps({"status": "failed", "mode": "manual"})),
             EventKind.WORKFLOW_FAILED,
-            {"status": "failed", "mode": "manual"},
+            {
+                "content": json.dumps({"status": "failed", "mode": "manual"}),
+                "status": "failed",
+                "mode": "manual",
+            },
             id="say.compaction.failed",
         ),
         pytest.param(
             _cline_say("compaction", json.dumps({"status": "cancelled", "mode": "auto"})),
             EventKind.SESSION_INFO,
-            {"status": "cancelled", "mode": "auto"},
+            {
+                "content": json.dumps({"status": "cancelled", "mode": "auto"}),
+                "status": "cancelled",
+                "mode": "auto",
+            },
             id="say.compaction.cancelled",
         ),
         pytest.param(

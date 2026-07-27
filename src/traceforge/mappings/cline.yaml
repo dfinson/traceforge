@@ -198,9 +198,12 @@ events:
     kind: session.info
     payload:
       content: text
+  # Upstream emits only say.compaction; the preprocessor synthesizes these
+  # status-qualified keys from ClineCompactionInfo.status for canonical mapping.
   say.compaction.started:
     kind: workflow.started
     payload:
+      content: text
       status: parsed.status
       mode: parsed.mode
       tokens_before: parsed.tokensBefore
@@ -210,6 +213,7 @@ events:
   say.compaction.completed:
     kind: workflow.completed
     payload:
+      content: text
       status: parsed.status
       mode: parsed.mode
       tokens_before: parsed.tokensBefore
@@ -219,16 +223,19 @@ events:
   say.compaction.failed:
     kind: workflow.failed
     payload:
+      content: text
       status: parsed.status
       mode: parsed.mode
       tokens_before: parsed.tokensBefore
       tokens_after: parsed.tokensAfter
       messages_before: parsed.messagesBefore
       messages_after: parsed.messagesAfter
-  # No registered workflow skipped/cancelled kinds; preserve them as information.
+  # The current canonical vocabulary has no workflow skipped/cancelled constants;
+  # preserve these terminal states as session information.
   say.compaction.skipped:
     kind: session.info
     payload:
+      content: text
       status: parsed.status
       mode: parsed.mode
       tokens_before: parsed.tokensBefore
@@ -238,6 +245,7 @@ events:
   say.compaction.cancelled:
     kind: session.info
     payload:
+      content: text
       status: parsed.status
       mode: parsed.mode
       tokens_before: parsed.tokensBefore

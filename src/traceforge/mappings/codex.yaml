@@ -208,6 +208,17 @@ events:
       model: model
       reasoning_effort: reasoning_effort
       status: status
+  event.collab_agent_spawn_failed:
+    kind: agent.failed
+    payload:
+      operation_id: call_id
+      completed_at_ms: completed_at_ms
+      sender_thread_id: sender_thread_id
+      agent_nickname: new_agent_nickname
+      agent_role: new_agent_role
+      model: model
+      reasoning_effort: reasoning_effort
+      status: status
   event.collab_agent_interaction_begin:
     kind: session.info
     payload:

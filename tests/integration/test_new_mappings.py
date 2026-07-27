@@ -100,11 +100,96 @@ class TestCodexMapping:
             "original_type": "event.reasoning_raw_content_delta",
         }
 
+    def test_successful_spawn_has_agent_id(self, adapter):
+        raw = {
+            "type": "event_msg",
+            "payload": {
+                "type": "collab_agent_spawn_end",
+                "call_id": "spawn-1",
+                "completed_at_ms": 100,
+                "sender_thread_id": "thread-1",
+                "new_thread_id": "thread-2",
+                "new_agent_nickname": "researcher",
+                "new_agent_role": "explore",
+                "model": "gpt-5",
+                "reasoning_effort": "high",
+                "status": {"completed": "SECRET FINAL MESSAGE"},
+            },
+        }
+        event = list(adapter.parse(json.dumps(raw)))[0]
+        assert event.kind == EventKind.AGENT_SPAWNED
+        assert event.payload == {
+            "operation_id": "spawn-1",
+            "completed_at_ms": 100,
+            "sender_thread_id": "thread-1",
+            "agent_id": "thread-2",
+            "agent_nickname": "researcher",
+            "agent_role": "explore",
+            "model": "gpt-5",
+            "reasoning_effort": "high",
+            "status": "completed",
+        }
+        assert "SECRET" not in json.dumps(event.payload)
+
+    def test_failed_spawn_is_not_emitted_as_spawned(self, adapter):
+        raw = {
+            "type": "event_msg",
+            "payload": {
+                "type": "collab_agent_spawn_end",
+                "call_id": "spawn-2",
+                "completed_at_ms": 200,
+                "sender_thread_id": "thread-1",
+                "new_thread_id": None,
+                "model": "gpt-5",
+                "reasoning_effort": "high",
+                "status": {"errored": "SECRET SPAWN ERROR"},
+            },
+        }
+        event = list(adapter.parse(json.dumps(raw)))[0]
+        assert event.kind == EventKind.AGENT_FAILED
+        assert event.payload == {
+            "operation_id": "spawn-2",
+            "completed_at_ms": 200,
+            "sender_thread_id": "thread-1",
+            "model": "gpt-5",
+            "reasoning_effort": "high",
+            "status": "errored",
+        }
+        assert "agent_id" not in event.payload
+        assert "SECRET" not in json.dumps(event.payload)
+
+    def test_wait_status_bodies_are_not_mapped(self, adapter):
+        raw = {
+            "type": "event_msg",
+            "payload": {
+                "type": "collab_waiting_end",
+                "call_id": "wait-1",
+                "completed_at_ms": 300,
+                "sender_thread_id": "thread-1",
+                "agent_statuses": [
+                    {
+                        "agent": {"thread_id": "thread-2"},
+                        "status": {"completed": "SECRET FINAL MESSAGE"},
+                    }
+                ],
+                "statuses": {"thread-2": {"errored": "SECRET ERROR"}},
+            },
+        }
+        event = list(adapter.parse(json.dumps(raw)))[0]
+        assert event.kind == EventKind.SESSION_INFO
+        assert event.payload == {
+            "operation_id": "wait-1",
+            "completed_at_ms": 300,
+            "sender_thread_id": "thread-1",
+            "agent_statuses": [{"agent": {"thread_id": "thread-2"}, "status": "completed"}],
+            "statuses": {"thread-2": "errored"},
+        }
+        assert "SECRET" not in json.dumps(event.payload)
+
     @pytest.mark.parametrize(
         ("event_type", "expected_kind"),
         [
             ("collab_agent_spawn_begin", EventKind.SESSION_INFO),
-            ("collab_agent_spawn_end", EventKind.AGENT_SPAWNED),
             ("collab_agent_interaction_begin", EventKind.SESSION_INFO),
             ("collab_agent_interaction_end", EventKind.AGENT_HANDOFF),
             ("collab_waiting_begin", EventKind.SESSION_INFO),
@@ -132,8 +217,10 @@ class TestCodexMapping:
         event = list(adapter.parse(json.dumps(raw)))[0]
         assert event.kind == expected_kind
         assert event.metadata.raw_kind == f"event.{event_type}"
-        correlation_field = "event_id" if event_type == "sub_agent_activity" else "operation_id"
-        assert event.payload[correlation_field] in {"call-1", "activity-1"}
+        if event_type == "sub_agent_activity":
+            assert event.payload["event_id"] == "activity-1"
+        else:
+            assert event.payload["operation_id"] == "call-1"
 
 
 class TestLangGraphMapping:

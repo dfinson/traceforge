@@ -11,8 +11,9 @@ Each physical line is one journal record:
 Paths mix dict keys and integer array indices, e.g.
 ``["requests", 2, "response"]``. The interesting state lives under ``requests[]``:
 each request carries the user ``message``, a streamed ``response`` part list
-(``thinking`` / ``toolInvocationSerialized`` / markdown text / file refs), and a
-terminal ``result`` with timings.
+(``thinking`` / ``toolInvocationSerialized`` / markdown text / file refs),
+request-level ``codeCitations`` and ``elapsedMs``. Final response parts may be
+written after ``elapsedMs``.
 
 Because the adapter feeds records one physical line at a time, this preprocessor
 keeps a small amount of module-level state (a mirror of the ``requests`` index ->
@@ -31,6 +32,7 @@ from traceforge.preprocessors.registry import register_preprocessor
 _REQ_IDS: dict[int, str | None] = {}
 _REQ_MODELS: dict[int, Any] = {}
 _REQ_TS: dict[int, Any] = {}
+_REQ_CITATION_COUNTS: dict[int, int] = {}
 _REQ_COUNT = [0]  # boxed int so helpers can mutate it
 
 
@@ -38,6 +40,7 @@ def _reset() -> None:
     _REQ_IDS.clear()
     _REQ_MODELS.clear()
     _REQ_TS.clear()
+    _REQ_CITATION_COUNTS.clear()
     _REQ_COUNT[0] = 0
 
 
@@ -62,11 +65,48 @@ def _emit_part(part: Any, idx: int) -> dict[str, Any] | None:
     return flat
 
 
+def _emit_citations(citations: Any, idx: int) -> list[dict[str, Any]]:
+    """Turn request-level VS Code code citations into informational events."""
+    if not isinstance(citations, list):
+        return []
+
+    citations = [citation for citation in citations if isinstance(citation, dict)]
+    start = min(_REQ_CITATION_COUNTS.get(idx, 0), len(citations))
+    _REQ_CITATION_COUNTS[idx] = len(citations)
+
+    out = []
+    for citation in citations[start:]:
+        out.append(
+            {
+                "event_type": "code_citation",
+                "request_id": _REQ_IDS.get(idx),
+                "model": _REQ_MODELS.get(idx),
+                "value": citation.get("value"),
+                "license": citation.get("license"),
+                "snippet": citation.get("snippet"),
+                "timestamp": _REQ_TS.get(idx),
+            }
+        )
+    return out
+
+
+def _emit_completion(elapsed_ms: int | float, idx: int) -> dict[str, Any]:
+    """Emit active generation duration from the v3 request-level field."""
+    return {
+        "event_type": "request_result",
+        "request_id": _REQ_IDS.get(idx),
+        "model": _REQ_MODELS.get(idx),
+        "elapsed_ms": elapsed_ms,
+        "timestamp": _REQ_TS.get(idx),
+    }
+
+
 def _emit_request(req: dict[str, Any], idx: int) -> list[dict[str, Any]]:
     """Register a request at ``idx`` and emit its user message + any inline parts."""
     _REQ_IDS[idx] = req.get("requestId")
     _REQ_MODELS[idx] = req.get("modelId")
     _REQ_TS[idx] = req.get("timestamp")
+    _REQ_CITATION_COUNTS.pop(idx, None)
 
     message = req.get("message")
     text = message.get("text") if isinstance(message, dict) else message
@@ -87,22 +127,11 @@ def _emit_request(req: dict[str, Any], idx: int) -> list[dict[str, Any]]:
         emitted = _emit_part(part, idx)
         if emitted is not None:
             out.append(emitted)
-    result = req.get("result")
-    if isinstance(result, dict):
-        out.append(_emit_result(result, idx))
+    out.extend(_emit_citations(req.get("codeCitations"), idx))
+    elapsed_ms = req.get("elapsedMs")
+    if isinstance(elapsed_ms, (int, float)) and not isinstance(elapsed_ms, bool):
+        out.append(_emit_completion(elapsed_ms, idx))
     return out
-
-
-def _emit_result(result: dict[str, Any], idx: int) -> dict[str, Any]:
-    timings = result.get("timings") if isinstance(result.get("timings"), dict) else {}
-    return {
-        "event_type": "request_result",
-        "request_id": _REQ_IDS.get(idx),
-        "model": _REQ_MODELS.get(idx),
-        "first_progress_ms": timings.get("firstProgress"),
-        "total_elapsed_ms": timings.get("totalElapsed"),
-        "timestamp": _REQ_TS.get(idx),
-    }
 
 
 @register_preprocessor("copilot_vscode")
@@ -161,11 +190,18 @@ def preprocess_copilot_vscode(obj: dict[str, Any]) -> list[dict[str, Any]]:
             return out
         return []
 
-    # ── Set records: only the terminal per-request result is interesting ──────
+    # ── Set records: request metadata serialized outside response parts ───────
     if kind == 1:
-        if len(path) == 3 and path[0] == "requests" and path[2] == "result":
-            if isinstance(value, dict):
-                return [_emit_result(value, path[1])]
+        if len(path) == 3 and path[0] == "requests":
+            idx = path[1]
+            if path[2] == "codeCitations":
+                return _emit_citations(value, idx)
+            if (
+                path[2] == "elapsedMs"
+                and isinstance(value, (int, float))
+                and not isinstance(value, bool)
+            ):
+                return [_emit_completion(value, idx)]
         return []
 
     return []

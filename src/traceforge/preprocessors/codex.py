@@ -27,6 +27,9 @@ def preprocess_codex(obj: dict[str, Any]) -> list[dict[str, Any]]:
     - event_msg.exec_command_end → "tool.exec_end"
     - event_msg.mcp_tool_call_begin → "tool.mcp_call"
     - event_msg.mcp_tool_call_end → "tool.mcp_result"
+    - inter_agent_communication → "agent.communication" (direct/legacy shape)
+    - inter_agent_communication_metadata → "agent.communication.metadata"
+    - response_item.agent_message → "agent.communication" (current persisted shape)
     - session_meta → "session.meta"
     - response_item.message (role=assistant) → "message.assistant"
     - event_msg.user_message → "message.user"
@@ -53,6 +56,31 @@ def preprocess_codex(obj: dict[str, Any]) -> list[dict[str, Any]]:
                 "model_provider": payload.get("model_provider", ""),
                 "cwd": payload.get("cwd", ""),
                 "cli_version": payload.get("cli_version", ""),
+            }
+        ]
+
+    if top_type == "inter_agent_communication":
+        normalized = {
+            **base,
+            "block_type": "agent.communication",
+            "id": payload.get("id"),
+            "author": payload.get("author"),
+            "recipient": payload.get("recipient"),
+            "other_recipients": payload.get("other_recipients", []),
+            "trigger_turn": payload.get("trigger_turn"),
+        }
+        if payload.get("encrypted_content"):
+            normalized["content_encrypted"] = True
+        else:
+            normalized["content"] = payload.get("content", "")
+        return [normalized]
+
+    if top_type == "inter_agent_communication_metadata":
+        return [
+            {
+                **base,
+                "block_type": "agent.communication.metadata",
+                "trigger_turn": payload.get("trigger_turn"),
             }
         ]
 
@@ -128,6 +156,37 @@ def _handle_response_item(payload: dict[str, Any], base: dict[str, Any]) -> list
                 "content": text,
             }
         ]
+
+    if item_type == "agent_message":
+        content_blocks = payload.get("content", [])
+        content_encrypted = False
+        text_parts: list[str] = []
+        if isinstance(content_blocks, list):
+            for block in content_blocks:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "encrypted_content":
+                    content_encrypted = True
+                    text_parts.clear()
+                    break
+                if block.get("type") == "input_text":
+                    text_parts.append(str(block.get("text", "")))
+
+        normalized = {
+            **base,
+            "block_type": "agent.communication",
+            "id": payload.get("id"),
+            "author": payload.get("author"),
+            "recipient": payload.get("recipient"),
+            "turn_id": (payload.get("internal_chat_message_metadata_passthrough") or {}).get(
+                "turn_id"
+            ),
+        }
+        if content_encrypted:
+            normalized["content_encrypted"] = True
+        else:
+            normalized["content"] = "\n".join(part for part in text_parts if part)
+        return [normalized]
 
     if item_type == "reasoning":
         return []

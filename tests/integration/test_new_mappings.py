@@ -1,4 +1,4 @@
-"""Integration tests for new YAML mappings: langgraph, pydantic_ai, smolagents.
+"""Integration tests for YAML mappings that need explicit behavior coverage.
 
 Validates that each YAML loads correctly, maps events to proper canonical kinds,
 and preserves payload extraction through dot-path resolution.
@@ -15,6 +15,125 @@ from traceforge.adapters.mapped_json import MappedJsonAdapter
 from traceforge.types import EventKind
 
 MAPPINGS_DIR = Path(__file__).resolve().parents[2] / "src" / "traceforge" / "mappings"
+
+
+class TestCodexMapping:
+    """Current Codex rollout and collaboration coverage."""
+
+    @pytest.fixture
+    def adapter(self) -> MappedJsonAdapter:
+        return MappedJsonAdapter.from_yaml(
+            str(MAPPINGS_DIR / "codex.yaml"), session_id="codex-session"
+        )
+
+    def test_durable_inter_agent_communication(self, adapter):
+        raw_lines = [
+            {
+                "type": "inter_agent_communication_metadata",
+                "payload": {"trigger_turn": True},
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "agent_message",
+                    "id": "amsg-1",
+                    "author": "/root",
+                    "recipient": "/root/researcher",
+                    "content": [{"type": "input_text", "text": "Inspect the parser"}],
+                    "internal_chat_message_metadata_passthrough": {"turn_id": "turn-1"},
+                },
+            },
+        ]
+        events = [event for raw in raw_lines for event in adapter.parse(json.dumps(raw))]
+        assert [event.kind for event in events] == [
+            EventKind.SESSION_INFO,
+            EventKind.AGENT_HANDOFF,
+        ]
+        assert events[0].payload == {"trigger_turn": True}
+        assert events[1].payload == {
+            "communication_id": "amsg-1",
+            "from_agent": "/root",
+            "to_agent": "/root/researcher",
+            "content": "Inspect the parser",
+            "turn_id": "turn-1",
+        }
+
+    def test_encrypted_inter_agent_content_is_not_exposed(self, adapter):
+        raw = {
+            "type": "response_item",
+            "payload": {
+                "type": "agent_message",
+                "id": "amsg-2",
+                "author": "/root",
+                "recipient": "/root/researcher",
+                "content": [
+                    {"type": "input_text", "text": "envelope"},
+                    {"type": "encrypted_content", "encrypted_content": "ciphertext"},
+                ],
+            },
+        }
+        event = list(adapter.parse(json.dumps(raw)))[0]
+        assert event.kind == EventKind.AGENT_HANDOFF
+        assert event.payload["content_encrypted"] is True
+        assert "content" not in event.payload
+        assert "encrypted_content" not in event.payload
+
+    def test_raw_reasoning_delta_is_not_exposed(self, adapter):
+        raw = {
+            "type": "event_msg",
+            "payload": {
+                "type": "reasoning_raw_content_delta",
+                "thread_id": "thread-1",
+                "turn_id": "turn-1",
+                "item_id": "item-1",
+                "content_index": 2,
+                "delta": "sensitive chain of thought",
+            },
+        }
+        event = list(adapter.parse(json.dumps(raw)))[0]
+        assert event.kind == EventKind.RAW
+        assert event.payload == {
+            "thread_id": "thread-1",
+            "turn_id": "turn-1",
+            "item_id": "item-1",
+            "content_index": 2,
+            "original_type": "event.reasoning_raw_content_delta",
+        }
+
+    @pytest.mark.parametrize(
+        ("event_type", "expected_kind"),
+        [
+            ("collab_agent_spawn_begin", EventKind.SESSION_INFO),
+            ("collab_agent_spawn_end", EventKind.AGENT_SPAWNED),
+            ("collab_agent_interaction_begin", EventKind.SESSION_INFO),
+            ("collab_agent_interaction_end", EventKind.AGENT_HANDOFF),
+            ("collab_waiting_begin", EventKind.SESSION_INFO),
+            ("collab_waiting_end", EventKind.SESSION_INFO),
+            ("collab_close_begin", EventKind.SESSION_INFO),
+            ("collab_close_end", EventKind.SESSION_INFO),
+            ("collab_resume_begin", EventKind.SESSION_INFO),
+            ("collab_resume_end", EventKind.SESSION_INFO),
+            ("sub_agent_activity", EventKind.SESSION_INFO),
+        ],
+    )
+    def test_collaboration_event_coverage(self, adapter, event_type, expected_kind):
+        raw = {
+            "type": "event_msg",
+            "payload": {
+                "type": event_type,
+                "call_id": "call-1",
+                "event_id": "activity-1",
+                "sender_thread_id": "thread-1",
+                "receiver_thread_id": "thread-2",
+                "new_thread_id": "thread-2",
+                "kind": "interacted",
+            },
+        }
+        event = list(adapter.parse(json.dumps(raw)))[0]
+        assert event.kind == expected_kind
+        assert event.metadata.raw_kind == f"event.{event_type}"
+        correlation_field = "event_id" if event_type == "sub_agent_activity" else "operation_id"
+        assert event.payload[correlation_field] in {"call-1", "activity-1"}
 
 
 class TestLangGraphMapping:

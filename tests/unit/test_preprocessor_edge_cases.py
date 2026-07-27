@@ -748,6 +748,98 @@ class TestCodex:
         assert out[0]["block_type"] == "tool.exec_begin"
         assert out[0]["command"] == ["ls"]
 
+    def test_inter_agent_communication_flattened(self) -> None:
+        out = preprocess_codex(
+            {
+                "type": "inter_agent_communication",
+                "payload": {
+                    "id": "comm-1",
+                    "author": "/root",
+                    "recipient": "/root/researcher",
+                    "content": "Investigate the parser",
+                    "trigger_turn": True,
+                },
+            }
+        )
+        assert out[0]["block_type"] == "agent.communication"
+        assert out[0]["author"] == "/root"
+        assert out[0]["recipient"] == "/root/researcher"
+        assert out[0]["trigger_turn"] is True
+
+    def test_current_inter_agent_communication_pair_flattened(self) -> None:
+        metadata = preprocess_codex(
+            {
+                "type": "inter_agent_communication_metadata",
+                "payload": {"trigger_turn": True},
+            }
+        )
+        message = preprocess_codex(
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "agent_message",
+                    "id": "amsg-1",
+                    "author": "/root",
+                    "recipient": "/root/researcher",
+                    "content": [{"type": "input_text", "text": "Investigate the parser"}],
+                    "internal_chat_message_metadata_passthrough": {"turn_id": "turn-1"},
+                },
+            }
+        )
+        assert metadata == [
+            {
+                "_timestamp": "",
+                "block_type": "agent.communication.metadata",
+                "trigger_turn": True,
+            }
+        ]
+        assert message[0]["block_type"] == "agent.communication"
+        assert message[0]["content"] == "Investigate the parser"
+        assert message[0]["turn_id"] == "turn-1"
+
+    def test_encrypted_agent_message_content_is_not_exposed(self) -> None:
+        out = preprocess_codex(
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "agent_message",
+                    "author": "/root",
+                    "recipient": "/root/researcher",
+                    "content": [
+                        {"type": "input_text", "text": "envelope"},
+                        {"type": "encrypted_content", "encrypted_content": "ciphertext"},
+                    ],
+                },
+            }
+        )
+        assert out[0]["content_encrypted"] is True
+        assert "content" not in out[0]
+        assert "encrypted_content" not in out[0]
+
+    @pytest.mark.parametrize(
+        "event_type",
+        [
+            "collab_close_begin",
+            "collab_close_end",
+            "collab_resume_begin",
+            "collab_resume_end",
+        ],
+    )
+    def test_close_and_resume_events_pass_through(self, event_type: str) -> None:
+        out = preprocess_codex(
+            {
+                "type": "event_msg",
+                "payload": {
+                    "type": event_type,
+                    "call_id": "call-1",
+                    "receiver_thread_id": "thread-2",
+                },
+            }
+        )
+        assert out[0]["block_type"] == f"event.{event_type}"
+        assert out[0]["call_id"] == "call-1"
+        assert out[0]["receiver_thread_id"] == "thread-2"
+
     def test_turn_context_dropped(self) -> None:
         assert preprocess_codex({"type": "turn_context", "payload": {}}) == []
 

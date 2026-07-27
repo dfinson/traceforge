@@ -53,7 +53,7 @@
 # Instance SSE also emits server.connected and server.heartbeat with empty properties.
 # Global SSE (/global/event) uses a DIFFERENT wire format — not covered by this YAML.
 #
-# 31 events defined in SessionEvent.Definitions at the verified upstream commit.
+# 32 events defined in SessionEvent.Definitions at the verified upstream commit.
 
 framework: opencode
 framework_version: ">=1.17,<2.0"
@@ -151,7 +151,9 @@ events:
       text: data.part.text
 
   message.part.text.unknown:
-    kind: message.assistant
+    # A watcher may start after the role-bearing message row. Keep the text
+    # without inventing user or assistant authorship.
+    kind: raw
     payload:
       session_id: data.sessionID
       message_id: data.part.messageID
@@ -245,6 +247,7 @@ events:
     kind: message.user
     payload:
       session_id: properties.sessionID
+      message_id: properties.messageID
       prompt_text: properties.prompt.text
       prompt_files: properties.prompt.files
       prompt_agents: properties.prompt.agents

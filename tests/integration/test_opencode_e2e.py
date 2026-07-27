@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
 from traceforge.adapters.mapped_json import MappedJsonAdapter
+from traceforge.preprocessors.opencode import _reset as _opencode_reset
 from traceforge.types import EventKind
 
 MAPPINGS_DIR = Path(__file__).resolve().parent.parent.parent / "src" / "traceforge" / "mappings"
@@ -17,6 +19,13 @@ def adapter() -> MappedJsonAdapter:
     return MappedJsonAdapter.from_yaml(
         str(MAPPINGS_DIR / "opencode.yaml"), session_id="opencode-e2e"
     )
+
+
+@pytest.fixture(autouse=True)
+def reset_opencode_state() -> Iterator[None]:
+    _opencode_reset()
+    yield
+    _opencode_reset()
 
 
 def _parse(adapter: MappedJsonAdapter, event: dict) -> list:
@@ -61,15 +70,19 @@ class TestOpenCodeMappings:
         pytest.param(
             _wire_event(
                 "session.next.prompted",
+                messageID="msg-user-1",
                 prompt={
                     "text": "Summarize this repo",
                     "files": None,
                     "agents": None,
-                    "references": None,
                 },
             ),
             "message.user",
-            {"session_id": "sess-abc", "prompt_text": "Summarize this repo"},
+            {
+                "session_id": "sess-abc",
+                "message_id": "msg-user-1",
+                "prompt_text": "Summarize this repo",
+            },
             id="session.next.prompted",
         ),
         pytest.param(
@@ -437,6 +450,7 @@ class TestOpenCodeMappings:
             adapter,
             _wire_event(
                 "session.next.prompted",
+                messageID="msg-user-attachments",
                 prompt={
                     "text": "Review these files",
                     "files": files,
@@ -448,9 +462,13 @@ class TestOpenCodeMappings:
         result = results[0]
         assert result.kind == "message.user"
         assert result.kind == EventKind.MESSAGE_USER
-        assert result.payload["prompt_text"] == "Review these files"
-        assert result.payload["prompt_files"] == files
-        assert result.payload["prompt_agents"] == agents
+        assert result.payload == {
+            "session_id": "sess-abc",
+            "message_id": "msg-user-attachments",
+            "prompt_text": "Review these files",
+            "prompt_files": files,
+            "prompt_agents": agents,
+        }
 
     def test_tool_content_union(self, adapter: MappedJsonAdapter) -> None:
         content = [
@@ -600,6 +618,7 @@ class TestOpenCodeMappings:
                 "message.part.updated.1",
                 {
                     "sessionID": "sqlite-session",
+                    "time": 1719828000000,
                     "part": {
                         "id": "part-user",
                         "messageID": "msg-user",
@@ -614,6 +633,7 @@ class TestOpenCodeMappings:
                 "message.part.updated.1",
                 {
                     "sessionID": "sqlite-session",
+                    "time": 1719828000001,
                     "part": {
                         "id": "part-assistant",
                         "messageID": "msg-assistant",
@@ -628,6 +648,7 @@ class TestOpenCodeMappings:
                 "message.part.updated.1",
                 {
                     "sessionID": "sqlite-session",
+                    "time": 1719828000002,
                     "part": {
                         "id": "part-unknown",
                         "messageID": "msg-unknown",
@@ -636,12 +657,13 @@ class TestOpenCodeMappings:
                         "text": "uncorrelated",
                     },
                 },
-                "message.assistant",
+                "raw",
             ),
             (
                 "message.part.updated.1",
                 {
                     "sessionID": "sqlite-session",
+                    "time": 1719828000003,
                     "part": {
                         "id": "part-reasoning",
                         "messageID": "msg-assistant",
@@ -656,6 +678,7 @@ class TestOpenCodeMappings:
                 "message.part.updated.1",
                 {
                     "sessionID": "sqlite-session",
+                    "time": 1719828000004,
                     "part": {
                         "id": "part-tool-running",
                         "messageID": "msg-assistant",
@@ -672,6 +695,7 @@ class TestOpenCodeMappings:
                 "message.part.updated.1",
                 {
                     "sessionID": "sqlite-session",
+                    "time": 1719828000005,
                     "part": {
                         "id": "part-tool-completed",
                         "messageID": "msg-assistant",
@@ -688,6 +712,7 @@ class TestOpenCodeMappings:
                 "message.part.updated.1",
                 {
                     "sessionID": "sqlite-session",
+                    "time": 1719828000006,
                     "part": {
                         "id": "part-tool-error",
                         "messageID": "msg-assistant",
@@ -710,6 +735,7 @@ class TestOpenCodeMappings:
                 "message.part.updated.1",
                 {
                     "sessionID": "sqlite-session",
+                    "time": 1719828000007,
                     "part": {
                         "id": "part-step-start",
                         "messageID": "msg-assistant",
@@ -723,6 +749,7 @@ class TestOpenCodeMappings:
                 "message.part.updated.1",
                 {
                     "sessionID": "sqlite-session",
+                    "time": 1719828000008,
                     "part": {
                         "id": "part-step-finish",
                         "messageID": "msg-assistant",
@@ -737,6 +764,7 @@ class TestOpenCodeMappings:
                 "message.part.updated.1",
                 {
                     "sessionID": "sqlite-session",
+                    "time": 1719828000009,
                     "part": {
                         "id": "part-patch",
                         "messageID": "msg-assistant",
@@ -758,6 +786,15 @@ class TestOpenCodeMappings:
         assert [result.kind for result in results] == [expected for _, _, expected in rows]
         assert results[4].payload["text"] == "question"
         assert results[5].payload["text"] == "answer"
+        assert results[6].kind == EventKind.RAW
+        assert results[6].kind not in {EventKind.MESSAGE_ASSISTANT, EventKind.MESSAGE_USER}
+        assert results[6].payload == {
+            "session_id": "sqlite-session",
+            "message_id": "msg-unknown",
+            "part_id": "part-unknown",
+            "text": "uncorrelated",
+            "original_type": "message.part.text.unknown",
+        }
         assert results[10].payload["error"] == "offline"
         assert results[10].payload["metadata"] == {"interrupted": True}
 

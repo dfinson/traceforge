@@ -12,6 +12,10 @@ _VERSION_SUFFIX_RE = re.compile(r"\.\d+$")
 _MESSAGE_ROLES: dict[tuple[str, str], str] = {}
 
 
+def _reset() -> None:
+    _MESSAGE_ROLES.clear()
+
+
 @register_preprocessor("opencode")
 def preprocess_opencode(obj: dict[str, Any]) -> list[dict[str, Any]]:
     """Normalize OpenCode's SQLite `event` rows to stable mapping types."""

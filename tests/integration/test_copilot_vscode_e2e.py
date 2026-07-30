@@ -120,7 +120,7 @@ def test_full_turn_maps_to_canonical_kinds(adapter: MappedJsonAdapter) -> None:
     assert kinds == [
         EventKind.SESSION_STARTED,
         EventKind.MESSAGE_USER,
-        EventKind.REASONING_STARTED,
+        EventKind.LLM_REASONING_CHUNK,
         EventKind.TOOL_CALL_COMPLETED,
         EventKind.MESSAGE_ASSISTANT,
         EventKind.LLM_CALL_COMPLETED,

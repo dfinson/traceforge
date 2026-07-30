@@ -83,7 +83,7 @@ events:
     payload:
       content: text
   say.reasoning:
-    kind: reasoning.started
+    kind: llm.reasoning.chunk
     payload:
       content: text
   say.completion_result:

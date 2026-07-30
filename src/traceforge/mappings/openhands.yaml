@@ -120,7 +120,7 @@ events:
       command: args.code
       source: source
   think:
-    kind: reasoning.started
+    kind: llm.reasoning.started
     payload:
       content: args.thought
       source: source
@@ -279,7 +279,7 @@ events:
       output: content
       source: source
   observation.think:
-    kind: reasoning.completed
+    kind: llm.reasoning.completed
     payload:
       content: content
       source: source

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
+import yaml
 
 from traceforge import EventKind, EventMetadata, SessionEvent, TelemetrySpan, UsageRecord
 from tests.conftest import make_event, make_span, make_usage
@@ -45,6 +47,31 @@ class TestEventKind:
         assert is_known_kind("message.user")
         assert is_known_kind("tool.call.started")
         assert not is_known_kind("totally.unknown.thing")
+
+    def test_reasoning_uses_one_llm_vocabulary(self):
+        from traceforge.types import KNOWN_KINDS
+
+        canonical = {
+            "llm.reasoning.started",
+            "llm.reasoning.chunk",
+            "llm.reasoning.completed",
+            "llm.reasoning.failed",
+        }
+        assert canonical.issubset(KNOWN_KINDS)
+
+        mappings_dir = Path(__file__).resolve().parents[2] / "src" / "traceforge" / "mappings"
+        mapped_reasoning_kinds: set[str] = set()
+        for mapping_path in mappings_dir.glob("*.yaml"):
+            mapping = yaml.safe_load(mapping_path.read_text(encoding="utf-8"))
+            for section in ("events", "spans"):
+                for event in (mapping.get(section) or {}).values():
+                    if not isinstance(event, dict):
+                        continue
+                    kind = event.get("kind")
+                    if isinstance(kind, str) and ("reasoning" in kind or "thinking" in kind):
+                        mapped_reasoning_kinds.add(kind)
+
+        assert mapped_reasoning_kinds <= canonical
 
 
 class TestEventMetadata:

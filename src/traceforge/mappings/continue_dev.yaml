@@ -37,7 +37,7 @@ events:
 
   # ── Thinking / reasoning ──────────────────────────────────────────────────
   assistant.thinking:
-    kind: reasoning.started
+    kind: llm.reasoning.chunk
     payload:
       content: content
 

@@ -73,7 +73,7 @@ events:
 
   # ── Additional MessageContent variants (preprocessor extracts from content_json) ──
   thinking:
-    kind: reasoning.started
+    kind: llm.reasoning.chunk
     payload:
       content: thinking
   image:
@@ -97,9 +97,10 @@ events:
       tool_call_id: id
       arguments: input
   redacted_thinking:
-    kind: reasoning.redacted
+    kind: llm.reasoning.chunk
     payload:
       data: data
+      redacted: redacted
   system_notification:
     kind: session.info
     payload:

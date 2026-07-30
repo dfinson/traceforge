@@ -363,18 +363,18 @@ events:
 
   # ── Agent reasoning ──
   agent_reasoning_started:
-    kind: reasoning.started
+    kind: llm.reasoning.started
     payload:
       agent_id: agent_id
       event_id: event_id
   agent_reasoning_completed:
-    kind: reasoning.completed
+    kind: llm.reasoning.completed
     payload:
       agent_id: agent_id
       event_id: event_id
       plan: plan
   agent_reasoning_failed:
-    kind: reasoning.failed
+    kind: llm.reasoning.failed
     payload:
       agent_id: agent_id
       error: error
@@ -442,7 +442,7 @@ events:
 
   # ── LLM guardrails ──
   llm_thinking_chunk:
-    kind: reasoning.chunk
+    kind: llm.reasoning.chunk
     payload:
       content: chunk
   llm_guardrail_started:

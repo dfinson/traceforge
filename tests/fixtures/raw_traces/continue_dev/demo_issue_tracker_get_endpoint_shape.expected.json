@@ -1,9 +1,9 @@
 {
   "event_count": 5,
   "kinds": {
+    "llm.reasoning.chunk": 1,
     "message.assistant": 1,
     "message.user": 1,
-    "reasoning.started": 1,
     "tool.call.completed": 1,
     "tool.call.started": 1
   }

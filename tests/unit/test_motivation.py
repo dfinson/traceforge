@@ -33,7 +33,7 @@ def _make_adapter(
                 payload={"content": "text"},
             ),
             "assistant.thinking": EventMapping(
-                kind="llm.thinking.chunk",
+                kind="llm.reasoning.chunk",
                 payload={"content": "thinking"},
             ),
             "assistant.intent": EventMapping(

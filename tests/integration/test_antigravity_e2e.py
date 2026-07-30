@@ -89,7 +89,7 @@ def test_full_trajectory_maps_to_canonical_kinds(adapter: MappedJsonAdapter) -> 
     assert kinds == [
         EventKind.MESSAGE_SYSTEM,
         EventKind.MESSAGE_USER,
-        EventKind.REASONING_STARTED,
+        EventKind.LLM_REASONING_CHUNK,
         EventKind.MESSAGE_ASSISTANT,
         EventKind.TOOL_CALL_STARTED,
         EventKind.SESSION_INFO,

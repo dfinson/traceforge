@@ -65,14 +65,15 @@ class EventKind:
     LLM_CALL_COMPLETED: Final = "llm.call.completed"
     LLM_CALL_FAILED: Final = "llm.call.failed"
     LLM_OUTPUT_CHUNK: Final = "llm.output.chunk"
-    LLM_THINKING_CHUNK: Final = "llm.thinking.chunk"
+    LLM_REASONING_STARTED: Final = "llm.reasoning.started"
+    LLM_REASONING_CHUNK: Final = "llm.reasoning.chunk"
+    LLM_REASONING_COMPLETED: Final = "llm.reasoning.completed"
+    LLM_REASONING_FAILED: Final = "llm.reasoning.failed"
 
-    # --- Planning / reasoning ---
+    # --- Planning ---
     PLANNING_STARTED: Final = "planning.started"
     PLANNING_COMPLETED: Final = "planning.completed"
     PLANNING_FAILED: Final = "planning.failed"
-    REASONING_STARTED: Final = "reasoning.started"
-    REASONING_COMPLETED: Final = "reasoning.completed"
 
     # --- Agent orchestration ---
     AGENT_SPAWNED: Final = "agent.spawned"

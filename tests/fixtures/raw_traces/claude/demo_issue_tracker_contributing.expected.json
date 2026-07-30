@@ -1,7 +1,7 @@
 {
   "event_count": 36,
   "kinds": {
-    "llm.thinking.chunk": 4,
+    "llm.reasoning.chunk": 4,
     "message.assistant": 4,
     "message.user": 1,
     "telemetry.usage": 15,

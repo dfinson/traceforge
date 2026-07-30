@@ -47,7 +47,10 @@ components:
         - llm.call.failed
         - llm.call.started
         - llm.output.chunk
-        - llm.thinking.chunk
+        - llm.reasoning.chunk
+        - llm.reasoning.completed
+        - llm.reasoning.failed
+        - llm.reasoning.started
         - mcp.connection.completed
         - mcp.connection.failed
         - mcp.connection.started
@@ -66,8 +69,6 @@ components:
         - planning.failed
         - planning.started
         - raw
-        - reasoning.completed
-        - reasoning.started
         - session.abort
         - session.ended
         - session.error

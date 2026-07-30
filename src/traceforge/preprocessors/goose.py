@@ -81,6 +81,7 @@ def preprocess_goose(obj: dict[str, Any]) -> list[dict[str, Any]]:
                     "role": "redacted_thinking",
                     "created_at": ts,
                     "data": item.get("data", ""),
+                    "redacted": True,
                 }
             )
         elif item_type == "image":

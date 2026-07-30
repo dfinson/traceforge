@@ -75,7 +75,7 @@ _PHASE_GOLDEN: list[tuple[str, str]] = [
     ("message.assistant", "planning"),  # "I've fixed the bug in main.py ..."
     ("message.user", "planning"),  # "Thanks, run the tests now"
     ("tool.call.completed", "verification"),  # pytest result (3 passed)
-    ("llm.thinking.chunk", "verification"),  # "The tests all pass now."
+    ("llm.reasoning.chunk", "verification"),  # "The tests all pass now."
     ("message.assistant", "planning"),  # "All 3 tests pass. The fix is working ..."
 ]
 

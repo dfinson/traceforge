@@ -276,7 +276,7 @@ class TestMappedJsonFullPipeline:
         assert len(all_events) == 6
         kinds = [e.kind for e in all_events]
         assert kinds[0] == "message.user"
-        assert kinds[1] == "reasoning.started"
+        assert kinds[1] == "llm.reasoning.started"
         assert kinds[2] == "file.read"
         assert kinds[3] == "command.started"
         assert kinds[4] == "file.edited"

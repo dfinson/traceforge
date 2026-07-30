@@ -157,7 +157,7 @@ events:
       content: data.content
 
   assistant.reasoning:
-    kind: reasoning.started
+    kind: llm.reasoning.chunk
     payload:
       content: data.content
 

@@ -184,7 +184,7 @@ class TestOpenHandsRealData:
         }
         results = _parse_event("openhands.yaml", event)
         assert len(results) == 1
-        assert results[0].kind == EventKind.REASONING_STARTED
+        assert results[0].kind == EventKind.LLM_REASONING_STARTED
         assert results[0].payload["content"] == "I should check the project structure first"
 
     def test_message_action_user(self):

@@ -56,7 +56,7 @@ events:
 
   # ── Reasoning ────────────────────────────────────────────────────────────
   thinking:
-    kind: reasoning.started
+    kind: llm.reasoning.chunk
     payload:
       content: content
       step_index: step_index

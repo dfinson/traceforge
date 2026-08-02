@@ -67,7 +67,7 @@ events:
   git_commit:
     kind: tool.call.completed
     payload:
-      tool_name: git
+      tool_name: "literal:git"
       result: commit_sha
       message: commit_message
 

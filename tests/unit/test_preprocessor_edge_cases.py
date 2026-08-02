@@ -490,6 +490,17 @@ class TestCline:
         out = preprocess_cline({"type": "say", "say": "text", "text": "hi"})
         assert out[0]["type"] == "say.text"
 
+    def test_plan_completion_result_preserves_upstream_text(self) -> None:
+        obj = {
+            "ts": 1722600000000,
+            "type": "say",
+            "say": "plan_completion_result",
+            "text": "Here is the implementation plan.",
+            "partial": False,
+        }
+        out = preprocess_cline(obj)
+        assert out == [{**obj, "type": "say.plan_completion_result"}]
+
     def test_ask_subtype(self) -> None:
         out = preprocess_cline({"type": "ask", "ask": "tool", "text": "{}"})
         assert out[0]["type"] == "ask.tool"

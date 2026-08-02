@@ -1361,6 +1361,12 @@ class TestClineMappings:
             id="say.completion_result",
         ),
         pytest.param(
+            _cline_say("plan_completion_result", "Here is the implementation plan"),
+            EventKind.SESSION_ENDED,
+            {"output": "Here is the implementation plan"},
+            id="say.plan_completion_result",
+        ),
+        pytest.param(
             _cline_say("user_feedback", "Please also add tests"),
             EventKind.MESSAGE_USER,
             {"content": "Please also add tests"},

@@ -1349,7 +1349,11 @@ class TestClineMappings:
             id="say.error_retry",
         ),
         pytest.param(
-            _cline_say("reasoning", "Thinking through solution"),
+            _cline_say(
+                "reasoning",
+                "Thinking through solution",
+                reasoning="This field must not win",
+            ),
             EventKind.LLM_REASONING_CHUNK,
             {"content": "Thinking through solution"},
             id="say.reasoning",
@@ -1359,6 +1363,12 @@ class TestClineMappings:
             EventKind.SESSION_ENDED,
             {"output": "All done"},
             id="say.completion_result",
+        ),
+        pytest.param(
+            _cline_say("plan_completion_result", "Here is the implementation plan"),
+            EventKind.PLANNING_COMPLETED,
+            {"plan": "Here is the implementation plan"},
+            id="say.plan_completion_result",
         ),
         pytest.param(
             _cline_say("user_feedback", "Please also add tests"),

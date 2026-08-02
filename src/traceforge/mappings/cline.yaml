@@ -1,7 +1,8 @@
 # Cline / Roo Code event mapping for MappedJsonAdapter
 # Targets: cline >= 3.88 (VS Code extension globalStorage JSON format)
-# Source: cline/cline apps/vscode/src/shared/ExtensionMessage.ts (commit 01617f9)
+# Source: cline/cline apps/vscode/src/shared/ExtensionMessage.ts (v4.1.3, bbfcbcd)
 # say.compaction was added in Cline 4.0.0 (commit 8e5471d, 2026-07-23).
+# say.plan_completion_result was added in Cline 4.1.3.
 #
 # IMPORTANT: Real Cline uses a COMPOUND discriminator:
 #   - type_field "type" has ONLY two values: "ask" or "say"
@@ -40,7 +41,7 @@ motivation:
 
 events:
   # ── Say subtypes (preprocessor synthesizes "say.<subtype>") ──
-  # Verified against ClineSay at commit 01617f9 (36 current values).
+  # Verified against ClineSay at v4.1.3 (37 current values).
   # api_req_retried and error_retry remain for persisted pre-SDK transcripts.
   say.task:
     kind: session.started
@@ -90,6 +91,12 @@ events:
     kind: session.ended
     payload:
       output: text
+  say.plan_completion_result:
+    # SDK plan mode presents this result for approval before Act mode continues.
+    # Unlike completion_result, it is not a terminal session lifecycle event.
+    kind: planning.completed
+    payload:
+      plan: text
   say.user_feedback:
     kind: message.user
     payload:

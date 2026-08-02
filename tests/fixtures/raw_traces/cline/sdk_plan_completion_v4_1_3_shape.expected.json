@@ -1,0 +1,8 @@
+{
+  "event_count": 3,
+  "kinds": {
+    "llm.reasoning.chunk": 1,
+    "planning.completed": 1,
+    "session.started": 1
+  }
+}

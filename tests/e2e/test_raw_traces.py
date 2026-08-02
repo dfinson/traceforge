@@ -192,3 +192,17 @@ def test_cline_compaction_preserves_native_payload() -> None:
     assert payload["tokens_after"] == 4300
     assert payload["messages_before"] == 48
     assert payload["messages_after"] == 17
+
+
+def test_cline_v4_1_3_sdk_completion_uses_upstream_text_fields() -> None:
+    """SDK plan completion and reasoning rows must read the fields Cline renders."""
+    trace = TRACES_ROOT / "cline" / "sdk_plan_completion_v4_1_3_shape.jsonl"
+    events = _parse_scenario("cline", trace)
+
+    reasoning = [event for event in events if event.kind == EventKind.LLM_REASONING_CHUNK]
+    assert len(reasoning) == 1
+    assert reasoning[0].payload["content"] == "We should update the route and its tests."
+
+    completed = [event for event in events if event.kind == EventKind.PLANNING_COMPLETED]
+    assert len(completed) == 1
+    assert completed[0].payload["plan"] == "1. Update the route.\n2. Add regression tests."

@@ -1,5 +1,5 @@
 # Microsoft 365 Agents SDK (MAF) span mapping for OtelSpanAdapter
-# Targets: microsoft-agents-hosting-core >= 1.0.0
+# Verified against: microsoft-agents-hosting-core 1.3.0 (v1.3.0, 6c30af0)
 # Source: OpenTelemetry spans emitted by the MAF ActivityHandler pipeline.
 # Ingestion: OTel span dicts (from InMemorySpanExporter or OTLP collector)
 #
@@ -7,7 +7,7 @@
 # and specifies which span attributes to extract into the event payload.
 
 framework: maf
-framework_version: ">=1.0.0"
+framework_version: "1.3.0"
 ingestion_mode: stream
 
 # Map span names to canonical event kinds.
@@ -20,9 +20,9 @@ spans:
     attributes:
       activity_type: activity.type
       channel_id: activity.channel_id
-      activity_id: activity.id
       conversation_id: activity.conversation.id
       delivery_mode: activity.delivery_mode
+      is_agentic: activity.is_agentic_request
 
   agents.adapter.send_activities:
     kind: message.assistant
@@ -52,13 +52,15 @@ spans:
     kind: turn.started
     attributes:
       activity_type: activity.type
-      is_agentic: activity.is_agentic_request
+      activity_id: activity.id
+      route_authorized: route.authorized
+      route_matched: route.matched
 
   agents.app.route_handler:
     kind: hook.started
     attributes:
-      route_matched: route.matched
       is_invoke: route.is_invoke
+      is_agentic: route.is_agentic
 
   agents.app.before_turn:
     kind: hook.started

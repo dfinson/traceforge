@@ -1,9 +1,9 @@
 framework: maf
-scenario: demo_issue_tracker_get_endpoint_shape
-source_repo: demo-issue-tracker-api
-framework_version: microsoft-agents-hosting-core 1.1.0
-model: gpt-5
-captured_at: "2026-07-07T09:24:00Z"
-traceforge_commit: b41dafc
-line_count: 11
-notes: SHAPE FIXTURE (not a live capture). Authored OpenTelemetry spans in the exact shape a MAF InMemorySpanExporter/OTLP export emits ({name, start_time_unix_nano, end_time_unix_nano, status, attributes}), consumed by traceforge.adapters.otel.OtelSpanAdapter (spans, NOT JSON lines). Every span name + attribute key is drawn from maf.yaml; the sequence is a representative single-turn ActivityHandler lifecycle (adapter.process -> app.run -> route_handler -> storage -> send_activities) for the canonical demo-repo task. Span/attribute shape is authoritative. Regenerate with scripts/capture_traces/synthesize_maf_otel.py.
+scenario: telemetry_span_wrappers_1_3_0
+source_repo: microsoft/agents-for-python
+framework_version: microsoft-agents-hosting-core 1.3.0
+model: none
+captured_at: "2026-08-02T15:50:33Z"
+traceforge_commit: d151b85
+line_count: 17
+notes: Captured from the real microsoft-agents-hosting-core span wrapper classes at v1.3.0 (6c30af0bb6f0e220fe68978e3ac1fbb14391fe87). Span names come from adapter, app, storage, and turn_context telemetry constants; attributes come from each wrapper's _get_attributes/share implementation. Exported with OpenTelemetry InMemorySpanExporter. Regenerate with scripts/capture_traces/capture_maf_otel.py.

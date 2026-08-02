@@ -23,6 +23,7 @@ from pathlib import Path
 from pydantic_core import to_jsonable_python
 
 from pydantic_ai import Agent
+from pydantic_ai.usage import UsageLimits
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _harness import package_version, write_trace  # noqa: E402
@@ -70,17 +71,15 @@ def _build_agent(ws: Workspace) -> Agent:
     return agent
 
 
-async def _capture(ws: Workspace) -> list[dict]:
+async def _capture_agent(agent: Agent, prompt: str, usage_limits: UsageLimits) -> list[dict]:
     from pydantic_ai.exceptions import UsageLimitExceeded
-    from pydantic_ai.usage import UsageLimits
 
-    agent = _build_agent(ws)
     lines: list[dict] = []
     run = None
     try:
-        async with agent.iter(CANONICAL_TASK, usage_limits=UsageLimits(request_limit=30)) as run:
+        async with agent.iter(prompt, usage_limits=usage_limits) as run:
             async for node in run:
-                if Agent.is_model_request_node(node):
+                if Agent.is_model_request_node(node) or Agent.is_call_tools_node(node):
                     async with node.stream(run.ctx) as stream:
                         async for event in stream:
                             lines.append(to_jsonable_python(event))
@@ -90,6 +89,14 @@ async def _capture(ws: Workspace) -> list[dict]:
         for msg in run.result.all_messages():
             lines.append(to_jsonable_python(msg))
     return lines
+
+
+async def _capture(ws: Workspace) -> list[dict]:
+    return await _capture_agent(
+        _build_agent(ws),
+        CANONICAL_TASK,
+        UsageLimits(request_limit=30),
+    )
 
 
 def main() -> None:

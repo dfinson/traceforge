@@ -1741,6 +1741,22 @@ class TestClineMappings:
 
 
 class TestPydanticAIMappings:
+    REMOVED_TYPES = {
+        "agent_run_start",
+        "agent_run_end",
+        "agent_run_error",
+        "model_request_start",
+        "model_request_error",
+        "user_message",
+        "model_text_response",
+        "model_structured_response",
+        "retry",
+        "token_usage",
+        "output_validation_start",
+        "output_validation_pass",
+        "output_validation_fail",
+    }
+
     CASES = [
         pytest.param(
             {
@@ -1837,35 +1853,61 @@ class TestPydanticAIMappings:
         pytest.param(
             {
                 "event_kind": "function_tool_call",
-                "tool_name": "search",
-                "args": {"query": "test"},
+                "part": {
+                    "part_kind": "tool-call",
+                    "tool_name": "search",
+                    "tool_call_id": "call-1",
+                    "args": {"query": "test"},
+                },
                 "timestamp": "2024-06-15T10:00:07Z",
             },
             EventKind.TOOL_CALL_STARTED,
-            {"tool_name": "search", "arguments": {"query": "test"}},
+            {
+                "tool_name": "search",
+                "tool_call_id": "call-1",
+                "arguments": {"query": "test"},
+            },
             id="tool_call_start",
         ),
         pytest.param(
             {
                 "event_kind": "function_tool_result",
-                "tool_name": "search",
-                "result": "Found results",
+                "part": {
+                    "part_kind": "tool-return",
+                    "tool_name": "search",
+                    "tool_call_id": "call-1",
+                    "content": "Found results",
+                    "outcome": "success",
+                },
                 "timestamp": "2024-06-15T10:00:08Z",
             },
             EventKind.TOOL_CALL_COMPLETED,
-            {"tool_name": "search", "result": "Found results"},
+            {
+                "tool_name": "search",
+                "tool_call_id": "call-1",
+                "result": "Found results",
+            },
             id="tool_call_end",
         ),
         pytest.param(
             {
-                "type": "tool_call_error",
-                "tool_call_id": "tc-1",
-                "tool_name": "search",
-                "error": "Failed",
+                "event_kind": "function_tool_result",
+                "part": {
+                    "part_kind": "tool-return",
+                    "tool_call_id": "tc-1",
+                    "tool_name": "search",
+                    "content": "Failed",
+                    "outcome": "failed",
+                },
                 "timestamp": "2024-06-15T10:00:09Z",
             },
             EventKind.TOOL_CALL_FAILED,
-            {"tool_call_id": "tc-1", "tool_name": "search", "error": "Failed"},
+            {
+                "tool_call_id": "tc-1",
+                "tool_name": "search",
+                "error": "Failed",
+                "outcome": "failed",
+            },
             id="tool_call_error",
         ),
         pytest.param(
@@ -1941,14 +1983,21 @@ class TestPydanticAIMappings:
         ),
         pytest.param(
             {
-                "type": "validation_error",
-                "tool_name": "search",
-                "error": "invalid args",
-                "retry_count": 2,
+                "event_kind": "function_tool_result",
+                "part": {
+                    "part_kind": "retry-prompt",
+                    "tool_name": "search",
+                    "tool_call_id": "call-invalid",
+                    "content": "invalid args",
+                },
                 "timestamp": "2024-06-15T10:00:18Z",
             },
             EventKind.TOOL_VALIDATION_FAILED,
-            {"tool_name": "search", "error": "invalid args", "retry_count": 2},
+            {
+                "tool_name": "search",
+                "tool_call_id": "call-invalid",
+                "error": "invalid args",
+            },
             id="validation_error",
         ),
         pytest.param(
@@ -2010,4 +2059,9 @@ class TestPydanticAIMappings:
     def test_pydantic_ai_mapping(
         self, event: dict, expected_kind: str, expected_payload: dict
     ) -> None:
+        if event.get("type") in self.REMOVED_TYPES:
+            results = _parse_event("pydantic_ai.yaml", event)
+            assert len(results) == 1
+            assert results[0].kind == EventKind.RAW
+            return
         _assert_event("pydantic_ai.yaml", event, expected_kind, expected_payload)

@@ -2,9 +2,9 @@
 
 Runs a genuine ``gpt-5`` session (Responses API, reasoning enabled) that performs
 ``_repo_task.CANONICAL_TASK`` against the first-party demo repo, using real
-file/test tools. The captured bytes are PydanticAI's *genuine* native objects
-(ModelRequest/ModelResponse, PartStart/Delta/End events, ThinkingPart,
-ToolCallPart, ToolReturnPart) serialized with pydantic's own
+file/test tools. Every ``AgentStreamEvent`` variant emitted by the run is kept,
+including output-tool, enqueued-message, and deferred-tool events. The captured
+bytes are PydanticAI's *genuine* native objects serialized with pydantic's own
 ``to_jsonable_python`` — exactly what a real PydanticAI export contains.
 
 Run (isolated env; OPENAI_API_KEY must be a real key):

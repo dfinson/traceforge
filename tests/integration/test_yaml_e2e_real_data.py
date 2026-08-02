@@ -738,17 +738,23 @@ class TestPydanticAIRealData:
         assert len(results) == 1
         assert results[0].kind == EventKind.LLM_OUTPUT_CHUNK
 
-    def test_fictional_type_field_works(self):
-        """The current YAML works IF someone preprocesses to this shape."""
+    def test_function_tool_call_uses_nested_part(self):
+        """FunctionToolCallEvent fields serialize under part."""
         event = {
-            "type": "model_request_start",
-            "timestamp": "2025-01-15T10:00:00Z",
-            "model_name": "gpt-4o",
-            "request_id": "req-123",
+            "event_kind": "function_tool_call",
+            "args_valid": True,
+            "part": {
+                "part_kind": "tool-call",
+                "tool_name": "search",
+                "tool_call_id": "call_123",
+                "args": {"query": "drift"},
+            },
         }
         results = _parse_event("pydantic_ai.yaml", event)
         assert len(results) == 1
-        assert results[0].kind == EventKind.LLM_CALL_STARTED
+        assert results[0].kind == EventKind.TOOL_CALL_STARTED
+        assert results[0].payload["tool_call_id"] == "call_123"
+        assert results[0].payload["arguments"] == {"query": "drift"}
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

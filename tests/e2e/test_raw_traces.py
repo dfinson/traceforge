@@ -176,6 +176,50 @@ def test_pydantic_ai_part_end_carries_real_content() -> None:
     )
 
 
+def test_pydantic_ai_v2_22_serialized_event_payloads() -> None:
+    """v2.22.0 native objects retain corrected and newly added payloads."""
+    fixture = TRACES_ROOT / "pydantic_ai" / "agent_stream_events_v2_22.jsonl"
+    if not fixture.exists():
+        pytest.skip("pydantic_ai v2.22.0 shape fixture not captured")
+
+    events = _parse_scenario("pydantic_ai", fixture)
+    by_kind = {}
+    for event in events:
+        by_kind.setdefault(event.kind, []).append(event.payload)
+
+    started = by_kind[EventKind.TOOL_CALL_STARTED]
+    assert started[0]["tool_call_id"] == "call_function"
+    assert started[0]["tool_name"] == "search"
+    assert started[0]["arguments"] == {"query": "drift"}
+    assert started[1]["tool_call_id"] == "call_output"
+    assert started[1]["args_valid"] is True
+
+    completed = by_kind[EventKind.TOOL_CALL_COMPLETED]
+    assert completed[0]["result"] == {"matches": 2}
+    assert completed[1]["result"] == "accepted"
+
+    failed = by_kind[EventKind.TOOL_CALL_FAILED][0]
+    assert failed["tool_call_id"] == "call_failed"
+    assert failed["error"] == "backend unavailable"
+    assert failed["outcome"] == "failed"
+
+    validation = by_kind[EventKind.TOOL_VALIDATION_FAILED][0]
+    assert validation["tool_call_id"] == "call_invalid"
+    assert validation["error"] == "query is required"
+
+    enqueued = by_kind[EventKind.SESSION_INFO][0]
+    assert enqueued["enqueue_id"] == "enqueue_1"
+    assert enqueued["messages"][0]["kind"] == "request"
+
+    paused = by_kind[EventKind.SESSION_PAUSED][0]
+    assert paused["calls"][0]["tool_call_id"] == "call_external"
+    assert paused["approvals"][0]["tool_call_id"] == "call_approval"
+
+    resumed = by_kind[EventKind.SESSION_RESUMED][0]
+    assert resumed["calls"] == {"call_external": "record 7"}
+    assert resumed["approvals"]["call_approval"]["kind"] == "tool-approved"
+
+
 def test_cline_compaction_preserves_native_payload() -> None:
     """Cline's JSON-encoded compaction divider must stay useful on the timeline."""
     if "cline" not in FRAMEWORKS:

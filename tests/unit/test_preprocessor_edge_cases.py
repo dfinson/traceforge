@@ -698,6 +698,23 @@ class TestPydanticAi:
         assert preprocess_pydantic_ai({"event_kind": "function_tool_result"})[0]["type"] == (
             "tool_call_end"
         )
+        assert preprocess_pydantic_ai({"event_kind": "output_tool_call"})[0]["type"] == (
+            "stream.output_tool_call"
+        )
+
+    def test_failed_tool_result_uses_failure_mapping(self) -> None:
+        event = {
+            "event_kind": "function_tool_result",
+            "part": {"part_kind": "tool-return", "outcome": "failed"},
+        }
+        assert preprocess_pydantic_ai(event)[0]["type"] == "tool_call_error"
+
+    def test_retry_prompt_uses_validation_mapping(self) -> None:
+        event = {
+            "event_kind": "function_tool_result",
+            "part": {"part_kind": "retry-prompt"},
+        }
+        assert preprocess_pydantic_ai(event)[0]["type"] == "validation_error"
 
     def test_unknown_shape_passthrough(self) -> None:
         obj = {"foo": "bar"}

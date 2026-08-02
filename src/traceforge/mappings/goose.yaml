@@ -1,6 +1,8 @@
 # Goose event mapping for MappedJsonAdapter
 # Targets: goose >= 1.0 (SQLite messages table, JSON-serialized rows)
-# Source: block/goose crates/goose-providers/src/conversation/message.rs
+# Sources: aaif-goose/goose v1.45.0
+#   crates/goose-provider-types/src/conversation/message.rs
+#   crates/goose/src/session/session_manager.rs
 #
 # IMPORTANT: Real Goose only has TWO role values: "user" and "assistant".
 # Tool calls are NESTED inside content_json as {"type": "toolRequest", ...}
@@ -14,8 +16,10 @@
 #   id, message_id, session_id, role, content_json, created_timestamp,
 #   timestamp, tokens, metadata_json
 # Session table has: total_tokens, input_tokens, output_tokens,
+#   cache_read_tokens, cache_write_tokens,
 #   accumulated_total_tokens, accumulated_input_tokens, accumulated_output_tokens,
-#   accumulated_cost
+#   accumulated_cache_read_tokens, accumulated_cache_write_tokens, accumulated_cost,
+#   provider_name, model_config_json
 #
 # MessageContent variants (all in content_json array, serde tag="type" camelCase):
 #   text, image, toolRequest, toolResponse, toolConfirmationRequest,
@@ -109,13 +113,8 @@ events:
   # ── Session lifecycle (from poll metadata) ──
   session_start:
     kind: session.started
-    payload:
-      model: model
-      provider: provider
   session_end:
     kind: session.ended
-    payload:
-      reason: reason
 
   # ── Usage/cost (from session table aggregates) ──
   usage:
@@ -125,5 +124,4 @@ events:
       output_tokens: output_tokens
       cache_read_tokens: cache_read_tokens
       cache_write_tokens: cache_write_tokens
-      cost_usd: cost_usd
       model: model

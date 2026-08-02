@@ -623,6 +623,11 @@ class TestGoose:
         assert tool["input"] == {"cmd": "ls"}
         assert tool["name"] == "shell"
 
+    def test_created_timestamp_preserved_on_every_derived_event(self) -> None:
+        out = preprocess_goose(_goose_valid())
+        assert all(event["created_timestamp"] == 1 for event in out)
+        assert all("created_at" not in event for event in out)
+
     def test_no_content_json_passthrough(self) -> None:
         obj = {"role": "user"}
         assert preprocess_goose(obj) == [obj]

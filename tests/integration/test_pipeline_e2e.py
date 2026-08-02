@@ -459,13 +459,13 @@ class TestMappedJsonFullPipeline:
         events_raw = [
             {
                 "role": "user",
-                "created_at": 1717232400,
+                "created_timestamp": 1717232400,
                 "session_id": "goose-1",
                 "content": "Help me refactor",
             },
             {
                 "role": "tool_use",
-                "created_at": 1717232401,
+                "created_timestamp": 1717232401,
                 "session_id": "goose-1",
                 "id": "tu-1",
                 "name": "shell",
@@ -473,7 +473,7 @@ class TestMappedJsonFullPipeline:
             },
             {
                 "role": "tool_result",
-                "created_at": 1717232402,
+                "created_timestamp": 1717232402,
                 "session_id": "goose-1",
                 "tool_use_id": "tu-1",
                 "content": "file1.py file2.py",
@@ -481,7 +481,7 @@ class TestMappedJsonFullPipeline:
             },
             {
                 "role": "assistant",
-                "created_at": 1717232403,
+                "created_timestamp": 1717232403,
                 "session_id": "goose-1",
                 "content": "I see two files. Let me read them.",
             },

@@ -9,7 +9,7 @@ Each test documents:
 Sources:
 - CrewAI: crewAI-inc/crewAI src/crewai/flow/flow_events.py (v0.86.0)
 - OpenHands: OpenHands/OpenHands openhands/events/serialization/ (v0.62.0)
-- Goose: block/goose crates/goose-providers/src/conversation/message.rs (v1.0+)
+- Goose: aaif-goose/goose crates/goose-provider-types/src/conversation/message.rs (v1.45.0)
 - SWE-agent: SWE-agent/SWE-agent sweagent/types.py (v0.7+)
 - Cline: cline/cline apps/vscode/src/shared/ExtensionMessage.ts (v3.0+)
 - LangGraph: langchain-ai/langchain libs/core/langchain_core/tracers/event_stream.py
@@ -20,6 +20,7 @@ Sources:
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -219,26 +220,37 @@ class TestOpenHandsRealData:
 class TestGooseRealData:
     """Tests using actual Goose v1.0+ message shapes."""
 
-    def test_user_text_message(self):
+    def test_user_text_message_preserves_source_timestamp(self):
         """Real user message row from messages table.
         Goose YAML: type_field "role", payload content: content_json."""
+        created_timestamp = 1740158366
         event = {
+            "id": 41,
+            "message_id": "msg_20250221_1_41",
+            "session_id": "20250221_1",
             "role": "user",
             "content_json": json.dumps(
                 [{"type": "text", "text": "List the files in the current directory"}]
             ),
-            "created_at": "2025-02-21T18:19:26Z",
+            "created_timestamp": created_timestamp,
+            "timestamp": "2025-02-21 18:39:26",
+            "tokens": 10,
+            "metadata_json": None,
         }
         results = _parse_event("goose.yaml", event)
         assert len(results) == 1
         assert results[0].kind == EventKind.MESSAGE_USER
-        # content_json is extracted as a string (the JSON-encoded array)
         assert "List the files" in results[0].payload["content"]
+        assert results[0].timestamp == datetime.fromtimestamp(created_timestamp, tz=timezone.utc)
 
-    def test_assistant_with_tool_request(self):
+    def test_assistant_with_tool_request_preserves_source_timestamp(self):
         """Real assistant message with nested toolRequest content.
         The tool call info is NESTED inside content_json — YAML can't extract it."""
+        created_timestamp = 1740158367
         event = {
+            "id": 42,
+            "message_id": "msg_20250221_1_42",
+            "session_id": "20250221_1",
             "role": "assistant",
             "content_json": json.dumps(
                 [
@@ -253,15 +265,21 @@ class TestGooseRealData:
                     },
                 ]
             ),
-            "created_at": "2025-02-21T18:19:27Z",
+            "created_timestamp": created_timestamp,
+            "timestamp": "2025-02-21 18:39:27",
+            "tokens": 37,
+            "metadata_json": "{}",
         }
         results = _parse_event("goose.yaml", event)
-        # Preprocessor splits into text message + tool_use event
         assert len(results) == 2
         assert results[0].kind == EventKind.MESSAGE_ASSISTANT
         assert "help you with that" in results[0].payload["content"]
         assert results[1].kind == EventKind.TOOL_CALL_STARTED
         assert results[1].payload["tool_name"] == "bash"
+        assert all(
+            result.timestamp == datetime.fromtimestamp(created_timestamp, tz=timezone.utc)
+            for result in results
+        )
 
     def test_tool_use_role_fictional(self):
         """Goose YAML maps 'tool_use' as if it's a role value — it's NOT.

@@ -198,14 +198,17 @@ def test_pydantic_ai_v2_22_serialized_event_payloads() -> None:
     assert completed[0]["result"] == {"matches": 2}
     assert completed[1]["result"] == "accepted"
 
-    failed = by_kind[EventKind.TOOL_CALL_FAILED][0]
-    assert failed["tool_call_id"] == "call_failed"
-    assert failed["error"] == "backend unavailable"
-    assert failed["outcome"] == "failed"
+    failed = {payload["tool_call_id"]: payload for payload in by_kind[EventKind.TOOL_CALL_FAILED]}
+    assert failed["call_failed"]["error"] == "backend unavailable"
+    assert failed["call_failed"]["outcome"] == "failed"
+    assert failed["call_output_interrupted"]["error"] == "output interrupted"
+    assert failed["call_output_interrupted"]["outcome"] == "interrupted"
 
-    validation = by_kind[EventKind.TOOL_VALIDATION_FAILED][0]
-    assert validation["tool_call_id"] == "call_invalid"
-    assert validation["error"] == "query is required"
+    validation = {
+        payload["tool_call_id"]: payload for payload in by_kind[EventKind.TOOL_VALIDATION_FAILED]
+    }
+    assert validation["call_invalid"]["error"] == "query is required"
+    assert validation["call_output_invalid"]["error"] == "invalid output"
 
     enqueued = by_kind[EventKind.SESSION_INFO][0]
     assert enqueued["enqueue_id"] == "enqueue_1"

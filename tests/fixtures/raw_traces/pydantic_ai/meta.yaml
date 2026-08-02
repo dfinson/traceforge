@@ -10,6 +10,6 @@ notes: Real OpenAI Responses session; coding task on demo-issue-tracker-api.
 additional_scenarios:
   - scenario: agent_stream_events_v2_22
     framework_version: 2.22.0
-    provenance: upstream-serialized
+    provenance: constructed-native-objects
     serializer: pydantic_core.to_jsonable_python
-    notes: Deterministic native objects covering tool corrections and new AgentStreamEvent variants.
+    notes: Native v2.22.0 event classes constructed deterministically and serialized by Pydantic.

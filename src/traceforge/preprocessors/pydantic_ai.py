@@ -21,7 +21,7 @@ def preprocess_pydantic_ai(obj: dict[str, Any]) -> list[dict[str, Any]]:
 
         if event_kind == "function_tool_call":
             normalized["type"] = "tool_call_start"
-        elif event_kind == "function_tool_result":
+        elif event_kind in {"function_tool_result", "output_tool_result"}:
             part = normalized.get("part")
             if isinstance(part, dict) and part.get("part_kind") == "retry-prompt":
                 normalized["type"] = "validation_error"
@@ -32,7 +32,11 @@ def preprocess_pydantic_ai(obj: dict[str, Any]) -> list[dict[str, Any]]:
             }:
                 normalized["type"] = "tool_call_error"
             else:
-                normalized["type"] = "tool_call_end"
+                normalized["type"] = (
+                    "tool_call_end"
+                    if event_kind == "function_tool_result"
+                    else "stream.output_tool_result"
+                )
         else:
             normalized["type"] = f"stream.{event_kind}"
         return [normalized]

@@ -128,7 +128,8 @@ events:
       messages: messages
 
   # Deferred requests pause for external execution or approval; resolved batches
-  # resume the run and are followed by ordinary per-tool result events.
+  # resume the run and are followed by ordinary per-tool result events. The pause
+  # intentionally creates a durable Parquet checkpoint at this interaction boundary.
   stream.deferred_tool_requests:
     kind: session.paused
     payload:

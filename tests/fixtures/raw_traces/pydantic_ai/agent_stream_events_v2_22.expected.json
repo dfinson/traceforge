@@ -1,12 +1,12 @@
 {
-  "event_count": 9,
+  "event_count": 11,
   "kinds": {
     "session.info": 1,
     "session.paused": 1,
     "session.resumed": 1,
     "tool.call.completed": 2,
-    "tool.call.failed": 1,
+    "tool.call.failed": 2,
     "tool.call.started": 2,
-    "tool.validation.failed": 1
+    "tool.validation.failed": 2
   }
 }

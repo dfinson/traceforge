@@ -3,11 +3,25 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
 from traceforge.adapters.otel import OtelSpanAdapter
 from traceforge.types import EventKind, SessionEvent
+
+_CAPTURE_PATH = (
+    Path(__file__).parents[1]
+    / "fixtures"
+    / "raw_traces"
+    / "maf"
+    / "telemetry_span_wrappers_1_3_0.jsonl"
+)
+
+
+def _captured_spans() -> dict[str, dict]:
+    spans = [json.loads(line) for line in _CAPTURE_PATH.read_text().splitlines() if line]
+    return {span["name"]: span for span in spans}
 
 
 class TestOtelSpanAdapter:
@@ -18,90 +32,56 @@ class TestOtelSpanAdapter:
         return OtelSpanAdapter(ingestion_mode="stream", session_id="maf-session-1")
 
     def test_parse_adapter_process_span(self, adapter):
-        """MAF adapter.process span → message.user event."""
-        span = {
-            "name": "agents.adapter.process",
-            "start_time_unix_nano": 1717232400_000_000_000,
-            "end_time_unix_nano": 1717232400_050_000_000,
-            "status": {"status_code": 1},
-            "attributes": {
-                "activity.type": "message",
-                "activity.channel_id": "msteams",
-                "activity.id": "act-001",
-                "activity.conversation.id": "conv-123",
-                "activity.delivery_mode": "normal",
-            },
-        }
+        """MAF adapter.process extracts attributes emitted by its upstream wrapper."""
+        span = _captured_spans()["agents.adapter.process"]
         events = list(adapter.parse(json.dumps(span)))
         assert len(events) == 1
         ev = events[0]
         assert ev.kind == EventKind.MESSAGE_USER
         assert ev.session_id == "maf-session-1"
         assert ev.payload["activity_type"] == "message"
-        assert ev.payload["channel_id"] == "msteams"
-        assert ev.payload["conversation_id"] == "conv-123"
-        assert ev.payload["duration_ms"] == 50.0
+        assert ev.payload["channel_id"] == "directline"
+        assert ev.payload["conversation_id"] == "conv-9f2c1a7b"
+        assert ev.payload["delivery_mode"] == "normal"
+        assert ev.payload["is_agentic"] is False
+        assert "activity_id" not in ev.payload
         assert ev.metadata.source_framework == "maf"
         assert ev.metadata.ingestion_mode == "stream"
         assert ev.metadata.raw_kind == "agents.adapter.process"
-        assert ev.metadata.duration_ms == 50.0
+        assert ev.metadata.duration_ms is not None
 
     def test_parse_app_run_span(self, adapter):
-        """MAF app.run span → turn.started event."""
-        span = {
-            "name": "agents.app.run",
-            "start_time_unix_nano": 1717232400_000_000_000,
-            "end_time_unix_nano": 1717232400_100_000_000,
-            "status": {"status_code": 1},
-            "attributes": {
-                "activity.type": "message",
-                "activity.is_agentic_request": True,
-            },
-        }
+        """MAF app.run owns activity ID and route-decision attributes."""
+        span = _captured_spans()["agents.app.run"]
         events = list(adapter.parse(json.dumps(span)))
         assert len(events) == 1
         assert events[0].kind == EventKind.TURN_STARTED
         assert events[0].payload["activity_type"] == "message"
-        assert events[0].payload["is_agentic"] is True
+        assert events[0].payload["activity_id"] == "act-in-001"
+        assert events[0].payload["route_authorized"] is True
+        assert events[0].payload["route_matched"] is True
+        assert "is_agentic" not in events[0].payload
 
     def test_parse_storage_read_span(self, adapter):
-        """MAF storage.read span → memory.query.started."""
-        span = {
-            "name": "agents.storage.read",
-            "start_time_unix_nano": 1717232401_000_000_000,
-            "end_time_unix_nano": 1717232401_020_000_000,
-            "status": {"status_code": 1},
-            "attributes": {"storage.keys.count": 3},
-        }
+        """MAF 1.3.0 emits storage.read with a key count."""
+        span = _captured_spans()["agents.storage.read"]
         events = list(adapter.parse(json.dumps(span)))
         assert events[0].kind == EventKind.MEMORY_QUERY_STARTED
-        assert events[0].payload["key_count"] == 3
+        assert events[0].payload["key_count"] == 2
 
     def test_parse_storage_write_span(self, adapter):
-        """MAF storage.write span → memory.save.started."""
-        span = {
-            "name": "agents.storage.write",
-            "start_time_unix_nano": 1717232402_000_000_000,
-            "end_time_unix_nano": 1717232402_010_000_000,
-            "status": {"status_code": 1},
-            "attributes": {"storage.keys.count": 1},
-        }
+        """MAF 1.3.0 emits storage.write with a key count."""
+        span = _captured_spans()["agents.storage.write"]
         events = list(adapter.parse(json.dumps(span)))
         assert events[0].kind == EventKind.MEMORY_SAVE_STARTED
-        assert events[0].payload["key_count"] == 1
+        assert events[0].payload["key_count"] == 2
 
     def test_parse_send_activities_span(self, adapter):
-        """MAF send_activities span → message.assistant."""
-        span = {
-            "name": "agents.adapter.send_activities",
-            "start_time_unix_nano": 1717232403_000_000_000,
-            "end_time_unix_nano": 1717232403_030_000_000,
-            "status": {"status_code": 1},
-            "attributes": {"activities.count": 2},
-        }
+        """MAF send_activities extracts the upstream activity count."""
+        span = _captured_spans()["agents.adapter.send_activities"]
         events = list(adapter.parse(json.dumps(span)))
         assert events[0].kind == EventKind.MESSAGE_ASSISTANT
-        assert events[0].payload["count"] == 2
+        assert events[0].payload["count"] == 1
 
     def test_parse_error_span(self, adapter):
         """Error status code → error event kind regardless of span name."""
@@ -204,20 +184,13 @@ class TestOtelSpanAdapter:
         assert abs(events[0].metadata.duration_ms - 123.456789) < 0.001
 
     def test_route_handler_span(self, adapter):
-        """Route handler span → hook.started."""
-        span = {
-            "name": "agents.app.route_handler",
-            "start_time_unix_nano": 1717232400_000_000_000,
-            "end_time_unix_nano": 1717232400_010_000_000,
-            "status": {"status_code": 1},
-            "attributes": {
-                "route.matched": True,
-                "route.is_invoke": False,
-            },
-        }
+        """Route handler owns route mode and agentic attributes."""
+        span = _captured_spans()["agents.app.route_handler"]
         events = list(adapter.parse(json.dumps(span)))
         assert events[0].kind == EventKind.HOOK_STARTED
-        assert events[0].payload["route_matched"] is True
+        assert events[0].payload["is_invoke"] is False
+        assert events[0].payload["is_agentic"] is True
+        assert "route_matched" not in events[0].payload
 
     def test_continue_conversation_span(self, adapter):
         """Continue conversation → session.resumed."""
@@ -232,43 +205,17 @@ class TestOtelSpanAdapter:
         assert events[0].kind == EventKind.SESSION_RESUMED
 
     def test_full_maf_session_simulation(self, adapter):
-        """Simulate a full MAF turn lifecycle: process → run → route → send."""
+        """Replay a MAF lifecycle from pinned upstream wrapper exports."""
+        captured = _captured_spans()
         spans = [
-            {
-                "name": "agents.adapter.process",
-                "start_time_unix_nano": 1717232400_000_000_000,
-                "end_time_unix_nano": 1717232400_200_000_000,
-                "status": {"status_code": 1},
-                "attributes": {"activity.type": "message", "activity.channel_id": "teams"},
-            },
-            {
-                "name": "agents.app.run",
-                "start_time_unix_nano": 1717232400_010_000_000,
-                "end_time_unix_nano": 1717232400_180_000_000,
-                "status": {"status_code": 1},
-                "attributes": {"activity.type": "message"},
-            },
-            {
-                "name": "agents.app.route_handler",
-                "start_time_unix_nano": 1717232400_020_000_000,
-                "end_time_unix_nano": 1717232400_170_000_000,
-                "status": {"status_code": 1},
-                "attributes": {"route.matched": True},
-            },
-            {
-                "name": "agents.storage.read",
-                "start_time_unix_nano": 1717232400_030_000_000,
-                "end_time_unix_nano": 1717232400_035_000_000,
-                "status": {"status_code": 1},
-                "attributes": {"storage.keys.count": 2},
-            },
-            {
-                "name": "agents.adapter.send_activities",
-                "start_time_unix_nano": 1717232400_160_000_000,
-                "end_time_unix_nano": 1717232400_175_000_000,
-                "status": {"status_code": 1},
-                "attributes": {"activities.count": 1},
-            },
+            captured[name]
+            for name in (
+                "agents.adapter.process",
+                "agents.app.run",
+                "agents.app.route_handler",
+                "agents.storage.read",
+                "agents.adapter.send_activities",
+            )
         ]
         all_events: list[SessionEvent] = []
         for span in spans:
@@ -292,28 +239,38 @@ class TestOtelSpanAdapter:
 class TestMafYamlMapping:
     """Validate that maf.yaml loads correctly and drives the OTel adapter."""
 
-    def test_yaml_loads_with_all_span_kinds(self):
-        """maf.yaml should define all expected span names."""
+    def test_yaml_span_names_match_upstream_capture(self):
+        """Every mapped name must be emitted by a pinned upstream wrapper."""
         from traceforge.adapters.otel import _SPAN_KIND_MAP
 
-        expected_spans = [
-            "agents.adapter.process",
-            "agents.app.run",
-            "agents.storage.read",
-            "agents.storage.write",
-            "agents.turn.send_activities",
-        ]
-        for span_name in expected_spans:
-            assert span_name in _SPAN_KIND_MAP, f"Missing span: {span_name}"
+        assert set(_SPAN_KIND_MAP) == set(_captured_spans())
 
-    def test_yaml_attribute_extractors_loaded(self):
-        """maf.yaml should populate attribute extractors for key spans."""
+    def test_yaml_attribute_ownership_matches_upstream_capture(self):
+        """Drift-prone activity and route keys stay on their emitting spans."""
         from traceforge.adapters.otel import _ATTRIBUTE_EXTRACTORS
 
-        assert "agents.adapter.process" in _ATTRIBUTE_EXTRACTORS
-        attrs = _ATTRIBUTE_EXTRACTORS["agents.adapter.process"]
-        assert "activity_type" in attrs
-        assert attrs["activity_type"] == "activity.type"
+        assert _ATTRIBUTE_EXTRACTORS["agents.adapter.process"] == {
+            "activity_type": "activity.type",
+            "channel_id": "activity.channel_id",
+            "conversation_id": "activity.conversation.id",
+            "delivery_mode": "activity.delivery_mode",
+            "is_agentic": "activity.is_agentic_request",
+        }
+        assert _ATTRIBUTE_EXTRACTORS["agents.app.run"] == {
+            "activity_type": "activity.type",
+            "activity_id": "activity.id",
+            "route_authorized": "route.authorized",
+            "route_matched": "route.matched",
+        }
+        assert _ATTRIBUTE_EXTRACTORS["agents.app.route_handler"] == {
+            "is_invoke": "route.is_invoke",
+            "is_agentic": "route.is_agentic",
+        }
+
+        captured = _captured_spans()
+        for span_name, extractors in _ATTRIBUTE_EXTRACTORS.items():
+            emitted = captured[span_name]["attributes"]
+            assert set(extractors.values()) <= set(emitted)
 
     def test_yaml_kinds_follow_dot_notation(self):
         """All maf.yaml kinds must follow the dot-notation grammar."""

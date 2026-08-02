@@ -1,14 +1,16 @@
 {
-  "event_count": 11,
+  "event_count": 17,
   "kinds": {
     "file.read": 1,
     "hook.completed": 1,
     "hook.started": 2,
     "memory.query.started": 1,
+    "memory.save.completed": 1,
     "memory.save.started": 1,
-    "message.assistant": 2,
+    "message.assistant": 5,
     "message.user": 1,
-    "session.info": 1,
+    "session.info": 2,
+    "session.resumed": 1,
     "turn.started": 1
   }
 }

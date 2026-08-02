@@ -167,6 +167,12 @@ class ResultMessage:
     result: str | None = None
 
 
+@dataclass
+class SystemMessage:
+    subtype: str
+    data: dict[str, Any]
+
+
 def _claude_messages() -> list[Any]:
     """Native Claude Messages equivalent to claude_session.jsonl (line for line)."""
     model = "claude-sonnet-4-20250514"
@@ -339,6 +345,28 @@ class TestClaudeGoldenEquivalence:
         assert all(r.mode == "stream" for r in records)
         sdk_events = _parse_all("claude.yaml", [r.payload for r in records])
         assert all(e.metadata.ingestion_mode == "file_watch" for e in sdk_events)
+
+    async def test_system_init_payload_matches_file_watch(self):
+        file_line = (FIXTURES / "claude_multimodal_system.jsonl").read_text().splitlines()[0]
+        file_wire = json.loads(file_line)
+        sdk_message = SystemMessage(
+            subtype=file_wire["subtype"],
+            data={
+                key: value
+                for key, value in file_wire.items()
+                if key not in {"type", "subtype", "uuid", "session_id"}
+            },
+        )
+        records = await _collect(SdkClaudeSource("claude-live", _agen([sdk_message])))
+
+        file_events = _parse_all("claude.yaml", [file_line])
+        sdk_events = _parse_all("claude.yaml", [records[0].payload])
+
+        assert len(file_events) == len(sdk_events) == 1
+        assert file_events[0].kind == sdk_events[0].kind == "session.started"
+        assert sdk_events[0].payload == file_events[0].payload
+        assert sdk_events[0].payload["model"] == "claude-sonnet-4-20250514"
+        assert sdk_events[0].payload["tools"] == ["Read", "Bash"]
 
     async def test_tool_result_list_content_flattens(self):
         # Line 9 of the fixture: tool_result whose content is a list of text blocks.

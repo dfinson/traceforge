@@ -378,6 +378,32 @@ class TestClaudeFileWatch:
         result_events = [e for e in all_events if e.kind == EventKind.USAGE]
         assert result_events[-1].session_id == "test-session"
 
+    def test_multimodal_user_text_and_system_init_fixture(self):
+        adapter = _claude_adapter()
+        fixture = FIXTURES / "claude_multimodal_system.jsonl"
+        events = [
+            event for line in fixture.read_text().splitlines() for event in adapter.parse(line)
+        ]
+
+        assert [event.kind for event in events] == [
+            EventKind.SESSION_STARTED,
+            EventKind.MESSAGE_USER,
+        ]
+        assert events[0].payload == {
+            "subtype": "init",
+            "model": "claude-sonnet-4-20250514",
+            "claude_code_version": "2.1.191",
+            "api_key_source": "user",
+            "permission_mode": "default",
+            "tools": ["Read", "Bash"],
+            "mcp_servers": [{"name": "github", "status": "connected"}],
+            "slash_commands": ["compact"],
+            "output_style": "default",
+            "skills": [],
+            "plugins": [],
+        }
+        assert events[1].payload == {"content": "What is shown in this screenshot?"}
+
     def test_session_id_from_constructor(self):
         adapter = _claude_adapter("my-session")
         line = json.dumps(

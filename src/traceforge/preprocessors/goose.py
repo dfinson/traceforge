@@ -14,7 +14,9 @@ def preprocess_goose(obj: dict[str, Any]) -> list[dict[str, Any]]:
     results = []
     role = obj.get("role")
     content_json_raw = obj.get("content_json")
-    ts = obj.get("created_at") or obj.get("created_timestamp")
+    ts = obj.get("created_timestamp")
+    if ts is None:
+        ts = obj.get("created_at")
 
     if not content_json_raw:
         return [obj]
@@ -46,7 +48,7 @@ def preprocess_goose(obj: dict[str, Any]) -> list[dict[str, Any]]:
             results.append(
                 {
                     "role": "tool_use",
-                    "created_at": ts,
+                    "created_timestamp": ts,
                     "name": value.get("name", ""),
                     "id": item.get("id", ""),
                     "input": value.get("arguments", {}),
@@ -57,7 +59,7 @@ def preprocess_goose(obj: dict[str, Any]) -> list[dict[str, Any]]:
             results.append(
                 {
                     "role": "tool_result",
-                    "created_at": ts,
+                    "created_timestamp": ts,
                     "tool_use_id": item.get("id", ""),
                     "content": (tool_result.get("value") or {}).get("content", "")
                     if isinstance(tool_result, dict)
@@ -71,7 +73,7 @@ def preprocess_goose(obj: dict[str, Any]) -> list[dict[str, Any]]:
             results.append(
                 {
                     "role": "thinking",
-                    "created_at": ts,
+                    "created_timestamp": ts,
                     "thinking": item.get("thinking", ""),
                 }
             )
@@ -79,7 +81,7 @@ def preprocess_goose(obj: dict[str, Any]) -> list[dict[str, Any]]:
             results.append(
                 {
                     "role": "redacted_thinking",
-                    "created_at": ts,
+                    "created_timestamp": ts,
                     "data": item.get("data", ""),
                     "redacted": True,
                 }
@@ -88,7 +90,7 @@ def preprocess_goose(obj: dict[str, Any]) -> list[dict[str, Any]]:
             results.append(
                 {
                     "role": "image",
-                    "created_at": ts,
+                    "created_timestamp": ts,
                     "data": item.get("data", ""),
                 }
             )
@@ -96,7 +98,7 @@ def preprocess_goose(obj: dict[str, Any]) -> list[dict[str, Any]]:
             results.append(
                 {
                     "role": "tool_confirmation_request",
-                    "created_at": ts,
+                    "created_timestamp": ts,
                     "content": item.get("prompt", ""),
                     "name": item.get("toolName", ""),
                     "id": item.get("id", ""),
@@ -112,7 +114,7 @@ def preprocess_goose(obj: dict[str, Any]) -> list[dict[str, Any]]:
             results.append(
                 {
                     "role": "action_required",
-                    "created_at": ts,
+                    "created_timestamp": ts,
                     "content": content,
                     "action_type": data.get("actionType", ""),
                 }
@@ -123,7 +125,7 @@ def preprocess_goose(obj: dict[str, Any]) -> list[dict[str, Any]]:
             results.append(
                 {
                     "role": "frontend_tool_request",
-                    "created_at": ts,
+                    "created_timestamp": ts,
                     "name": value.get("name", ""),
                     "id": item.get("id", ""),
                     "input": value.get("arguments", {}),
@@ -133,7 +135,7 @@ def preprocess_goose(obj: dict[str, Any]) -> list[dict[str, Any]]:
             results.append(
                 {
                     "role": "system_notification",
-                    "created_at": ts,
+                    "created_timestamp": ts,
                     "content": item.get("msg", ""),
                 }
             )
@@ -149,7 +151,7 @@ def preprocess_goose(obj: dict[str, Any]) -> list[dict[str, Any]]:
             0,
             {
                 "role": role,
-                "created_at": ts,
+                "created_timestamp": ts,
                 "content": "\n".join(text_parts) if text_parts else content_json_raw,
             },
         )

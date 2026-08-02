@@ -634,6 +634,63 @@ class TestGoose:
         assert tool["input"] == {"cmd": "ls"}
         assert tool["name"] == "shell"
 
+    def test_created_timestamp_preserved_on_every_derived_event(self) -> None:
+        created_timestamp = 1718400000
+        content_items = [
+            {"type": "text", "text": "hi"},
+            {
+                "type": "toolRequest",
+                "id": "call",
+                "toolCall": {"value": {"name": "shell", "arguments": {}}},
+            },
+            {
+                "type": "toolResponse",
+                "id": "call",
+                "toolResult": {"status": "success", "value": {"content": "done"}},
+            },
+            {"type": "thinking", "thinking": "reasoning"},
+            {"type": "redactedThinking", "data": "redacted"},
+            {"type": "image", "data": "base64"},
+            {
+                "type": "toolConfirmationRequest",
+                "id": "confirm",
+                "toolName": "shell",
+                "prompt": "Allow?",
+            },
+            {
+                "type": "actionRequired",
+                "data": {"actionType": "elicitation", "message": "Choose"},
+            },
+            {
+                "type": "frontendToolRequest",
+                "id": "frontend",
+                "toolCall": {"value": {"name": "showFile", "arguments": {}}},
+            },
+            {"type": "systemNotification", "msg": "Working"},
+        ]
+        out = preprocess_goose(
+            {
+                "role": "assistant",
+                "created_timestamp": created_timestamp,
+                "content_json": json.dumps(content_items),
+            }
+        )
+        assert {event["role"] for event in out} == {
+            "assistant",
+            "tool_use",
+            "tool_result",
+            "thinking",
+            "redacted_thinking",
+            "image",
+            "tool_confirmation_request",
+            "action_required",
+            "frontend_tool_request",
+            "system_notification",
+        }
+        assert len(out) == 10
+        assert all(event["created_timestamp"] == created_timestamp for event in out)
+        assert all("created_at" not in event for event in out)
+
     def test_no_content_json_passthrough(self) -> None:
         obj = {"role": "user"}
         assert preprocess_goose(obj) == [obj]

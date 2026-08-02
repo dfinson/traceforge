@@ -220,46 +220,6 @@ class TestGooseMappings:
             0,
             id="system_notification",
         ),
-        pytest.param(
-            {
-                "role": "session_start",
-                "created_timestamp": 1718400000,
-                "model": "gpt-4o",
-                "provider": "openai",
-            },
-            EventKind.SESSION_STARTED,
-            {"model": "gpt-4o", "provider": "openai"},
-            1,
-            0,
-            id="session_start",
-        ),
-        pytest.param(
-            {
-                "role": "session_end",
-                "created_timestamp": 1718400001,
-                "reason": "completed",
-            },
-            EventKind.SESSION_ENDED,
-            {"reason": "completed"},
-            1,
-            0,
-            id="session_end",
-        ),
-        pytest.param(
-            {
-                "role": "usage",
-                "created_timestamp": 1718400002,
-                "input_tokens": 42,
-                "output_tokens": 9,
-                "cost_usd": 0.12,
-                "model": "gpt-4o",
-            },
-            EventKind.USAGE,
-            {"input_tokens": 42, "output_tokens": 9, "cost_usd": 0.12, "model": "gpt-4o"},
-            1,
-            0,
-            id="usage",
-        ),
     ]
 
     @pytest.mark.parametrize(
@@ -282,6 +242,56 @@ class TestGooseMappings:
             expected_count=expected_count,
             result_index=result_index,
         )
+
+    @pytest.mark.parametrize(
+        ("event", "expected_kind"),
+        [
+            (
+                {
+                    "role": "session_start",
+                    "created_timestamp": 1718400000,
+                    "model": "gpt-4o",
+                    "provider": "openai",
+                },
+                EventKind.SESSION_STARTED,
+            ),
+            (
+                {
+                    "role": "session_end",
+                    "created_timestamp": 1718400001,
+                    "reason": "completed",
+                },
+                EventKind.SESSION_ENDED,
+            ),
+        ],
+    )
+    def test_unverified_lifecycle_payload_fields_are_not_mapped(
+        self, event: dict, expected_kind: str
+    ) -> None:
+        result = _parse_event("goose.yaml", event)[0]
+        assert result.kind == expected_kind
+        assert result.payload == {}
+
+    def test_usage_maps_only_verified_usage_ledger_fields(self) -> None:
+        event = {
+            "role": "usage",
+            "created_timestamp": 1718400002,
+            "input_tokens": 42,
+            "output_tokens": 9,
+            "cache_read_tokens": 7,
+            "cache_write_tokens": 3,
+            "cost_usd": 0.12,
+            "model": "gpt-4o",
+        }
+        result = _parse_event("goose.yaml", event)[0]
+        assert result.kind == EventKind.USAGE
+        assert result.payload == {
+            "input_tokens": 42,
+            "output_tokens": 9,
+            "cache_read_tokens": 7,
+            "cache_write_tokens": 3,
+            "model": "gpt-4o",
+        }
 
 
 class TestSWEAgentMappings:

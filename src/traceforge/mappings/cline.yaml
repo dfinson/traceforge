@@ -92,9 +92,11 @@ events:
     payload:
       output: text
   say.plan_completion_result:
-    kind: session.ended
+    # SDK plan mode presents this result for approval before Act mode continues.
+    # Unlike completion_result, it is not a terminal session lifecycle event.
+    kind: planning.completed
     payload:
-      output: text
+      plan: text
   say.user_feedback:
     kind: message.user
     payload:

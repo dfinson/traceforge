@@ -203,6 +203,6 @@ def test_cline_v4_1_3_sdk_completion_uses_upstream_text_fields() -> None:
     assert len(reasoning) == 1
     assert reasoning[0].payload["content"] == "We should update the route and its tests."
 
-    completed = [event for event in events if event.kind == EventKind.SESSION_ENDED]
+    completed = [event for event in events if event.kind == EventKind.PLANNING_COMPLETED]
     assert len(completed) == 1
-    assert completed[0].payload["output"] == "1. Update the route.\n2. Add regression tests."
+    assert completed[0].payload["plan"] == "1. Update the route.\n2. Add regression tests."

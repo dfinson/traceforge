@@ -12,14 +12,22 @@
 # The flat type_field: role approach can ONLY distinguish user/assistant.
 # A GoosePreProcessor is needed to extract nested tool calls into separate events.
 #
-# Real schema: messages table columns:
+# Schema evidence: the exact CREATE TABLE statements live in
+# crates/goose/src/session/session_manager.rs, SessionStorage::create_schema.
+# The messages table columns are:
 #   id, message_id, session_id, role, content_json, created_timestamp,
 #   timestamp, tokens, metadata_json
-# Session table has: total_tokens, input_tokens, output_tokens,
+# The sessions table includes: total_tokens, input_tokens, output_tokens,
 #   cache_read_tokens, cache_write_tokens,
 #   accumulated_total_tokens, accumulated_input_tokens, accumulated_output_tokens,
 #   accumulated_cache_read_tokens, accumulated_cache_write_tokens, accumulated_cost,
 #   provider_name, model_config_json
+# The usage_ledger table includes: created_timestamp, model, input_tokens,
+#   output_tokens, total_tokens, cache_read_tokens, cache_write_tokens, cost,
+#   cost_source, is_compaction
+# No verified producer synthesizes lifecycle payload fields. The compatibility
+# session_start/session_end mappings therefore remain payloadless, while usage
+# maps only names persisted by usage_ledger.
 #
 # MessageContent variants (all in content_json array, serde tag="type" camelCase):
 #   text, image, toolRequest, toolResponse, toolConfirmationRequest,

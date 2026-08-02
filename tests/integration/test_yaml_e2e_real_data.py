@@ -233,7 +233,7 @@ class TestGooseRealData:
                 [{"type": "text", "text": "List the files in the current directory"}]
             ),
             "created_timestamp": created_timestamp,
-            "timestamp": "2025-02-21 18:39:26",
+            "timestamp": "2025-02-21 17:19:26",
             "tokens": 10,
             "metadata_json": None,
         }
@@ -266,7 +266,7 @@ class TestGooseRealData:
                 ]
             ),
             "created_timestamp": created_timestamp,
-            "timestamp": "2025-02-21 18:39:27",
+            "timestamp": "2025-02-21 17:19:27",
             "tokens": 37,
             "metadata_json": "{}",
         }

@@ -447,6 +447,32 @@ class TestClaude:
         out = preprocess_claude({"type": "user", "message": {"content": "hello"}})
         assert out == [{"block_type": "user.text", "content": "hello"}]
 
+    def test_user_list_text_normalized_to_content_contract(self) -> None:
+        out = preprocess_claude(
+            {
+                "type": "user",
+                "message": {
+                    "content": [
+                        {"type": "image", "source": {"type": "base64", "data": "..."}},
+                        {"type": "text", "text": "What is shown in this screenshot?"},
+                    ]
+                },
+            }
+        )
+        assert out[1]["block_type"] == "user.text"
+        assert out[1]["content"] == "What is shown in this screenshot?"
+
+    def test_system_init_gets_qualified_discriminator(self) -> None:
+        out = preprocess_claude({"type": "system", "subtype": "init", "model": "claude"})
+        assert out == [
+            {
+                "type": "system",
+                "subtype": "init",
+                "model": "claude",
+                "block_type": "system.init",
+            }
+        ]
+
     def test_result_usage_flattened_to_top_level(self) -> None:
         out = preprocess_claude(
             {"type": "result", "usage": {"input_tokens": 5, "output_tokens": 9}}

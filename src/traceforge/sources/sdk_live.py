@@ -314,13 +314,18 @@ class SdkClaudeSource(_SdkLiveSource):
             return self._result(message)
 
         if type_name == "SystemMessage" or msg_type == "system":
-            system: dict[str, Any] = {"type": "system"}
+            system: dict[str, Any] = {}
+            data = _attr(message, "data")
+            if data is not None:
+                serialized = _jsonable(data)
+                if isinstance(serialized, dict):
+                    system.update(serialized)
+                else:
+                    system["data"] = serialized
+            system["type"] = "system"
             subtype = _attr(message, "subtype")
             if subtype is not None:
                 system["subtype"] = subtype
-            data = _attr(message, "data")
-            if data is not None:
-                system["data"] = _jsonable(data)
             return system
 
         return None

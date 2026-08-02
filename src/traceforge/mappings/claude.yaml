@@ -14,7 +14,7 @@
 #
 # The "claude" preprocessor flattens content blocks into individual dicts
 # with a synthesized `block_type` field (e.g. "assistant.text",
-# "assistant.tool_use", "user.text", "result").
+# "assistant.tool_use", "user.text", "system.init", "result").
 #
 # Source: Claude Agent SDK JSONL output
 # Verified against: claude_session.jsonl fixture
@@ -37,6 +37,23 @@ motivation:
       role: reasoning
 
 events:
+  # ── Session initialization ─────────────────────────────────────────────────
+  # Agent SDK SDKSystemMessage is initialization metadata, not a system prompt.
+  system.init:
+    kind: session.started
+    payload:
+      subtype: subtype
+      model: model
+      claude_code_version: claude_code_version
+      api_key_source: apiKeySource
+      permission_mode: permissionMode
+      tools: tools
+      mcp_servers: mcp_servers
+      slash_commands: slash_commands
+      output_style: output_style
+      skills: skills
+      plugins: plugins
+
   # ── User messages ──────────────────────────────────────────────────────────
   user.text:
     kind: message.user

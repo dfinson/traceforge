@@ -15,13 +15,13 @@ def preprocess_claude(obj: dict[str, Any]) -> list[dict[str, Any]]:
       - user:      {type: "user", message: {content: "..."}}
       - assistant:  {type: "assistant", message: {content: [{type: "text", ...}, ...]}}
       - result:    {type: "result", subtype: ..., usage: {...}, ...}
-      - system:    {type: "system", ...}
+      - system:    {type: "system", subtype: "init", ...}
 
     Assistant messages contain a list of content blocks, each of which
     becomes a separate normalized dict with a synthesized ``block_type``
     discriminator (e.g. "assistant.text", "assistant.tool_use").
 
-    User messages with string content get block_type "user.text".
+    User text blocks normalize to the same ``content`` field as string content.
     Result messages pass through with block_type "result".
     """
     msg_type = obj.get("type")
@@ -45,7 +45,8 @@ def preprocess_claude(obj: dict[str, Any]) -> list[dict[str, Any]]:
 
     if msg_type == "system":
         normalized = dict(obj)
-        normalized["block_type"] = "system"
+        subtype = normalized.get("subtype")
+        normalized["block_type"] = f"system.{subtype}" if subtype else "system"
         return _stamp_cwd([normalized], cwd)
 
     message = obj.get("message")
@@ -89,6 +90,9 @@ def _flatten_blocks(blocks: list[Any], context: str) -> list[dict[str, Any]]:
         block_kind = block.get("type", "unknown")
         normalized = dict(block)
         normalized["block_type"] = f"{context}.{block_kind}"
+
+        if context == "user" and block_kind == "text":
+            normalized["content"] = block.get("text", "")
 
         # For tool_result blocks, handle list-of-dicts content → joined text
         if block_kind == "tool_result":

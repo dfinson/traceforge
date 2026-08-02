@@ -7,3 +7,9 @@ captured_at: "2026-06-28T09:12:28Z"
 traceforge_commit: 13f4d3d
 line_count: 1456
 notes: Real OpenAI Responses session; coding task on demo-issue-tracker-api.
+additional_scenarios:
+  - scenario: agent_stream_events_v2_22
+    framework_version: 2.22.0
+    provenance: constructed-native-objects
+    serializer: pydantic_core.to_jsonable_python
+    notes: Native v2.22.0 event classes constructed deterministically and serialized by Pydantic.

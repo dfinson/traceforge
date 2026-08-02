@@ -792,6 +792,44 @@ class TestPydanticAi:
         assert preprocess_pydantic_ai({"event_kind": "function_tool_result"})[0]["type"] == (
             "tool_call_end"
         )
+        assert preprocess_pydantic_ai({"event_kind": "output_tool_call"})[0]["type"] == (
+            "stream.output_tool_call"
+        )
+
+    def test_failed_tool_result_uses_failure_mapping(self) -> None:
+        event = {
+            "event_kind": "function_tool_result",
+            "part": {"part_kind": "tool-return", "outcome": "failed"},
+        }
+        assert preprocess_pydantic_ai(event)[0]["type"] == "tool_call_error"
+
+    def test_retry_prompt_uses_validation_mapping(self) -> None:
+        event = {
+            "event_kind": "function_tool_result",
+            "part": {"part_kind": "retry-prompt"},
+        }
+        assert preprocess_pydantic_ai(event)[0]["type"] == "validation_error"
+
+    @pytest.mark.parametrize(
+        ("part", "expected_type"),
+        [
+            ({"part_kind": "retry-prompt"}, "validation_error"),
+            ({"part_kind": "tool-return", "outcome": "failed"}, "tool_call_error"),
+            (
+                {"part_kind": "tool-return", "outcome": "interrupted"},
+                "tool_call_error",
+            ),
+            (
+                {"part_kind": "tool-return", "outcome": "success"},
+                "stream.output_tool_result",
+            ),
+        ],
+    )
+    def test_output_tool_result_classification(
+        self, part: dict[str, str], expected_type: str
+    ) -> None:
+        event = {"event_kind": "output_tool_result", "part": part}
+        assert preprocess_pydantic_ai(event)[0]["type"] == expected_type
 
     def test_unknown_shape_passthrough(self) -> None:
         obj = {"foo": "bar"}

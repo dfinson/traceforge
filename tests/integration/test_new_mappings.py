@@ -384,8 +384,8 @@ class TestPydanticAIMapping:
             str(MAPPINGS_DIR / "pydantic_ai.yaml"), session_id="pai-session"
         )
 
-    def test_agent_lifecycle(self, adapter):
-        """Agent run start → end."""
+    def test_unsupported_agent_lifecycle_falls_through(self, adapter):
+        """PydanticAI does not serialize standalone agent lifecycle records."""
         events_raw = [
             {
                 "type": "agent_run_start",
@@ -403,13 +403,10 @@ class TestPydanticAIMapping:
         all_events = []
         for raw in events_raw:
             all_events.extend(adapter.parse(json.dumps(raw)))
-        assert all_events[0].kind == EventKind.SESSION_STARTED
-        assert all_events[0].payload["agent_name"] == "my_agent"
-        assert all_events[0].payload["model"] == "gpt-4o"
-        assert all_events[1].kind == EventKind.SESSION_ENDED
+        assert [event.kind for event in all_events] == [EventKind.RAW, EventKind.RAW]
 
     def test_model_request(self, adapter):
-        """Model request start → response with usage."""
+        """Only native request/response messages are supported."""
         events_raw = [
             {
                 "type": "model_request_start",
@@ -428,7 +425,7 @@ class TestPydanticAIMapping:
         all_events = []
         for raw in events_raw:
             all_events.extend(adapter.parse(json.dumps(raw)))
-        assert all_events[0].kind == EventKind.LLM_CALL_STARTED
+        assert all_events[0].kind == EventKind.RAW
         assert all_events[1].kind == EventKind.LLM_CALL_COMPLETED
         assert all_events[1].payload["input_tokens"] == 200
         assert all_events[1].payload["output_tokens"] == 100
@@ -437,18 +434,25 @@ class TestPydanticAIMapping:
         """Tool call lifecycle."""
         events_raw = [
             {
-                "type": "tool_call_start",
+                "event_kind": "function_tool_call",
                 "timestamp": "2024-06-01T10:00:01Z",
-                "tool_name": "search_db",
-                "call_id": "tc-1",
-                "args": {"query": "users"},
+                "part": {
+                    "part_kind": "tool-call",
+                    "tool_name": "search_db",
+                    "tool_call_id": "tc-1",
+                    "args": {"query": "users"},
+                },
             },
             {
-                "type": "tool_call_end",
+                "event_kind": "function_tool_result",
                 "timestamp": "2024-06-01T10:00:02Z",
-                "tool_name": "search_db",
-                "call_id": "tc-1",
-                "result": '[{"name": "alice"}]',
+                "part": {
+                    "part_kind": "tool-return",
+                    "tool_name": "search_db",
+                    "tool_call_id": "tc-1",
+                    "content": [{"name": "alice"}],
+                    "outcome": "success",
+                },
             },
         ]
         all_events = []
@@ -457,23 +461,26 @@ class TestPydanticAIMapping:
         assert all_events[0].kind == EventKind.TOOL_CALL_STARTED
         assert all_events[0].payload["tool_name"] == "search_db"
         assert all_events[1].kind == EventKind.TOOL_CALL_COMPLETED
-        assert all_events[1].payload["result"] == '[{"name": "alice"}]'
+        assert all_events[1].payload["result"] == [{"name": "alice"}]
 
     def test_validation_error(self, adapter):
         """Validation failures map to tool.validation.failed."""
         raw = {
-            "type": "validation_error",
+            "event_kind": "function_tool_result",
             "timestamp": "2024-06-01T10:00:01Z",
-            "tool_name": "calculator",
-            "error": "invalid input",
-            "retry_count": 2,
+            "part": {
+                "part_kind": "retry-prompt",
+                "tool_name": "calculator",
+                "tool_call_id": "tc-invalid",
+                "content": "invalid input",
+            },
         }
         events = list(adapter.parse(json.dumps(raw)))
         assert events[0].kind == EventKind.TOOL_VALIDATION_FAILED
-        assert events[0].payload["retry_count"] == 2
+        assert events[0].payload["error"] == "invalid input"
 
-    def test_guardrail_events(self, adapter):
-        """Result validation → guardrail events."""
+    def test_unsupported_guardrail_events_fall_through(self, adapter):
+        """Output validators do not serialize start/fail stream records."""
         events_raw = [
             {
                 "type": "output_validation_start",
@@ -490,9 +497,7 @@ class TestPydanticAIMapping:
         all_events = []
         for raw in events_raw:
             all_events.extend(adapter.parse(json.dumps(raw)))
-        assert all_events[0].kind == EventKind.GUARDRAIL_STARTED
-        assert all_events[1].kind == EventKind.GUARDRAIL_FAILED
-        assert all_events[1].payload["reason"] == "profanity detected"
+        assert [event.kind for event in all_events] == [EventKind.RAW, EventKind.RAW]
 
 
 class TestSmolagentsMapping:

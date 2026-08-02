@@ -202,6 +202,13 @@ class TestEndToEndPipeline:
         assert kind_map.get("error") == "session.error"
         assert kind_map.get("token_usage") == "telemetry.usage"
 
+    def test_git_commit_has_literal_tool_name(self, adapter, parser_events):
+        commit = next(event for event in parser_events if event["type"] == "git_commit")
+
+        session_event = next(iter(adapter.parse(json.dumps(commit))))
+
+        assert session_event.payload["tool_name"] == "git"
+
     def test_raw_event_always_preserved(self, adapter, parser_events):
         """Every SessionEvent must carry the original parser dict as raw_event."""
         for event_dict in parser_events:

@@ -1,6 +1,6 @@
 # Aider analytics JSONL mapping for MappedJsonAdapter
 # Targets: aider >= 0.70 analytics log (--analytics-log <path>)
-# Source: Aider-AI/aider:aider/analytics.py — verified 2026-06-14
+# Source: Aider-AI/aider v0.86.0 (a4be6ccd), aider/{commands,analytics}.py — verified 2026-08-02
 #
 # Aider writes JSONL to a USER-SPECIFIED path via --analytics-log flag.
 # There is NO default structured output file. Users must configure:
@@ -203,10 +203,6 @@ events:
     payload: {}
 
   command_reasoning-effort:
-    kind: user.command
-    payload: {}
-
-  command_ok:
     kind: user.command
     payload: {}
 

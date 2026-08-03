@@ -57,7 +57,7 @@ if TYPE_CHECKING:
     from traceforge.sdk.observe import ObservationHandle
     from traceforge.sinks.base import StorageSink
     from traceforge.trace import EventTrace
-    from traceforge.types import SessionEvent, TelemetrySpan, UsageRecord
+    from traceforge.types import SessionEvent, TelemetrySpan, TurnSummaryUpdate, UsageRecord
 
 
 class Pipeline:
@@ -181,6 +181,7 @@ class Pipeline:
             enable_phase=enable_structure,
             enable_boundary=enable_structure,
             enable_title=enable_title,
+            enable_turn_summary=enable_structure,
             governance=gov_engine if governance else None,
         )
         return cls(backbone=backbone, governance=gov_engine)
@@ -198,6 +199,16 @@ class Pipeline:
     async def push_usage(self, usage: "UsageRecord") -> None:
         """Emit a usage record to the sinks."""
         await self._backbone.push_usage(usage)
+
+    def subscribe(self, on_event=None, **kwargs):
+        """Subscribe to events and live structural updates on the backbone."""
+
+        return self._backbone.subscribe(on_event, **kwargs)
+
+    async def push_turn_summary(self, update: "TurnSummaryUpdate") -> None:
+        """Publish a refined turn summary through the backbone's sink fan-out."""
+
+        await self._backbone.push_turn_summary(update)
 
     async def flush(self) -> None:
         """Flush held plumbing and pending refinements, then flush all sinks."""

@@ -7,7 +7,13 @@ import logging
 from pathlib import Path
 
 from traceforge.sinks.base import StorageSink
-from traceforge.types import SessionEvent, TelemetrySpan, TitleUpdate, UsageRecord
+from traceforge.types import (
+    SessionEvent,
+    TelemetrySpan,
+    TitleUpdate,
+    TurnSummaryUpdate,
+    UsageRecord,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +124,19 @@ class JsonlSink(StorageSink):
             default=str,
         )
 
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        except OSError as exc:
+            logger.error("JsonlSink: failed to write to %s: %s", path, exc)
+
+    async def on_turn_summary(self, update: TurnSummaryUpdate) -> None:
+        path = self._resolve_path(update.session_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps(
+            {"record": "turn_summary", **update.model_dump(mode="json")},
+            default=str,
+        )
         try:
             with open(path, "a", encoding="utf-8") as f:
                 f.write(line + "\n")

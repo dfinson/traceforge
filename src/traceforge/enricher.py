@@ -18,6 +18,7 @@ from traceforge.classify.risk import assess_risk, assess_tool_risk
 from traceforge.classify.tool_display import ToolDisplayProvider, ToolDisplayResolver
 from traceforge.classify.tools import normalize_tool_name
 from traceforge.classify.workflow import Phase, Visibility
+from traceforge.paths import normalize_file_targets
 from traceforge.types import EventKind, EventMetadata, SessionEvent
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,7 @@ class Enricher:
         max_pending: int | None = _DEFAULT_MAX_PENDING,
         flush_on_session_end: bool = True,
         tool_display_providers: Sequence[ToolDisplayProvider] | None = None,
+        workspace_root: Path | str | None = None,
     ) -> None:
         """
         Args:
@@ -73,6 +75,9 @@ class Enricher:
                 ``metadata.tool_display``. The first non-empty result wins; when all
                 defer, the static map (built-in defaults + config overrides) is used,
                 then ``None``.
+            workspace_root: Optional declared session/worktree root. Concrete file
+                targets are normalized against it into ``metadata.file_targets``
+                while their raw payload values remain untouched.
 
         Raises:
             ValueError: if ``pairing_ttl_s`` is set and not > 0, or if
@@ -88,6 +93,7 @@ class Enricher:
         self._pairing_ttl_s = pairing_ttl_s
         self._max_pending = max_pending
         self._flush_on_session_end = flush_on_session_end
+        self._workspace_root = str(workspace_root) if workspace_root is not None else None
 
         # Build engine eagerly so config errors surface at construction time
         if config is not None:
@@ -115,6 +121,7 @@ class Enricher:
             # push the raw event straight to sinks and bypass the exactly-once
             # tool-call pairing guarantee the downstream governance stage relies on.
             event = event.model_copy(update={"metadata": EventMetadata()})
+        event = self._normalize_file_targets(event)
 
         # Stream time drives TTL eviction: the timestamp of the event currently
         # being processed is "now". Using stream time (not wallclock) keeps bounded
@@ -343,6 +350,16 @@ class Enricher:
 
         return event
 
+    def _normalize_file_targets(self, event: SessionEvent) -> SessionEvent:
+        """Stamp normalized concrete file targets without rewriting the payload."""
+
+        raw_targets = _extract_file_targets_from_payload(event.payload)
+        if not raw_targets:
+            return event
+        targets = normalize_file_targets(raw_targets, self._workspace_root)
+        metadata = event.metadata.model_copy(update={"file_targets": targets})
+        return event.model_copy(update={"metadata": metadata})
+
     def _classify_permission(self, event: SessionEvent) -> SessionEvent:
         """Set metadata.classification for a permission-gate event from its kind.
 
@@ -428,8 +445,7 @@ class Enricher:
 
     def _assess_tool_risk(self, event: SessionEvent, cls: Classification) -> SessionEvent:
         """Compute risk score for a native/MCP tool and store in payload._enrichment."""
-        # Extract file targets from payload
-        targets = _extract_targets_from_payload(event.payload)
+        targets = _risk_targets(event)
 
         risk = assess_tool_risk(
             classification=cls,
@@ -579,6 +595,7 @@ _INFRA_DIRS = frozenset({"helm", "charts", "k8s", "kubernetes", "terraform", "in
 _CONTAINER_FILES = frozenset({"docker-compose.yml", "docker-compose.yaml", ".dockerignore"})
 _DOC_FILES = frozenset({"readme.md", "contributing.md", "changelog.md", "license.md"})
 _PAYLOAD_PATH_KEYS = ("path", "file_path", "file", "filename")
+_RISK_TARGET_KEYS = (*_PAYLOAD_PATH_KEYS, "pattern", "glob")
 
 
 def _infer_scope_from_path(path: str) -> str | None:
@@ -624,17 +641,28 @@ def _infer_scope_from_path(path: str) -> str | None:
 
 def _extract_path_from_payload(payload: dict) -> str:
     """Extract the first file path string from common payload keys."""
-    for key in _PAYLOAD_PATH_KEYS:
-        val = payload.get(key, "")
-        if isinstance(val, str) and val:
-            return val
-    args = payload.get("arguments", {})
-    if isinstance(args, dict):
-        for key in _PAYLOAD_PATH_KEYS:
-            val = args.get(key, "")
-            if isinstance(val, str) and val:
-                return val
-    return ""
+    targets = _extract_payload_targets(payload, _PAYLOAD_PATH_KEYS)
+    return targets[0] if targets else ""
+
+
+def _extract_file_targets_from_payload(payload: dict) -> list[str]:
+    """Extract concrete file target strings from payload and arguments."""
+
+    return _extract_payload_targets(payload, _PAYLOAD_PATH_KEYS)
+
+
+def _extract_payload_targets(payload: dict, keys: tuple[str, ...]) -> list[str]:
+    """Extract ordered, unique target values from payload and arguments."""
+
+    targets: list[str] = []
+    for container in (payload, payload.get("arguments", {})):
+        if not isinstance(container, dict):
+            continue
+        for key in keys:
+            value = container.get(key)
+            if isinstance(value, str) and value and value not in targets:
+                targets.append(value)
+    return targets
 
 
 def _refine_scope_from_payload(cls: Classification, payload: dict) -> Classification:
@@ -721,19 +749,18 @@ def _extract_tool_call_id(event: SessionEvent) -> str | None:
     return None
 
 
-def _extract_targets_from_payload(payload: dict) -> list[str]:
-    """Extract file path targets from event payload for risk scoring."""
+def _risk_targets(event: SessionEvent) -> list[str]:
+    """Return one ordered risk-target domain with concrete paths normalized."""
+
+    normalized_paths = {target.raw_path: target.path for target in event.metadata.file_targets}
     targets: list[str] = []
-    primary = _extract_path_from_payload(payload)
-    if primary:
-        targets.append(primary)
-    # Also pick up pattern/glob from arguments
-    args = payload.get("arguments", {})
-    if isinstance(args, dict):
-        for key in ("pattern", "glob"):
-            val = args.get(key, "")
-            if isinstance(val, str) and val and val not in targets:
-                targets.append(val)
+    for raw_target in _extract_payload_targets(event.payload, _RISK_TARGET_KEYS):
+        target = normalized_paths.get(raw_target, raw_target)
+        if target not in targets:
+            targets.append(target)
+    for file_target in event.metadata.file_targets:
+        if file_target.path not in targets:
+            targets.append(file_target.path)
     return targets
 
 
@@ -750,6 +777,13 @@ def _merge_metadata(
             continue
         start_val = getattr(start, field_name)
         complete_val = getattr(complete, field_name)
+        if field_name == "file_targets":
+            merged_targets = {
+                (target.raw_path, target.path): target
+                for target in (*start.file_targets, *complete.file_targets)
+            }
+            updates[field_name] = tuple(merged_targets.values())
+            continue
         if field_name in _start_authoritative:
             updates[field_name] = start_val if start_val is not None else complete_val
         else:

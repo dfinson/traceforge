@@ -188,6 +188,7 @@ class EventMetadata(FrozenModel):
     tool_display: str | None
     motivation: ToolMotivation | None
     duration_ms: float | None
+    file_targets: tuple[FileTarget, ...]
 `
 
 ### SessionEvent
@@ -201,7 +202,19 @@ class SessionEvent(FrozenModel):
     payload: dict[str, Any]
     raw_event: dict[str, Any] | None     # original event data, verbatim
     metadata: EventMetadata
+
+    @property
+    def sequence(self) -> int | None: ...  # canonical metadata.sequence accessor
 `
+
+`SessionEvent.id` is stable event identity. `EventMetadata.sequence` is the sole
+serialized ordering field; producers and consumers MUST NOT duplicate it into the
+open payload. `event_to_sse()` uses `id` as the SSE `id:` and serializes the whole
+event (including `metadata.sequence`) as JSON `data:`.
+
+`FileTarget(raw_path, path, inside_root)` retains verbatim provenance while exposing
+one normalized path: root-relative when inside a declared workspace, normalized
+absolute when outside.
 
 ### TelemetrySpan
 
@@ -581,6 +594,7 @@ class Enricher:
         custom_classifications: dict[str, Classification] | None = None,
         config: ClassifyConfig | None = None,
         config_path: Path | str | None = None,
+        workspace_root: Path | str | None = None,
     ) -> None: ...
 
     def process(self, event: SessionEvent) -> SessionEvent | list[SessionEvent] | None: ...
@@ -589,23 +603,27 @@ class Enricher:
 
 ### Enrichment Steps
 
-1. **Tool call pairing**: Buffers `TOOL_CALL_STARTED` events, pairs them with matching `TOOL_CALL_COMPLETED` by `tool_call_id`. Merges payloads. Emits orphan starts on displacement or flush.
+1. **File target normalization**: With `workspace_root` declared, stamps concrete
+   targets into `metadata.file_targets` using host-independent Windows/POSIX
+   normalization. Raw payload paths are never rewritten.
 
-2. **Duration computation**: Calculates `metadata.duration_ms` from timestamp difference of start/complete pairs.
+2. **Tool call pairing**: Buffers `TOOL_CALL_STARTED` events, pairs them with matching `TOOL_CALL_COMPLETED` by `tool_call_id`. Merges payloads. Emits orphan starts on displacement or flush.
 
-3. **Classification dispatch**: For `TOOL_CALL_STARTED` and unpaired `TOOL_CALL_COMPLETED`:
+3. **Duration computation**: Calculates `metadata.duration_ms` from timestamp difference of start/complete pairs.
+
+4. **Classification dispatch**: For `TOOL_CALL_STARTED` and unpaired `TOOL_CALL_COMPLETED`:
    - Shell tools → deep tree-sitter AST analysis (bash, PowerShell, cmd)
    - Native tools → static classification via engine lookup
    - MCP tools → profile-based classification
    - Scope refinement from file paths in payload
 
-4. **Risk scoring**: Computes a 0-100 risk score:
+5. **Risk scoring**: Computes a 0-100 risk score:
    - Shell commands: structural + flag modifiers + injection patterns + pipeline taint + context
    - Native/MCP tools: intent base + scope + capability escalation + context
 
-5. **Visibility assignment**: Sets `metadata.visibility` based on event kind (system events, bookkeeping → SYSTEM; similar repeated events → COLLAPSED).
+6. **Visibility assignment**: Sets `metadata.visibility` based on event kind (system events, bookkeeping → SYSTEM; similar repeated events → COLLAPSED).
 
-6. **Phase detection**: Derives `metadata.phases` from classification dimensions.
+7. **Phase detection**: Derives `metadata.phases` from classification dimensions.
 
 ### Return Semantics
 
@@ -785,6 +803,7 @@ class EventPipeline:
     async def push(self, event: SessionEvent) -> None: ...
     async def push_span(self, span: TelemetrySpan) -> None: ...
     async def push_usage(self, usage: UsageRecord) -> None: ...
+    async def push_turn_summary(self, update: TurnSummaryUpdate) -> None: ...
     async def flush(self) -> None: ...
     async def close(self) -> None: ...
 `
@@ -796,6 +815,9 @@ class EventPipeline:
 - **Fan-out**: All sinks receive every event concurrently.
 - **Flush**: Drains enricher buffer (unpaired tool starts), then flushes all sinks.
 - **Close**: Flush + close all sinks (also error-isolated).
+- **Turn projection**: one deterministic version-1 `TurnSummaryUpdate` is emitted
+  for the first meaningful event of every turn. Later refinements use
+  `push_turn_summary()` with the same `(session_id, turn_id)` and a higher version.
 
 ---
 
@@ -811,6 +833,7 @@ class StorageSink(ABC):
     async def on_event(self, event: SessionEvent) -> None: ...
     async def on_span(self, span: TelemetrySpan) -> None: ...   # default no-op
     async def on_usage(self, usage: UsageRecord) -> None: ...   # default no-op
+    async def on_turn_summary(self, update: TurnSummaryUpdate) -> None: ...
     async def flush(self) -> None: ...                          # default no-op
     async def close(self) -> None: ...                          # default no-op
 `
@@ -938,13 +961,18 @@ An in-process consumer can react to events without implementing a full sink: `St
 **The official lightweight pub/sub API is `EventPipeline.subscribe`:**
 
 ```python
-pipeline.subscribe(on_event, *, kind=None, to_thread=False) -> CallbackSink
+pipeline.subscribe(
+    on_event=None, *, on_progress=None, on_turn_summary=None,
+    kind=None, to_thread=False
+) -> CallbackSink
 pipeline.unsubscribe(sink) -> bool
 ```
 
 - `subscribe` wraps `on_event` in a `CallbackSink` and appends it to the fan-out; it returns that sink, which doubles as the handle for `unsubscribe`.
 - `on_event` may be **async or a plain sync callable** — the one genuinely new capability. Sync callbacks run inline on the event loop by default (right for append-to-list / put-on-queue consumers); pass `to_thread=True` to run a blocking callback via `asyncio.to_thread` so it never stalls the loop. (Adapter: `traceforge.sinks.callback.as_async_event_callback`.)
 - `kind` is an optional per-subscriber filter checked **before** dispatch: an exact kind, a `"prefix.*"` wildcard (e.g. `"tool.*"`), an iterable of those, or a predicate over the event.
+- `on_turn_summary` receives one deterministic initial summary per meaningful turn.
+  It uses the same error-isolated sink fan-out as events and progress.
 
 `EventPipeline(sinks=[CallbackSink(on_event=handler)])` remains equivalent for construction-time wiring; `subscribe` is the ergonomic path for adding/removing consumers on a live pipeline — no sink subclassing, no flush/close lifecycle, no persistence contract.
 
@@ -2027,6 +2055,7 @@ mid-session and survives `SESSION_ENDED` / `SESSION_PAUSED`.
 |-------|--------|--------|---------|
 | Phase classifier | `traceforge.phase` | `metadata.phase` (per event) | on (`enable_phase`) |
 | Boundary decoder | `traceforge.boundary` | `metadata.boundary` + `activity_id` / `step_id` | on (`enable_boundary`) |
+| Turn summarizer | `traceforge.turn_summary` | `TurnSummaryUpdate` records (out-of-band) | on (`enable_turn_summary`) |
 | Titler | `traceforge.title` | `TitleUpdate` records (out-of-band) | off (`enable_title`) |
 
 ### 23.1 — Shared foundations
@@ -2130,17 +2159,29 @@ distilled request-head was measured at ~9% coherent and dropped).
   the environment (the key is **never** read from config). It runs off the hot path on a worker thread and
   emits a later, refined `kind = "session"` `TitleUpdate` (`refine_title` / `take_session_refinement`).
 
-### 23.6 — Live-stamping & enablement contract
+### 23.6 — Deterministic turn summaries
+
+`TurnSummarizer` emits exactly one initial `TurnSummaryUpdate(version=1)` for each
+meaningful turn. An explicit `metadata.turn_id` is authoritative; otherwise a
+substantive user message opens an implicit turn. Lifecycle/plumbing events defer
+emission until useful text arrives. Every update carries its source event plus the
+current activity/step IDs. Refiners publish a later version on the same public
+channel, and consumers merge by keeping the highest version for
+`(session_id, turn_id)`.
+
+### 23.7 — Live-stamping & enablement contract
 
 - `enable_phase` — default **on**; stamps `metadata.phase` live.
 - `enable_boundary` — default **on**; stamps `metadata.boundary` (and assigns `activity_id` / `step_id`)
   live.
 - `enable_title` — default **off** (opt-in); emits `TitleUpdate` records out-of-band.
+- `enable_turn_summary` — default **on**; emits deterministic
+  `TurnSummaryUpdate` records out-of-band.
 - Live structuring runs at the `EventPipeline` layer, alongside — not inside — the enricher (which owns
   classification and risk). Structuring is the pipeline's observation plane and feeds sinks directly
   (including `on_title_update`).
 
-### 23.7 — Packaging
+### 23.8 — Packaging
 
 The base `traceforge` wheel is **model-free only for the titler.** Its build force-includes the small model
 artifacts — `phase/data/*.joblib`, `phase/data/potion-base-8M/*`, `boundary/data/*.joblib`, and

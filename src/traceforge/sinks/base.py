@@ -6,7 +6,14 @@ import logging
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, ClassVar
 
-from traceforge.types import ProgressUpdate, SessionEvent, TelemetrySpan, TitleUpdate, UsageRecord
+from traceforge.types import (
+    ProgressUpdate,
+    SessionEvent,
+    TelemetrySpan,
+    TitleUpdate,
+    TurnSummaryUpdate,
+    UsageRecord,
+)
 
 if TYPE_CHECKING:
     from traceforge.governance.envelope import EnrichedEvent
@@ -115,6 +122,13 @@ class StorageSink(ABC):
                 "dropped. Override on_title_update(update) to persist or forward them.",
                 cls,
             )
+
+    async def on_turn_summary(self, update: TurnSummaryUpdate) -> None:
+        """Handle a deterministic, versioned summary for one meaningful turn.
+
+        Default no-op. Sinks that materialize the live structural projection
+        override this and merge by ``(session_id, turn_id, version)``.
+        """
 
     async def flush(self) -> None:
         """Flush buffered writes. Default no-op."""

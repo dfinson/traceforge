@@ -17,15 +17,19 @@ from traceforge.sinks.callback import (
     EventCallback,
     KindFilter,
     ProgressCallback,
+    TurnSummaryCallback,
     as_async_event_callback,
     as_async_progress_callback,
+    as_async_turn_summary_callback,
 )
+from traceforge.turn_summary import TurnSummarizer
 from traceforge.types import (
     EventMetadata,
     ProgressUpdate,
     SessionEvent,
     TelemetrySpan,
     TitleUpdate,
+    TurnSummaryUpdate,
     UsageRecord,
 )
 
@@ -101,6 +105,10 @@ class EventPipeline:
     append-only :class:`~traceforge.types.TitleUpdate` records (``on_title_update``)
     keyed by segment id; consumers join them onto events. The trailing open
     activity is titled at pipeline close.
+
+    ``enable_turn_summary`` (on by default) emits one deterministic,
+    versioned :class:`~traceforge.types.TurnSummaryUpdate` for each meaningful
+    turn. It is independent of the optional title model.
     """
 
     def __init__(
@@ -113,6 +121,7 @@ class EventPipeline:
         enable_phase: bool = True,
         enable_boundary: bool = True,
         enable_title: bool = False,
+        enable_turn_summary: bool = True,
         max_sessions: int | None = _DEFAULT_MAX_SESSIONS,
         governance=None,
         metrics: PipelineMetrics | None = None,
@@ -147,6 +156,11 @@ class EventPipeline:
         self._boundary_streams: dict[str, object] = {}
         self._title_inferencer = title_inferencer
         self._title_streams: dict[str, object] = {}
+        self._turn_summarizer = (
+            TurnSummarizer(history_size=max_sessions or _DEFAULT_MAX_SESSIONS)
+            if enable_turn_summary
+            else None
+        )
         # Live progress-headline emitter (SPEC U7). Created lazily the first time
         # a caller subscribes with ``on_progress`` (see :meth:`subscribe`); stays
         # ``None`` otherwise, so every progress site on the hot path is a single
@@ -222,10 +236,11 @@ class EventPipeline:
         on_event: EventCallback | None = None,
         *,
         on_progress: ProgressCallback | None = None,
+        on_turn_summary: TurnSummaryCallback | None = None,
         kind: KindFilter = None,
         to_thread: bool = False,
     ) -> CallbackSink:
-        """Register a lightweight event and/or progress subscriber (SPEC §15 / #47, U7).
+        """Register lightweight event and structural-update subscribers.
 
         One-line sugar over the sink model: wraps the given callback(s) in a
         :class:`~traceforge.sinks.callback.CallbackSink` and appends it, so the
@@ -237,7 +252,9 @@ class EventPipeline:
         ``on_event`` receives every (post-structuring) :class:`SessionEvent`;
         ``on_progress`` receives a live :class:`~traceforge.types.ProgressUpdate`
         — a deterministic heuristic headline emitted the instant an activity/step
-        opens (U7). Pass either or both; at least one is required. Subscribing to
+        opens (U7). ``on_turn_summary`` receives one deterministic initial summary
+        per meaningful turn. Pass any callback combination; at least one is
+        required. Subscribing to
         ``on_progress`` lazily arms the progress emitter; not subscribing to it
         leaves the pipeline byte-identical to before (the emitter stays ``None``).
 
@@ -253,8 +270,10 @@ class EventPipeline:
         Returns the created :class:`CallbackSink`, which doubles as the handle for
         :meth:`unsubscribe`.
         """
-        if on_event is None and on_progress is None:
-            raise ValueError("subscribe requires at least one of on_event or on_progress")
+        if on_event is None and on_progress is None and on_turn_summary is None:
+            raise ValueError(
+                "subscribe requires at least one of on_event, on_progress, or on_turn_summary"
+            )
         event_cb = (
             as_async_event_callback(on_event, kind=kind, to_thread=to_thread)
             if on_event is not None
@@ -265,7 +284,16 @@ class EventPipeline:
             if on_progress is not None
             else None
         )
-        sink = CallbackSink(on_event=event_cb, on_progress=progress_cb)
+        turn_summary_cb = (
+            as_async_turn_summary_callback(on_turn_summary, to_thread=to_thread)
+            if on_turn_summary is not None
+            else None
+        )
+        sink = CallbackSink(
+            on_event=event_cb,
+            on_progress=progress_cb,
+            on_turn_summary=turn_summary_cb,
+        )
         if on_progress is not None and self._progress is None:
             self._progress = ProgressEmitter()
         self._sinks.append(sink)
@@ -428,6 +456,8 @@ class EventPipeline:
         self._boundary_streams.pop(session_id, None)
         if self._progress is not None:
             self._progress.forget(session_id)
+        if self._turn_summarizer is not None:
+            self._turn_summarizer.forget(session_id)
 
     async def _push_locked(self, event: SessionEvent) -> None:
         if self._enricher is not None:
@@ -511,14 +541,16 @@ class EventPipeline:
         for event in events:
             if self._boundary_inferencer is not None:
                 event = self._boundary_stamp(event)
-            await self._title_emit(event)
+            event = await self._title_emit(event)
             # Progress rides the same boundary-stamped event straight after it
             # reaches the sinks. Gated: on the default path ``_progress`` is None,
             # so this is a single bool check and nothing else runs (U7).
             if self._progress is not None:
                 await self._emit_progress(event)
+            if self._turn_summarizer is not None:
+                await self._emit_turn_summary(event)
 
-    async def _title_emit(self, event: SessionEvent) -> None:
+    async def _title_emit(self, event: SessionEvent) -> SessionEvent:
         """Stamp the event's live segment ids, emit it immediately, then emit
         any titles for the activity it just closed.
 
@@ -541,7 +573,7 @@ class EventPipeline:
 
         if self._title_inferencer is None:
             await self._push_to_sinks(event)
-            return
+            return event
 
         stream = self._title_streams.get(event.session_id)
         if stream is None:
@@ -576,6 +608,7 @@ class EventPipeline:
         # By default (strategy=model) nothing is queued, so this is a no-op.
         for closed in stream.take_activity_refinements():
             self._schedule_activity_refine(event.session_id, closed)
+        return event
 
     def _schedule_session_refine(self, session_id: str, text: str) -> None:
         """Refine a session title via the API off the hot path (fire-and-forget).
@@ -845,6 +878,34 @@ class EventPipeline:
             f"progress update for segment {update.segment_id}",
         )
 
+    async def _emit_turn_summary(self, event: SessionEvent) -> None:
+        """Derive and fan out the first deterministic summary for a turn."""
+
+        try:
+            update = self._turn_summarizer.observe(event)
+        except Exception as exc:
+            logger.error(
+                "Live turn summarization failed for event %s: %s — skipping",
+                event.id,
+                exc,
+                exc_info=True,
+            )
+            return
+        if update is not None:
+            await self.push_turn_summary(update)
+
+    async def push_turn_summary(self, update: TurnSummaryUpdate) -> None:
+        """Publish an initial or refined turn summary.
+
+        Refiners reuse the same ``session_id``/``turn_id`` with a higher
+        ``version``; materializing sinks keep the highest version.
+        """
+
+        await self._fanout(
+            (sink.on_turn_summary(update) for sink in self._sinks),
+            f"turn summary for {update.session_id}/{update.turn_id}",
+        )
+
     async def push_span(self, span: TelemetrySpan) -> None:
         """Fan-out span to all registered sinks.
 
@@ -913,6 +974,8 @@ class EventPipeline:
         self._session_order.clear()
         if self._progress is not None:
             self._progress.clear()
+        if self._turn_summarizer is not None:
+            self._turn_summarizer.clear()
 
         await self._fanout((sink.flush() for sink in self._sinks), "flush")
 

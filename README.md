@@ -34,8 +34,8 @@ mapping file**: no code.
 1. **Sources** transport raw data from files, HTTP endpoints, SSE streams, SQLite databases, or replays.
 2. **Parsers** pre-process non-structured formats (markdown logs, chunked data) into structured dicts.
 3. **Adapters** parse raw input into a common `SessionEvent` type using declarative YAML mappings.
-4. **Enricher** adds metadata: tool pairing, duration, multi-dimensional classification, risk scoring, visibility.
-5. **Pipeline** stamps live structure, phase, activity/step boundaries, titles, then routes events to one or more sinks with error isolation.
+4. **Enricher** adds metadata: tool pairing, duration, normalized file targets, multi-dimensional classification, risk scoring, visibility.
+5. **Pipeline** stamps live structure, phase, activity/step boundaries, per-turn summaries, titles, then routes events to one or more sinks with error isolation.
 6. **Sinks** write to storage backends or call custom handlers.
 7. **Governance** (opt-in) assesses the same events (data labeling, taint / drift / budget tracking, rule evaluation) into per-event recommendations, with optional gate policies for enforcement.
 
@@ -90,6 +90,25 @@ native config — for Claude Code, a `PreToolUse` hook in `.claude/settings.json
 `traceforge gate --stdin`. It does not scaffold `~/.traceforge/` (that config bootstrap happens
 automatically on first config access).
 
+### Stable event and turn contracts
+
+`SessionEvent.id` is the stable event identity. Stream order lives only at
+`event.metadata.sequence` (with `event.sequence` as a convenience accessor), never
+at `payload.seq`. `event_to_sse(event)` writes the event ID to the SSE `id:` field
+and the complete canonical event JSON to `data:`.
+
+For live projections, subscribe to deterministic turn summaries:
+
+```python
+pipeline.subscribe(on_turn_summary=updates.append)
+```
+
+Each meaningful turn emits one `TurnSummaryUpdate` at version 1, linked to its
+native `activity_id` / `step_id`. A refiner can publish a higher version through
+`pipeline.push_turn_summary(update)`; materializing sinks keep the highest version.
+Declare `Enricher(workspace_root=...)` to receive normalized, root-relative
+`metadata.file_targets` while the raw payload remains unchanged.
+
 ## Dashboard
 
 `traceforge dashboard` opens a local, read-only web console over your SQLite output sink — the
@@ -114,7 +133,7 @@ See [`docs/dashboard-spec.md`](docs/dashboard-spec.md) for the full design and d
 | 🧩 **Framework-agnostic** | 22 bundled YAML mappings covering Copilot, Claude Code, Cline, Aider, CrewAI, LangGraph, OpenHands, PydanticAI, smolagents, Goose, and more. |
 | 🖥️ **Runs anywhere** | Runs from a laptop to CI. CPU-only, no heavyweight ML stack. |
 | 🏷️ **Classification & risk** | 7-dimension taxonomy, tree-sitter shell AST, MCP profiles, 0–100 risk scoring with MITRE ATT&CK mappings. |
-| 🧠 **Live structure** | Phase, activity/step boundaries, and human-readable titles stamped as events arrive. |
+| 🧠 **Live structure** | Phase, activity/step boundaries, deterministic turn summaries, and human-readable titles as events arrive. |
 | 🛡️ **Governance** | Data labeling, information-flow control, drift & budget tracking, and `allow/warn/escalate/deny/transform` recommendations. |
 | 🔌 **Pluggable sinks** | JSONL, SQLite, S3, Parquet, OpenTelemetry, webhook, console, and custom callbacks, all YAML-configurable. |
 

@@ -37,6 +37,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   premium-request count, not dollars — never synthesized). Ingestion-side only; usage
   rides `usage_records` (Cost lens), never the enriched-events timeline.
 
+## [0.1.3] - 2026-08-02
+
+### Added
+
+- A canonical event wire contract: `SessionEvent.id` is the stable identity,
+  `EventMetadata.sequence` is the sole ordering field (also exposed as
+  `event.sequence`), and `event_to_sse()` serializes both without payload
+  duplication.
+- Deterministic `TurnSummaryUpdate` projection. `EventPipeline` emits one version-1
+  summary per meaningful turn with activity/step linkage; callbacks, JSONL, and
+  SQLite consume the same public channel, and higher versions merge by
+  `(session_id, turn_id)`.
+- Host-independent file-target normalization via `normalize_file_target(s)` and
+  `Enricher(workspace_root=...)`. `metadata.file_targets` exposes root-relative
+  paths while retaining every raw path for provenance.
+
+### Fixed
+
+- `powershell` and `pwsh` tool calls now both canonicalize to the bundled shell
+  executor and use native PowerShell command classification.
+
 ## [0.1.1] - 2026-07-09
 
 ### Added
@@ -135,6 +156,7 @@ risk-scored, governed event streams with opt-in tool-call gating.
 - The gate IPC server binds a POSIX `AF_UNIX` socket; on Windows that path is skipped
   and a localhost TCP socket is used instead.
 
-[Unreleased]: https://github.com/dfinson/traceforge/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/dfinson/traceforge/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/dfinson/traceforge/compare/v0.1.2...v0.1.3
 [0.1.1]: https://github.com/dfinson/traceforge/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/dfinson/traceforge/releases/tag/v0.1.0

@@ -37,6 +37,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   premium-request count, not dollars — never synthesized). Ingestion-side only; usage
   rides `usage_records` (Cost lens), never the enriched-events timeline.
 
+## [0.1.4] - 2026-08-02
+
+### Fixed
+
+- Native tool risk now consumes the canonical `metadata.file_targets` collection,
+  including normalized path, pattern, and glob selectors with raw provenance in
+  deterministic first-seen order. POSIX absolute targets paired with relative workspace
+  roots are safely classified as outside the root instead of raising.
+
 ## [0.1.3] - 2026-08-02
 
 ### Added
@@ -156,7 +165,8 @@ risk-scored, governed event streams with opt-in tool-call gating.
 - The gate IPC server binds a POSIX `AF_UNIX` socket; on Windows that path is skipped
   and a localhost TCP socket is used instead.
 
-[Unreleased]: https://github.com/dfinson/traceforge/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/dfinson/traceforge/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/dfinson/traceforge/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/dfinson/traceforge/compare/v0.1.2...v0.1.3
 [0.1.1]: https://github.com/dfinson/traceforge/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/dfinson/traceforge/releases/tag/v0.1.0

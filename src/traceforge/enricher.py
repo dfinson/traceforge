@@ -445,7 +445,7 @@ class Enricher:
 
     def _assess_tool_risk(self, event: SessionEvent, cls: Classification) -> SessionEvent:
         """Compute risk score for a native/MCP tool and store in payload._enrichment."""
-        targets = _risk_targets(event)
+        targets = [target.path for target in event.metadata.file_targets]
 
         risk = assess_tool_risk(
             classification=cls,
@@ -595,7 +595,7 @@ _INFRA_DIRS = frozenset({"helm", "charts", "k8s", "kubernetes", "terraform", "in
 _CONTAINER_FILES = frozenset({"docker-compose.yml", "docker-compose.yaml", ".dockerignore"})
 _DOC_FILES = frozenset({"readme.md", "contributing.md", "changelog.md", "license.md"})
 _PAYLOAD_PATH_KEYS = ("path", "file_path", "file", "filename")
-_RISK_TARGET_KEYS = (*_PAYLOAD_PATH_KEYS, "pattern", "glob")
+_PAYLOAD_TARGET_KEYS = (*_PAYLOAD_PATH_KEYS, "pattern", "glob")
 
 
 def _infer_scope_from_path(path: str) -> str | None:
@@ -646,9 +646,9 @@ def _extract_path_from_payload(payload: dict) -> str:
 
 
 def _extract_file_targets_from_payload(payload: dict) -> list[str]:
-    """Extract concrete file target strings from payload and arguments."""
+    """Extract native file targets and selectors from payload and arguments."""
 
-    return _extract_payload_targets(payload, _PAYLOAD_PATH_KEYS)
+    return _extract_payload_targets(payload, _PAYLOAD_TARGET_KEYS)
 
 
 def _extract_payload_targets(payload: dict, keys: tuple[str, ...]) -> list[str]:
@@ -747,21 +747,6 @@ def _extract_tool_call_id(event: SessionEvent) -> str | None:
     if value is not None and not isinstance(value, str):
         logger.debug("Ignoring non-string tool_call_id: %r", value)
     return None
-
-
-def _risk_targets(event: SessionEvent) -> list[str]:
-    """Return one ordered risk-target domain with concrete paths normalized."""
-
-    normalized_paths = {target.raw_path: target.path for target in event.metadata.file_targets}
-    targets: list[str] = []
-    for raw_target in _extract_payload_targets(event.payload, _RISK_TARGET_KEYS):
-        target = normalized_paths.get(raw_target, raw_target)
-        if target not in targets:
-            targets.append(target)
-    for file_target in event.metadata.file_targets:
-        if file_target.path not in targets:
-            targets.append(file_target.path)
-    return targets
 
 
 def _merge_metadata(

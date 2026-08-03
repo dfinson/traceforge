@@ -1398,7 +1398,7 @@ traceforge/
 
 | Item | Priority | Dependencies | Notes |
 |------|----------|--------------|-------|
-| **PyPI release** | Medium | None | Publish `traceforge-toolkit` + `traceforge-title-model` to PyPI. Packaging and CI publish workflow are already in place. |
+| **PyPI release** | Medium | None | Publish `traceforge-toolkit==0.1.3` from tag `v0.1.3`; the independent `traceforge-title-model` remains at `0.2.0`. Packaging and CI publish workflows are already in place. |
 
 > **Delivered since this table was first written:** the live structuring subsystem
 > (`phase/` + `boundary/` + `title/`, formerly PR #35, now specified in §23) and the
@@ -1409,7 +1409,7 @@ traceforge/
 ### Implementation Order (Recommended)
 
 `
-1. PyPI release → publish traceforge-toolkit + traceforge-title-model
+1. PyPI release → publish `traceforge-toolkit==0.1.3` from tag `v0.1.3`
 `
 
 ---

@@ -27,6 +27,9 @@ the operational runbook and go/no-go checklist for cutting a release.
 separate distribution so the core wheel stays code-first and the ~95 MB model
 only re-releases when it is retrained (rarely), on its own tag.
 
+The current code release target is `traceforge-toolkit==0.1.3`, published from
+tag `v0.1.3`. The independent `traceforge-title-model` remains at `0.2.0`.
+
 Both weight classes (`.safetensors` in `traceforge-toolkit`, `.onnx` in
 `traceforge-title-model`) are tracked with **Git LFS** — see [§4](#4-git-lfs--weight-integrity).
 

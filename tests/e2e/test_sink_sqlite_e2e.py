@@ -40,6 +40,7 @@ from traceforge.types import (
     EventMetadata,
     TelemetrySpan,
     TitleUpdate,
+    TurnSummaryUpdate,
     UsageRecord,
 )
 
@@ -150,6 +151,50 @@ async def test_sqlite_title_upsert_keeps_highest_version(tmp_path: Path) -> None
         ("seg-1", "activity"),
     )
     assert rows == [("final", 3)]
+
+
+@pytest.mark.e2e
+async def test_sqlite_turn_summary_upsert_keeps_highest_version(tmp_path: Path) -> None:
+    db = tmp_path / "turns.db"
+    sink = SqliteOutputSink(path=str(db))
+    initial = TurnSummaryUpdate(
+        session_id="s",
+        turn_id="turn-1",
+        summary="initial",
+        source_event_id="event-1",
+        sequence=0,
+        activity_id="activity-1",
+        step_id="step-1",
+    )
+    await sink.on_turn_summary(initial)
+    await sink.on_turn_summary(initial.model_copy(update={"summary": "refined", "version": 3}))
+    await sink.on_turn_summary(initial.model_copy(update={"summary": "stale", "version": 2}))
+    await sink.close()
+
+    rows = _query(
+        db,
+        "SELECT summary, version, activity_id, step_id FROM turn_summaries "
+        "WHERE session_id = ? AND turn_id = ?",
+        ("s", "turn-1"),
+    )
+    assert rows == [("refined", 3, "activity-1", "step-1")]
+
+
+@pytest.mark.e2e
+async def test_sqlite_event_metadata_preserves_canonical_sequence(tmp_path: Path) -> None:
+    db = tmp_path / "sequence.db"
+    sink = SqliteOutputSink(path=str(db))
+    event = make_event(id="stable-event", metadata=EventMetadata(sequence=12))
+    await sink.on_event(event)
+    await sink.close()
+
+    [(event_id, metadata_json)] = _query(
+        db,
+        "SELECT id, metadata_json FROM enriched_events WHERE id = ?",
+        ("stable-event",),
+    )
+    assert event_id == event.id
+    assert json.loads(metadata_json)["sequence"] == 12
 
 
 @pytest.mark.e2e

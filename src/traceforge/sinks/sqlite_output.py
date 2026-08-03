@@ -18,7 +18,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from traceforge.sinks.base import StorageSink
-from traceforge.types import SessionEvent, TelemetrySpan, TitleUpdate, UsageRecord
+from traceforge.types import (
+    SessionEvent,
+    TelemetrySpan,
+    TitleUpdate,
+    TurnSummaryUpdate,
+    UsageRecord,
+)
 
 if TYPE_CHECKING:
     from traceforge.telemetry.attribution import Anomaly, AttributionRollup
@@ -74,6 +80,22 @@ CREATE TABLE IF NOT EXISTS segment_titles (
 );
 
 CREATE INDEX IF NOT EXISTS idx_segment_titles_session ON segment_titles(session_id);
+
+CREATE TABLE IF NOT EXISTS turn_summaries (
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    source_event_id TEXT NOT NULL,
+    sequence INTEGER NOT NULL,
+    version INTEGER NOT NULL,
+    activity_id TEXT,
+    step_id TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (session_id, turn_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_turn_summaries_session_sequence
+ON turn_summaries(session_id, sequence);
 
 CREATE TABLE IF NOT EXISTS context_gaps (
     id TEXT PRIMARY KEY,
@@ -436,6 +458,44 @@ class SqliteOutputSink(StorageSink):
             update.parent_id,
         )
         await asyncio.to_thread(self._write_title, params)
+
+    async def on_turn_summary(self, update: TurnSummaryUpdate) -> None:
+        params = (
+            update.session_id,
+            update.turn_id,
+            update.summary,
+            update.source_event_id,
+            update.sequence,
+            update.version,
+            update.activity_id,
+            update.step_id,
+        )
+        await asyncio.to_thread(self._write_turn_summary, params)
+
+    def _write_turn_summary(self, params: tuple) -> None:
+        """Upsert a turn summary, retaining the highest version."""
+
+        conn = self._get_conn()
+        try:
+            conn.execute(
+                """INSERT INTO turn_summaries
+                   (session_id, turn_id, summary, source_event_id, sequence, version,
+                    activity_id, step_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(session_id, turn_id) DO UPDATE SET
+                       summary=excluded.summary,
+                       source_event_id=excluded.source_event_id,
+                       sequence=excluded.sequence,
+                       version=excluded.version,
+                       activity_id=excluded.activity_id,
+                       step_id=excluded.step_id,
+                       updated_at=datetime('now')
+                   WHERE excluded.version >= turn_summaries.version""",
+                params,
+            )
+            conn.commit()
+        except sqlite3.Error as exc:
+            logger.error("SqliteOutputSink: turn summary write failed: %s", exc)
 
     def _write_title(self, params: tuple) -> None:
         """Synchronous upsert keeping the highest version — called via to_thread."""

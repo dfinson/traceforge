@@ -160,6 +160,19 @@ class TestToolPairing:
         assert result.payload["arguments"] == {"path": "/foo.py"}
         assert result.payload["result"] == "success"
 
+    def test_start_file_targets_survive_pathless_completion(self):
+        enricher = Enricher(workspace_root=r"C:\repo")
+        raw_path = r"C:\repo\src\api.py"
+        start = _make_tool_start(arguments={"path": raw_path})
+        complete = _make_tool_complete(result="success")
+
+        enricher.process(start)
+        result = enricher.process(complete)
+
+        assert result is not None
+        assert result.metadata.file_targets[0].raw_path == raw_path
+        assert result.metadata.file_targets[0].path == "src/api.py"
+
 
 # =============================================================================
 # Duration Calculation Tests
@@ -214,6 +227,34 @@ class TestToolClassification:
         cls = flushed[0].metadata.classification
         assert cls is not None
         assert cls.mechanism == "unknown"
+
+    def test_powershell_is_native_command_execution_with_display(self):
+        enricher = Enricher()
+        event = _make_tool_complete(
+            tool_name="powershell",
+            arguments={"command": "Get-ChildItem -Force"},
+        )
+
+        result = enricher.process(event)
+
+        assert result is not None
+        assert result.metadata.classification.mechanism == "process.shell"
+        assert result.metadata.classification.has_action("retrieve")
+        assert result.metadata.tool_display == "shell"
+
+    def test_pwsh_uses_powershell_command_classifier(self):
+        enricher = Enricher()
+        event = _make_tool_complete(
+            tool_name="pwsh",
+            arguments={"command": "Get-ChildItem -Force"},
+        )
+
+        result = enricher.process(event)
+
+        assert result is not None
+        assert result.metadata.classification.mechanism == "process.shell"
+        assert result.metadata.classification.has_action("retrieve")
+        assert result.metadata.tool_display == "shell"
 
     def test_custom_classification_overrides_defaults(self):
         custom = Classification(mechanism="custom.write", effect="mutating")

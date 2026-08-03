@@ -7,7 +7,14 @@ import inspect
 from collections.abc import Awaitable, Callable, Iterable
 
 from traceforge.sinks.base import StorageSink
-from traceforge.types import ProgressUpdate, SessionEvent, TelemetrySpan, TitleUpdate, UsageRecord
+from traceforge.types import (
+    ProgressUpdate,
+    SessionEvent,
+    TelemetrySpan,
+    TitleUpdate,
+    TurnSummaryUpdate,
+    UsageRecord,
+)
 
 #: Accepted shapes for a lightweight event subscriber: a coroutine function or a
 #: plain sync callable (both taking a single :class:`SessionEvent`).
@@ -16,6 +23,7 @@ EventCallback = Callable[[SessionEvent], Awaitable[None] | None]
 #: Accepted shapes for a lightweight progress subscriber: a coroutine function or
 #: a plain sync callable (both taking a single :class:`ProgressUpdate`).
 ProgressCallback = Callable[[ProgressUpdate], Awaitable[None] | None]
+TurnSummaryCallback = Callable[[TurnSummaryUpdate], Awaitable[None] | None]
 
 #: Accepted shapes for a per-subscriber kind filter. ``None`` means "all events".
 #: A string is an exact kind, or a ``"prefix.*"`` wildcard matching that dotted
@@ -35,12 +43,14 @@ class CallbackSink(StorageSink):
         on_usage: Callable[[UsageRecord], Awaitable[None]] | None = None,
         on_title_update: Callable[[TitleUpdate], Awaitable[None]] | None = None,
         on_progress: Callable[[ProgressUpdate], Awaitable[None]] | None = None,
+        on_turn_summary: Callable[[TurnSummaryUpdate], Awaitable[None]] | None = None,
     ) -> None:
         self._on_event = on_event
         self._on_span = on_span
         self._on_usage = on_usage
         self._on_title_update = on_title_update
         self._on_progress = on_progress
+        self._on_turn_summary = on_turn_summary
 
     async def on_event(self, event: SessionEvent) -> None:
         if self._on_event is not None:
@@ -61,6 +71,10 @@ class CallbackSink(StorageSink):
     async def on_progress(self, update: ProgressUpdate) -> None:
         if self._on_progress is not None:
             await self._on_progress(update)
+
+    async def on_turn_summary(self, update: TurnSummaryUpdate) -> None:
+        if self._on_turn_summary is not None:
+            await self._on_turn_summary(update)
 
 
 def _kind_predicate(kind: KindFilter) -> Callable[[SessionEvent], bool] | None:
@@ -180,3 +194,29 @@ def as_async_progress_callback(
             await result
 
     return on_progress
+
+
+def as_async_turn_summary_callback(
+    callback: TurnSummaryCallback,
+    *,
+    to_thread: bool = False,
+) -> Callable[[TurnSummaryUpdate], Awaitable[None]]:
+    """Adapt a sync-or-async turn-summary callback to the sink protocol."""
+
+    if not callable(callback):
+        raise TypeError(f"turn summary callback must be callable, got {type(callback).__name__}")
+
+    is_async = asyncio.iscoroutinefunction(callback)
+
+    async def on_turn_summary(update: TurnSummaryUpdate) -> None:
+        if is_async:
+            await callback(update)
+            return
+        if to_thread:
+            await asyncio.to_thread(callback, update)
+            return
+        result = callback(update)
+        if inspect.isawaitable(result):
+            await result
+
+    return on_turn_summary

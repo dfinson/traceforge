@@ -12,6 +12,7 @@ canonical_tools:
   shell: shell                     # OpenAI Codex CLI (Responses API native)
   bash: shell                      # GitHub Copilot, SWE-agent, Cline (native models)
   powershell: shell                # GitHub Copilot (Windows)
+  pwsh: shell                      # PowerShell 6+ executable/tool alias
   Bash: shell                      # Claude Code, OpenAI Codex RS (hook name)
   PowerShell: shell                # Claude Code (Windows)
   execute_command: shell           # Cline (GENERIC model), Roo Code

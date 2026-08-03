@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A canonical event wire contract: `SessionEvent.id` is the stable identity,
+  `EventMetadata.sequence` is the sole ordering field (also exposed as
+  `event.sequence`), and `event_to_sse()` serializes both without payload
+  duplication.
+- Deterministic `TurnSummaryUpdate` projection. `EventPipeline` emits one version-1
+  summary per meaningful turn with activity/step linkage; callbacks, JSONL, and
+  SQLite consume the same public channel, and higher versions merge by
+  `(session_id, turn_id)`.
+- Host-independent file-target normalization via `normalize_file_target(s)` and
+  `Enricher(workspace_root=...)`. `metadata.file_targets` exposes root-relative
+  paths while retaining every raw path for provenance.
 - **AI Units (AIU / "AI credits") are now the primary Copilot consumption signal**,
   captured end-to-end. The `copilot` preprocessor carries each model's
   `session.shutdown.data.modelMetrics.<model>.totalNanoAiu` (nano-AIU) onto its
@@ -27,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `powershell` and `pwsh` tool calls now both canonicalize to the bundled shell
+  executor and use native PowerShell command classification.
 - GitHub Copilot CLI runs no longer render blank `model` / `repo` and an empty Cost
   lens. A new `copilot` preprocessor synthesizes per-model `assistant.usage` records
   from the authoritative `session.shutdown.data.modelMetrics` (Copilot emits no

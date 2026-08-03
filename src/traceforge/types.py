@@ -209,7 +209,7 @@ class EventMetadata(FrozenModel):
     run_id: str | None = None  # top-level run/session identifier
 
     # --- Ordering ---
-    sequence: int | None = None  # monotonic ordering within a stream
+    sequence: int | None = Field(default=None, ge=0)  # monotonic ordering within a stream
     namespace: tuple[str, ...] | None = None  # scope path (subgraph, subagent)
     partial: bool = False  # True if this is a streaming chunk
 
@@ -239,6 +239,10 @@ class EventMetadata(FrozenModel):
     tool_display: str | None = None
     motivation: ToolMotivation | None = None
     duration_ms: float | None = None
+    # Concrete file targets normalized by Enricher against its declared
+    # workspace_root. The original payload and each target's raw_path remain
+    # untouched for provenance.
+    file_targets: tuple["FileTarget", ...] = Field(default_factory=tuple)
 
     # --- Governance (populated by enrichment pipeline before sink emission) ---
     governance: SessionMeta | None = None
@@ -255,7 +259,14 @@ class EventMetadata(FrozenModel):
 
 
 class SessionEvent(FrozenModel):
-    """The universal event type. Every adapter produces these."""
+    """The universal event type. Every adapter produces these.
+
+    ``id`` is the stable event identity. ``metadata.sequence`` is the canonical
+    optional ordering key within a producer stream; it is deliberately not
+    duplicated into ``payload``. The :attr:`sequence` accessor makes that
+    canonical metadata field convenient for live consumers while JSON round-trips
+    preserve its one wire location.
+    """
 
     id: str = Field(default_factory=_uuid4_str)
     kind: str  # Open string — use EventKind constants for canonical kinds
@@ -264,6 +275,26 @@ class SessionEvent(FrozenModel):
     payload: dict[str, Any]
     raw_event: dict[str, Any] | None = None  # Original event data, verbatim
     metadata: EventMetadata = Field(default_factory=EventMetadata)
+
+    @property
+    def sequence(self) -> int | None:
+        """Canonical producer-stream sequence from :attr:`metadata`."""
+
+        return self.metadata.sequence
+
+
+class FileTarget(FrozenModel):
+    """A file target with normalized identity and untouched source provenance.
+
+    ``path`` uses forward slashes. When a ``workspace_root`` was declared and
+    the target is inside it, ``path`` is root-relative and ``inside_root`` is
+    ``True``. Outside-root targets remain normalized absolute paths and carry
+    ``inside_root=False``. Without a root, ``inside_root`` is ``None``.
+    """
+
+    raw_path: str
+    path: str
+    inside_root: bool | None = None
 
 
 # ─── Trace-native attribution dimensions ────────────────────────────────────
@@ -401,3 +432,22 @@ class ProgressUpdate(FrozenModel):
     headline: str
     sequence: int = Field(default=0, ge=0)
     parent_id: str | None = None  # a step's activity segment id, for tree rebuild
+
+
+class TurnSummaryUpdate(FrozenModel):
+    """A deterministic, versioned summary for one meaningful agent turn.
+
+    The pipeline emits version 1 from the first meaningful event in a turn.
+    Refiners publish later versions with the same ``(session_id, turn_id)``;
+    consumers merge by keeping the highest version. ``activity_id`` and
+    ``step_id`` link the turn to TraceForge's native structural projection.
+    """
+
+    session_id: str
+    turn_id: str
+    summary: str
+    source_event_id: str
+    sequence: int = Field(ge=0)
+    version: int = Field(default=1, ge=1)
+    activity_id: str | None = None
+    step_id: str | None = None

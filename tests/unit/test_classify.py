@@ -49,6 +49,7 @@ class TestNormalizeToolName:
 
     def test_alias_resolution(self):
         assert normalize_tool_name("powershell") == "shell"
+        assert normalize_tool_name("pwsh") == "shell"
         assert normalize_tool_name("read_file") == "view"
         assert normalize_tool_name("str_replace_editor") == "edit"
         assert normalize_tool_name("execute_command") == "shell"
@@ -114,6 +115,7 @@ class TestClassifyTool:
 
     def test_alias_classified(self):
         assert classify_tool("powershell").mechanism == "process.shell"
+        assert classify_tool("pwsh").mechanism == "process.shell"
         assert classify_tool("read_file").mechanism == "filesystem"
         assert classify_tool("str_replace_editor").mechanism == "filesystem"
         assert classify_tool("greptool").mechanism == "filesystem"

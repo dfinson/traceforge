@@ -21,6 +21,8 @@ from traceforge.enricher import Enricher
 from traceforge.parsers.aider import AiderPreParser
 from traceforge.pipeline import EventPipeline
 from traceforge.progress import ProgressEmitter
+from traceforge.paths import normalize_file_target, normalize_file_targets
+from traceforge.serialization import event_to_sse
 from traceforge.sinks.base import StorageSink
 from traceforge.sinks.callback import CallbackSink
 from traceforge.telemetry.attribution import (
@@ -37,11 +39,13 @@ from traceforge.types import (
     CostBreakdown,
     EventKind,
     EventMetadata,
+    FileTarget,
     IngestionMode,
     ProgressUpdate,
     SessionEvent,
     TelemetrySpan,
     TitleUpdate,
+    TurnSummaryUpdate,
     UsageRecord,
     is_known_kind,
 )
@@ -61,6 +65,7 @@ __all__ = [
     "Enricher",
     "EventKind",
     "EventMetadata",
+    "FileTarget",
     "EventPipeline",
     "IngestionMode",
     "KNOWN_KINDS",
@@ -72,6 +77,7 @@ __all__ = [
     "TelemetrySpan",
     "EventTrace",
     "TitleUpdate",
+    "TurnSummaryUpdate",
     "UsageRecord",
     "Visibility",
     "classify_cmd_command",
@@ -82,6 +88,9 @@ __all__ = [
     "is_known_kind",
     "load_config",
     "normalize_tool_name",
+    "normalize_file_target",
+    "normalize_file_targets",
+    "event_to_sse",
     # Attribution (U11)
     "Anomaly",
     "AttributionRollup",

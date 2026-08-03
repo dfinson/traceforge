@@ -270,7 +270,12 @@ class TestToolClassification:
             "path": "/srv/repo/src",
             "glob": "**/*.pem",
         }
-        assert result.metadata.file_targets[0].path == "src"
+        assert tuple(
+            (target.raw_path, target.path) for target in result.metadata.file_targets
+        ) == (
+            ("/srv/repo/src", "src"),
+            ("**/*.pem", "**/*.pem"),
+        )
         assert result.metadata.classification.mechanism == "filesystem"
         assert result.metadata.classification.has_action("retrieve.search")
         assert result.payload["_enrichment"]["risk"]["score"] >= 21
@@ -290,7 +295,12 @@ class TestToolClassification:
             "path": "/srv/repo/src",
             "pattern": "*.key",
         }
-        assert result.metadata.file_targets[0].path == "src"
+        assert tuple(
+            (target.raw_path, target.path) for target in result.metadata.file_targets
+        ) == (
+            ("/srv/repo/src", "src"),
+            ("*.key", "*.key"),
+        )
         assert result.metadata.classification.mechanism == "filesystem"
         assert result.metadata.classification.has_action("retrieve.search")
         assert result.payload["_enrichment"]["risk"]["score"] >= 21

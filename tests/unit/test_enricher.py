@@ -270,9 +270,7 @@ class TestToolClassification:
             "path": "/srv/repo/src",
             "glob": "**/*.pem",
         }
-        assert tuple(
-            (target.raw_path, target.path) for target in result.metadata.file_targets
-        ) == (
+        assert tuple((target.raw_path, target.path) for target in result.metadata.file_targets) == (
             ("/srv/repo/src", "src"),
             ("**/*.pem", "**/*.pem"),
         )
@@ -295,9 +293,7 @@ class TestToolClassification:
             "path": "/srv/repo/src",
             "pattern": "*.key",
         }
-        assert tuple(
-            (target.raw_path, target.path) for target in result.metadata.file_targets
-        ) == (
+        assert tuple((target.raw_path, target.path) for target in result.metadata.file_targets) == (
             ("/srv/repo/src", "src"),
             ("*.key", "*.key"),
         )

@@ -51,6 +51,22 @@ def test_relative_escape_is_outside_root() -> None:
     assert target.inside_root is False
 
 
+def test_posix_absolute_target_with_relative_root_is_outside() -> None:
+    raw = "/srv/repo/src/api.py"
+    event = make_event(
+        kind=EventKind.TOOL_CALL_COMPLETED,
+        payload={"tool_name": "edit", "arguments": {"path": raw}},
+    )
+
+    enriched = Enricher(workspace_root="repo").process(event)
+
+    assert enriched is not None
+    assert enriched.payload["arguments"]["path"] == raw
+    assert enriched.metadata.file_targets[0].raw_path == raw
+    assert enriched.metadata.file_targets[0].path == raw
+    assert enriched.metadata.file_targets[0].inside_root is False
+
+
 def test_enricher_stamps_normalized_target_without_rewriting_payload() -> None:
     raw = r"C:\Work\Repo\tests\test_api.py"
     event = make_event(

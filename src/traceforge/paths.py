@@ -69,7 +69,10 @@ def normalize_file_target(raw_path: str, workspace_root: str | None = None) -> F
     normalized = _normalize_posix(candidate)
     if normalized_root is None:
         return FileTarget(raw_path=raw_path, path=normalized)
-    inside = posixpath.commonpath([normalized, normalized_root]) == normalized_root
+    try:
+        inside = posixpath.commonpath([normalized, normalized_root]) == normalized_root
+    except ValueError:
+        inside = False
     path = posixpath.relpath(normalized, normalized_root) if inside else normalized
     return FileTarget(raw_path=raw_path, path=path, inside_root=inside)
 

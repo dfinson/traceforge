@@ -445,11 +445,7 @@ class Enricher:
 
     def _assess_tool_risk(self, event: SessionEvent, cls: Classification) -> SessionEvent:
         """Compute risk score for a native/MCP tool and store in payload._enrichment."""
-        # Match policies against normalized identity when available. Raw
-        # provenance remains in payload and each FileTarget.raw_path.
-        targets = [target.path for target in event.metadata.file_targets]
-        if not targets:
-            targets = _extract_targets_from_payload(event.payload)
+        targets = _risk_targets(event)
 
         risk = assess_tool_risk(
             classification=cls,
@@ -599,6 +595,7 @@ _INFRA_DIRS = frozenset({"helm", "charts", "k8s", "kubernetes", "terraform", "in
 _CONTAINER_FILES = frozenset({"docker-compose.yml", "docker-compose.yaml", ".dockerignore"})
 _DOC_FILES = frozenset({"readme.md", "contributing.md", "changelog.md", "license.md"})
 _PAYLOAD_PATH_KEYS = ("path", "file_path", "file", "filename")
+_RISK_TARGET_KEYS = (*_PAYLOAD_PATH_KEYS, "pattern", "glob")
 
 
 def _infer_scope_from_path(path: str) -> str | None:
@@ -644,27 +641,24 @@ def _infer_scope_from_path(path: str) -> str | None:
 
 def _extract_path_from_payload(payload: dict) -> str:
     """Extract the first file path string from common payload keys."""
-    for key in _PAYLOAD_PATH_KEYS:
-        val = payload.get(key, "")
-        if isinstance(val, str) and val:
-            return val
-    args = payload.get("arguments", {})
-    if isinstance(args, dict):
-        for key in _PAYLOAD_PATH_KEYS:
-            val = args.get(key, "")
-            if isinstance(val, str) and val:
-                return val
-    return ""
+    targets = _extract_payload_targets(payload, _PAYLOAD_PATH_KEYS)
+    return targets[0] if targets else ""
 
 
 def _extract_file_targets_from_payload(payload: dict) -> list[str]:
     """Extract concrete file target strings from payload and arguments."""
 
+    return _extract_payload_targets(payload, _PAYLOAD_PATH_KEYS)
+
+
+def _extract_payload_targets(payload: dict, keys: tuple[str, ...]) -> list[str]:
+    """Extract ordered, unique target values from payload and arguments."""
+
     targets: list[str] = []
     for container in (payload, payload.get("arguments", {})):
         if not isinstance(container, dict):
             continue
-        for key in _PAYLOAD_PATH_KEYS:
+        for key in keys:
             value = container.get(key)
             if isinstance(value, str) and value and value not in targets:
                 targets.append(value)
@@ -755,19 +749,18 @@ def _extract_tool_call_id(event: SessionEvent) -> str | None:
     return None
 
 
-def _extract_targets_from_payload(payload: dict) -> list[str]:
-    """Extract file path targets from event payload for risk scoring."""
+def _risk_targets(event: SessionEvent) -> list[str]:
+    """Return one ordered risk-target domain with concrete paths normalized."""
+
+    normalized_paths = {target.raw_path: target.path for target in event.metadata.file_targets}
     targets: list[str] = []
-    primary = _extract_path_from_payload(payload)
-    if primary:
-        targets.append(primary)
-    # Also pick up pattern/glob from arguments
-    args = payload.get("arguments", {})
-    if isinstance(args, dict):
-        for key in ("pattern", "glob"):
-            val = args.get(key, "")
-            if isinstance(val, str) and val and val not in targets:
-                targets.append(val)
+    for raw_target in _extract_payload_targets(event.payload, _RISK_TARGET_KEYS):
+        target = normalized_paths.get(raw_target, raw_target)
+        if target not in targets:
+            targets.append(target)
+    for file_target in event.metadata.file_targets:
+        if file_target.path not in targets:
+            targets.append(file_target.path)
     return targets
 
 

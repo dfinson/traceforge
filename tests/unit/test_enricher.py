@@ -256,6 +256,46 @@ class TestToolClassification:
         assert result.metadata.classification.has_action("retrieve")
         assert result.metadata.tool_display == "shell"
 
+    def test_path_and_glob_both_contribute_to_risk(self):
+        enricher = Enricher(workspace_root="/srv/repo")
+        event = _make_tool_complete(
+            tool_name="search_files",
+            arguments={"path": "/srv/repo/src", "glob": "**/*.pem"},
+        )
+
+        result = enricher.process(event)
+
+        assert result is not None
+        assert result.payload["arguments"] == {
+            "path": "/srv/repo/src",
+            "glob": "**/*.pem",
+        }
+        assert result.metadata.file_targets[0].path == "src"
+        assert result.metadata.classification.mechanism == "filesystem"
+        assert result.metadata.classification.has_action("retrieve.search")
+        assert result.payload["_enrichment"]["risk"]["score"] >= 21
+        assert result.payload["_enrichment"]["risk"]["level"] == "caution"
+
+    def test_path_and_pattern_both_contribute_to_risk(self):
+        enricher = Enricher(workspace_root="/srv/repo")
+        event = _make_tool_complete(
+            tool_name="search_files",
+            arguments={"path": "/srv/repo/src", "pattern": "*.key"},
+        )
+
+        result = enricher.process(event)
+
+        assert result is not None
+        assert result.payload["arguments"] == {
+            "path": "/srv/repo/src",
+            "pattern": "*.key",
+        }
+        assert result.metadata.file_targets[0].path == "src"
+        assert result.metadata.classification.mechanism == "filesystem"
+        assert result.metadata.classification.has_action("retrieve.search")
+        assert result.payload["_enrichment"]["risk"]["score"] >= 21
+        assert result.payload["_enrichment"]["risk"]["level"] == "caution"
+
     def test_custom_classification_overrides_defaults(self):
         custom = Classification(mechanism="custom.write", effect="mutating")
         enricher = Enricher(custom_classifications={"edit": custom})

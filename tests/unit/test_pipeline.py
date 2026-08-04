@@ -941,6 +941,56 @@ class TestPipelineFinalizeSession:
         await pipeline.flush()
         assert titles("B") == ["Heuristic Bravo", "Refined Bravo"]
 
+    async def test_finalize_refinement_cannot_clobber_a_fresh_incarnation(self):
+        # Stronger than the await test above: finalize awaits the refinement *under
+        # the session lock*, so a late same-session push cannot start a fresh
+        # incarnation (and emit a newer session title) until the prior
+        # incarnation's refinement has landed. Were the refinement awaited outside
+        # the lock, the fresh "Heuristic Beta" could be emitted first and then be
+        # overwritten by the stale "Refined Alpha" on the same session segment.
+        import asyncio
+        import threading
+
+        release = threading.Event()
+
+        def heuristic(text: str) -> str:
+            return "Heuristic " + text.split()[0]
+
+        def refiner(text: str) -> str:
+            release.wait(timeout=5)  # keep the first incarnation's refine in-flight
+            return "Refined " + text.split()[0]
+
+        recorder = RecordingSink()
+        pipeline = self._titled([recorder.sink], session_titler=heuristic, session_refiner=refiner)
+        await pipeline.push(self._umsg("A", "Alpha add retry logic to the HTTP client"))
+        assert pipeline._refine_tasks.get("A")  # first incarnation's refine in-flight
+
+        fin = asyncio.create_task(pipeline.finalize_session("A"))
+        await asyncio.sleep(0.05)  # finalize drains, then blocks awaiting the refine
+        assert not fin.done()
+
+        # A late same-session push must wait behind the finalization-held lock: it
+        # stays blocked until the refine is released (a free push would finish in
+        # ~1ms), cleanly separating "serialized after delivery" from "raced ahead".
+        push2 = asyncio.create_task(
+            pipeline.push(self._umsg("A", "Beta build the pagination endpoint for the users API"))
+        )
+        await asyncio.sleep(0.1)
+        assert not push2.done()  # blocked — the fresh incarnation cannot start yet
+        assert "Heuristic Beta" not in [
+            u.title for u in recorder.title_updates if u.kind == "session"
+        ]
+
+        release.set()
+        await asyncio.wait_for(asyncio.gather(fin, push2), timeout=5)
+
+        sess = [
+            u.title for u in recorder.title_updates if u.session_id == "A" and u.kind == "session"
+        ]
+        # The first incarnation's refinement landed BEFORE the fresh incarnation's
+        # heuristic — no stale clobber.
+        assert sess.index("Refined Alpha") < sess.index("Heuristic Beta")
+
     async def test_finalize_drains_only_that_sessions_held_plumbing(self):
         # Phase inference holds contiguous *leading* plumbing until the session's
         # first content event; finalizing one session must release only its hold.

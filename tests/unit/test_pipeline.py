@@ -709,6 +709,330 @@ class TestPipelineActivityTitleRefinement:
         assert a_api == []
 
 
+class TestPipelineFinalizeSession:
+    """``finalize_session`` retires ONE session: everything it still holds is
+    emitted, that session's in-flight refinements are awaited, and only its state
+    is reclaimed. Every other live session keeps streaming, and unlike ``flush``
+    the pipeline itself stays open."""
+
+    @staticmethod
+    def _sev(session_id: str, i: int) -> SessionEvent:
+        from datetime import datetime, timezone
+
+        from traceforge.types import EventMetadata
+
+        return SessionEvent(
+            id=f"{session_id}-{i}",
+            kind="tool.call",
+            session_id=session_id,
+            timestamp=datetime.now(timezone.utc),
+            payload={"tool_name": "edit", "arguments": {"path": f"{session_id.lower()}{i}.py"}},
+            metadata=EventMetadata(source_framework="copilot"),
+        )
+
+    @staticmethod
+    def _plumbing(session_id: str, i: int) -> SessionEvent:
+        """A non-content-bearing event: the phase stream holds it as *leading*
+        plumbing until the session's first content event (or a drain)."""
+        from datetime import datetime, timezone
+
+        from traceforge.types import EventMetadata
+
+        return SessionEvent(
+            id=f"{session_id}-{i}",
+            kind="session.start",
+            session_id=session_id,
+            timestamp=datetime.now(timezone.utc),
+            payload={},
+            metadata=EventMetadata(source_framework="copilot"),
+        )
+
+    @staticmethod
+    def _umsg(session_id: str, text: str) -> SessionEvent:
+        from datetime import datetime, timezone
+
+        from traceforge.types import EventMetadata
+
+        return SessionEvent(
+            id=f"{session_id}-0",
+            kind="message.user",
+            session_id=session_id,
+            timestamp=datetime.now(timezone.utc),
+            payload={"content": text},
+            metadata=EventMetadata(source_framework="copilot"),
+        )
+
+    @staticmethod
+    def _titled(sinks, **titler_kwargs) -> EventPipeline:
+        """A pipeline driving the REAL title inferencer/stream (only the packaged
+        seq2seq model is faked), so these tests exercise the actual title path
+        rather than a stubbed TitleUpdate callback."""
+        from tests.unit.test_title_inferencer import _FakeTitle
+
+        from traceforge.title import TitleInferencer
+
+        return EventPipeline(
+            sinks=sinks,
+            enable_phase=False,
+            enable_boundary=False,
+            title_inferencer=TitleInferencer(model=_FakeTitle(), **titler_kwargs),
+        )
+
+    async def _interleaved(self, recorder: RecordingSink, extra_sinks=()) -> EventPipeline:
+        """Two interleaved live sessions, each with one open (untitled) activity."""
+        pipeline = self._titled([recorder.sink, *extra_sinks])
+        await pipeline.push(self._sev("A", 0))
+        await pipeline.push(self._sev("B", 0))
+        await pipeline.push(self._sev("A", 1))
+        await pipeline.push(self._sev("B", 1))
+        assert [e.id for e in recorder.events] == ["A-0", "B-0", "A-1", "B-1"]
+        assert recorder.title_updates == []  # both activities still open
+        return pipeline
+
+    async def test_finalize_emits_only_that_session_and_leaves_others_intact(self):
+        recorder = RecordingSink()
+        pipeline = await self._interleaved(recorder)
+
+        await pipeline.finalize_session("A")
+
+        # Only A's trailing activity was titled; B produced nothing.
+        assert {u.session_id for u in recorder.title_updates} == {"A"}
+        acts = [u for u in recorder.title_updates if u.kind == "activity"]
+        assert [u.segment_id for u in acts] == ["A-0"] and all(u.title for u in acts)
+        # A's per-session state is gone...
+        assert "A" not in pipeline._title_streams
+        assert "A" not in pipeline._session_locks
+        assert "A" not in pipeline._session_order
+        # ...and B's is untouched and still live.
+        assert "B" in pipeline._title_streams
+        assert "B" in pipeline._session_locks
+        assert "B" in pipeline._session_order
+
+    async def test_survivor_keeps_streaming_and_then_finalizes_exactly_once(self):
+        recorder = RecordingSink()
+        pipeline = await self._interleaved(recorder)
+        await pipeline.finalize_session("A")
+        seen = len(recorder.title_updates)
+
+        # B is unaffected by A's finalize: it keeps accepting pushes.
+        await pipeline.push(self._sev("B", 2))
+        assert [e.id for e in recorder.events] == ["A-0", "B-0", "A-1", "B-1", "B-2"]
+
+        await pipeline.finalize_session("B")
+        emitted = recorder.title_updates[seen:]
+        assert {u.session_id for u in emitted} == {"B"}
+        b_acts = [u for u in emitted if u.kind == "activity"]
+        assert [u.segment_id for u in b_acts] == ["B-0"] and all(u.title for u in b_acts)
+        assert pipeline._title_streams == {}
+
+    async def test_repeated_and_unknown_finalize_are_clean_no_ops(self):
+        recorder = RecordingSink()
+        pipeline = await self._interleaved(recorder)
+        await pipeline.finalize_session("A")
+        seen = len(recorder.title_updates)
+
+        await pipeline.finalize_session("A")  # repeat
+        await pipeline.finalize_session("never-pushed")  # unknown
+
+        assert len(recorder.title_updates) == seen
+        # An unknown/finalized id leaves behind no per-session state.
+        for sid in ("A", "never-pushed"):
+            assert sid not in pipeline._session_locks
+            assert sid not in pipeline._session_order
+            assert sid not in pipeline._title_streams
+        assert "B" in pipeline._title_streams  # still untouched
+
+    async def test_concurrent_finalize_of_same_session_titles_it_once(self):
+        import asyncio
+
+        recorder = RecordingSink()
+        pipeline = await self._interleaved(recorder)
+
+        # Both calls converge on the session's current lock, so the second finds
+        # the stream already gone rather than re-titling (or corrupting) it.
+        await asyncio.wait_for(
+            asyncio.gather(pipeline.finalize_session("A"), pipeline.finalize_session("A")),
+            timeout=5,
+        )
+
+        acts = [u for u in recorder.title_updates if u.kind == "activity"]
+        assert [(u.session_id, u.segment_id) for u in acts] == [("A", "A-0")]
+        assert "A" not in pipeline._session_locks
+        assert "B" in pipeline._title_streams
+
+    async def test_concurrent_finalize_of_distinct_sessions_each_title_once(self):
+        import asyncio
+
+        recorder = RecordingSink()
+        pipeline = await self._interleaved(recorder)
+
+        # Distinct sessions take distinct locks, so these run concurrently.
+        await asyncio.wait_for(
+            asyncio.gather(pipeline.finalize_session("A"), pipeline.finalize_session("B")),
+            timeout=5,
+        )
+
+        acts = [u for u in recorder.title_updates if u.kind == "activity"]
+        assert sorted((u.session_id, u.segment_id) for u in acts) == [("A", "A-0"), ("B", "B-0")]
+        assert pipeline._title_streams == {}
+        assert pipeline._session_locks == {}
+        assert len(pipeline._session_order) == 0
+
+    async def test_concurrent_push_and_finalize_of_same_session_is_safe(self):
+        import asyncio
+
+        recorder = RecordingSink()
+        pipeline = await self._interleaved(recorder)
+
+        # Which of the two lands first is the caller's business; the invariants
+        # are that neither is lost, neither deadlocks, and no segment is titled
+        # twice regardless of the interleaving.
+        await asyncio.wait_for(
+            asyncio.gather(pipeline.push(self._sev("A", 2)), pipeline.finalize_session("A")),
+            timeout=5,
+        )
+        await pipeline.flush()
+
+        ids = [e.id for e in recorder.events]
+        assert len(ids) == len(set(ids))
+        assert {"A-0", "A-1", "A-2", "B-0", "B-1"} == set(ids)
+        segs = [u.segment_id for u in recorder.title_updates if u.kind == "activity"]
+        assert len(segs) == len(set(segs))
+        assert "B-0" in segs
+
+    async def test_finalize_awaits_that_sessions_title_refinement(self):
+        # Eviction *cancels* a victim's in-flight refinement; an explicit
+        # finalize is voluntary, so it awaits instead — the API upgrade has
+        # already reached the sinks by the time finalize_session returns.
+        import asyncio
+        import threading
+
+        release = threading.Event()
+
+        def heuristic(text: str) -> str:
+            return "Heuristic " + text.split()[0]
+
+        def refiner(text: str) -> str:
+            release.wait(timeout=5)
+            return "Refined " + text.split()[0]
+
+        recorder = RecordingSink()
+        pipeline = self._titled([recorder.sink], session_titler=heuristic, session_refiner=refiner)
+        await pipeline.push(self._umsg("A", "Alpha add retry logic to the HTTP client"))
+        await pipeline.push(self._umsg("B", "Bravo build the pagination endpoint"))
+
+        task = asyncio.create_task(pipeline.finalize_session("A"))
+        await asyncio.sleep(0.05)
+        assert not task.done()  # blocked awaiting A's refinement, not cancelling it
+        release.set()
+        await asyncio.wait_for(task, timeout=5)
+
+        def titles(sid: str) -> list[str]:
+            return [
+                u.title
+                for u in recorder.title_updates
+                if u.session_id == sid and u.kind == "session"
+            ]
+
+        assert titles("A") == ["Heuristic Alpha", "Refined Alpha"]
+        assert "A" not in pipeline._refine_tasks
+        # B's refinement was neither awaited nor cancelled by A's finalize; the
+        # terminal flush still lands it.
+        await pipeline.flush()
+        assert titles("B") == ["Heuristic Bravo", "Refined Bravo"]
+
+    async def test_finalize_drains_only_that_sessions_held_plumbing(self):
+        # Phase inference holds contiguous *leading* plumbing until the session's
+        # first content event; finalizing one session must release only its hold.
+        recorder = RecordingSink()
+        pipeline = EventPipeline(sinks=[recorder.sink], enable_boundary=False)
+        await pipeline.push(self._plumbing("A", 0))
+        await pipeline.push(self._plumbing("B", 0))
+        assert recorder.events == []  # both sessions still holding
+
+        await pipeline.finalize_session("A")
+
+        assert [e.id for e in recorder.events] == ["A-0"]
+        assert all(e.metadata.phase for e in recorder.events)
+        assert "A" not in pipeline._phase_streams
+        assert "B" in pipeline._phase_streams  # B's hold is intact
+
+        # B's held plumbing still comes out at the terminal flush.
+        await pipeline.flush()
+        assert [e.id for e in recorder.events] == ["A-0", "B-0"]
+
+    async def test_finalize_flushes_only_that_sessions_enricher_orphans(self):
+        from traceforge import Enricher, EventKind
+
+        def _start(session_id: str) -> SessionEvent:
+            return make_event(
+                kind=EventKind.TOOL_CALL_STARTED,
+                session_id=session_id,
+                id=f"{session_id}-start",
+                payload={"tool_call_id": "same", "tool_name": "edit"},
+            )
+
+        recorder = RecordingSink()
+        pipeline = EventPipeline(
+            sinks=[recorder.sink],
+            enricher=Enricher(),
+            enable_phase=False,
+            enable_boundary=False,
+        )
+        await pipeline.push(_start("A"))
+        await pipeline.push(_start("B"))
+        assert recorder.events == []  # both starts buffered awaiting completion
+
+        await pipeline.finalize_session("A")
+        assert [e.id for e in recorder.events] == ["A-start"]
+        assert recorder.events[0].metadata.duration_ms is None  # emitted as an orphan
+
+        # B's start survived A's finalize and still pairs with its completion.
+        await pipeline.push(
+            make_event(
+                kind=EventKind.TOOL_CALL_COMPLETED,
+                session_id="B",
+                id="B-complete",
+                payload={"tool_call_id": "same", "tool_name": "edit"},
+            )
+        )
+        assert [e.id for e in recorder.events] == ["A-start", "B-complete"]
+        assert recorder.events[-1].metadata.duration_ms is not None
+
+    async def test_finalize_forgets_only_that_sessions_turn_state(self):
+        recorder = RecordingSink()
+        pipeline = EventPipeline(sinks=[recorder.sink], enable_phase=False, enable_boundary=False)
+        await pipeline.push(make_event(session_id="A", id="A-0"))
+        await pipeline.push(make_event(session_id="B", id="B-0"))
+        summarizer = pipeline._turn_summarizer
+        assert set(summarizer._turn) == {"A", "B"}
+
+        await pipeline.finalize_session("A")
+        assert set(summarizer._turn) == {"B"}
+
+    async def test_global_flush_stays_terminal_after_per_session_finalize(self):
+        recorder = RecordingSink()
+        tracker = FlushTrackingSink()
+        pipeline = await self._interleaved(recorder, extra_sinks=[tracker])
+        await pipeline.finalize_session("A")
+        seen = len(recorder.title_updates)
+
+        await pipeline.close()
+
+        # flush finalized only what was left (B) — A is not re-emitted — and the
+        # global terminal semantics are unchanged.
+        remaining = recorder.title_updates[seen:]
+        assert {u.session_id for u in remaining} == {"B"}
+        b_acts = [u for u in remaining if u.kind == "activity"]
+        assert [u.segment_id for u in b_acts] == ["B-0"]
+        assert tracker.flushed and tracker.closed
+        assert pipeline._title_streams == {}
+        assert pipeline._phase_streams == {}
+        assert pipeline._boundary_streams == {}
+        assert pipeline._session_locks == {}
+        assert len(pipeline._session_order) == 0
+
+
 class TestPipelineSpanAndUsage:
     async def test_push_span_fanout(self):
         recorders = [RecordingSink() for _ in range(2)]

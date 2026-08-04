@@ -204,7 +204,7 @@ class Enricher:
             # ``flush_on_session_end`` (default True) gates this drain; disabling it
             # leaves the starts pending, subject only to the size/TTL bounds and the
             # final Enricher.flush — they are still never dropped.
-            orphans = self._flush_session(event.session_id) if self._flush_on_session_end else []
+            orphans = self.flush_session(event.session_id) if self._flush_on_session_end else []
             event = self._set_visibility(event)
             event = self._set_phase(event)
             result = [*orphans, event] if orphans else event
@@ -234,12 +234,24 @@ class Enricher:
         self._pending.clear()
         return result
 
-    def _flush_session(self, session_id: str) -> list[SessionEvent]:
-        """Emit and remove this session's buffered unpaired tool-starts as orphans.
+    def flush_session(self, session_id: str) -> list[SessionEvent]:
+        """Emit and remove **one** session's buffered unpaired tool-starts as orphans.
 
-        Like :meth:`flush` but scoped to a single session — used to drain pending
-        starts the instant that session ends, rather than waiting for pipeline
-        close, so a governance stage sees them before it finalizes the session."""
+        The per-session counterpart of :meth:`flush`: only ``session_id``'s
+        pending starts are drained (as orphans, ``duration_ms=None`` — never
+        dropped) and removed; every other session's buffered starts are left
+        exactly as they were, so interleaved sessions can be retired one at a
+        time. Returns them in buffer (insertion) order.
+
+        Idempotent — a second call, or a call for a session with nothing buffered
+        (including an unknown session id), returns an empty list and changes
+        nothing.
+
+        Used internally the instant a session ends (so a governance stage sees
+        its unpaired starts before it finalizes the session) rather than waiting
+        for pipeline close, and available publicly for hosts that finalize
+        sessions individually (see ``EventPipeline.finalize_session``).
+        """
         result: list[SessionEvent] = []
         for key, event in list(self._pending.items()):
             if event.session_id == session_id:

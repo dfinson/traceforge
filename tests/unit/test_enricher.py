@@ -768,13 +768,13 @@ class TestIDStabilityAndRobustness:
         assert r2.metadata.duration_ms == 2000.0  # 12:00:01 -> 12:00:03
 
     def test_flush_session_scoped_to_one_session_on_id_collision(self):
-        """_flush_session drains only the ended session's buffered start even when
+        """flush_session drains only the ended session's buffered start even when
         another live session holds the same tool_call_id."""
         enricher = Enricher()
         enricher.process(_make_tool_start(tool_call_id="same", session_id="s1"))
         enricher.process(_make_tool_start(tool_call_id="same", session_id="s2"))
 
-        orphans = enricher._flush_session("s1")
+        orphans = enricher.flush_session("s1")
         assert [o.session_id for o in orphans] == ["s1"]
 
         # s2's start survives and still pairs.
@@ -782,6 +782,48 @@ class TestIDStabilityAndRobustness:
         assert not isinstance(paired, list)
         assert paired is not None
         assert paired.session_id == "s2"
+
+    def test_flush_session_leaves_other_sessions_buffered_and_is_idempotent(self):
+        """flush_session is strictly per-session and repeat-safe: it drains only
+        the target session's buffered starts, in buffer order, and a second call
+        (or an unknown session id) is a clean no-op that leaves interleaved
+        sessions untouched."""
+        enricher = Enricher()
+        enricher.process(_make_tool_start(tool_call_id="a1", session_id="s1"))
+        enricher.process(_make_tool_start(tool_call_id="b1", session_id="s2"))
+        enricher.process(_make_tool_start(tool_call_id="a2", session_id="s1"))
+
+        drained = enricher.flush_session("s1")
+        assert [o.payload["tool_call_id"] for o in drained] == ["a1", "a2"]
+        assert all(o.session_id == "s1" for o in drained)
+        assert all(o.metadata.duration_ms is None for o in drained)
+
+        # Idempotent: repeating it, or naming a session that never buffered
+        # anything, emits nothing and changes nothing.
+        assert enricher.flush_session("s1") == []
+        assert enricher.flush_session("never-seen") == []
+
+        # s2's interleaved start survived and is all the global flush has left.
+        remaining = enricher.flush()
+        assert [(o.session_id, o.payload["tool_call_id"]) for o in remaining] == [("s2", "b1")]
+
+    def test_flush_session_does_not_break_another_sessions_pairing(self):
+        """Draining s1 must not consume or displace s2's buffered start — s2's
+        completion still pairs and still carries a real duration."""
+        enricher = Enricher()
+        t0 = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        enricher.process(_make_tool_start(tool_call_id="same", session_id="s1", ts=t0))
+        enricher.process(_make_tool_start(tool_call_id="same", session_id="s2", ts=t0))
+
+        assert [o.session_id for o in enricher.flush_session("s1")] == ["s1"]
+
+        paired = enricher.process(
+            _make_tool_complete(tool_call_id="same", session_id="s2", ts=t0 + timedelta(seconds=2))
+        )
+        assert not isinstance(paired, list)
+        assert paired is not None
+        assert paired.session_id == "s2"
+        assert paired.metadata.duration_ms == 2000.0
 
     def test_flushed_orphan_preserves_original_id(self):
         """Flushed orphan start preserves its original event ID."""

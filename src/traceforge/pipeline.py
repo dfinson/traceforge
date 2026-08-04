@@ -419,17 +419,91 @@ class EventPipeline:
                 self._session_locks.pop(victim, None)
 
     async def _finalize_session(self, session_id: str) -> None:
-        """Drain + title a single session's trailing state, then drop it.
+        """Finalize an *evicted* session (the LRU path), cancelling its refinements.
 
-        Mirrors :meth:`flush` for one session: cancel any in-flight session-title
-        refinement (so it can't emit after this session's title stream is gone),
-        emit any held leading plumbing (phase drain), title the trailing open
-        activity (title-stream flush), and discard the boundary stream. Called
-        under the session's lock by :meth:`_evict_over_cap`. The phase drain runs
-        first so every event has reached the title stream before it is flushed,
-        matching flush ordering.
+        Called under the victim's lock by :meth:`_evict_over_cap`. Eviction is
+        involuntary, so it cancels the victim's in-flight title refinements —
+        a stale API title must never land after the stream it described was
+        dropped and possibly replaced by a fresh one on resume — and schedules no
+        new ones. The voluntary counterpart is :meth:`finalize_session`, which
+        awaits refinements instead of cancelling them.
         """
-        self._cancel_session_refinements(session_id)
+        await self._finalize_session_state(session_id, cancel_refinements=True)
+
+    async def finalize_session(self, session_id: str) -> None:
+        """Finalize one session and reclaim **only** that session's state.
+
+        The per-session analogue of :meth:`flush`: it drains and emits everything
+        still held for ``session_id`` — that session's buffered enricher orphans
+        (:meth:`Enricher.flush_session`), its held leading plumbing (phase drain),
+        the boundary/title updates for its trailing open activity — awaits that
+        session's in-flight title refinements so their updates have reached the
+        sinks before returning, and only then drops the session's live state
+        (phase/boundary/title streams, progress and turn-summary state, recency
+        entry, lock).
+
+        Scoping is strict: every *other* session's state is untouched, so a
+        long-lived multi-session host can retire one run while the rest keep
+        streaming. Unlike :meth:`flush` this is **not** terminal for the pipeline
+        — the sinks are neither flushed nor closed, and pushes for other sessions
+        remain valid throughout.
+
+        Idempotent: finalizing an unknown session, or the same session twice, is
+        a clean no-op.
+
+        Concurrency-safe: the work runs under the session's *current* lock, taken
+        through the same :meth:`_acquire_session` validation loop :meth:`push`
+        uses, so a concurrent same-session push lands wholly before or wholly
+        after this call, concurrent finalizes of the same session serialize (the
+        second finding nothing to do), and pushes/finalizes for *other* sessions
+        never block on it. A session that receives another event after being
+        finalized simply starts fresh with cold causal state, exactly as after
+        LRU eviction.
+        """
+        lock = await self._acquire_session(session_id)
+        try:
+            self._session_order.pop(session_id, None)
+            if self._enricher is not None:
+                for event in self._enricher.flush_session(session_id):
+                    await self._emit(event)
+            await self._finalize_session_state(session_id, cancel_refinements=False)
+            # Awaited under the lock so no title update for this session can land
+            # after finalize_session returns. Refinement tasks only fan out to
+            # sinks (they never take a session lock), so this cannot deadlock.
+            await self._await_session_refinements(session_id)
+        finally:
+            lock.release()
+        # Drop the lock only if it is still the one we held — the identity guard
+        # from :meth:`_evict_over_cap`. A concurrent eviction/finalize may already
+        # have replaced it, and removing a successor's lock would let two pushers
+        # for this session serialize under different locks.
+        if self._session_locks.get(session_id) is lock:
+            self._session_locks.pop(session_id, None)
+
+    async def _finalize_session_state(self, session_id: str, *, cancel_refinements: bool) -> None:
+        """Drain + title one session's trailing state, then drop it.
+
+        The single per-session finalize primitive, shared by LRU eviction
+        (:meth:`_finalize_session`), the public :meth:`finalize_session`, and the
+        global :meth:`flush`. Mirrors :meth:`flush` for one session: emit any held
+        leading plumbing (phase drain), title the trailing open activity
+        (title-stream flush), discard the boundary stream, and forget the
+        session's progress / turn-summary state. The phase drain runs first so
+        every event has reached the title stream before it is flushed, matching
+        flush ordering.
+
+        ``cancel_refinements`` selects the eviction contract: cancel this
+        session's in-flight API refinements and queue no new ones, so an evicted
+        session finalizes with packaged titles only and leaves no API task running
+        after its stream is gone. With it ``False`` the trailing activity's
+        refinements are queued as usual and the caller awaits them
+        (:meth:`_await_session_refinements`).
+
+        Callers must hold the session's lock, except terminal :meth:`flush`, where
+        no push may run by contract.
+        """
+        if cancel_refinements:
+            self._cancel_session_refinements(session_id)
         if self._phase_inferencer is not None:
             await self._drain_stream(session_id)
         if self._title_inferencer is not None:
@@ -439,7 +513,7 @@ class EventPipeline:
                     updates = await asyncio.to_thread(stream.flush)
                 except Exception as exc:
                     logger.error(
-                        "Title stream flush failed for evicted session %s: %s",
+                        "Title stream flush failed for session %s: %s",
                         session_id,
                         exc,
                         exc_info=True,
@@ -447,17 +521,46 @@ class EventPipeline:
                     updates = []
                 for update in updates:
                     await self._push_title_update(update)
-                # NOTE: eviction does not schedule API refinement for the trailing
-                # activity. It already cancelled this session's in-flight
-                # refinements above; finalizing with packaged titles only keeps a
-                # clean contract (evicted sessions get no API upgrades) and leaves
-                # no API task running after the stream is gone. Normally-completing
-                # sessions refine their trailing activity in _flush_title_streams.
+                if not cancel_refinements:
+                    # Upgrade the trailing activity's packaged titles off the hot
+                    # path when configured; the caller awaits these before it
+                    # returns (finalize_session) or before closing sinks (flush).
+                    for closed in stream.take_activity_refinements():
+                        self._schedule_activity_refine(session_id, closed)
         self._boundary_streams.pop(session_id, None)
         if self._progress is not None:
             self._progress.forget(session_id)
         if self._turn_summarizer is not None:
             self._turn_summarizer.forget(session_id)
+
+    async def _await_session_refinements(self, session_id: str) -> None:
+        """Await one session's in-flight title refinements. Error-isolated.
+
+        A slow-but-successful API upgrade must land (as its own title update)
+        before the session is reported finalized. Failures were already logged
+        inside the task, which left the heuristic title standing, so they are
+        absorbed here rather than propagated.
+        """
+        pending = list(self._refine_tasks.get(session_id, ()))
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    def _tracked_sessions(self) -> list[str]:
+        """Every session id still holding live per-session state, first-seen order.
+
+        The union across the per-session maps, snapshotted into a list so callers
+        may finalize (and therefore mutate those maps) while iterating.
+        """
+        seen: dict[str, None] = {}
+        for source in (
+            self._phase_streams,
+            self._title_streams,
+            self._boundary_streams,
+            self._session_order,
+        ):
+            for session_id in source:
+                seen[session_id] = None
+        return list(seen)
 
     async def _push_locked(self, event: SessionEvent) -> None:
         if self._enricher is not None:
@@ -759,36 +862,6 @@ class EventPipeline:
                 ev = self._boundary_stamp(ev)
             await self._title_emit(ev)
 
-    async def _flush_title_streams(self) -> None:
-        """Title each session's final open activity and emit its updates.
-
-        Title streams persist for the whole ``session_id`` (never torn down on
-        mid-session SESSION_ENDED/PAUSED markers). The session's events have all
-        already been emitted live; at pipeline flush the trailing activity has no
-        closing boundary, so it is titled from its full context here and its
-        :class:`~traceforge.types.TitleUpdate` records are emitted.
-        """
-        if self._title_inferencer is None:
-            return
-        for session_id in list(self._title_streams):
-            stream = self._title_streams.pop(session_id)
-            try:
-                updates = await asyncio.to_thread(stream.flush)
-            except Exception as exc:
-                logger.error(
-                    "Title stream flush failed for session %s: %s",
-                    session_id,
-                    exc,
-                    exc_info=True,
-                )
-                updates = []
-            for update in updates:
-                await self._push_title_update(update)
-            # Upgrade the trailing activity's packaged titles off the hot path
-            # when configured; flush() below awaits these before closing sinks.
-            for closed in stream.take_activity_refinements():
-                self._schedule_activity_refine(session_id, closed)
-
     async def _fanout(
         self,
         coros: Iterable[Awaitable],
@@ -931,29 +1004,31 @@ class EventPipeline:
     async def flush(self) -> None:
         """Drain all buffered state to sinks. TERMINAL — see :meth:`push`.
 
-        Flushes the enricher, drains each session's held leading plumbing and
-        final open activity, reclaims every per-session map, then flushes the
-        sinks. This runs *outside* the session lock and reclaims state, so no
-        ``push`` may run during or after it (the caller stops pushing, then
-        flushes/closes). Error-isolated.
+        Flushes the enricher, finalizes every session still holding live state,
+        reclaims every per-session map, then flushes the sinks. This runs
+        *outside* the session lock and reclaims state, so no ``push`` may run
+        during or after it (the caller stops pushing, then flushes/closes).
+        Error-isolated.
+
+        Global terminal semantics are unchanged; the per-session work is the same
+        primitive the public :meth:`finalize_session` uses, so however a session
+        is retired it drains identically. To retire a single session while the
+        pipeline keeps running, call :meth:`finalize_session` instead.
         """
         if self._enricher is not None:
             for event in self._enricher.flush():
                 await self._emit(event)
 
-        # Drain any sessions still holding leading plumbing (no content event
-        # and no explicit SESSION_ENDED seen). Steady-state events are already
-        # emitted live, so only the leading hold-buffer can remain.
-        if self._phase_inferencer is not None:
-            for session_id in list(self._phase_streams):
-                await self._drain_stream(session_id)
-
-        # Title each session's final open activity. Its events were already
-        # emitted live (carrying their segment ids); the trailing activity has
-        # no closing boundary, so it is titled here and its TitleUpdate records
-        # emitted. Done after phase drain so every event has reached the title
-        # stream first.
-        await self._flush_title_streams()
+        # Finalize every session still holding live state: its held leading
+        # plumbing (no content event and no explicit SESSION_ENDED seen) is
+        # drained, then its final open activity is titled — its events were
+        # already emitted live carrying their segment ids, but the trailing
+        # activity has no closing boundary, so it is titled here and its
+        # TitleUpdate records emitted. Drain-before-title is a per-session
+        # invariant (the primitive enforces it) and the streams are per-session,
+        # so finalizing session-by-session is equivalent to the map-by-map order.
+        for session_id in self._tracked_sessions():
+            await self._finalize_session_state(session_id, cancel_refinements=False)
 
         # Await any in-flight session-title API refinements so a slow-but-
         # successful upgrade lands (as its own title update) before the sinks are
@@ -963,13 +1038,15 @@ class EventPipeline:
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
 
-        # Boundary streams and per-session locks carry no buffered output to
-        # drain (boundary is O(1) causal state; locks are bare mutexes), but
-        # they are per-session and would otherwise outlive every finalized
-        # session. Reclaim them here so all four per-session maps free together
-        # at teardown, matching the phase/title drain above. Safe because flush
-        # is terminal: no push holds a lock or touches a boundary stream now.
+        # The per-session finalize above reclaimed the phase/boundary/title
+        # streams and the progress / turn-summary state of every tracked session.
+        # Clear the maps outright anyway — flush is terminal, so nothing may hold
+        # them afterwards — and reclaim the per-session locks and recency order,
+        # which carry no buffered output to drain (locks are bare mutexes) but
+        # would otherwise outlive every finalized session.
+        self._phase_streams.clear()
         self._boundary_streams.clear()
+        self._title_streams.clear()
         self._session_locks.clear()
         self._session_order.clear()
         if self._progress is not None:

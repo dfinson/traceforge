@@ -7,8 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-08-04
+
 ### Added
 
+- Per-session finalization, so a long-lived host can retire **one** session while
+  the rest keep streaming. `await EventPipeline.finalize_session(session_id)`
+  drains and emits everything that session still holds — its buffered enricher
+  orphans, its held leading plumbing, and the title updates for its trailing open
+  activity — awaits that session's in-flight title refinements, then reclaims only
+  that session's state (streams, progress/turn-summary state, recency entry,
+  lock). Every other session is untouched, the pipeline stays open (sinks are
+  neither flushed nor closed), repeated or unknown session ids are clean no-ops,
+  and the work runs under the session's own lock so it is safe alongside
+  concurrent pushes and finalizes. `Enricher.flush_session(session_id)` is the
+  matching public per-session orphan drain. `flush()` / `close()` keep their
+  global terminal semantics and now reuse the same per-session primitive.
 - **AI Units (AIU / "AI credits") are now the primary Copilot consumption signal**,
   captured end-to-end. The `copilot` preprocessor carries each model's
   `session.shutdown.data.modelMetrics.<model>.totalNanoAiu` (nano-AIU) onto its
@@ -165,7 +179,8 @@ risk-scored, governed event streams with opt-in tool-call gating.
 - The gate IPC server binds a POSIX `AF_UNIX` socket; on Windows that path is skipped
   and a localhost TCP socket is used instead.
 
-[Unreleased]: https://github.com/dfinson/traceforge/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/dfinson/traceforge/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/dfinson/traceforge/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/dfinson/traceforge/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/dfinson/traceforge/compare/v0.1.2...v0.1.3
 [0.1.1]: https://github.com/dfinson/traceforge/compare/v0.1.0...v0.1.1

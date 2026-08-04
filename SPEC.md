@@ -599,6 +599,7 @@ class Enricher:
 
     def process(self, event: SessionEvent) -> SessionEvent | list[SessionEvent] | None: ...
     def flush(self) -> list[SessionEvent]: ...
+    def flush_session(self, session_id: str) -> list[SessionEvent]: ...
 `
 
 ### Enrichment Steps
@@ -607,7 +608,7 @@ class Enricher:
    targets into `metadata.file_targets` using host-independent Windows/POSIX
    normalization. Raw payload paths are never rewritten.
 
-2. **Tool call pairing**: Buffers `TOOL_CALL_STARTED` events, pairs them with matching `TOOL_CALL_COMPLETED` by `tool_call_id`. Merges payloads. Emits orphan starts on displacement or flush.
+2. **Tool call pairing**: Buffers `TOOL_CALL_STARTED` events, pairs them with matching `TOOL_CALL_COMPLETED` by `tool_call_id`. Merges payloads. Emits orphan starts on displacement or flush. `flush()` drains every session's buffered starts; `flush_session(session_id)` drains only that session's, in buffer order, leaving interleaved sessions untouched (idempotent for a repeated or unknown id).
 
 3. **Duration computation**: Calculates `metadata.duration_ms` from timestamp difference of start/complete pairs.
 
@@ -804,6 +805,7 @@ class EventPipeline:
     async def push_span(self, span: TelemetrySpan) -> None: ...
     async def push_usage(self, usage: UsageRecord) -> None: ...
     async def push_turn_summary(self, update: TurnSummaryUpdate) -> None: ...
+    async def finalize_session(self, session_id: str) -> None: ...
     async def flush(self) -> None: ...
     async def close(self) -> None: ...
 `
@@ -813,7 +815,20 @@ class EventPipeline:
 - **Enrichment**: If an enricher is configured, events pass through `enricher.process()` before reaching sinks. Enricher failures fall through gracefully (raw event passed to sinks).
 - **Error isolation**: Each sink call is wrapped in `asyncio.gather(return_exceptions=True)`. One failing sink does not block others.
 - **Fan-out**: All sinks receive every event concurrently.
-- **Flush**: Drains enricher buffer (unpaired tool starts), then flushes all sinks.
+- **Finalize session**: `finalize_session(session_id)` is the per-session analogue
+  of flush, for hosts that retire one session while others keep streaming. It
+  emits everything that session still holds — its buffered enricher orphans
+  (`Enricher.flush_session(session_id)`), its held leading plumbing, and the
+  boundary/title updates for its trailing open activity — awaits that session's
+  in-flight title refinements, then reclaims only that session's state
+  (phase/boundary/title streams, progress and turn-summary state, recency entry,
+  lock). It is **not** terminal for the pipeline: sinks are neither flushed nor
+  closed and other sessions are untouched. Idempotent for a repeated or unknown
+  `session_id`, and run under the session's own lock, so it is safe alongside
+  concurrent pushes and finalizes.
+- **Flush**: Drains enricher buffer (unpaired tool starts), finalizes every
+  session still holding live state through the same per-session primitive, then
+  flushes all sinks. Terminal and global — no `push` may run during or after it.
 - **Close**: Flush + close all sinks (also error-isolated).
 - **Turn projection**: one deterministic version-1 `TurnSummaryUpdate` is emitted
   for the first meaningful event of every turn. Later refinements use

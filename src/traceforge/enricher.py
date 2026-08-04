@@ -234,12 +234,39 @@ class Enricher:
         self._pending.clear()
         return result
 
+    def flush_session(self, session_id: str) -> list[SessionEvent]:
+        """Flush **one** session's buffered unpaired tool-starts as orphans.
+
+        The per-session analogue of :meth:`flush`: it removes and returns only
+        ``session_id``'s still-pending tool-starts (each re-stamped as an orphan
+        completion with ``duration_ms=None``), leaving every other session's
+        buffered starts byte-for-byte untouched. This is the supported way for a
+        caller multiplexing many sessions through one shared enricher to drain a
+        finished session's orphan buffer without disturbing the others — e.g.
+        terminal cleanup for one job when concurrent jobs share the enricher,
+        where the global :meth:`flush` would wrongly emit and clear every session.
+
+        Synchronous and atomic with respect to the event loop (no ``await``), so
+        it never interleaves with an in-flight :meth:`process` or a flush of a
+        different session. **Idempotent**: a session's starts are removed as they
+        are emitted, so a repeat call — or a flush of a session with nothing
+        pending, including an unknown / never-seen ``session_id`` — returns an
+        empty list and emits no duplicate orphan completions. The global
+        :meth:`flush` keeps its all-sessions semantics unchanged.
+
+        Returns the flushed orphan-completion events in buffer (insertion) order,
+        or an empty list when the session has nothing pending.
+        """
+        return self._flush_session(session_id)
+
     def _flush_session(self, session_id: str) -> list[SessionEvent]:
         """Emit and remove this session's buffered unpaired tool-starts as orphans.
 
-        Like :meth:`flush` but scoped to a single session — used to drain pending
-        starts the instant that session ends, rather than waiting for pipeline
-        close, so a governance stage sees them before it finalizes the session."""
+        Like :meth:`flush` but scoped to a single session. It is the shared
+        implementation behind both the automatic drain when a ``SESSION_ENDED``
+        event is processed (so a governance stage sees the orphans before it
+        finalizes the session, rather than waiting for pipeline close) and the
+        public :meth:`flush_session`."""
         result: list[SessionEvent] = []
         for key, event in list(self._pending.items()):
             if event.session_id == session_id:

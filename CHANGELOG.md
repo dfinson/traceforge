@@ -37,6 +37,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   premium-request count, not dollars — never synthesized). Ingestion-side only; usage
   rides `usage_records` (Cost lens), never the enriched-events timeline.
 
+## [0.1.5] - 2026-08-04
+
+### Added
+
+- `EventPipeline.finalize_session(session_id)` — a public, per-session lifecycle
+  primitive for callers that multiplex many sessions through one shared pipeline.
+  It is the per-session analogue of `flush()`: it drains and emits everything still
+  pending for that one session (its held leading plumbing, its trailing open
+  activity's titles, and any configured off-hot-path API title upgrades), awaits
+  that session's in-flight title-refinement tasks so their `TitleUpdate` records
+  have reached the sinks, then reclaims only that session's
+  phase/boundary/title/progress/turn-summary/lock/order state — leaving every other
+  active session behaviourally untouched and the sinks neither flushed nor closed.
+  It runs under the session's own lock (serialising with concurrent `push()` for the
+  same session), is idempotent (a repeat or concurrent finalize emits no duplicates
+  and does not raise), and treats an unknown session id as a no-op. A `push()` that
+  lands after finalization starts the session fresh from cold state, matching the
+  LRU-eviction contract. `flush()` / `close()` keep their global semantics and now
+  share the same per-session finalize primitive.
+- `Enricher.flush_session(session_id)` — a public, per-session analogue of the
+  enricher's global `flush()`. It drains and returns only that session's buffered
+  unpaired tool-starts as orphan completions (`duration_ms=None`), leaving every
+  other session's buffer untouched, so a caller multiplexing many sessions through
+  one shared enricher can retire one finished session's orphan buffer without
+  emitting or clearing the others. Synchronous and atomic with respect to the event
+  loop, idempotent (a repeat, already-drained, or unknown session returns an empty
+  list and never duplicates an orphan completion), and leaves the global `flush()`
+  semantics unchanged.
+
 ## [0.1.4] - 2026-08-02
 
 ### Fixed
@@ -165,7 +194,8 @@ risk-scored, governed event streams with opt-in tool-call gating.
 - The gate IPC server binds a POSIX `AF_UNIX` socket; on Windows that path is skipped
   and a localhost TCP socket is used instead.
 
-[Unreleased]: https://github.com/dfinson/traceforge/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/dfinson/traceforge/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/dfinson/traceforge/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/dfinson/traceforge/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/dfinson/traceforge/compare/v0.1.2...v0.1.3
 [0.1.1]: https://github.com/dfinson/traceforge/compare/v0.1.0...v0.1.1

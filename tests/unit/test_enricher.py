@@ -1335,3 +1335,94 @@ class TestInfraDirScopeInference:
         flushed = enricher.flush()
         cls = flushed[0].metadata.classification
         assert "configuration.infrastructure" in cls.scope
+
+
+# =============================================================================
+# Public per-session lifecycle API: Enricher.flush_session
+# =============================================================================
+
+
+class TestEnricherFlushSession:
+    """``flush_session(sid)`` is the public, per-session analogue of ``flush``: it
+    drains ONLY that session's buffered unpaired tool-starts as orphans, leaving
+    every other session's buffer untouched. Idempotent and safe to call for an
+    unknown or already-drained session."""
+
+    def test_flush_session_emits_only_that_session_and_leaves_others_untouched(self):
+        # Two interleaved sessions each hold a buffered start. Flushing A returns
+        # only A's orphan; B's start is untouched and still pairs normally later.
+        enricher = Enricher()
+        a_start = _make_tool_start(tool_call_id="a", session_id="A")
+        b_start = _make_tool_start(tool_call_id="b", session_id="B")
+        assert enricher.process(a_start) is None  # buffered
+        assert enricher.process(b_start) is None  # buffered
+
+        orphans = enricher.flush_session("A")
+        assert [o.session_id for o in orphans] == ["A"]
+        assert orphans[0].id == a_start.id  # original identity preserved
+        assert orphans[0].metadata.duration_ms is None  # emitted as an orphan
+
+        # B was not touched: its start survives and still pairs into a real
+        # completion (duration computed), proving flushing A did not reset B.
+        paired = enricher.process(_make_tool_complete(tool_call_id="b", session_id="B"))
+        assert not isinstance(paired, list)
+        assert paired is not None and paired.session_id == "B"
+        assert paired.metadata.duration_ms is not None
+
+    def test_flush_session_is_idempotent_no_duplicate_orphans(self):
+        # Flushing the same session again yields nothing — its starts were removed
+        # as they were emitted — so no orphan completion is ever duplicated.
+        enricher = Enricher()
+        enricher.process(_make_tool_start(tool_call_id="a", session_id="A"))
+
+        first = enricher.flush_session("A")
+        assert [o.session_id for o in first] == ["A"]
+        assert enricher.flush_session("A") == []  # repeat: nothing left
+        assert enricher.flush_session("A") == []
+        # A global flush afterwards also finds nothing for A (no resurrection).
+        assert enricher.flush() == []
+
+    def test_flush_session_unknown_session_is_noop(self):
+        enricher = Enricher()
+        enricher.process(_make_tool_start(tool_call_id="a", session_id="A"))
+        # An unknown session flushes nothing and leaves A's buffer intact.
+        assert enricher.flush_session("never-seen") == []
+        remaining = enricher.flush_session("A")
+        assert [o.session_id for o in remaining] == ["A"]
+
+    def test_flush_session_drains_all_of_one_sessions_starts(self):
+        # Multiple unpaired starts for one session all drain in insertion order;
+        # a concurrently-buffered other session is left entirely alone.
+        enricher = Enricher()
+        enricher.process(_make_tool_start(tool_call_id="a1", session_id="A"))
+        enricher.process(_make_tool_start(tool_call_id="b1", session_id="B"))
+        enricher.process(_make_tool_start(tool_call_id="a2", session_id="A"))
+
+        orphans = enricher.flush_session("A")
+        assert [o.payload["tool_call_id"] for o in orphans] == ["a1", "a2"]
+        assert all(o.session_id == "A" and o.metadata.duration_ms is None for o in orphans)
+        # B remains buffered and flushes independently.
+        assert [o.session_id for o in enricher.flush_session("B")] == ["B"]
+
+    def test_flush_session_then_global_flush_is_compatible(self):
+        # flush_session + the global flush coexist: flush() drains the sessions
+        # flush_session did not, and never re-emits an already-drained session.
+        enricher = Enricher()
+        enricher.process(_make_tool_start(tool_call_id="a", session_id="A"))
+        enricher.process(_make_tool_start(tool_call_id="b", session_id="B"))
+
+        assert [o.session_id for o in enricher.flush_session("A")] == ["A"]
+        remaining = enricher.flush()
+        assert [o.session_id for o in remaining] == ["B"]  # only B left; A not re-emitted
+
+    def test_flush_session_does_not_disturb_other_session_on_id_collision(self):
+        # Even when a live session holds the SAME tool_call_id, flushing one
+        # session drains only its own buffered start (keyed by (session, id)).
+        enricher = Enricher()
+        enricher.process(_make_tool_start(tool_call_id="same", session_id="A"))
+        enricher.process(_make_tool_start(tool_call_id="same", session_id="B"))
+
+        assert [o.session_id for o in enricher.flush_session("A")] == ["A"]
+        paired = enricher.process(_make_tool_complete(tool_call_id="same", session_id="B"))
+        assert not isinstance(paired, list)
+        assert paired is not None and paired.session_id == "B"
